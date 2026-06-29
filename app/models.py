@@ -6,6 +6,51 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Foreig
 from app.database import Base
 
 
+class ChaosExperiment(Base):
+    __tablename__ = "chaos_experiments"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    target_type = Column(String(32), default="pod")
+    target_selector = Column(Text, default="{}")
+    fault_type = Column(String(64), nullable=False)
+    fault_params = Column(Text, default="{}")
+    steady_state = Column(Text, default="{}")
+    status = Column(String(32), default="pending")
+    result = Column(String(32), default="")
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class ChaosRun(Base):
+    __tablename__ = "chaos_runs"
+    id = Column(Integer, primary_key=True, index=True)
+    experiment_id = Column(Integer, ForeignKey("chaos_experiments.id"), nullable=False)
+    steady_state_passed = Column(Boolean, default=False)
+    alerts_triggered = Column(Integer, default=0)
+    error_budget_impact = Column(Float, default=0.0)
+    duration_seconds = Column(Integer, default=0)
+    steady_state_before = Column(Text, default="{}")
+    steady_state_after = Column(Text, default="{}")
+    notes = Column(Text, default="")
+    started_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class ChaosScenario(Base):
+    __tablename__ = "chaos_scenarios"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    category = Column(String(32), default="pod")
+    fault_type = Column(String(64), nullable=False)
+    fault_params = Column(Text, default="{}")
+    risk_level = Column(String(16), default="low")
+    recommended_slo = Column(String(128), default="")
+    is_builtin = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
 class User(Base):
     __tablename__ = "users"
 

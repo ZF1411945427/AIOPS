@@ -296,6 +296,31 @@
     ]
   },
   {
+    "key": "chaos",
+    "label": "混沌工程",
+    "icon": "Warning",
+    "items": [
+      {
+        "key": "chaos-experiment",
+        "label": "实验管理",
+        "type": "vue",
+        "path": "/chaos-experiment"
+      },
+      {
+        "key": "chaos-report",
+        "label": "实验报告",
+        "type": "vue",
+        "path": "/chaos-report"
+      },
+      {
+        "key": "chaos-scenario",
+        "label": "场景库",
+        "type": "vue",
+        "path": "/chaos-scenario"
+      }
+    ]
+  },
+  {
     "key": "system",
     "label": "系统管理",
     "icon": "Setting",
