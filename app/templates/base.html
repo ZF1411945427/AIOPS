@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIOPS - {% block title %}智能运维系统{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=11">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <meta name="theme-color" content="#6366f1">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <script>if (window.self !== window.top) document.documentElement.className='is-iframe';</script>
+    <div class="layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-row">
+                    <div class="brand-logo">🤖</div>
+                    <h2>AIOPS</h2>
+                </div>
+                <span class="version">v0.1.0</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" data-taburl="/" data-tabtitle="总览看板"
+                   class="{% if request.url.path == '/' %}active{% endif %}">
+                    <span class="icon">📊</span>
+                    <span class="nav-label">总览看板</span>
+                </a>
+                <a href="/agent/chat" class="{% if request.url.path.startswith('/agent') %}active{% endif %}">
+                    <span class="icon">🤖</span>
+                    <span class="nav-label">AI 智能助手</span>
+                </a>
+                <a href="#" data-taburl="/metrics" data-tabtitle="指标监控"
+                   class="{% if request.url.path == '/metrics' %}active{% endif %}">
+                    <span class="icon">📈</span>
+                    <span class="nav-label">指标监控</span>
+                </a>
+
+                <div class="menu-group">
+                    <div class="menu-header" onclick="toggleMenu(this)">
+                        <span class="menu-icon">🐳</span>
+                        <span class="nav-label">Docker 容器</span>
+                        <span class="arrow">▶</span>
+                    </div>
+                    <div class="sub-menu">
+                        <a href="#" data-taburl="/containers" data-tabtitle="Docker 概览">Docker 概览</a>
+                        <a href="#" data-taburl="/containers/docker" data-tabtitle="Docker 容器列表">Docker 容器列表</a>
+                    </div>
+                </div>
+
+                <div class="menu-group">
+                    <div class="menu-header" onclick="toggleMenu(this)">
+                        <span class="menu-icon">☸️</span>
+                        <span class="nav-label">Kubernetes</span>
+                        <span class="arrow">▶</span>
+                    </div>
+                    <div class="sub-menu">
+                        <a href="#" data-taburl="/k8s/overview" data-tabtitle="集群概览">集群概览</a>
+                        <a href="#" data-taburl="/containers/pods" data-tabtitle="Pod 列表">Pod 列表</a>
+                        <a href="#" data-taburl="/containers/deployments" data-tabtitle="Deployment">Deployment</a>
+                        <a href="#" data-taburl="/containers/deploy/create" data-tabtitle="创建 Deployment">创建 Deployment</a>
+                        <a href="#" data-taburl="/k8s/configmaps" data-tabtitle="ConfigMap">ConfigMap</a>
+                        <a href="#" data-taburl="/k8s/secrets" data-tabtitle="Secret">Secret</a>
+                        <a href="#" data-taburl="/k8s/services" data-tabtitle="Service">Service</a>
+                        <a href="#" data-taburl="/k8s/ingresses" data-tabtitle="Ingress">Ingress</a>
+                        <a href="#" data-taburl="/k8s/hpas" data-tabtitle="HPA">HPA</a>
+                        <a href="#" data-taburl="/k8s/statefulsets" data-tabtitle="StatefulSet">StatefulSet</a>
+                        <a href="#" data-taburl="/k8s/daemonsets" data-tabtitle="DaemonSet">DaemonSet</a>
+                        <a href="#" data-taburl="/k8s/pvcs" data-tabtitle="PVC">PVC</a>
+                        <a href="#" data-taburl="/k8s/pvs" data-tabtitle="PV">PV</a>
+                        <a href="#" data-taburl="/containers/topology" data-tabtitle="容器拓扑">容器拓扑</a>
+                        <a href="#" data-taburl="/events" data-tabtitle="集群事件">集群事件</a>
+                        <a href="#" data-taburl="/events/stats" data-tabtitle="事件统计">事件统计</a>
+                        <a href="#" data-taburl="/cluster-anomaly" data-tabtitle="集群异常检测">集群异常检测</a>
+                    </div>
+                </div>
+
+                <div class="menu-group">
+                    <div class="menu-header" onclick="toggleMenu(this)">
+                        <span class="menu-icon">🖥️</span>
+                        <span class="nav-label">资产管理</span>
+                        <span class="arrow">▶</span>
+                    </div>
+                    <div class="sub-menu">
+                        <a href="#" data-taburl="/assets" data-tabtitle="资产列表">资产列表</a>
+                        <a href="#" data-taburl="/tags" data-tabtitle="标签管理">标签管理</a>
+                        <a href="#" data-taburl="/topology" data-tabtitle="拓扑视图">拓扑视图</a>
+                        <a href="#" data-taburl="/topology/path" data-tabtitle="路径查询">路径查询</a>
+                        <a href="#" data-taburl="/lifecycle" data-tabtitle="资产生命周期">资产生命周期</a>
+                        <a href="#" data-taburl="/discovery" data-tabtitle="资产自动发现">资产自动发现</a>
+                        <a href="#" data-taburl="/ext-cmdb" data-tabtitle="外部 CMDB">外部 CMDB</a>
+                        <a href="#" data-taburl="/asset-changes" data-tabtitle="变更跟踪">变更跟踪</a>
+                    </div>
+                </div>
+
+                <div class="menu-group">
+                    <div class="menu-header" onclick="toggleMenu(this)">
+                        <span class="menu-icon">🚨</span>
+                        <span class="nav-label">告警管理</span>
+                        <span class="arrow">▶</span>
+                    </div>
+                    <div class="sub-menu">
+                        <a href="#" data-taburl="/alerts" data-tabtitle="告警中心">告警中心</a>
+                        <a href="#" data-taburl="/alerts/rules" data-tabtitle="告警规则">告警规则</a>
+                        <a href="#" data-taburl="/incidents" data-tabtitle="故障单">故障单</a>
+                        <a href="#" data-taburl="/anomaly" data-tabtitle="异常检测">异常检测</a>
+                        <a href="#" data-taburl="/remediation" data-tabtitle="自动响应">自动响应</a>
+                        <a href="#" data-taburl="/alert-console" data-tabtitle="告警控制台">告警控制台</a>
+                        <a href="#" data-taburl="/alert-storm" data-tabtitle="风暴抑制">风暴抑制</a>
+                        <a href="#" data-taburl="/alert-events" data-tabtitle="事件关联">事件关联</a>
+                    </div>
+                </div>
+
+                <div class="menu-group">
+                    <div class="menu-header" onclick="toggleMenu(this)">
+                        <span class="menu-icon">🔍</span>
+                        <span class="nav-label">智能分析</span>
+                        <span class="arrow">▶</span>
+                    </div>
+                    <div class="sub-menu">
+                        <a href="#" data-taburl="/knowledge" data-tabtitle="知识库">知识库</a>
+                        <a href="#" data-taburl="/knowledge/graph" data-tabtitle="知识图谱">知识图谱</a>
+                        <a href="#" data-taburl="/predictions/capacity" data-tabtitle="容量预测">容量预测</a>
+                        <a href="#" data-taburl="/correlation" data-tabtitle="指标关联">指标关联</a>
+                        <a href="#" data-taburl="/runbooks" data-tabtitle="Runbook">Runbook</a>
+                        <a href="#" data-taburl="/hotspot" data-tabtitle="热点下钻">热点下钻</a>
+                        <a href="#" data-taburl="/log-anomaly" data-tabtitle="日志异常检测">日志异常检测</a>
+                        <a href="#" data-taburl="/smart-recommend" data-tabtitle="智能推荐">智能推荐</a>
+                        <a href="#" data-taburl="/predictions-enhanced/life" data-tabtitle="剩余寿命预测">剩余寿命预测</a>
+                        <a href="#" data-taburl="/predictions-enhanced/failure" data-tabtitle="故障概率预测">故障概率预测</a>
+                        <a href="#" data-taburl="/trace-view" data-tabtitle="调用链视图">调用链视图</a>
+                        <a href="#" data-taburl="/traces" data-tabtitle="调用链查询">调用链查询</a>
+                        <a href="#" data-taburl="/trace-rca" data-tabtitle="调用链根因分析">调用链根因分析</a>
+                        <a href="#" data-taburl="/trace-anomaly" data-tabtitle="调用链异常检测">调用链异常检测</a>
+                        <a href="#" data-taburl="/reports" data-tabtitle="运维报表">运维报表</a>
+                        <a href="#" data-taburl="/topo-graph" data-tabtitle="拓扑图可视化">拓扑图可视化</a>
+                        <a href="#" data-taburl="/pcadr" data-tabtitle="PCADR 根因分析">PCADR 根因分析</a>
+                        <a href="#" data-taburl="/pagerank-rca" data-tabtitle="PageRank 根因分析">PageRank 根因分析</a>
+                        <a href="#" data-taburl="/granger" data-tabtitle="Granger 因果">Granger 因果</a>
+                        <a href="#" data-taburl="/log-rca" data-tabtitle="日志 RCA">日志 RCA</a>
+                        <a href="#" data-taburl="/dtw" data-tabtitle="DTW 相似搜索">DTW 相似搜索</a>
+                        <a href="#" data-taburl="/idice" data-tabtitle="iDice 下钻分析">iDice 下钻分析</a>
+                        <a href="#" data-taburl="/trend-prediction" data-tabtitle="趋势预测">趋势预测</a>
+                        <a href="#" data-taburl="/chatops" data-tabtitle="ChatOps">ChatOps</a>
+                    </div>
+                </div>
+
+                <div class="menu-group">
+                    <div class="menu-header" onclick="toggleMenu(this)">
+                        <span class="menu-icon">🤖</span>
+                        <span class="nav-label">自动化运维</span>
+                        <span class="arrow">▶</span>
+                    </div>
+                    <div class="sub-menu">
+                        <a href="#" data-taburl="/remediation" data-tabtitle="自愈规则">自愈规则</a>
+                        <a href="#" data-taburl="/remediation-workflows" data-tabtitle="自愈工作流">自愈工作流</a>
+                        <a href="#" data-taburl="/script" data-tabtitle="远程脚本执行">远程脚本执行</a>
+                        <a href="#" data-taburl="/blue-green" data-tabtitle="蓝绿发布">蓝绿发布</a>
+                        <a href="#" data-taburl="/change-workflow" data-tabtitle="变更审批">变更审批</a>
+                    </div>
+                </div>
+
+                <div class="menu-group">
+                    <div class="menu-header" onclick="toggleMenu(this)">
+                        <span class="menu-icon">⚙️</span>
+                        <span class="nav-label">系统管理</span>
+                        <span class="arrow">▶</span>
+                    </div>
+                    <div class="sub-menu">
+                        <a href="#" data-taburl="/datasources" data-tabtitle="数据源">数据源</a>
+                        <a href="#" data-taburl="/k8s-monitor" data-tabtitle="K8s 资源监控">K8s 资源监控</a>
+                        <a href="#" data-taburl="/alert-silence" data-tabtitle="告警静默排班">告警静默排班</a>
+                        <a href="#" data-taburl="/notification-templates" data-tabtitle="通知模板">通知模板</a>
+                        <a href="#" data-taburl="/alert-webhooks" data-tabtitle="告警回调">告警回调</a>
+                        <a href="#" data-taburl="/es-integration" data-tabtitle="ES 集成">ES 集成</a>
+                        <a href="#" data-taburl="/kafka" data-tabtitle="Kafka 管道">Kafka 管道</a>
+                        <a href="#" data-taburl="/event-sources" data-tabtitle="外部事件源">外部事件源</a>
+                        <a href="#" data-taburl="/netflow" data-tabtitle="网络流采集">网络流采集</a>
+                        <a href="#" data-taburl="/service-mesh" data-tabtitle="Service Mesh">Service Mesh</a>
+                        <a href="#" data-taburl="/feature-store" data-tabtitle="特征仓库">特征仓库</a>
+                        <a href="#" data-taburl="/logs" data-tabtitle="日志搜索">日志搜索</a>
+                        <a href="#" data-taburl="/drain" data-tabtitle="Drain 模板提取">Drain 模板提取</a>
+                        <a href="#" data-taburl="/notifications" data-tabtitle="通知渠道">通知渠道</a>
+                        <a href="#" data-taburl="/api-tokens" data-tabtitle="API 令牌">API 令牌</a>
+                        <a href="#" data-taburl="/api/v1/docs" data-tabtitle="API 文档">API 文档</a>
+                        <a href="#" data-taburl="/users" data-tabtitle="用户管理">用户管理</a>
+                        <a href="#" data-taburl="/dashboard-config" data-tabtitle="Dashboard 配置">Dashboard 配置</a>
+                        <a href="#" data-taburl="/report-schedules" data-tabtitle="定时报告">定时报告</a>
+                        <a href="#" data-taburl="/ci-models" data-tabtitle="CI 模型">CI 模型</a>
+                        <a href="#" data-taburl="/prediction-models" data-tabtitle="预测模型">预测模型</a>
+                        <a href="#" data-taburl="/settings" data-tabtitle="系统设置">系统设置</a>
+                        <a href="#" data-taburl="/ai/providers" data-tabtitle="AI 设置">AI 设置</a>
+                        <a href="#" data-taburl="/agent/pending" data-tabtitle="待确认动作">待确认动作</a>
+                    </div>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggle" onclick="Theme.toggle()" title="切换主题">🌙</button>
+                <form method="post" action="/logout" style="margin:0;flex:1">
+                    <button type="submit" class="footer-btn" style="width:100%">
+                        <span>退出</span>
+                        <span class="footer-text">登录</span>
+                    </button>
+                </form>
+            </div>
+        </aside>
+
+        <div class="main-area" id="mainArea">
+            <div class="header-bar">
+                <button class="sidebar-toggle" onclick="toggleSidebar()" title="收起/展开侧边栏">☰</button>
+                <div class="header-breadcrumb">
+                    <span id="pageTitle">AIOps 智能运维系统</span>
+                </div>
+                <div class="header-actions">
+                    <a href="/agent/chat" class="header-btn">🤖 AI 助手</a>
+                    <a href="/agent/pending" class="header-btn">⏳ 待确认</a>
+                    <a href="/ai/providers" class="header-btn primary-btn">⚙️ 提供商设置</a>
+                </div>
+            </div>
+            <div class="tab-bar" id="tabBar"></div>
+            <div class="main-tabview" id="tabView">
+                <div class="tab-pane active" id="pane-initial">
+                    {% block content %}{% endblock %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/js/app.js?v=2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+var tabIdCounter = 0;
+var tabs = [];
+var activeTabId = 'pane-initial';
+
+var SIDEBAR_KEY = 'aiops_sidebar_collapsed';
+
+function initSidebar() {
+    var collapsed = localStorage.getItem(SIDEBAR_KEY) === 'true';
+    if (collapsed) document.getElementById('sidebar').classList.add('collapsed');
+}
+
+function toggleSidebar() {
+    var sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('collapsed');
+    localStorage.setItem(SIDEBAR_KEY, sidebar.classList.contains('collapsed'));
+}
+
+(function() {
+    initSidebar();
+    var groups = document.querySelectorAll('.menu-group');
+    groups.forEach(function(g) {
+        var links = g.querySelectorAll('.sub-menu a');
+        var shouldOpen = false;
+        links.forEach(function(a) {
+            if (a.classList.contains('active')) shouldOpen = true;
+        });
+        if (shouldOpen) {
+            g.querySelector('.sub-menu').classList.add('open');
+            g.querySelector('.arrow').classList.add('open');
+        }
+    });
+
+    document.querySelectorAll('[data-taburl]').forEach(function(a) {
+        a.addEventListener('click', function(e) {
+            e.preventDefault();
+            openTab(a.getAttribute('data-taburl'), a.getAttribute('data-tabtitle'));
+        });
+    });
+
+    var initialUrl = window.location.pathname + window.location.search;
+    var initialTitle = document.querySelector('.sidebar-nav a.active, .sidebar-nav [data-taburl="' + initialUrl + '"]');
+    var title = '\u9996\u9875';
+    if (initialTitle) title = initialTitle.getAttribute('data-tabtitle') || initialTitle.textContent.trim();
+    tabs.push({ id: 'pane-initial', url: initialUrl, title: title });
+    addTabButton('pane-initial', title, true);
+    updateCloseAll();
+    updatePageTitle(title);
+})();
+
+function toggleMenu(header) {
+    var sub = header.nextElementSibling;
+    var arrow = header.querySelector('.arrow');
+    var isOpen = sub.classList.toggle('open');
+    arrow.classList.toggle('open', isOpen);
+}
+
+function addTabButton(id, title, isActive) {
+    var bar = document.getElementById('tabBar');
+    var btn = document.createElement('div');
+    btn.className = 'tab-item' + (isActive ? ' active' : '');
+    btn.id = id + '-btn';
+    var closeHtml = id === 'pane-initial' ? '' : '<span class="tab-close" data-close="' + id + '">\u2715</span>';
+    btn.innerHTML = '<span class="tab-refresh" data-refresh="' + id + '">\u21bb</span><span>' + title + '</span>' + closeHtml;
+    btn.addEventListener('click', function() { activateTab(id); });
+    var refreshBtn = btn.querySelector('.tab-refresh');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (id === 'pane-initial') { window.location.reload(); return; }
+            var iframe = document.getElementById(id + '-pane').querySelector('iframe');
+            if (iframe) iframe.src = iframe.src;
+        });
+    }
+    var closeBtn = btn.querySelector('.tab-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeTab(id);
+        });
+    }
+    bar.appendChild(btn);
+}
+
+function openTab(url, title) {
+    if (!url) return;
+    var existing = tabs.find(function(t) { return t.url === url; });
+    if (existing) { activateTab(existing.id); return; }
+
+    var id = 'tab-' + (++tabIdCounter);
+    tabs.push({ id: id, url: url, title: title });
+
+    var cur = document.querySelector('.tab-pane.active');
+    if (cur) cur.classList.remove('active');
+    var curBtn = document.getElementById(activeTabId + '-btn');
+    if (curBtn) curBtn.classList.remove('active');
+
+    var view = document.getElementById('tabView');
+    var pane = document.createElement('div');
+    pane.className = 'tab-pane active';
+    pane.id = id + '-pane';
+    var iframe = document.createElement('iframe');
+    pane.appendChild(iframe);
+    view.appendChild(pane);
+
+    activeTabId = id;
+    addTabButton(id, title, true);
+    updateCloseAll();
+
+    iframe.src = url;
+    updatePageTitle(title);
+}
+
+function paneId(id) {
+    return id === 'pane-initial' ? 'pane-initial' : id + '-pane';
+}
+
+function activateTab(id) {
+    if (activeTabId === id) return;
+    var prev = document.getElementById(paneId(activeTabId));
+    var prevBtn = document.getElementById(activeTabId + '-btn');
+    if (prev) prev.classList.remove('active');
+    if (prevBtn) prevBtn.classList.remove('active');
+
+    activeTabId = id;
+    var pane = document.getElementById(paneId(id));
+    var btn = document.getElementById(id + '-btn');
+    if (pane) pane.classList.add('active');
+    if (btn) {
+        btn.classList.add('active');
+        btn.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+    }
+    var tab = tabs.find(function(t) { return t.id === id; });
+    if (tab) updatePageTitle(tab.title);
+}
+
+function closeTab(id) {
+    if (id === 'pane-initial') { window.location.href = '/'; return; }
+    var idx = tabs.findIndex(function(t) { return t.id === id; });
+    if (idx === -1) return;
+    var wasActive = activeTabId === id;
+
+    var btn = document.getElementById(id + '-btn');
+    var pane = document.getElementById(id + '-pane');
+    if (btn) btn.remove();
+    if (pane) { var ifr = pane.querySelector('iframe'); if (ifr) ifr.src = ''; pane.remove(); }
+
+    tabs.splice(idx, 1);
+    if (tabs.length === 0) { activeTabId = null; updateCloseAll(); return; }
+    if (wasActive) { var nextIdx = Math.min(idx, tabs.length - 1); activateTab(tabs[nextIdx].id); }
+    updateCloseAll();
+}
+
+function closeAllTabs() {
+    var toClose = tabs.filter(function(t) { return t.id !== 'pane-initial'; }).map(function(t) { return t.id; });
+    toClose.forEach(function(id) { closeTab(id); });
+}
+
+function updateCloseAll() {
+    var btn = document.querySelector('.tab-bar .tab-close-all');
+    if (!btn) {
+        btn = document.createElement('div');
+        btn.className = 'tab-close-all';
+        btn.textContent = '\u2715 \u5168\u90E8\u5173\u95ED';
+        btn.addEventListener('click', closeAllTabs);
+        document.getElementById('tabBar').appendChild(btn);
+    }
+    btn.style.display = tabs.length > 1 ? '' : 'none';
+}
+
+function updatePageTitle(title) {
+    var el = document.getElementById('pageTitle');
+    if (el) el.textContent = title || 'AIOps \u667A\u80FD\u8FD0\u7EF4\u7CFB\u7EDF';
+}
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

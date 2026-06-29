@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}终端 - {{ pod.name.split('/')[-1] }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.min.css">
+{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>终端: {{ pod.name.split('/')[-1] }}</h1>
+    <a href="/containers/pod/{{ pod.id }}" class="link">← 返回 Pod 详情</a>
+</div>
+
+<div id="terminal" style="height:70vh;background:#1e1e1e;border-radius:6px;overflow:hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.min.js"></script>
+<script>
+var term = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: "'Cascadia Code','Fira Code',monospace",
+    theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+});
+var fitAddon = new FitAddon();
+term.loadAddon(fitAddon);
+term.open(document.getElementById('terminal'));
+fitAddon.fit();
+
+var container = document.getElementById('terminal');
+var ws = new WebSocket('ws://' + location.host + '/containers/ws/pod/{{ pod.id }}/terminal');
+
+ws.onopen = function() {
+    term.focus();
+};
+ws.onmessage = function(e) {
+    term.write(e.data);
+};
+ws.onerror = function() {
+    term.write('\r\n[连接错误]\r\n');
+};
+ws.onclose = function() {
+    term.write('\r\n[连接关闭]\r\n');
+};
+
+term.onData(function(data) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+    }
+});
+
+window.addEventListener('resize', function() {
+    fitAddon.fit();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({resize: {cols: term.cols, rows: term.rows}}));
+    }
+});
+</script>
+{% endblock %}

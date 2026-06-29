@@ -1,0 +1,335 @@
+[
+  {
+    "key": "overview",
+    "label": "运行概览",
+    "icon": "Odometer",
+    "items": [
+      {
+        "key": "system-posture",
+        "label": "系统态势",
+        "type": "vue",
+        "path": "/system-posture"
+      },
+      {
+        "key": "dashboard",
+        "label": "仪表盘",
+        "type": "vue",
+        "path": "/dashboard"
+      },
+      {
+        "key": "reports",
+        "label": "运维报表",
+        "type": "iframe",
+        "path": "/reports"
+      }
+    ]
+  },
+  {
+    "key": "aiops",
+    "label": "AIOps 智能体",
+    "icon": "Cpu",
+    "items": [
+      {
+        "key": "agent-chat",
+        "label": "AI 智能助手",
+        "type": "vue",
+        "path": "/agent-chat"
+      },
+      {
+        "key": "pending-actions",
+        "label": "待确认动作",
+        "type": "iframe",
+        "path": "/agent/pending"
+      },
+      {
+        "key": "ai-providers",
+        "label": "智能体配置",
+        "type": "iframe",
+        "path": "/ai/providers"
+      },
+      {
+        "key": "feature-store",
+        "label": "特征仓库",
+        "type": "iframe",
+        "path": "/feature-store"
+      },
+      {
+        "key": "prediction-models",
+        "label": "预测模型",
+        "type": "iframe",
+        "path": "/prediction-models"
+      },
+      {
+        "key": "audit",
+        "label": "智能体审计",
+        "type": "vue",
+        "path": "/agent-audit"
+      }
+    ]
+  },
+  {
+    "key": "observability",
+    "label": "可观测性",
+    "icon": "DataAnalysis",
+    "items": [
+      {
+        "key": "metrics",
+        "label": "指标监控",
+        "type": "vue",
+        "path": "/metrics-view"
+      },
+      {
+        "key": "logs",
+        "label": "日志中心",
+        "type": "iframe",
+        "path": "/logs"
+      },
+      {
+        "key": "traces",
+        "label": "链路追踪",
+        "type": "vue",
+        "path": "/trace-view"
+      },
+      {
+        "key": "discovery",
+        "label": "接入指引",
+        "type": "vue",
+        "path": "/trace-agent-guide"
+      },
+      {
+        "key": "alerts",
+        "label": "告警中心",
+        "type": "iframe",
+        "path": "/alerts"
+      },
+      {
+        "key": "datasources",
+        "label": "数据源管理",
+        "type": "iframe",
+        "path": "/datasources"
+      },
+      {
+        "key": "k8s-monitor",
+        "label": "K8s 资源监控",
+        "type": "iframe",
+        "path": "/k8s-monitor"
+      }
+    ]
+  },
+  {
+    "key": "events",
+    "label": "事件中心",
+    "icon": "Bell",
+    "items": [
+      {
+        "key": "incident",
+        "label": "集群事件",
+        "type": "iframe",
+        "path": "/incidents"
+      },
+      {
+        "key": "event-stats",
+        "label": "事件统计",
+        "type": "iframe",
+        "path": "/events/stats"
+      },
+      {
+        "key": "event-sources",
+        "label": "事件源配置",
+        "type": "iframe",
+        "path": "/event-sources"
+      },
+      {
+        "key": "anomaly",
+        "label": "异常检测",
+        "type": "iframe",
+        "path": "/anomaly"
+      }
+    ]
+  },
+  {
+    "key": "tasks",
+    "label": "任务中心",
+    "icon": "Tools",
+    "items": [
+      {
+        "key": "remediation",
+        "label": "自愈规则",
+        "type": "iframe",
+        "path": "/remediation"
+      },
+      {
+        "key": "remediation-workflow",
+        "label": "自愈工作流",
+        "type": "iframe",
+        "path": "/remediation-workflows"
+      },
+      {
+        "key": "script-exec",
+        "label": "远程脚本",
+        "type": "iframe",
+        "path": "/script"
+      },
+      {
+        "key": "blue-green",
+        "label": "蓝绿发布",
+        "type": "iframe",
+        "path": "/blue-green"
+      },
+      {
+        "key": "change-workflow",
+        "label": "变更审批",
+        "type": "iframe",
+        "path": "/change-workflow"
+      }
+    ]
+  },
+  {
+    "key": "assets",
+    "label": "资产管理",
+    "icon": "Box",
+    "items": [
+      {
+        "key": "asset-list",
+        "label": "资产列表",
+        "type": "iframe",
+        "path": "/assets"
+      },
+      {
+        "key": "tags",
+        "label": "标签管理",
+        "type": "iframe",
+        "path": "/tags"
+      },
+      {
+        "key": "topology",
+        "label": "拓扑视图",
+        "type": "iframe",
+        "path": "/topology"
+      },
+      {
+        "key": "topology-path",
+        "label": "路径查询",
+        "type": "iframe",
+        "path": "/topology/path"
+      },
+      {
+        "key": "lifecycle",
+        "label": "资产生命周期",
+        "type": "iframe",
+        "path": "/lifecycle"
+      },
+      {
+        "key": "ext-cmdb",
+        "label": "外部 CMDB",
+        "type": "iframe",
+        "path": "/ext-cmdb"
+      }
+    ]
+  },
+  {
+    "key": "containers",
+    "label": "容器与 K8s",
+    "icon": "Cloudy",
+    "items": [
+      {
+        "key": "kubernetes",
+        "label": "Kubernetes",
+        "type": "iframe",
+        "path": "/k8s/overview"
+      },
+      {
+        "key": "docker",
+        "label": "Docker 容器",
+        "type": "iframe",
+        "path": "/containers/docker"
+      }
+    ]
+  },
+  {
+    "key": "sre",
+    "label": "SRE 可靠性",
+    "icon": "DataLine",
+    "items": [
+      {
+        "key": "error-budget",
+        "label": "错误预算",
+        "type": "vue",
+        "path": "/error-budget"
+      },
+      {
+        "key": "burn-rate",
+        "label": "预算消耗",
+        "type": "vue",
+        "path": "/burn-rate"
+      },
+      {
+        "key": "slo-config",
+        "label": "SLO 配置",
+        "type": "vue",
+        "path": "/slo-config"
+      },
+      {
+        "key": "sla-agreement",
+        "label": "SLA 协议",
+        "type": "vue",
+        "path": "/sla-agreement"
+      },
+      {
+        "key": "oncall-schedule",
+        "label": "值班表",
+        "type": "vue",
+        "path": "/oncall-schedule"
+      },
+      {
+        "key": "escalation-policy",
+        "label": "升级策略",
+        "type": "vue",
+        "path": "/escalation-policy"
+      },
+      {
+        "key": "availability-report",
+        "label": "可用性报表",
+        "type": "vue",
+        "path": "/availability-report"
+      }
+    ]
+  },
+  {
+    "key": "system",
+    "label": "系统管理",
+    "icon": "Setting",
+    "items": [
+      {
+        "key": "users",
+        "label": "用户与权限",
+        "type": "iframe",
+        "path": "/users"
+      },
+      {
+        "key": "notifications",
+        "label": "通知管理",
+        "type": "iframe",
+        "path": "/notifications"
+      },
+      {
+        "key": "settings",
+        "label": "系统配置",
+        "type": "iframe",
+        "path": "/settings"
+      },
+      {
+        "key": "openapi",
+        "label": "开放接口",
+        "type": "iframe",
+        "path": "/api/v1/docs"
+      },
+      {
+        "key": "integration",
+        "label": "集成管理",
+        "type": "iframe",
+        "path": "/es-integration"
+      }
+    ]
+  }
+]

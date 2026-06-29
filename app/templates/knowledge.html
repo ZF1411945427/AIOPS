@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>故障知识库</h2>
+<p class="text-muted">记录已知故障、根因和解决方案</p>
+
+<div class="row mb-3">
+<div class="col-md-12">
+<button class="btn btn-primary" onclick="toggleForm()">新增知识条目</button>
+<form class="search-form d-inline-block ms-3" method="get">
+<input name="tag" placeholder="按标签过滤" value="{{ tag_filter }}" class="form-control d-inline" style="width:200px">
+<button type="submit" class="btn btn-sm">搜索</button>
+</form>
+</div>
+</div>
+
+<div class="mb-3" id="addForm" style="display:none">
+<div class="card card-body">
+<form method="POST" action="/knowledge/create">
+<div class="row g-3">
+<div class="col-12"><input name="title" placeholder="标题" class="form-control" required></div>
+<div class="col-6"><textarea name="symptom" placeholder="症状描述" class="form-control" rows="3"></textarea></div>
+<div class="col-6"><textarea name="root_cause" placeholder="根因分析" class="form-control" rows="3"></textarea></div>
+<div class="col-12"><textarea name="solution" placeholder="解决方案" class="form-control" rows="3"></textarea></div>
+<div class="col-4">
+<select name="severity" class="form-select">
+<option value="info">Info</option><option value="warning" selected>Warning</option><option value="critical">Critical</option>
+</select>
+</div>
+<div class="col-4"><input name="asset_type" placeholder="资产类型 (如 host)" class="form-control"></div>
+<div class="col-4"><input name="tags" placeholder="标签 (逗号分隔)" class="form-control"></div>
+<div class="col-2"><button type="submit" class="btn btn-success">保存</button></div>
+</div>
+</form>
+</div>
+</div>
+</div>
+
+<script>
+function toggleForm() {
+  var el = document.getElementById('addForm');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+
+<div class="panel">
+<div class="panel-body">
+{% if items %}
+<table class="table">
+<thead><tr><th>ID</th><th>标题</th><th>症状</th><th>标签</th><th>级别</th><th>更新时间</th><th>操作</th></tr></thead>
+<tbody>
+{% for item in items %}
+<tr>
+<td>{{ item.id }}</td>
+<td><a href="/knowledge/{{ item.id }}">{{ item.title }}</a></td>
+<td>{{ item.symptom[:60] }}{% if item.symptom|length > 60 %}...{% endif %}</td>
+<td>{{ item.tags or '-' }}</td>
+<td><span class="badge {{ item.severity }}">{{ item.severity }}</span></td>
+<td class="text-sm">{{ item.updated_at.strftime('%m-%d %H:%M') }}</td>
+<td>
+<form method="POST" action="/knowledge/{{ item.id }}/delete" style="display:inline">
+<button class="btn btn-sm btn-danger" onclick="return confirm('确认删除？')">删除</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p class="empty">暂无知识条目</p>
+{% endif %}
+</div>
+</div>
+{% endblock %}

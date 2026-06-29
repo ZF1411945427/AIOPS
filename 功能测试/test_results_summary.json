@@ -1,0 +1,728 @@
+{
+  "AI-001": {
+    "status": "PASS",
+    "func": "AI Agent对话",
+    "detail": "AI Agent对话页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AI-002": {
+    "status": "PASS",
+    "func": "ChatOps",
+    "detail": "ChatOps页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AI-003": {
+    "status": "PASS",
+    "func": "智能推荐",
+    "detail": "智能推荐页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AI-004": {
+    "status": "PASS",
+    "func": "AI智能助手对话",
+    "detail": "发送消息后收到AI回复(585字)，包含能力介绍",
+    "scenario": "e2e_ai_provider"
+  },
+  "ALERT-006": {
+    "status": "PASS",
+    "func": "告警规则页面加载",
+    "detail": "页面有规则内容",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-007": {
+    "status": "PASS",
+    "func": "创建告警规则",
+    "detail": "规则创建成功并出现在列表",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-008": {
+    "status": "PASS",
+    "func": "告警规则列表",
+    "detail": "1 条规则",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-009": {
+    "status": "PASS",
+    "func": "规则启用/禁用",
+    "detail": "状态切换成功",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-010": {
+    "status": "PASS",
+    "func": "规则静默",
+    "detail": "静默操作成功",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-012": {
+    "status": "PASS",
+    "func": "告警检查触发",
+    "detail": "HTTP 200, body: {\"new_alerts\":0}",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-001": {
+    "status": "PASS",
+    "func": "告警列表页面",
+    "detail": "页面有告警内容",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-002": {
+    "status": "PASS",
+    "func": "创建告警规则",
+    "detail": "规则已创建",
+    "scenario": "e2e_fixes"
+  },
+  "ALERT-003": {
+    "status": "PASS",
+    "func": "告警解决",
+    "detail": "解决操作完成",
+    "scenario": "e2e_alert"
+  },
+  "ALERT-011": {
+    "status": "PASS",
+    "func": "告警详情",
+    "detail": "无告警数据(跳过)",
+    "scenario": "e2e_alert"
+  },
+  "ASSET-001": {
+    "status": "PASS",
+    "func": "资产变更记录",
+    "detail": "资产变更页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "ASSET-004": {
+    "status": "PASS",
+    "func": "添加资产132",
+    "detail": "保存后跳转到 http://127.0.0.1:8000/assets",
+    "scenario": "e2e_asset"
+  },
+  "ASSET-002": {
+    "status": "PASS",
+    "func": "CI模型管理",
+    "detail": "CI模型页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "ASSET-005": {
+    "status": "PASS",
+    "func": "编辑资产",
+    "detail": "编辑保存成功",
+    "scenario": "e2e_asset"
+  },
+  "ASSET-006": {
+    "status": "PASS",
+    "func": "删除资产",
+    "detail": "删除后剩余 2 行",
+    "scenario": "e2e_asset"
+  },
+  "AUTH-001": {
+    "status": "PASS",
+    "func": "正常登录",
+    "detail": "跳转到 http://127.0.0.1:8000/",
+    "scenario": "e2e_auth"
+  },
+  "AUTH-002": {
+    "status": "PASS",
+    "func": "错误密码登录",
+    "detail": "停留在登录页",
+    "scenario": "e2e_auth"
+  },
+  "AUTH-003": {
+    "status": "PASS",
+    "func": "空用户名登录",
+    "detail": "停留在登录页",
+    "scenario": "e2e_auth"
+  },
+  "AUTH-004": {
+    "status": "PASS",
+    "func": "空密码登录",
+    "detail": "停留在登录页",
+    "scenario": "e2e_auth"
+  },
+  "AUTH-005": {
+    "status": "PASS",
+    "func": "退出登录",
+    "detail": "跳转到登录页",
+    "scenario": "e2e_auth"
+  },
+  "AUTH-006": {
+    "status": "FAIL",
+    "func": "未登录访问受保护页面",
+    "detail": "未重定向: http://127.0.0.1:8000/assets",
+    "scenario": "e2e_auth"
+  },
+  "AUTH-007": {
+    "status": "PASS",
+    "func": "登录后 session 保持",
+    "detail": "刷新后仍登录",
+    "scenario": "e2e_auth"
+  },
+  "DASH-001": {
+    "status": "PASS",
+    "func": "仪表盘页面加载",
+    "detail": "页面有仪表盘内容",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-002": {
+    "status": "PASS",
+    "func": "仪表盘统计数据",
+    "detail": "0 个统计元素, 有数字: True",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-003": {
+    "status": "FAIL",
+    "func": "资产分布图表",
+    "detail": "0 个图表元素",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-004": {
+    "status": "PASS",
+    "func": "告警统计",
+    "detail": "有告警相关内容",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-005": {
+    "status": "PASS",
+    "func": "告警趋势",
+    "detail": "有趋势内容",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-006": {
+    "status": "PASS",
+    "func": "指标监控概览",
+    "detail": "有指标内容",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-007": {
+    "status": "FAIL",
+    "func": "指标趋势图",
+    "detail": "0 个图表",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-008": {
+    "status": "PASS",
+    "func": "仪表盘API数据",
+    "detail": "HTTP 200, body长度: 66",
+    "scenario": "e2e_dashboard"
+  },
+  "DASH-009": {
+    "status": "FAIL",
+    "func": "系统态势页面",
+    "detail": "无态势内容",
+    "scenario": "e2e_dashboard"
+  },
+  "ASSET-007": {
+    "status": "PASS",
+    "func": "资产测试连接",
+    "detail": "API响应: {'ok': False, 'message': 'SSH错误: No authentication methods available'}",
+    "scenario": "e2e_fixes"
+  },
+  "K8S-002": {
+    "status": "PASS",
+    "func": "Pod列表",
+    "detail": "页面有 Pod 内容",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-003": {
+    "status": "PASS",
+    "func": "Deployment列表",
+    "detail": "页面有 Deployment 内容",
+    "scenario": "e2e_k8s"
+  },
+  "SYS-002": {
+    "status": "PASS",
+    "func": "创建用户",
+    "detail": "用户 e2e_user_873eb1 创建成功",
+    "scenario": "e2e_system"
+  },
+  "SYS-004": {
+    "status": "PASS",
+    "func": "系统设置页面",
+    "detail": "有设置内容",
+    "scenario": "e2e_system"
+  },
+  "SYS-005": {
+    "status": "PASS",
+    "func": "系统概览API",
+    "detail": "assets=2, metrics_1h=1575",
+    "scenario": "e2e_system"
+  },
+  "K8S-001": {
+    "status": "PASS",
+    "func": "K8s集群概览",
+    "detail": "页面有集群内容",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-004": {
+    "status": "PASS",
+    "func": "Pod详情",
+    "detail": "无详情链接(可能无数据)",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-007": {
+    "status": "PASS",
+    "func": "StatefulSet列表",
+    "detail": "页面加载",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-008": {
+    "status": "PASS",
+    "func": "DaemonSet列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-009": {
+    "status": "PASS",
+    "func": "Service列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-010": {
+    "status": "PASS",
+    "func": "Ingress列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-011": {
+    "status": "PASS",
+    "func": "ConfigMap列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-012": {
+    "status": "PASS",
+    "func": "Secret列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-013": {
+    "status": "PASS",
+    "func": "HPA列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-014": {
+    "status": "PASS",
+    "func": "PVC列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-016": {
+    "status": "PASS",
+    "func": "K8s监控页面",
+    "detail": "页面有监控内容",
+    "scenario": "e2e_k8s"
+  },
+  "K8S-017": {
+    "status": "PASS",
+    "func": "Docker容器列表",
+    "detail": "页面加载成功",
+    "scenario": "e2e_k8s"
+  },
+  "METRIC-001": {
+    "status": "PASS",
+    "func": "指标监控页面加载",
+    "detail": "页面有指标内容",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-002": {
+    "status": "PASS",
+    "func": "指标分类展示",
+    "detail": "找到 6 种分类: ['CPU', '内存', '内存', '负载', '磁盘', '网络']",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-003": {
+    "status": "PASS",
+    "func": "多资产指标查看",
+    "detail": "资产选择器存在",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-004": {
+    "status": "PASS",
+    "func": "单资产指标详情",
+    "detail": "21 个指标卡片",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-005": {
+    "status": "PASS",
+    "func": "指标趋势图",
+    "detail": "42 个图表元素",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-006": {
+    "status": "PASS",
+    "func": "指标历史数据",
+    "detail": "有时间标注",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-007": {
+    "status": "FAIL",
+    "func": "离线资产历史指标标注",
+    "detail": "无离线标注",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-008": {
+    "status": "FAIL",
+    "func": "离线资产时间提示",
+    "detail": "无采集时间提示",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-009": {
+    "status": "FAIL",
+    "func": "实时指标数据",
+    "detail": "未找到今日数据",
+    "scenario": "e2e_metric"
+  },
+  "METRIC-010": {
+    "status": "PASS",
+    "func": "指标数据刷新",
+    "detail": "有刷新按钮",
+    "scenario": "e2e_metric"
+  },
+  "LOG-001": {
+    "status": "PASS",
+    "func": "日志页面加载",
+    "detail": "日志页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "LOG-002": {
+    "status": "PASS",
+    "func": "日志搜索",
+    "detail": "日志搜索执行成功",
+    "scenario": "e2e_remaining"
+  },
+  "LOG-003": {
+    "status": "PASS",
+    "func": "日志异常检测页面",
+    "detail": "日志异常检测页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "LOG-004": {
+    "status": "PASS",
+    "func": "日志根因分析",
+    "detail": "日志根因分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TRACE-001": {
+    "status": "PASS",
+    "func": "链路追踪页面",
+    "detail": "链路追踪页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TRACE-002": {
+    "status": "PASS",
+    "func": "Trace详情页面",
+    "detail": "Trace详情页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TRACE-003": {
+    "status": "PASS",
+    "func": "Trace异常检测",
+    "detail": "Trace异常检测页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TRACE-004": {
+    "status": "PASS",
+    "func": "Trace根因分析",
+    "detail": "Trace根因分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "KB-001": {
+    "status": "PASS",
+    "func": "知识库页面",
+    "detail": "知识库页面加载成功，有知识内容",
+    "scenario": "e2e_remaining"
+  },
+  "KB-002": {
+    "status": "FAIL",
+    "func": "知识库创建",
+    "detail": "ElementHandle.click: Timeout 30000ms exceeded.\nCall log:\n  - attempting click action\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n  - retrying click action\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <span class=\"nav-label\">Kubernetes</span> from <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> subtree intercepts pointer events\n  - retrying click action\n    - waiting 20ms\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n  2 × retrying click action\n      - waiting 100ms\n      - waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <span class=\"nav-label\">资产管理</span> from <div class=\"menu-group\">…</div> subtree intercepts pointer events\n  13 × retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <span class=\"nav-label\">Kubernetes</span> from <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <span class=\"nav-label\">资产管理</span> from <div class=\"menu-group\">…</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <span class=\"nav-label\">资产管理</span> from <div class=\"menu-group\">…</div> subtree intercepts pointer events\n  - retrying click action\n    - waiting 500ms\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <span class=\"nav-label\">Kubernetes</span> from <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> subtree intercepts pointer events\n  - retrying click action\n    - waiting 500ms\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n  - retrying click action\n    - waiting 500ms\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <span class=\"nav-label\">资产管理</span> from <div class=\"menu-group\">…</div> subtree intercepts pointer events\n  - retrying click action\n    - waiting 500ms\n",
+    "scenario": "e2e_remaining"
+  },
+  "KG-001": {
+    "status": "PASS",
+    "func": "知识图谱页面",
+    "detail": "知识图谱页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "ANOM-001": {
+    "status": "PASS",
+    "func": "异常检测页面",
+    "detail": "异常检测页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "ANOM-002": {
+    "status": "PASS",
+    "func": "集群异常检测",
+    "detail": "集群异常检测页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "PRED-001": {
+    "status": "PASS",
+    "func": "预测页面",
+    "detail": "预测页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "PRED-002": {
+    "status": "PASS",
+    "func": "预测模型管理",
+    "detail": "预测模型页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "PRED-003": {
+    "status": "PASS",
+    "func": "趋势预测",
+    "detail": "趋势预测页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "NOTIF-001": {
+    "status": "PASS",
+    "func": "通知管理页面",
+    "detail": "通知管理页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "NOTIF-002": {
+    "status": "PASS",
+    "func": "通知模板",
+    "detail": "通知模板页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TOPO-001": {
+    "status": "PASS",
+    "func": "拓扑图页面",
+    "detail": "拓扑页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TOPO-002": {
+    "status": "PASS",
+    "func": "拓扑图可视化",
+    "detail": "拓扑图可视化加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TOPO-003": {
+    "status": "PASS",
+    "func": "拓扑路径分析",
+    "detail": "拓扑路径页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "TOPO-004": {
+    "status": "PASS",
+    "func": "服务网格",
+    "detail": "服务网格页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "INC-001": {
+    "status": "PASS",
+    "func": "事件管理页面",
+    "detail": "事件管理页面加载成功，有事件数据",
+    "scenario": "e2e_remaining"
+  },
+  "RCA-001": {
+    "status": "PASS",
+    "func": "PageRank根因分析",
+    "detail": "PageRank RCA页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "RCA-002": {
+    "status": "PASS",
+    "func": "热点分析",
+    "detail": "热点分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "RCA-003": {
+    "status": "PASS",
+    "func": "Granger因果分析",
+    "detail": "Granger因果分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "RCA-004": {
+    "status": "PASS",
+    "func": "DTW分析",
+    "detail": "DTW分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "RCA-005": {
+    "status": "PASS",
+    "func": "iDice分析",
+    "detail": "iDice分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "RCA-006": {
+    "status": "PASS",
+    "func": "PCA降维RCA",
+    "detail": "PCA-DR分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "REM-001": {
+    "status": "PASS",
+    "func": "自动修复页面",
+    "detail": "自动修复页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "REM-002": {
+    "status": "PASS",
+    "func": "修复工作流",
+    "detail": "修复工作流页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "REM-003": {
+    "status": "PASS",
+    "func": "运维手册",
+    "detail": "运维手册页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "REM-004": {
+    "status": "PASS",
+    "func": "脚本执行",
+    "detail": "脚本执行页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "REM-005": {
+    "status": "PASS",
+    "func": "变更工作流",
+    "detail": "变更工作流页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "REM-006": {
+    "status": "PASS",
+    "func": "蓝绿部署",
+    "detail": "蓝绿部署页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "DS-001": {
+    "status": "PASS",
+    "func": "数据源管理",
+    "detail": "数据源页面加载成功，有ES数据源",
+    "scenario": "e2e_remaining"
+  },
+  "DS-002": {
+    "status": "PASS",
+    "func": "ES集成",
+    "detail": "ES集成页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "DS-003": {
+    "status": "PASS",
+    "func": "Kafka管道",
+    "detail": "Kafka管道页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "INT-001": {
+    "status": "PASS",
+    "func": "事件源",
+    "detail": "事件源页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "INT-002": {
+    "status": "PASS",
+    "func": "NetFlow",
+    "detail": "NetFlow页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "INT-003": {
+    "status": "PASS",
+    "func": "自动发现",
+    "detail": "自动发现页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "POSTURE-001": {
+    "status": "FAIL",
+    "func": "系统态势页面",
+    "detail": "页面无态势数据",
+    "scenario": "e2e_remaining"
+  },
+  "DRAIN-001": {
+    "status": "PASS",
+    "func": "Drain模板分析",
+    "detail": "Drain日志模板分析页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AE-001": {
+    "status": "PASS",
+    "func": "告警事件",
+    "detail": "告警事件页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AE-002": {
+    "status": "PASS",
+    "func": "告警控制台",
+    "detail": "告警控制台页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AE-003": {
+    "status": "PASS",
+    "func": "告警静默",
+    "detail": "告警静默页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AE-004": {
+    "status": "PASS",
+    "func": "告警风暴",
+    "detail": "告警风暴页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "AE-005": {
+    "status": "PASS",
+    "func": "告警Webhook",
+    "detail": "告警Webhook页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "ASSET-003": {
+    "status": "PASS",
+    "func": "外部CMDB",
+    "detail": "外部CMDB页面加载成功",
+    "scenario": "e2e_remaining"
+  },
+  "SYS-001": {
+    "status": "PASS",
+    "func": "用户管理页面",
+    "detail": "有用户内容",
+    "scenario": "e2e_system"
+  },
+  "SYS-003": {
+    "status": "PASS",
+    "func": "用户列表",
+    "detail": "4 个用户",
+    "scenario": "e2e_system"
+  },
+  "SYS-006": {
+    "status": "PASS",
+    "func": "审计日志API",
+    "detail": "返回 0 条审计记录",
+    "scenario": "e2e_system"
+  },
+  "SYS-007": {
+    "status": "PASS",
+    "func": "API令牌页面",
+    "detail": "有令牌内容",
+    "scenario": "e2e_system"
+  },
+  "SYS-008": {
+    "status": "PASS",
+    "func": "创建API令牌",
+    "detail": "令牌 e2e_token_4796da 创建成功",
+    "scenario": "e2e_system"
+  },
+  "SYS-010": {
+    "status": "PASS",
+    "func": "数据库模式查询",
+    "detail": "当前模式: real",
+    "scenario": "e2e_system"
+  },
+  "SYS-011": {
+    "status": "PASS",
+    "func": "数据库切换",
+    "detail": "切回 real: real",
+    "scenario": "e2e_system"
+  },
+  "SYS-015": {
+    "status": "PASS",
+    "func": "数据源管理",
+    "detail": "有数据源内容",
+    "scenario": "e2e_system"
+  },
+  "SYS-022": {
+    "status": "PASS",
+    "func": "系统菜单",
+    "detail": "60 个菜单项",
+    "scenario": "e2e_system"
+  }
+}

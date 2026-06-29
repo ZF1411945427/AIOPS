@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}PageRank 根因排序{% endblock %}
+{% block content %}
+<h1>PageRank 根因排序</h1>
+<p class="text-sm text-muted">基于 PageRank 算法对资产依赖图排序，结合告警分数定位根因</p>
+
+<form method="POST" action="/pagerank-rca/analyze" class="row g-2 mb-3">
+<div class="col-auto">
+<select name="incident_id" class="form-select">
+<option value="0">-- 全资产排名(不关联故障单) --</option>
+{% for inc in incidents %}
+<option value="{{ inc.id }}">#{{ inc.id }} {{ inc.title[:40] }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-auto"><input name="damping" class="form-control" type="number" step="0.01" value="0.85" style="width:80px" title="阻尼系数"></div>
+<div class="col-auto"><button type="submit" class="btn btn-primary">分析</button></div>
+</form>
+
+{% if result %}
+{% if result.error %}
+<div class="panel"><div class="panel-body text-sm text-warning">{{ result.error }}</div></div>
+{% else %}
+<div class="row g-2 mb-3">
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>资产总数</strong><br>{{ result.total_assets }}</div></div></div>
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>依赖关系</strong><br>{{ result.total_relations }}</div></div></div>
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>阻尼系数</strong><br>{{ result.damping_factor }}</div></div></div>
+</div>
+
+<h3>Top 资产排名</h3>
+<div style="display:flex;flex-direction:column;gap:4px">
+{% for a in result.ranked_assets %}
+<div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>#{{ a.id }}</strong> {{ a.name }}
+<span class="badge">{{ a.type }}</span>
+{% if a.alert_score > 0 %}<span class="badge danger">告警分: {{ a.alert_score }}</span>{% endif %}
+</div>
+<div>
+<span class="badge info">PR: {{ a.pagerank }}</span>
+</div>
+</div></div>
+{% endfor %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

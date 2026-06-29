@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}调用链视图{% endblock %}
+{% block content %}
+<h1>调用链 / 服务依赖图</h1>
+
+<div class="card card-body mb-3">
+<form method="GET" class="row g-2 align-items-end">
+<div class="col-auto">
+<select name="root_id" class="form-select" onchange="this.form.submit()">
+<option value="">选择根节点</option>
+{% for a in assets %}
+<option value="{{ a.id }}" {% if root_id == a.id %}selected{% endif %}>{{ a.name[:50] }} ({{ a.ci_type }})</option>
+{% endfor %}
+</select>
+</div>
+</form>
+</div>
+
+{% if graph.nodes %}
+<div class="card"><div class="card-body" style="padding:0">
+<table class="table" style="margin:0">
+<thead><tr><th>节点</th><th>类型</th><th>连接</th></tr></thead>
+<tbody>
+{% for node in graph.nodes %}
+<tr>
+<td><strong>{{ node.label }}</strong></td>
+<td><span class="badge">{{ node.type }}</span></td>
+<td>
+{% for edge in graph.edges %}
+{% if edge.source == node.id %}
+→ <code>{{ edge.target }}</code> <span class="text-sm">({{ edge.relation }})</span><br>
+{% endif %}
+{% endfor %}
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div></div>
+{% else %}
+<div class="panel"><div class="panel-body text-sm text-muted">选择根节点查看依赖关系</div></div>
+{% endif %}
+{% endblock %}

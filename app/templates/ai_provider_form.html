@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="workbench-page-shell">
+  <div class="section-toolbar">
+    <h1>{{ "编辑" if provider else "添加" }} 模型提供商</h1>
+  </div>
+
+  <div class="panel fade-in">
+    <div class="panel-body">
+      <form method="post" class="form">
+        <div class="form-group">
+          <label>名称</label>
+          <input name="name" value="{{ provider.name if provider else '' }}" required placeholder="例如: OpenAI, DeepSeek, Ollama">
+        </div>
+        <div class="form-group">
+          <label>Base URL</label>
+          <input name="base_url" value="{{ provider.base_url if provider else '' }}" placeholder="https://api.openai.com/v1">
+        </div>
+        <div class="form-group">
+          <label>默认模型</label>
+          <input name="default_model" value="{{ provider.default_model if provider else '' }}" placeholder="gpt-4o, deepseek-chat, qwen2.5:14b">
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input name="api_key" type="password" placeholder="{{ '留空不修改' if provider else 'sk-...' }}">
+        </div>
+        <div class="grid-3">
+          <div class="form-group">
+            <label>温度 (0-2)</label>
+            <input name="temperature" type="number" step="0.1" min="0" max="2"
+                   value="{{ provider.temperature if provider else 0.2 }}">
+          </div>
+          <div class="form-group">
+            <label>Max Tokens</label>
+            <input name="max_tokens" type="number" value="{{ provider.max_tokens if provider else 10000 }}">
+          </div>
+          <div class="form-group">
+            <label>超时 (秒)</label>
+            <input name="timeout_seconds" type="number" value="{{ provider.timeout_seconds if provider else 30 }}">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">保存</button>
+          <a href="/ai/providers" class="btn">取消</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

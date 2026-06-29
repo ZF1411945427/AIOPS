@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}集群异常检测{% endblock %}
+{% block content %}
+<h1>集群异常检测</h1>
+<p class="text-sm text-muted">检测 DNS 解析失败、CNI 网络异常、NodeNotReady 等 K8s 集群级问题</p>
+
+<div class="mb-3">
+<a href="/cluster-anomaly/detect" class="btn btn-primary">执行检测</a>
+</div>
+
+{% if detect_result %}
+<div class="alert alert-{{ 'danger' if detect_result|selectattr('severity', 'equalto', 'critical')|list else 'warning' }}">
+检测到 {{ detect_result|length }} 个异常:
+{% for r in detect_result %}
+<strong>{{ r.type }}</strong>: {{ r.message }} ({{ r.count }} 次) {% if r.severity == 'critical' %}🔴{% else %}🟡{% endif %}
+{% endfor %}
+</div>
+{% endif %}
+
+<h3>异常事件记录</h3>
+<div style="display:flex;flex-direction:column;gap:3px">
+{% for a in anomalies %}
+<div class="card {{ 'border-danger' if a.severity == 'critical' else 'border-warning' }}">
+<div class="card-body py-1 d-flex justify-content-between align-items-center">
+<div>
+<strong>{{ a.anomaly_type }}</strong>
+<span class="badge bg-{{ 'danger' if a.severity == 'critical' else 'warning' }}">{{ a.severity }}</span>
+<span class="text-xs">{{ a.message[:80] }}</span>
+</div>
+<div style="display:flex;gap:6px;align-items:center">
+<span class="badge">{{ a.count }} 次</span>
+<span class="text-xs text-muted">{{ a.last_seen.strftime('%m-%d %H:%M') }}</span>
+<span class="badge bg-{{ 'success' if a.resolved else 'secondary' }}">{{ '已解决' if a.resolved else '未解决' }}</span>
+{% if not a.resolved %}
+<a href="/cluster-anomaly/resolve/{{ a.id }}" class="btn btn-sm btn-outline-success">解决</a>
+{% endif %}
+</div>
+</div></div>
+{% else %}<div class="text-muted">暂无异常记录</div>{% endfor %}
+</div>
+{% endblock %}

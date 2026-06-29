@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>数据源管理</h2>
+<p class="text-muted">配置外部数据采集源，支持 Prometheus / 自定义 API / 日志文件 / SSH / Kubernetes / Docker</p>
+
+<div class="row mb-3">
+<div class="col-md-12">
+<button class="btn btn-primary" onclick="toggleForm()">添加数据源</button>
+</div>
+</div>
+
+<div class="mb-3" id="addForm" style="display:none">
+<div class="card card-body">
+<form method="POST" action="/datasources/create" class="row g-3">
+<div class="col-3"><input name="name" placeholder="名称" class="form-control" required></div>
+<div class="col-2">
+<select name="type" class="form-select" id="dsTypeSelect" onchange="toggleDSFields()">
+{% for key, dt in ds_types.items() %}
+<option value="{{ key }}">{{ dt.label }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-4"><input name="endpoint" placeholder="Endpoint URL / 主机地址" class="form-control" id="endpointInput"></div>
+
+<!-- HTTP auth fields -->
+<div class="col-2" id="authTypeGroup">
+<select name="auth_type" class="form-select">
+{% for key, label in auth_types.items() %}
+<option value="{{ key }}">{{ label }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-3" id="basicAuthGroup" style="display:none">
+<input name="auth_config_user" placeholder="用户名" class="form-control mb-1">
+<input name="auth_config_password" type="password" placeholder="密码" class="form-control">
+</div>
+<div class="col-3" id="tokenAuthGroup" style="display:none">
+<input name="auth_config_token" placeholder="Token / API Key" class="form-control">
+</div>
+
+<!-- SSH fields -->
+<div class="col-2" id="sshPortGroup" style="display:none">
+<input name="ssh_port" type="number" value="22" placeholder="端口" class="form-control">
+</div>
+<div class="col-2" id="sshUserGroup" style="display:none">
+<input name="ssh_user" placeholder="SSH 用户名" class="form-control">
+</div>
+<div class="col-3" id="sshPassGroup" style="display:none">
+<input name="ssh_password" type="password" placeholder="SSH 密码" class="form-control">
+</div>
+
+<!-- K8s fields -->
+<div class="col-3" id="k8sTokenGroup" style="display:none">
+<input name="k8s_token" placeholder="Bearer Token" class="form-control">
+</div>
+<div class="col-4" id="k8sConfigGroup" style="display:none">
+<textarea name="k8s_kubeconfig" placeholder="kubeconfig JSON（可选）" class="form-control" rows="2"></textarea>
+</div>
+
+            <!-- Docker fields -->
+            <div class="col-4" id="dockerSocketGroup" style="display:none">
+                <input name="docker_socket" placeholder="Docker Socket 路径（默认 unix:///var/run/docker.sock）" class="form-control">
+            </div>
+
+            <!-- Elasticsearch fields -->
+            <div class="col-2" id="esUserGroup" style="display:none">
+                <input name="es_user" placeholder="ES 用户名" class="form-control">
+            </div>
+            <div class="col-2" id="esPassGroup" style="display:none">
+                <input name="es_password" type="password" placeholder="ES 密码" class="form-control">
+            </div>
+            <div class="col-3" id="esApiKeyGroup" style="display:none">
+                <input name="es_api_key" placeholder="API Key（选填）" class="form-control">
+            </div>
+
+            <div class="col-2">
+<label class="form-label">采集间隔(秒)</label>
+<input name="scrape_interval" type="number" value="60" class="form-control">
+</div>
+<div class="col-2 align-self-end">
+<button type="submit" class="btn btn-success">保存</button>
+</div>
+</form>
+</div>
+</div>
+</div>
+
+<script>
+function toggleForm() {
+  var el = document.getElementById('addForm');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function toggleDSFields() {
+  var t = document.getElementById('dsTypeSelect').value;
+  var isSSH = t === 'ssh';
+  var isK8s = t === 'kubernetes';
+  var isDocker = t === 'docker';
+  var isES = t === 'elasticsearch';
+  document.getElementById('authTypeGroup').style.display = (isSSH || isK8s || isDocker || isES) ? 'none' : '';
+  document.getElementById('basicAuthGroup').style.display = 'none';
+  document.getElementById('tokenAuthGroup').style.display = 'none';
+  document.getElementById('sshPortGroup').style.display = isSSH ? '' : 'none';
+  document.getElementById('sshUserGroup').style.display = isSSH ? '' : 'none';
+  document.getElementById('sshPassGroup').style.display = isSSH ? '' : 'none';
+  document.getElementById('k8sTokenGroup').style.display = isK8s ? '' : 'none';
+  document.getElementById('k8sConfigGroup').style.display = isK8s ? '' : 'none';
+  document.getElementById('dockerSocketGroup').style.display = isDocker ? '' : 'none';
+  document.getElementById('esUserGroup').style.display = isES ? '' : 'none';
+  document.getElementById('esPassGroup').style.display = isES ? '' : 'none';
+  document.getElementById('esApiKeyGroup').style.display = isES ? '' : 'none';
+  document.getElementById('endpointInput').placeholder = isSSH ? '主机 IP' : (isK8s ? 'API Server 地址' : (isDocker ? 'Docker 主机地址' : (isES ? 'Elasticsearch URL' : 'Endpoint URL / 路径')));
+}
+</script>
+
+<h3 class="mt-4">数据源列表</h3>
+<table class="table table-sm">
+<thead><tr><th>名称</th><th>类型</th><th>目标</th><th>状态</th><th>上次采集</th><th>错误信息</th><th>操作</th></tr></thead>
+<tbody>
+{% for s in sources %}
+<tr>
+<td>{{ s.name }}</td><td>{{ ds_types[s.type].label if s.type in ds_types else s.type }}</td>
+<td class="text-sm">{{ s.endpoint[:50] }}</td>
+<td>
+{% if s.last_status == "online" %}
+<span class="badge bg-success">在线</span>
+{% elif s.last_status == "error" %}
+<span class="badge bg-danger">异常</span>
+{% else %}
+<span class="badge bg-secondary">未知</span>
+{% endif %}
+</td>
+<td class="text-sm">{{ s.last_scrape.strftime('%H:%M:%S') if s.last_scrape else '-' }}</td>
+<td class="text-sm text-danger">{{ s.last_error[:40] if s.last_error else '' }}</td>
+<td class="actions">
+<form method="POST" action="/datasources/{{ s.id }}/test" style="display:inline">
+<button class="btn btn-sm">测试</button>
+</form>
+<form method="POST" action="/datasources/{{ s.id }}/toggle" style="display:inline">
+<button class="btn btn-sm">{{ '停用' if s.enabled else '启用' }}</button>
+</form>
+<form method="POST" action="/datasources/{{ s.id }}/delete" style="display:inline">
+<button class="btn btn-sm btn-danger" onclick="return confirm('确定删除？')">删除</button>
+</form>
+</td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="text-muted">暂无数据源配置</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

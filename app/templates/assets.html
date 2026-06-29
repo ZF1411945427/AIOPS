@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}资产管理{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>资产管理</h1>
+    <p>CMDB 配置管理</p>
+</div>
+
+<div class="toolbar">
+    <form class="search-form" method="get">
+        <input type="text" name="search" placeholder="搜索资产名称..." value="{{ search }}">
+        <select name="ci_type">
+            <option value="">全部 CI 类型</option>
+            {% for ct in ci_types %}
+            <option value="{{ ct }}" {% if ci_type == ct %}selected{% endif %}>{{ ct }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm">搜索</button>
+    </form>
+    <a href="/assets/create" class="btn btn-primary btn-sm">+ 新增资产</a>
+</div>
+
+<div class="panel">
+    <div class="panel-body">
+        {% if assets %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>名称</th>
+                    <th>CI 类型</th>
+                    <th>IP</th>
+                    <th>状态</th>
+                    <th>最后探测</th>
+                    <th>延迟</th>
+                    <th>集群</th>
+                    <th>标签</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in assets %}
+                <tr>
+                    <td>{{ asset.id }}</td>
+                    <td>{{ asset.name }}</td>
+                    <td><span class="badge ci-type">{{ asset.ci_type }}</span></td>
+                    <td>{{ asset.ip }}</td>
+                    <td><span class="badge {{ asset.status }}">{{ asset.status }}</span></td>
+                    <td class="text-sm">{{ asset.last_checked.strftime('%Y-%m-%d %H:%M:%S') if asset.last_checked else '-' }}</td>
+                    <td class="text-sm">{{ (asset.latency_ms|string + 'ms') if asset.latency_ms else '-' }}</td>
+                    <td class="text-sm">{{ asset.k8s_cluster or '-' }}</td>
+                    <td class="text-sm">{{ asset.tags }}</td>
+                    <td class="text-sm">{{ asset.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td class="actions">
+                        <a href="/assets/{{ asset.id }}/edit" class="btn btn-sm">编辑</a>
+                        <form method="post" action="/assets/{{ asset.id }}/delete" style="display:inline">
+                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('确认删除?')">删除</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty">暂无资产数据，请先新增资产</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

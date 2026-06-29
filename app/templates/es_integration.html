@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}ES 日志集成{% endblock %}
+{% block content %}
+<h1>Elasticsearch 日志集成</h1>
+<p class="text-sm text-muted">将 K8s 事件同步到 Elasticsearch 做持久化存储和全文检索</p>
+
+{% if es_sources %}
+<div style="display:flex;flex-direction:column;gap:8px">
+{% for es in es_sources %}
+<div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ es.name }}</strong>
+<code class="text-sm">{{ es.endpoint }}</code>
+<span class="badge {{ 'online' if es.last_status == 'online' else 'warning' }}">{{ es.last_status }}</span>
+</div>
+<form method="POST" action="/es-integration/sync-events/{{ es.id }}">
+<button type="submit" class="btn btn-sm btn-primary">同步事件到 ES</button>
+</form>
+</div></div>
+{% endfor %}
+</div>
+{% else %}
+<div class="panel"><div class="panel-body text-sm text-muted">
+未配置 Elasticsearch 数据源。请先在「系统管理 → 数据源」中添加 ES 类型的数据源。
+</div></div>
+{% endif %}
+{% endblock %}

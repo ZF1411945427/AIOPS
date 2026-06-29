@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}容量预测{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>容量预测</h1>
+    <p class="text-muted">基于历史趋势预测资源耗尽时间</p>
+</div>
+
+<div class="panel mb-3">
+    <div class="panel-body">
+        <form method="get" class="form-inline" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <div>
+                <label class="form-label">指标</label>
+                <select name="metric" class="form-select" style="width:250px">
+                    <option value="">选择指标</option>
+                    {% for m in metrics %}
+                    <option value="{{ m.name }}" {% if selected_metric == m.name %}selected{% endif %}>
+                        {{ m.name }} ({{ m.count }} 数据点, 最大 {{ m.max_value }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label">阈值（达到即告警）</label>
+                <input type="number" name="threshold" step="0.1" value="{{ threshold or '' }}" placeholder="如 90" class="form-control" style="width:120px">
+            </div>
+            <div>
+                <label class="form-label">回溯时间</label>
+                <select name="hours_back" class="form-select" style="width:100px">
+                    <option value="24" {% if hours_back == 24 %}selected{% endif %}>24 小时</option>
+                    <option value="72" {% if hours_back == 72 %}selected{% endif %}>3 天</option>
+                    <option value="168" {% if hours_back == 168 %}selected{% endif %}>7 天</option>
+                    <option value="720" {% if hours_back == 720 %}selected{% endif %}>30 天</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">分析</button>
+        </form>
+    </div>
+</div>
+
+{% if result %}
+<div class="row" style="display:flex;gap:16px;flex-wrap:wrap">
+    <div class="card" style="flex:1;min-width:200px">
+        <div class="card-body">
+            <div class="text-sm text-muted">趋势方向</div>
+            <div class="stat-number" style="font-size:20px">
+                {% if result.trend == 'increasing' %}
+                <span style="color:#d94a4a">📈 上升</span>
+                {% elif result.trend == 'decreasing' %}
+                <span style="color:#4a90d9">📉 下降</span>
+                {% else %}
+                <span style="color:#999">➡️ 稳定</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:200px">
+        <div class="card-body">
+            <div class="text-sm text-muted">当前值</div>
+            <div class="stat-number" style="font-size:20px">{{ result.current_value|round(2) }}</div>
+        </div>
+    </div>
+    {% if result.days_until_threshold %}
+    <div class="card" style="flex:1;min-width:200px;border-color:#e67e22">
+        <div class="card-body">
+            <div class="text-sm text-muted">预计达到阈值 ({{ result.threshold }})</div>
+            <div class="stat-number" style="font-size:20px;color:#e67e22">{{ result.days_until_threshold }} 天</div>
+        </div>
+    </div>
+    {% endif %}
+    <div class="card" style="flex:1;min-width:200px">
+        <div class="card-body">
+            <div class="text-sm text-muted">斜率 (每小时)</div>
+            <div class="stat-number" style="font-size:20px">{{ result.slope|round(4) }}</div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:200px">
+        <div class="card-body">
+            <div class="text-sm text-muted">拟合度 R²</div>
+            <div class="stat-number" style="font-size:20px">{{ (result.r2 * 100)|round(1) }}%</div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:200px">
+        <div class="card-body">
+            <div class="text-sm text-muted">数据点</div>
+            <div class="stat-number" style="font-size:20px">{{ result.data_points }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="panel mt-3">
+    <div class="panel-header"><h3>趋势图</h3></div>
+    <div class="panel-body" style="text-align:center">
+        {{ svg|safe }}
+        <div class="text-muted text-sm mt-2">实线 = 历史数据 | 虚线 = 预测趋势 | 橙色线 = 阈值</div>
+    </div>
+</div>
+{% elif selected_metric %}
+<div class="text-muted text-center py-4">数据点不足，至少需要 5 个数据点（当前为小时聚合）</div>
+{% endif %}
+
+{% if not metrics %}
+<div class="panel mt-3">
+    <div class="panel-body text-muted">暂无可用指标数据。请确保数据源正在采集指标数据。</div>
+</div>
+{% endif %}
+{% endblock %}

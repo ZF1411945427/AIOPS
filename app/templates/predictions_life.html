@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}剩余寿命预测{% endblock %}
+{% block content %}
+<h1>剩余寿命预测</h1>
+
+<div class="card card-body mb-3">
+<form method="GET" class="row g-2 align-items-end">
+<div class="col-auto">
+<select name="asset_id" class="form-select" onchange="this.form.submit()">
+<option value="">选择资产</option>
+{% for a in assets %}
+<option value="{{ a.id }}" {% if selected_asset and selected_asset.id == a.id %}selected{% endif %}>{{ a.name }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-auto">
+<select name="metric" class="form-select" onchange="this.form.submit()">
+<option value="disk_usage" {% if metric == 'disk_usage' %}selected{% endif %}>磁盘使用率</option>
+<option value="memory_usage" {% if metric == 'memory_usage' %}selected{% endif %}>内存使用率</option>
+<option value="cpu_usage" {% if metric == 'cpu_usage' %}selected{% endif %}>CPU 使用率</option>
+</select>
+</div>
+</form>
+</div>
+
+{% if prediction %}
+<div class="row" style="display:flex;gap:12px;flex-wrap:wrap">
+<div class="card" style="flex:1;min-width:200px;text-align:center;padding:20px">
+<div style="font-size:32px;font-weight:700;color:#ef4444">{{ prediction.remaining_days }}</div>
+<div class="text-muted">剩余天数</div>
+</div>
+<div class="card" style="flex:1;min-width:200px;text-align:center;padding:20px">
+<div style="font-size:32px;font-weight:700">{{ prediction.remaining_hours }}</div>
+<div class="text-muted">剩余小时数</div>
+</div>
+<div class="card" style="flex:1;min-width:200px;text-align:center;padding:20px">
+<div style="font-size:24px;font-weight:700">{{ prediction.current }}%</div>
+<div class="text-muted">当前值 (阈值 {{ prediction.threshold }}%)</div>
+</div>
+<div class="card" style="flex:1;min-width:200px;text-align:center;padding:20px">
+<div style="font-size:18px;font-weight:600">预计 {{ prediction.estimated_failure }}</div>
+<div class="text-muted">预估满阈值日期</div>
+</div>
+</div>
+
+<div class="card mt-3">
+<div class="card-header"><h3>模型参数</h3></div>
+<div class="card-body text-sm">
+退化斜率: {{ prediction.slope }} %/小时<br>
+模型: 线性回归 (基于最近7天数据)
+</div>
+</div>
+{% elif selected_asset %}
+<div class="panel"><div class="panel-body text-sm text-muted">数据不足，无法预测（需要至少2条记录）</div></div>
+{% endif %}
+{% endblock %}

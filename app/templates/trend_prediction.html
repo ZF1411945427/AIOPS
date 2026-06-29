@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}时序趋势预测{% endblock %}
+{% block content %}
+<h1>时序趋势预测</h1>
+<p class="text-sm text-muted">基于线性回归对指标时序数据进行趋势预测</p>
+
+<form method="POST" action="/trend-prediction/predict" class="row g-2 mb-3">
+<div class="col-md-3">
+<label>指标</label>
+<select name="metric_name" class="form-select" required>
+<option value="">-- 选择 --</option>
+{% for m in metrics %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+</select>
+</div>
+<div class="col-md-2"><label>历史时长(h)</label>
+<select name="hours" class="form-select">
+<option value="6">6h</option><option value="24" selected>24h</option>
+<option value="72">72h</option><option value="168">7d</option>
+</select></div>
+<div class="col-md-2"><label>预测步数</label><input name="forecast_steps" class="form-control" type="number" value="12"></div>
+<div class="col-12"><button type="submit" class="btn btn-primary">预测</button></div>
+</form>
+
+{% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+
+{% if result %}
+<div class="row mb-3">
+<div class="col-md-2"><div class="card text-center"><div class="card-body"><h6>数据点</h6><span class="fs-5">{{ result.data_points }}</span></div></div></div>
+<div class="col-md-2"><div class="card text-center"><div class="card-body"><h6>最新值</h6><span class="fs-5">{{ result.latest_value }}</span></div></div></div>
+<div class="col-md-2"><div class="card text-center {{ 'border-danger' if result.direction == 'up' else 'border-success' }}"><div class="card-body"><h6>趋势</h6><span class="fs-5">{{ '↑ 上升' if result.direction == 'up' else '↓ 下降' }}</span></div></div></div>
+<div class="col-md-2"><div class="card text-center"><div class="card-body"><h6>斜率</h6><span class="fs-5">{{ result.slope }}</span></div></div></div>
+<div class="col-md-2"><div class="card text-center"><div class="card-body"><h6>MAE</h6><span class="fs-5">{{ result.mae }}</span></div></div></div>
+</div>
+
+<h3>预测值 (未来 {{ result.forecast|length }} 步)</h3>
+<div style="display:flex;flex-wrap:wrap;gap:4px">
+{% for f in result.forecast %}
+<div class="card" style="width:120px"><div class="card-body text-center py-2">
+<h6>步 {{ f.step }}</h6>
+<span class="fs-5">{{ f.predicted_value }}</span>
+</div></div>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

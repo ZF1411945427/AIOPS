@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}外部 CMDB 集成{% endblock %}
+{% block content %}
+<h1>外部 CMDB 集成</h1>
+
+<form method="POST" action="/ext-cmdb/create" class="row g-2 mb-3">
+<div class="col-md-3"><label>名称</label><input name="name" class="form-control" required></div>
+<div class="col-md-2">
+<label>类型</label>
+<select name="cmdb_type" class="form-select">
+<option value="generic">通用</option><option value="cmdb">CMDB</option>
+<option value="zabbix">Zabbix</option><option value="nacos">Nacos</option>
+</select>
+</div>
+<div class="col-md-4"><label>API URL</label><input name="api_url" class="form-control" placeholder="https://cmdb.example.com/api/assets" required></div>
+<div class="col-md-2"><label>同步间隔(min)</label><input name="sync_interval" class="form-control" type="number" value="60"></div>
+<div class="col-md-1"><label>认证JSON</label><input name="auth_json" class="form-control" value='{"token":""}'></div>
+<div class="col-12"><button type="submit" class="btn btn-primary">添加</button></div>
+</form>
+
+<h3>CMDB 配置</h3>
+<div style="display:flex;flex-direction:column;gap:3px">
+{% for c in configs %}
+<div class="card"><div class="card-body py-1" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ c.name }}</strong> <span class="badge bg-secondary">{{ c.cmdb_type }}</span>
+<span class="text-xs text-muted">{{ c.api_url[:60] }}..</span>
+</div>
+<div style="display:flex;align-items:center;gap:8px">
+<span class="badge bg-{{ 'success' if c.enabled else 'secondary' }}">{{ '已启用' if c.enabled else '已禁用' }}</span>
+{% if c.last_sync %}<span class="text-xs">上次同步: {{ c.last_sync.strftime('%m-%d %H:%M') }}</span>{% endif %}
+<form method="POST" action="/ext-cmdb/toggle/{{ c.id }}" style="display:inline">
+<button type="submit" class="btn btn-sm btn-outline-{{ 'warning' if c.enabled else 'success' }}">{{ '禁用' if c.enabled else '启用' }}</button>
+</form>
+<form method="POST" action="/ext-cmdb/sync/{{ c.id }}" style="display:inline">
+<button type="submit" class="btn btn-sm btn-outline-primary">立即同步</button>
+</form>
+</div>
+</div></div>
+{% else %}
+<div class="text-muted">暂无配置</div>
+{% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ change.title }}{% endblock %}
+{% block content %}
+<h1>{{ change.title }}</h1>
+
+<div class="row g-2 mb-3">
+<div class="col-md-3"><strong>状态</strong><br><span class="badge {{ 'warning' if change.status == 'pending_approval' else 'success' if change.status == 'approved' else 'danger' if change.status in ('rejected','rolled_back') else 'info' if change.status == 'in_progress' else 'secondary' }}">{{ change.status }}</span></div>
+<div class="col-md-3"><strong>类型</strong><br>{{ change.change_type }}</div>
+<div class="col-md-3"><strong>优先级</strong><br>{{ change.priority }}</div>
+<div class="col-md-3"><strong>风险</strong><br>{{ change.risk_level }}</div>
+<div class="col-md-3"><strong>申请人</strong><br>{{ users[change.requester_id].username if change.requester_id and users.get(change.requester_id) else '-' }}</div>
+<div class="col-md-3"><strong>审批人</strong><br>{{ users[change.reviewer_id].username if change.reviewer_id and users.get(change.reviewer_id) else '-' }}</div>
+<div class="col-md-3"><strong>CI 类型</strong><br>{{ change.ci_type or '-' }}</div>
+<div class="col-md-3"><strong>资产 ID</strong><br>{{ change.asset_id or '-' }}</div>
+</div>
+
+{% if change.description %}<p class="text-sm">{{ change.description }}</p>{% endif %}
+{% if change.review_comment %}<p class="text-sm text-muted">审批意见: {{ change.review_comment }}</p>{% endif %}
+
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+{% if change.status == 'draft' %}
+<form method="POST" action="/change-workflow/{{ change.id }}/submit"><button class="btn btn-primary btn-sm">提交审批</button></form>
+{% endif %}
+{% if change.status == 'pending_approval' %}
+<form method="POST" action="/change-workflow/{{ change.id }}/approve" style="display:inline">
+<input name="review_comment" placeholder="审批意见" class="form-control-sm"><button class="btn btn-success btn-sm">通过</button>
+</form>
+<form method="POST" action="/change-workflow/{{ change.id }}/reject" style="display:inline">
+<input name="review_comment" placeholder="驳回原因" class="form-control-sm"><button class="btn btn-danger btn-sm">驳回</button>
+</form>
+{% endif %}
+{% if change.status in ('approved','in_progress') and change.status != 'in_progress' %}
+<form method="POST" action="/change-workflow/{{ change.id }}/start" style="display:inline"><button class="btn btn-info btn-sm">开始执行</button></form>
+{% endif %}
+{% if change.status == 'in_progress' %}
+<form method="POST" action="/change-workflow/{{ change.id }}/complete" style="display:inline"><button class="btn btn-success btn-sm">完成</button></form>
+{% endif %}
+{% if change.status in ('approved','in_progress') %}
+<form method="POST" action="/change-workflow/{{ change.id }}/rollback" style="display:inline"><button class="btn btn-warning btn-sm">回滚</button></form>
+{% endif %}
+</div>
+
+<h3>执行步骤</h3>
+<form method="POST" action="/change-workflow/{{ change.id }}/tasks/new" class="row g-2 mb-3">
+<div class="col-auto"><input name="description" class="form-control" placeholder="步骤描述" required></div>
+<div class="col-auto"><input name="command" class="form-control" placeholder="执行命令(可选)"></div>
+<div class="col-auto"><input name="step_order" class="form-control" type="number" value="{{ tasks|length + 1 }}" style="width:70px"></div>
+<div class="col-auto"><button type="submit" class="btn btn-sm btn-primary">添加步骤</button></div>
+</form>
+
+<div style="display:flex;flex-direction:column;gap:4px">
+{% for t in tasks %}
+<div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>#{{ t.step_order }}</strong> {{ t.description }}
+{% if t.command %}<code class="text-xs">{{ t.command }}</code>{% endif %}
+</div>
+<div style="display:flex;gap:4px;align-items:center">
+<span class="badge {{ 'secondary' if t.status == 'pending' else 'info' if t.status == 'in_progress' else 'success' if t.status == 'completed' else 'danger' }}">{{ t.status }}</span>
+{% if change.status == 'in_progress' %}
+<form method="POST" action="/change-workflow/{{ change.id }}/tasks/{{ t.id }}/status" style="display:inline">
+<select name="status" class="form-select-sm">
+<option value="pending">pending</option>
+<option value="in_progress">in_progress</option>
+<option value="completed">completed</option>
+<option value="failed">failed</option>
+<option value="skipped">skipped</option>
+</select>
+<input name="result" class="form-control-sm" placeholder="结果" style="width:120px">
+<button class="btn btn-sm btn-secondary">更新</button>
+</form>
+{% endif %}
+</div>
+</div></div>
+{% endfor %}
+</div>
+{% endblock %}

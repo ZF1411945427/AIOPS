@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}热点下钻分析{% endblock %}
+{% block content %}
+<h1>热点下钻分析</h1>
+
+<div class="card card-body mb-3">
+<form method="GET" class="row g-2 align-items-end">
+<div class="col-auto">
+<select name="metric" class="form-select" onchange="this.form.submit()">
+{% for m in top_metrics %}
+<option value="{{ m }}" {% if metric == m %}selected{% endif %}>{{ m }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-auto">
+<select name="hours" class="form-select" onchange="this.form.submit()">
+<option value="1" {% if hours == 1 %}selected{% endif %}>对比前 1 小时</option>
+<option value="6" {% if hours == 6 %}selected{% endif %}>对比前 6 小时</option>
+<option value="24" {% if hours == 24 %}selected{% endif %}>对比前 24 小时</option>
+</select>
+</div>
+</form>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>维度贡献度排名 (当前时段 vs 基线时段)</h3></div>
+    <div class="card-body" style="padding:0">
+        <table class="table" style="margin:0">
+            <thead>
+                <tr><th>维度</th><th>当前值</th><th>基线值</th><th>变化 %</th><th>影响</th></tr>
+            </thead>
+            <tbody>
+            {% for c in changes %}
+                <tr>
+                    <td><code>{{ c.dimension }}</code></td>
+                    <td>{{ c.current }}</td>
+                    <td>{{ c.baseline }}</td>
+                    <td>
+                        <span style="color:{{ 'red' if c.change > 0 else 'green' }};font-weight:600">
+                            {{ '+' if c.change > 0 }}{{ c.change }}%
+                        </span>
+                    </td>
+                    <td>
+                        {% if c.change > 50 %}
+                        <span class="badge danger">高</span>
+                        {% elif c.change > 20 %}
+                        <span class="badge warning">中</span>
+                        {% elif c.change < -50 %}
+                        <span class="badge online">低</span>
+                        {% else %}
+                        <span class="badge">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="text-muted text-sm">暂无数据</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

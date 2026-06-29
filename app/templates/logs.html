@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}日志搜索{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>日志搜索</h1>
+    <p class="text-muted">通过 Elasticsearch 查询日志</p>
+</div>
+
+<div class="panel mb-3">
+    <div class="panel-body">
+        <form method="get" class="form-inline" style="display:flex;gap:8px;flex-wrap:wrap">
+            <select name="source_id" class="form-select" style="width:200px" required>
+                <option value="">选择数据源</option>
+                {% for s in sources %}
+                <option value="{{ s.id }}" {% if selected_source_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                {% else %}
+                <option value="" disabled>暂无 ES 数据源</option>
+                {% endfor %}
+            </select>
+            <input type="text" name="query" value="{{ query }}" placeholder="Lucene 查询语法，如: error AND host:web-1" class="form-control" style="flex:1;min-width:200px">
+            <select name="time_range" class="form-select" style="width:100px">
+                <option value="15m" {% if time_range == '15m' %}selected{% endif %}>15 分钟</option>
+                <option value="30m" {% if time_range == '30m' %}selected{% endif %}>30 分钟</option>
+                <option value="1h" {% if time_range == '1h' %}selected{% endif %}>1 小时</option>
+                <option value="6h" {% if time_range == '6h' %}selected{% endif %}>6 小时</option>
+                <option value="24h" {% if time_range == '24h' %}selected{% endif %}>24 小时</option>
+                <option value="7d" {% if time_range == '7d' %}selected{% endif %}>7 天</option>
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">搜索</button>
+        </form>
+    </div>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+{% if logs %}
+<div class="d-flex justify-content-between mb-2">
+    <span class="text-sm text-muted">共 {{ total }} 条结果</span>
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="?source_id={{ selected_source_id }}&query={{ query }}&time_range={{ time_range }}&page={{ page - 1 }}&size={{ size }}" class="btn btn-sm">上一页</a>
+        {% endif %}
+        <span class="text-sm px-2">第 {{ page }} 页</span>
+        <a href="?source_id={{ selected_source_id }}&query={{ query }}&time_range={{ time_range }}&page={{ page + 1 }}&size={{ size }}" class="btn btn-sm">下一页</a>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-body" style="padding:0">
+        {% for log in logs %}
+        <div class="log-entry" style="padding:8px 12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px">
+            <div class="log-meta" style="display:flex;gap:8px;margin-bottom:2px">
+                <span class="text-muted">{{ log.timestamp[:19] if log.timestamp else '?' }}</span>
+                {% if log.level %}
+                <span class="badge {% if log.level|lower in ('error','critical','fatal') %}bg-danger{% elif log.level|lower in ('warn','warning') %}bg-warning{% else %}bg-secondary{% endif %}" style="font-size:10px">{{ log.level }}</span>
+                {% endif %}
+                {% if log.host %}
+                <span class="text-muted">{{ log.host }}</span>
+                {% endif %}
+                {% if log.service %}
+                <span class="text-muted">{{ log.service }}</span>
+                {% endif %}
+                <span class="text-muted" style="margin-left:auto;font-size:10px">{{ log.index }}</span>
+            </div>
+            <div class="log-message" style="white-space:pre-wrap;word-break:break-all;color:#333">{{ log.message[:500] }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="d-flex justify-content-center mt-2">
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="?source_id={{ selected_source_id }}&query={{ query }}&time_range={{ time_range }}&page={{ page - 1 }}&size={{ size }}" class="btn btn-sm">上一页</a>
+        {% endif %}
+        <span class="text-sm px-2">第 {{ page }} 页 / 共 {{ (total / size)|round(0, 'ceil')|int }} 页</span>
+        <a href="?source_id={{ selected_source_id }}&query={{ query }}&time_range={{ time_range }}&page={{ page + 1 }}&size={{ size }}" class="btn btn-sm">下一页</a>
+    </div>
+</div>
+{% elif selected_source_id and not error %}
+<div class="text-muted text-center py-4">无匹配日志</div>
+{% endif %}
+
+<style>
+.log-entry:hover { background:#f5f7fa; }
+.log-message { max-height:80px;overflow-y:auto; }
+.log-message::-webkit-scrollbar { width:4px; }
+.log-message::-webkit-scrollbar-thumb { background:#ccc;border-radius:2px; }
+</style>
+{% endblock %}

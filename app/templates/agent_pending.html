@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="workbench-page-shell">
+  <div class="section-toolbar">
+    <div>
+      <h1>待确认动作</h1>
+      <p>AI Agent 生成的待用户确认执行的操作</p>
+    </div>
+  </div>
+
+  <div class="panel fade-in">
+    <div class="panel-body" style="padding:0">
+      {% if actions %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>动作</th>
+            <th>类型</th>
+            <th>风险等级</th>
+            <th>状态</th>
+            <th>时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in actions %}
+          <tr class="{{ 'severity-' + a.risk_level if a.risk_level in ('critical', 'warning') else '' }}">
+            <td class="font-medium">{{ a.title }}</td>
+            <td><span class="badge ci-type">{{ a.action_type }}</span></td>
+            <td>
+              <span class="badge
+                {% if a.risk_level == 'critical' %}critical
+                {% elif a.risk_level == 'high' %}warning
+                {% elif a.risk_level == 'medium' %}warning
+                {% else %}bg-success{% endif %}">
+                {{ a.risk_level }}
+              </span>
+            </td>
+            <td>
+              <span class="status-dot
+                {% if a.status == 'pending' %}yellow pulse
+                {% elif a.status == 'confirmed' %}green
+                {% elif a.status == 'cancelled' %}gray
+                {% else %}gray{% endif %}">
+              </span>
+              {{ a.status }}
+            </td>
+            <td style="color:var(--text-secondary); font-size:0.82rem">{{ a.created_at.strftime('%m-%d %H:%M') }}</td>
+            <td>
+              <div class="actions">
+                {% if a.status == 'pending' %}
+                <form action="/agent/pending/{{ a.id }}/confirm" method="post" class="d-inline">
+                  <button class="btn btn-success btn-sm">确认</button>
+                </form>
+                <form action="/agent/pending/{{ a.id }}/cancel" method="post" class="d-inline">
+                  <button class="btn btn-danger btn-sm">取消</button>
+                </form>
+                {% else %}
+                <span class="text-muted">{{ a.status }}</span>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">✅</div>
+        <div class="empty-title">暂无待确认动作</div>
+        <div class="empty-desc">所有操作都已被处理，没有待确认的 AI 生成动作。</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

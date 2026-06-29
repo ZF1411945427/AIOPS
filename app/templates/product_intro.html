@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="system">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIOps — 智能运维平台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:        #F8F9FA;
+  --surface:   #FFFFFF;
+  --surface2:  #F1F3F5;
+  --surface3:  #EEF2FF;
+  --fg:        #111827;
+  --fg2:       #6B7280;
+  --fg3:       #9CA3AF;
+  --border:    #E5E7EB;
+  --primary:   #C7512E;
+  --primary-bg: rgba(199,81,46,0.08);
+  --primary-light: #E87A5A;
+  --teal:      #0D9488;
+  --teal-bg:   rgba(13,148,136,0.08);
+  --radius:    16px;
+  --radius-sm: 8px;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--fg);
+  overflow-x: hidden;
+  font-size: 15px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+a { text-decoration: none; color: inherit; }
+::selection { background: var(--primary); color: #FFFFFF; }
+
+/* ─── NAV ─── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  padding: 0 48px; height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(248,249,250,0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+.logo { font-size: 22px; font-weight: 800; letter-spacing: -0.04em; color: var(--fg); }
+.logo em { font-style: normal; color: var(--primary); }
+.nav-links { display: flex; gap: 28px; align-items: center; }
+.nav-links a { font-size: 13px; font-weight: 500; color: var(--fg2); transition: color 0.2s; }
+.nav-links a:hover { color: var(--fg); }
+.nav-btn {
+  padding: 9px 22px;
+  background: var(--fg); color: #FFFFFF;
+  font-size: 13px; font-weight: 600; border: none;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s; cursor: pointer;
+}
+.nav-btn:hover { background: #1F2937; }
+.nav-btn:active { transform: scale(0.97); }
+
+/* ─── SECTIONS ─── */
+section { scroll-snap-align: start; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; padding: 48px 0 0; }
+.container { max-width: 1120px; margin: 0 auto; padding: 0 48px; width: 100%; }
+
+/* ─── HERO ─── */
+.hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+.hero-eyebrow {
+  display: inline-block; padding: 6px 14px;
+  background: var(--primary-bg); color: var(--primary);
+  font-size: 12px; font-weight: 700;
+  border-radius: 9999px; margin-bottom: 20px;
+}
+.hero h1 {
+  font-size: clamp(32px, 3.6vw, 44px);
+  line-height: 1.45; letter-spacing: -0.01em;
+  font-weight: 600; color: var(--fg);
+  margin-bottom: 24px;
+}
+.hero h1 .hl { color: var(--primary); }
+.hero h1 .l2 { font-weight: 400; color: var(--fg2); }
+.hero h1 .l3 { }
+.hero p {
+  font-size: 15px; color: var(--fg2); line-height: 1.75;
+  margin-bottom: 32px; max-width: 400px;
+}
+.hero-btns { display: flex; gap: 12px; flex-wrap: wrap; }
+.hero-btn {
+  padding: 12px 28px;
+  font-size: 14px; font-weight: 600;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.hero-btn.primary { background: var(--fg); color: #FFFFFF; border: none; }
+.hero-btn.primary:hover { background: #1F2937; }
+.hero-btn.primary:active { transform: scale(0.97); }
+.hero-btn.ghost { background: transparent; color: var(--fg2); border: 1px solid var(--border); }
+.hero-btn.ghost:hover { border-color: var(--fg); color: var(--fg); }
+
+/* ─── HERO PANEL ─── */
+.panel-shell {
+  background: var(--surface2);
+  padding: 8px;
+  border-radius: calc(var(--radius) + 8px);
+  border: 1px solid var(--border);
+}
+.panel-core {
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.panel-hd {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-hd-left { display: flex; align-items: center; gap: 8px; }
+.panel-title { font-size: 12px; color: var(--fg2); font-weight: 500; }
+.panel-badge {
+  font-size: 10px; font-weight: 600;
+  padding: 3px 10px;
+  background: var(--teal-bg); color: var(--teal);
+  border-radius: 9999px;
+}
+.panel-body { padding: 28px 20px; }
+.panel-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+.panel-cell { text-align: center; }
+.panel-cell + .panel-cell { border-left: 1px solid var(--border); }
+.panel-num {
+  font-size: 36px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--fg); line-height: 1;
+}
+.panel-num.warn { color: var(--primary); }
+.panel-label { font-size: 11px; color: var(--fg3); margin-top: 6px; font-weight: 500; }
+.panel-ft {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+  font-size: 12px; color: var(--fg2);
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* ─── TRUST ─── */
+.trust { background: var(--surface); border-top: 1px solid var(--border); }
+.trust-header { text-align: center; margin-bottom: 48px; }
+.trust-header h2 {
+  font-size: clamp(26px, 2.8vw, 34px);
+  font-weight: 700; line-height: 1.2;
+  letter-spacing: -0.02em; color: var(--fg);
+  margin-bottom: 8px;
+}
+.trust-header p { font-size: 15px; color: var(--fg2); max-width: 480px; }
+.trust-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--border); border-radius: var(--radius); overflow: hidden;
+}
+.trust-item { padding: 40px 24px; text-align: center; background: var(--surface); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.trust-icon {
+  width: 36px; height: 36px;
+  background: var(--primary-bg);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--primary); margin-bottom: 8px;
+}
+.trust-num {
+  font-size: clamp(36px, 4vw, 52px); font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1;
+  color: var(--fg);
+}
+.trust-num.accent { color: var(--primary); }
+.trust-label { font-size: 14px; color: var(--fg); font-weight: 600; }
+.trust-desc { font-size: 12px; color: var(--fg2); line-height: 1.5; max-width: 180px; }
+.trust-summary {
+  margin-top: 40px; text-align: center;
+  padding: 24px 32px;
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  font-size: 14px; color: var(--fg2); line-height: 1.7;
+}
+.trust-summary strong { color: var(--fg); font-weight: 600; }
+
+/* ─── SECTION HEADERS ─── */
+.sec-hd { margin-bottom: 32px; width: 100%; }
+.sec-hd h2 {
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 700; line-height: 1.2;
+  letter-spacing: -0.02em; color: var(--fg);
+  margin-bottom: 8px;
+}
+.sec-hd p {
+  font-size: 15px; color: var(--fg2); line-height: 1.7;
+  max-width: 520px;
+}
+
+/* ─── NARRATIVE ─── */
+.narr-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px; background: var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.narr-card { background: var(--surface); padding: 40px 32px; transition: background 0.3s; }
+.narr-card:hover { background: var(--surface2); }
+.narr-num {
+  font-size: 44px; font-weight: 700; color: var(--fg3);
+  line-height: 1; margin-bottom: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.narr-card h3 { font-size: 17px; font-weight: 600; color: var(--fg); margin-bottom: 8px; letter-spacing: -0.01em; }
+.narr-card p { font-size: 13px; color: var(--fg2); line-height: 1.7; }
+.narr-tag {
+  display: inline-block; margin-top: 14px;
+  background: var(--primary-bg); color: var(--primary);
+  font-size: 11px; font-weight: 500;
+  padding: 4px 10px; border-radius: 9999px;
+}
+
+/* ─── SOLUTION ─── */
+.solution-lead {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: center;
+  margin-bottom: 32px;
+}
+.solution-lead h3 {
+  font-size: clamp(18px, 1.8vw, 22px);
+  font-weight: 700; line-height: 1.3; letter-spacing: -0.02em;
+  color: var(--fg); margin-bottom: 6px;
+}
+.solution-lead p { font-size: 14px; color: var(--fg2); line-height: 1.6; }
+.solution-lead .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.solution-lead .tags span {
+  padding: 6px 14px;
+  background: var(--teal-bg); color: var(--teal);
+  font-size: 12px; font-weight: 500;
+  border-radius: 9999px;
+}
+.feat-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px; background: var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.feat-card { background: var(--surface); padding: 28px 24px; transition: background 0.3s; }
+.feat-card:hover { background: var(--surface2); }
+.feat-card.featured {
+  background: linear-gradient(135deg, var(--surface3) 0%, var(--surface) 100%);
+}
+.feat-icon {
+  width: 40px; height: 40px;
+  background: var(--primary-bg);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px; color: var(--primary);
+}
+.feat-card.featured .feat-icon { background: var(--primary); color: #FFFFFF; }
+.feat-card h3 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 6px; }
+.feat-card p { font-size: 13px; color: var(--fg2); line-height: 1.65; }
+.feat-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+.feat-tags span {
+  font-family: var(--font-mono);
+  font-size: 9px; font-weight: 500;
+  padding: 3px 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--fg3);
+  border-radius: 4px;
+}
+
+/* ─── HOW IT WORKS ─── */
+.how-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: start; }
+.how-step { display: flex; gap: 20px; padding: 24px 0; }
+.how-step + .how-step { border-top: 1px solid var(--border); }
+.how-step-num {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  font-size: 13px; font-weight: 600; color: var(--fg2);
+}
+.how-step:first-child .how-step-num { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); }
+.how-step-context h4 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 4px; }
+.how-step-context p { font-size: 13px; color: var(--fg2); line-height: 1.6; }
+.chat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.chat-hd {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 500; color: var(--fg2);
+  display: flex; align-items: center; gap: 8px;
+}
+.chat-hd .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+.chat-bd { padding: 20px; }
+.msg {
+  padding: 14px 18px; margin-bottom: 10px;
+  font-size: 13px; line-height: 1.7;
+  border-radius: var(--radius-sm);
+}
+.msg.user {
+  background: var(--surface2); color: var(--fg2);
+  border: 1px solid var(--border);
+  margin-left: 28px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.msg.ai {
+  background: var(--primary-bg); color: var(--fg);
+  margin-right: 28px;
+}
+.msg .hl { color: var(--primary); font-weight: 600; }
+.msg .hl-dim { color: var(--fg3); }
+.msg .hl-em { color: var(--teal); font-weight: 600; }
+
+/* ─── SECURITY ─── */
+.sec-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border-radius: var(--radius); overflow: hidden; }
+.sec-card { background: var(--surface); padding: 32px 28px; transition: background 0.3s; }
+.sec-card:hover { background: var(--surface2); }
+.sec-badge {
+  font-family: var(--font-mono);
+  display: inline-block; font-size: 10px; font-weight: 500;
+  padding: 4px 10px;
+  background: var(--primary-bg);
+  color: var(--primary); border-radius: 6px;
+  margin-bottom: 14px;
+}
+.sec-card h3 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 6px; }
+.sec-card p { font-size: 13px; color: var(--fg2); line-height: 1.65; }
+
+/* ─── COMPARE ─── */
+.compare-cols {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 1px; background: var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.compare-col { padding: 40px 36px; }
+.compare-col.left { background: var(--surface2); }
+.compare-col.right { background: #FFFFFF; }
+.compare-col h3 {
+  font-size: 17px; font-weight: 600;
+  margin-bottom: 24px; display: flex; align-items: center; gap: 10px;
+}
+.compare-col.left h3 { color: var(--fg); }
+.compare-col.right h3 { color: var(--primary); }
+.compare-col ul { list-style: none; }
+.compare-col li {
+  font-size: 14px; color: var(--fg2); padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.compare-col li:last-child { border: none; }
+
+/* ─── CTA ─── */
+.cta { text-align: center; background: var(--surface); border-top: 1px solid var(--border); }
+.cta h2 {
+  font-size: clamp(26px, 2.8vw, 34px);
+  font-weight: 700; line-height: 1.2;
+  letter-spacing: -0.02em; color: var(--fg);
+  margin-bottom: 12px;
+}
+.cta p { font-size: 15px; color: var(--fg2); margin-bottom: 36px; }
+.cta-btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 40px;
+  background: var(--fg); color: #FFFFFF;
+  border: none; font-size: 15px; font-weight: 600;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s; cursor: pointer;
+}
+.cta-btn:hover { background: #1F2937; }
+.cta-btn:active { transform: scale(0.97); }
+.cta-btn svg { transition: transform 0.2s; }
+.cta-btn:hover svg { transform: translateX(4px); }
+
+/* ─── FOOTER ─── */
+footer {
+  scroll-snap-align: start;
+  padding: 32px 48px; text-align: center;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px; color: var(--fg3);
+}
+
+/* ─── SCROLL REVEAL ─── */
+.rv {
+  opacity: 0; transform: translateY(24px);
+  transition: opacity 0.6s cubic-bezier(0.16,1,0.3,1), transform 0.6s cubic-bezier(0.16,1,0.3,1);
+}
+.rv.in { opacity: 1; transform: translateY(0); }
+.rv-1 { transition-delay: 0.08s; }
+.rv-2 { transition-delay: 0.16s; }
+.rv-3 { transition-delay: 0.24s; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 1024px) {
+  .hero-grid, .solution-lead, .how-grid, .compare-cols { grid-template-columns: 1fr; gap: 48px; }
+  .feat-grid, .sec-cols { grid-template-columns: 1fr 1fr; }
+  .feat-card:nth-child(4), .feat-card:nth-child(5) { grid-column: auto; }
+  .narr-grid { grid-template-columns: 1fr; }
+  .trust-grid { grid-template-columns: 1fr 1fr; }
+  section { padding: 60px 40px; }
+  .container { padding: 0; }
+}
+@media (max-width: 640px) {
+  .feat-grid, .sec-cols { grid-template-columns: 1fr; }
+  .trust-grid { grid-template-columns: 1fr 1fr; }
+  nav, footer { padding-left: 20px; padding-right: 20px; }
+  .container { padding: 0 20px; }
+  section { padding: 40px 20px; }
+  .nav-links a:not(.nav-btn) { display: none; }
+  .hero-grid { gap: 40px; }
+  .compare-col { padding: 28px 24px; }
+  .trust-item { padding: 32px 16px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="logo"><em>AI</em>Ops</a>
+  <div class="nav-links">
+    <a href="#narrative">困境</a>
+    <a href="#solution">方案</a>
+    <a href="#how">流程</a>
+    <a href="/login" class="nav-btn">免费试用</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-grid">
+      <div class="rv in">
+        <span class="hero-eyebrow">智能运维平台</span>
+        <h1>告警响了 —<br><span class="l2">不等你到现场</span><br>根因已经<span class="hl">锁定</span></h1>
+        <p>从告警到根因，AI 替你完成。不靠经验，不靠猜，靠数据。</p>
+        <div class="hero-btns">
+          <a href="/login" class="hero-btn primary">免费试用</a>
+          <a href="#solution" class="hero-btn ghost">了解方案 →</a>
+        </div>
+      </div>
+      <div class="rv in rv-2">
+        <div class="panel-shell">
+          <div class="panel-core">
+            <div class="panel-hd">
+              <div class="panel-hd-left">
+                <span class="panel-title">核心支付系统 · 实时态势</span>
+              </div>
+              <span class="panel-badge">● 健康</span>
+            </div>
+            <div class="panel-body">
+              <div class="panel-grid">
+                <div class="panel-cell">
+                  <div class="panel-num">99.8%</div>
+                  <div class="panel-label">健康分</div>
+                </div>
+                <div class="panel-cell">
+                  <div class="panel-num warn">2</div>
+                  <div class="panel-label">活跃告警</div>
+                </div>
+                <div class="panel-cell">
+                  <div class="panel-num" style="color:var(--fg3)">8</div>
+                  <div class="panel-label">未关闭事件</div>
+                </div>
+                <div class="panel-cell">
+                  <div class="panel-num">128</div>
+                  <div class="panel-label">资产总数</div>
+                </div>
+              </div>
+            </div>
+            <div class="panel-ft">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              SLA 99.8% · 系统平稳运行中
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TRUST -->
+<section class="trust">
+  <div class="container">
+    <div class="trust-header rv">
+      <h2>接入 AIOps，效果看得见</h2>
+      <p>已有多家企业通过 AIOps 实现运维效率的全面提升。</p>
+    </div>
+    <div class="trust-grid rv">
+      <div class="trust-item">
+        <div class="trust-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div class="trust-num">70%</div>
+        <div class="trust-label">故障恢复时间降低</div>
+        <div class="trust-desc">MTTR 从平均 45 分钟降至 13 分钟，故障处理不再需要逐级上报。</div>
+      </div>
+      <div class="trust-item">
+        <div class="trust-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+        </div>
+        <div class="trust-num accent">90%</div>
+        <div class="trust-label">告警噪声减少</div>
+        <div class="trust-desc">AI 收敛去重后，每天真正需要处理的告警不到 10 条。</div>
+      </div>
+      <div class="trust-item">
+        <div class="trust-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="trust-num">80%</div>
+        <div class="trust-label">运维自动化覆盖</div>
+        <div class="trust-desc">重启 / 扩容 / 清理等高频操作由智能体自动执行，无需人工介入。</div>
+      </div>
+      <div class="trust-item">
+        <div class="trust-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="trust-num accent">500+</div>
+        <div class="trust-label">接入资产规模</div>
+        <div class="trust-desc">覆盖服务器、容器、中间件、数据库等全栈资产，统一纳管。</div>
+      </div>
+    </div>
+    <div class="trust-summary rv rv-2">
+      以上数据基于已接入客户的平均值。<strong>你的团队也可以。</strong> 
+      <a href="/login" style="color:var(--primary);font-weight:600;">免费试用 →</a>
+    </div>
+  </div>
+</section>
+
+<!-- NARRATIVE -->
+<section id="narrative" class="narrative">
+  <div class="container">
+    <div class="sec-hd rv">
+      <h2>告警看了半小时，还是找不到根因？</h2>
+      <p>不只是你一个人。每一家企业的运维团队都在经历同样的问题。</p>
+    </div>
+    <div class="narr-grid rv">
+      <div class="narr-card">
+        <div class="narr-num">01</div>
+        <h3>告警说了等于没说</h3>
+        <p>告警只告诉你"CPU 98%" — 不告诉你哪个进程、为什么、怎么处理。</p>
+        <span class="narr-tag">告警无上下文</span>
+      </div>
+      <div class="narr-card">
+        <div class="narr-num">02</div>
+        <h3>故障定位靠"猜"</h3>
+        <p>老运维知道看哪几个指标，新人只能一个个排除。同样的故障，每次排查路径都不一样。</p>
+        <span class="narr-tag">经验不传承</span>
+      </div>
+      <div class="narr-card">
+        <div class="narr-num">03</div>
+        <h3>60% 是机械操作</h3>
+        <p>重启 / 扩容 / 清理磁盘 — 这些本该自动化的操作，每天消耗着你最宝贵的时间。</p>
+        <span class="narr-tag">重复劳动多</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SOLUTION -->
+<section id="solution" class="solution">
+  <div class="container">
+    <div class="sec-hd rv">
+      <h2>从被动告警到主动防御</h2>
+      <p>故障还没发生，系统已经在预测和处理了。</p>
+    </div>
+    <div class="solution-lead rv">
+      <div>
+        <h3>把「救火」变成「防火」</h3>
+        <p>AIOps 不是又一个监控工具。它能理解你的系统、自动定位根因、执行修复。</p>
+      </div>
+      <div class="tags">
+        <span>告警收敛去噪</span>
+        <span>AI 根因定位</span>
+        <span>自动修复</span>
+        <span>知识沉淀</span>
+      </div>
+    </div>
+    <div class="feat-grid rv">
+      <div class="feat-card featured">
+        <div class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <h3>AI 智能体</h3>
+        <p>自然语言交互，MCP 工具调用，自动修复执行，全链路审计。</p>
+        <div class="feat-tags"><span>LLM</span><span>Agent</span><span>MCP</span></div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9"/></svg>
+        </div>
+        <h3>指标监控</h3>
+        <p>多维度指标采集，实时告警，趋势预测，自定义仪表盘。</p>
+        <div class="feat-tags"><span>CPU/内存</span><span>3σ/STL</span></div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <h3>日志中心</h3>
+        <p>日志采集 / 全文搜索 / Drain 模板聚合 / 异常检测。</p>
+        <div class="feat-tags"><span>Kafka</span><span>ES</span></div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <h3>链路追踪</h3>
+        <p>分布式 Trace / Span 瀑布图 / 服务拓扑可视化。</p>
+        <div class="feat-tags"><span>Jaeger</span><span>自研</span></div>
+      </div>
+      <div class="feat-card featured">
+        <div class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+        </div>
+        <h3>告警中心</h3>
+        <p>告警收敛 / 去重 / 升级 / 静默 / 分派。</p>
+        <div class="feat-tags"><span>EWMA</span><span>规则引擎</span></div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>事件中心</h3>
+        <p>告警归并故障单 / AI 根因分析 / 自动建单。</p>
+        <div class="feat-tags"><span>知识图谱</span><span>PageRank</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="how" class="how-section">
+  <div class="container">
+    <div class="sec-hd rv">
+      <h2>你的 7×24 运维专家</h2>
+      <p>不是问答机器人，是能真正替你干活的智能体。</p>
+    </div>
+    <div class="how-grid">
+      <div class="how-steps">
+        <div class="how-step rv">
+          <div class="how-step-num">01</div>
+          <div class="how-step-context"><h4>意图识别</h4><p>解析自然语言查询，路由到对应工具。</p></div>
+        </div>
+        <div class="how-step rv rv-1">
+          <div class="how-step-num">02</div>
+          <div class="how-step-context"><h4>MCP 工具调用</h4><p>查询告警 / 指标 / 日志 / 资产 / 知识库，一步到位。</p></div>
+        </div>
+        <div class="how-step rv rv-2">
+          <div class="how-step-num">03</div>
+          <div class="how-step-context"><h4>知识检索</h4><p>匹配历史故障知识库，推荐相似案例和解决方案。</p></div>
+        </div>
+        <div class="how-step rv rv-3">
+          <div class="how-step-num">04</div>
+          <div class="how-step-context"><h4>安全执行</h4><p>高风险操作需二次确认，所有执行动作全审计。</p></div>
+        </div>
+      </div>
+      <div class="chat-card rv rv-2">
+        <div class="chat-hd">
+          <span class="dot"></span>
+          自然语言 · 故障分析
+        </div>
+        <div class="chat-bd">
+          <div class="msg user">&gt; 查一下 order-center 最近的异常</div>
+          <div class="msg ai">
+            检测到 <span class="hl">3 条 critical 告警</span>。<br>
+            均指向 <span class="hl-dim">POD-ABC123</span>。<br>
+            根因：<span class="hl">OOMKILLED</span> — 内存超限 98.2%
+          </div>
+          <div class="msg ai">
+            memory_usage <span class="hl">98.2%</span> //
+            pod_restarts <span class="hl">+12</span>
+          </div>
+          <div class="msg ai">
+            匹配历史故障，建议重启恢复。<br>
+            <span class="hl-em">>> 一键执行修复？</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SECURITY -->
+<section class="security-section">
+  <div class="container">
+    <div class="sec-hd rv">
+      <h2>安全执行，放心交付</h2>
+      <p>再智能的系统，安全也是底线。</p>
+    </div>
+    <div class="sec-cols rv">
+      <div class="sec-card">
+        <div class="sec-badge">// RBAC</div>
+        <h3>权限控制</h3>
+        <p>管理员 / 运维 / 只读 — 细粒度操作权限控制</p>
+      </div>
+      <div class="sec-card">
+        <div class="sec-badge">// CONFIRM</div>
+        <h3>动作确认</h3>
+        <p>高风险操作必须二次确认，杜绝误操作</p>
+      </div>
+      <div class="sec-card">
+        <div class="sec-badge">// AUDIT</div>
+        <h3>审计日志</h3>
+        <p>所有操作记录时间 / 操作者 / 结果，支持回放</p>
+      </div>
+      <div class="sec-card">
+        <div class="sec-badge">// API KEY</div>
+        <h3>令牌管理</h3>
+        <p>只读 / 读写 / 管理员三级令牌，即时吊销</p>
+      </div>
+      <div class="sec-card">
+        <div class="sec-badge">// ALLOWLIST</div>
+        <h3>白名单</h3>
+        <p>仅允许预置安全工具执行，禁用任意命令</p>
+      </div>
+      <div class="sec-card">
+        <div class="sec-badge">// SILENCE</div>
+        <h3>告警静默</h3>
+        <p>维护窗口期间自动静默，避免无效骚扰</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section class="compare-section">
+  <div class="container">
+    <div class="sec-hd rv">
+      <h2>传统运维 vs AIOps</h2>
+      <p>从告警轰炸到智能决策，差距不止一点点。</p>
+    </div>
+    <div class="compare-cols rv">
+      <div class="compare-col left">
+        <h3>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          传统运维
+        </h3>
+        <ul>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>告警多，噪声大，靠人工筛选</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>故障定位靠经验，排查几小时</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>手工操作，重复劳动多</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>知识无法积累，新人难上手</li>
+        </ul>
+      </div>
+      <div class="compare-col right">
+        <h3>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          AIOps
+        </h3>
+        <ul>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>告警收敛去噪，信号精准推送</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>AI 自动定位根因，5 分钟搞定</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>规则触发自动修复，零手工</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>知识库沉淀经验，可复用</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="container">
+    <h2 class="rv">告警再来一次，<br>你会怎么应对？</h2>
+    <p class="rv rv-1">让 AIOps 替你处理重复的，把时间留给真正重要的事。</p>
+    <a href="/login" class="cta-btn rv rv-2">
+      免费试用 AIOps
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+    </a>
+  </div>
+</section>
+
+<footer>
+  AIOps — 智能运维平台 · 可观测性 + 人工智能 · v2.4.1
+</footer>
+
+<script>
+const els = document.querySelectorAll('.rv');
+const ob = new IntersectionObserver((e) => {
+  e.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('in'); });
+}, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+els.forEach(el => ob.observe(el));
+</script>
+</body>
+</html>

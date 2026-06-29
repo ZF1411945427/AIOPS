@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}告警风暴管理{% endblock %}
+{% block content %}
+<h1>告警风暴管理</h1>
+
+<div class="row g-2 mb-3">
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>总告警数</strong><br>{{ stats.total }}</div></div></div>
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>已抑制(风暴)</strong><br>{{ stats.get('storm_suppressed', 0) }}</div></div></div>
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>已收敛(去重)</strong><br>{{ stats.get('dedup_suppressed', 0) }}</div></div></div>
+</div>
+
+<div class="card mb-3"><div class="card-body">
+<h4>风暴阈值配置</h4>
+<form method="POST" action="/alert-storm/config" class="row g-2">
+<div class="col-auto"><label>1分钟内触发次数阈值</label><input name="storm_threshold" class="form-control" type="number" value="{{ storm_threshold }}"></div>
+<div class="col-auto" style="padding-top:28px"><button type="submit" class="btn btn-primary btn-sm">保存</button></div>
+</form>
+</div></div>
+
+<h3>抑制历史</h3>
+<div style="display:flex;flex-direction:column;gap:4px">
+{% for s in suppressions %}
+<div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ s.reason }}</strong>
+<span class="text-sm text-muted">{{ s.rule_name or s.metric_name }}</span>
+<span class="badge {{ 'warning' if s.reason == 'storm' else 'secondary' }}">已抑制 {{ s.suppressed_count }} 次</span>
+</div>
+<div class="text-xs text-muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else '' }}</div>
+</div></div>
+{% endfor %}
+</div>
+{% endblock %}

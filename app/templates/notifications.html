@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>通知渠道</h2>
+
+<div class="row mb-3">
+<div class="col-md-12">
+<button class="btn btn-primary" onclick="toggleForm()">添加渠道</button>
+</div>
+</div>
+
+<div class="mb-3" id="addChannelForm" style="display:none">
+<div class="card card-body">
+<form method="POST" action="/notifications/channels/create">
+<div class="row g-3">
+<div class="col-md-3">
+<label class="form-label">名称</label>
+<input name="name" class="form-control" required>
+</div>
+<div class="col-md-2">
+<label class="form-label">类型</label>
+<select name="type" class="form-select" id="channelTypeSelect">
+<option value="email">邮件</option>
+<option value="webhook">Webhook</option>
+<option value="dingtalk">钉钉机器人</option>
+<option value="wecom">企微机器人</option>
+<option value="feishu">飞书机器人</option>
+<option value="log">日志</option>
+</select>
+</div>
+<div class="col-md-3" id="emailConfig">
+<h6>邮件配置</h6>
+<input name="config_host" placeholder="SMTP 主机" class="form-control mb-1">
+<input name="config_port" value="587" placeholder="端口" class="form-control mb-1">
+<input name="config_user" placeholder="用户名" class="form-control mb-1">
+<input name="config_password" type="password" placeholder="密码" class="form-control mb-1">
+<input name="config_recipients" placeholder="收件人(逗号分隔)" class="form-control">
+</div>
+<div class="col-md-3" id="webhookConfig" style="display:none">
+<h6>Webhook</h6>
+<input name="config_url" placeholder="Webhook URL" class="form-control">
+</div>
+<div class="col-md-3" id="dingtalkConfig" style="display:none">
+<h6>钉钉机器人</h6>
+<input name="config_webhook" placeholder="Webhook URL (含access_token)" class="form-control">
+</div>
+<div class="col-md-3" id="wecomConfig" style="display:none">
+<h6>企微机器人</h6>
+<input name="config_webhook" placeholder="Webhook URL (含key)" class="form-control">
+</div>
+<div class="col-md-3" id="feishuConfig" style="display:none">
+<h6>飞书机器人</h6>
+<input name="config_webhook" placeholder="Webhook URL (含token)" class="form-control">
+</div>
+<div class="col-md-2 align-self-end">
+<button type="submit" class="btn btn-success">保存</button>
+</div>
+</div>
+</form>
+</div>
+</div>
+
+<script>
+function toggleForm() {
+  var el = document.getElementById('addChannelForm');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+document.getElementById('channelTypeSelect').addEventListener('change', function() {
+document.getElementById('emailConfig').style.display = this.value === 'email' ? 'block' : 'none';
+document.getElementById('webhookConfig').style.display = this.value === 'webhook' ? 'block' : 'none';
+document.getElementById('dingtalkConfig').style.display = this.value === 'dingtalk' ? 'block' : 'none';
+document.getElementById('wecomConfig').style.display = this.value === 'wecom' ? 'block' : 'none';
+document.getElementById('feishuConfig').style.display = this.value === 'feishu' ? 'block' : 'none';
+});
+</script>
+
+<h3 class="mt-4">渠道列表</h3>
+<table class="table table-sm">
+<thead><tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
+<tbody>
+{% for c in channels %}
+<tr>
+<td>{{ c.id }}</td><td>{{ c.name }}</td><td>{{ c.type }}</td>
+<td>{% if c.enabled %}启用{% else %}停用{% endif %}</td>
+<td>
+<form method="POST" action="/notifications/channels/{{ c.id }}/delete" style="display:inline">
+<button class="btn btn-sm btn-danger" onclick="return confirm('确定删除？')">删除</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h3 class="mt-4">通知记录</h3>
+<table class="table table-sm">
+<thead><tr><th>时间</th><th>渠道</th><th>告警ID</th><th>标题</th><th>状态</th></tr></thead>
+<tbody>
+{% for log in logs %}
+<tr>
+<td>{{ log.created_at.strftime('%H:%M:%S') }}</td>
+<td>{{ log.channel_type }}</td>
+<td>{{ log.alert_id or '-' }}</td>
+<td>{{ log.title[:40] }}</td>
+<td>{% if log.success %}成功{% else %}<span class="text-danger">失败</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

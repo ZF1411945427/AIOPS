@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Kafka 日志管道{% endblock %}
+{% block content %}
+<h1>Kafka 日志管道</h1>
+<p class="text-sm text-muted">配置 Kafka 消费者管道，接入日志/指标数据流</p>
+
+<form method="POST" action="/kafka/create" class="row g-2 mb-3">
+<div class="col-md-3"><label>管道名称</label><input name="name" class="form-control" required></div>
+<div class="col-md-3"><label>Brokers</label><input name="brokers" class="form-control" placeholder="localhost:9092" required></div>
+<div class="col-md-2"><label>Topic</label><input name="topic" class="form-control" placeholder="logs" required></div>
+<div class="col-md-2"><label>Group ID</label><input name="group_id" class="form-control" value="aiops"></div>
+<div class="col-md-1">
+<label>类型</label>
+<select name="pipeline_type" class="form-select">
+<option value="log">日志</option><option value="metric">指标</option>
+<option value="event">事件</option>
+</select>
+</div>
+<div class="col-md-1">
+<label>转换</label>
+<select name="transform" class="form-select">
+<option value="raw">原始</option><option value="json">JSON</option>
+</select>
+</div>
+<div class="col-12"><button type="submit" class="btn btn-primary">添加管道</button></div>
+</form>
+
+<h3>管道列表</h3>
+<div style="display:flex;flex-direction:column;gap:3px">
+{% for p in pipelines %}
+<div class="card"><div class="card-body py-1 d-flex justify-content-between align-items-center">
+<div>
+<strong>{{ p.name }}</strong>
+<span class="badge bg-secondary">{{ p.pipeline_type }}</span>
+<span class="text-xs">{{ p.brokers }} → {{ p.topic }}</span>
+</div>
+<div style="display:flex;gap:6px;align-items:center">
+<span class="badge bg-{{ 'success' if p.enabled else 'secondary' }}">{{ '运行中' if p.enabled else '已停止' }}</span>
+<form method="POST" action="/kafka/toggle/{{ p.id }}" style="display:inline">
+<button type="submit" class="btn btn-sm btn-outline-{{ 'warning' if p.enabled else 'success' }}">{{ '停止' if p.enabled else '启动' }}</button>
+</form>
+<form method="POST" action="/kafka/delete/{{ p.id }}" style="display:inline" onsubmit="return confirm('确认删除?')">
+<button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
+</form>
+</div>
+</div></div>
+{% else %}
+<div class="text-muted">暂无管道</div>
+{% endfor %}
+</div>
+{% endblock %}

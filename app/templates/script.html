@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}远程脚本执行{% endblock %}
+{% block content %}
+<h1>远程脚本执行</h1>
+
+<form method="POST" action="/script/execute" class="row g-2 mb-3">
+<div class="col-md-3">
+<label>目标主机</label>
+<select name="target_id" class="form-select" required>
+{% for t in targets %}
+<option value="{{ t.id }}">{{ t.name }} ({{ t.api_url or 'local' }})</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-md-12">
+<label>脚本内容</label>
+<textarea name="script_content" class="form-control font-monospace" rows="8" placeholder="#!/bin/bash&#10;uptime&#10;df -h"></textarea>
+</div>
+<div class="col-md-2">
+<label>超时(s)</label>
+<input name="timeout" class="form-control" type="number" value="30">
+</div>
+<div class="col-12"><button type="submit" class="btn btn-primary">执行</button></div>
+</form>
+
+{% if last_output is not none %}
+<h4>输出</h4>
+<pre class="bg-dark text-light p-2 rounded" style="max-height:300px;overflow:auto">{{ last_output }}</pre>
+{% endif %}
+{% if last_error %}
+<h4>错误</h4>
+<pre class="bg-danger text-light p-2 rounded" style="max-height:200px;overflow:auto">{{ last_error }}</pre>
+{% endif %}
+
+<h3 class="mt-4">历史记录</h3>
+<div style="display:flex;flex-direction:column;gap:3px">
+{% for h in history %}
+<div class="card"><div class="card-body py-1" style="display:flex;justify-content:space-between;align-items:center">
+<div><strong>{{ h.target_name }}</strong> <span class="text-xs text-muted">{{ h.created_at.strftime('%m-%d %H:%M') }}</span></div>
+<div>
+<span class="badge {{ 'success' if h.exit_code == 0 else 'danger' }}">exit: {{ h.exit_code }}</span>
+<button class="btn btn-sm btn-outline-secondary" onclick="toggleOutput('o{{ h.id }}')">查看</button>
+</div>
+</div>
+<pre id="o{{ h.id }}" class="bg-dark text-light p-2 rounded m-0" style="max-height:200px;overflow:auto;display:none">{% if h.output %}{{ h.output[:2000] }}{% endif %}{% if h.error %}&#10;--- STDERR ---&#10;{{ h.error[:1000] }}{% endif %}</pre>
+</div>
+{% endfor %}
+</div>
+<script>
+function toggleOutput(id) {
+    const el = document.getElementById(id);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+{% endblock %}

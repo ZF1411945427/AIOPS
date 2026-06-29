@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}PCADR 根因分析{% endblock %}
+{% block content %}
+<h1>PCADR 根因分析</h1>
+<p class="text-sm text-muted">基于 PCA 的主成分贡献度分析，找出导致异常的根因指标</p>
+
+<form method="POST" action="/pcadr/analyze" class="row g-2 mb-3">
+<div class="col-auto">
+<select name="incident_id" class="form-select">
+<option value="0">-- 选择故障单(可选) --</option>
+{% for inc in incidents %}
+<option value="{{ inc.id }}">#{{ inc.id }} {{ inc.title[:40] }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-auto"><input name="asset_id" class="form-control" type="number" placeholder="资产 ID(可选)"></div>
+<div class="col-auto">
+<select name="hours" class="form-select">
+<option value="3">3 小时</option>
+<option value="6" selected>6 小时</option>
+<option value="12">12 小时</option>
+<option value="24">24 小时</option>
+</select>
+</div>
+<div class="col-auto"><button type="submit" class="btn btn-primary">分析</button></div>
+</form>
+
+{% if result %}
+{% if result.error %}
+<div class="panel"><div class="panel-body text-sm text-warning">{{ result.error }}</div></div>
+{% else %}
+<div class="row g-2 mb-3">
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>分析指标数</strong><br>{{ result.metric_count }}</div></div></div>
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>时间点数</strong><br>{{ result.timepoints }}</div></div></div>
+<div class="col-md-3"><div class="card"><div class="card-body"><strong>PC1 方差占比</strong><br>{{ result.variance_explained[0] if result.variance_explained else 0 }}%</div></div></div>
+</div>
+
+{% if result.variance_explained %}
+<h3>主成分方差占比</h3>
+<div style="display:flex;gap:8px;margin-bottom:12px">
+{% for v in result.variance_explained %}
+<div style="flex:1;text-align:center">
+<div style="height:{{ v }}px;background:var(--accent);min-height:4px;border-radius:4px"></div>
+<div class="text-xs">PC{{ loop.index }}: {{ v }}%</div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<h3>Top 贡献指标</h3>
+<div style="display:flex;flex-direction:column;gap:4px">
+{% for item in result.top_contributors %}
+<div class="card"><div class="card-body">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ item.metric }}</strong>
+<span class="badge {{ 'danger' if item.contribution_pct > 20 else 'warning' if item.contribution_pct > 10 else 'info' }}">{{ item.contribution_pct }}%</span>
+</div>
+<div class="text-xs">loading: {{ item.raw_loading }}</div>
+</div>
+{% if item.alerts %}
+<div class="text-xs text-muted">关联告警: {{ item.alerts|join(', ') }}</div>
+{% endif %}
+</div></div>
+{% endfor %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

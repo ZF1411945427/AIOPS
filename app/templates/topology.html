@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+.tree ul { padding-left: 24px; list-style: none; position: relative; }
+.tree li { position: relative; padding-left: 16px; line-height: 28px; }
+.tree li::before { content: ''; position: absolute; left: 0; top: 0; bottom: 50%; border-left: 1px solid var(--border); width: 16px; }
+.tree li::after { content: ''; position: absolute; left: 0; top: 50%; bottom: 0; border-left: 1px solid var(--border); width: 16px; }
+.tree li:last-child::after { display: none; }
+.tree li:only-child::before { border-bottom: 1px solid var(--border); }
+.tree > li::before, .tree > li::after { display: none; }
+.tree .node { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 4px; font-size: 13px; }
+.tree .node-host { background: #1a3a5c; }
+.tree .node-service { background: #2d4a2d; }
+.tree .node-database { background: #4a2d2d; }
+.tree .node-middleware { background: #4a3a1a; }
+.tree .status-online { color: #4caf50; }
+.tree .status-offline { color: #f44336; }
+.tree .status-warning { color: #ff9800; }
+</style>
+{% endblock %}
+{% block content %}
+<h2>资产拓扑</h2>
+<p class="text-muted">管理资产间的依赖关系</p>
+
+<div class="row">
+<div class="col-md-4">
+<div class="card mb-3">
+<div class="card-body">
+<h6>添加依赖关系</h6>
+<form method="POST" action="/topology/relations/create" class="row g-2">
+<div class="col-12">
+<select name="parent_id" class="form-select" required>
+<option value="">父资产</option>
+{% for a in assets %}<option value="{{ a.id }}">[{{ a.type }}] {{ a.name }}</option>{% endfor %}
+</select>
+</div>
+<div class="col-12">
+<select name="child_id" class="form-select" required>
+<option value="">子资产</option>
+{% for a in assets %}<option value="{{ a.id }}">[{{ a.type }}] {{ a.name }}</option>{% endfor %}
+</select>
+</div>
+<div class="col-8">
+<select name="relation_type" class="form-select">
+<option value="depends_on">依赖 (depends_on)</option>
+<option value="contains">包含 (contains)</option>
+<option value="connects_to">连接 (connects_to)</option>
+</select>
+</div>
+<div class="col-4">
+<button type="submit" class="btn btn-sm btn-primary">添加</button>
+</div>
+</form>
+</div>
+</div>
+
+<h6>关系列表</h6>
+<table class="table table-sm">
+<thead><tr><th>父</th><th>→</th><th>子</th><th>类型</th><th></th></tr></thead>
+<tbody>
+{% for r in relations %}
+<tr>
+<td>{{ r.parent_id }}</td><td>→</td><td>{{ r.child_id }}</td>
+<td>{{ r.relation_type }}</td>
+<td>
+<form method="POST" action="/topology/relations/{{ r.id }}/delete" style="display:inline">
+<button class="btn btn-sm btn-danger">×</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<div class="col-md-8">
+<div class="card">
+<div class="card-body">
+{% if trees %}
+<div class="tree">
+<ul>
+{% for node in trees %}
+<li>
+<div class="node node-{{ node.type }}">
+<span class="status-{{ node.status }}">●</span>
+<strong>{{ node.name }}</strong>
+<small class="text-muted">({{ node.type }})</small>
+</div>
+{% if node.children %}
+<ul>
+{% for child in node.children %}
+<li>
+<div class="node node-{{ child.type }}">
+<span class="status-{{ child.status }}">●</span>
+<strong>{{ child.name }}</strong>
+<small class="text-muted">({{ child.type }})</small>
+</div>
+{% if child.children %}
+<ul>
+{% for grandchild in child.children %}
+<li>
+<div class="node node-{{ grandchild.type }}">
+<span class="status-{{ grandchild.status }}">●</span>
+<strong>{{ grandchild.name }}</strong>
+<small class="text-muted">({{ grandchild.type }})</small>
+</div>
+</li>
+{% endfor %}
+</ul>
+{% endif %}
+</li>
+{% endfor %}
+</ul>
+{% endif %}
+</li>
+{% endfor %}
+</ul>
+</div>
+{% else %}
+<p class="text-muted">暂无拓扑数据。先在资产管理中创建资产，然后在这里添加依赖关系。</p>
+{% endif %}
+</div>
+</div>
+</div>
+</div>
+{% endblock %}
