@@ -19,10 +19,7 @@ else:
 @router.get("")
 def get_menu(db: Session = Depends(get_db)):
     """获取菜单配置"""
-    # 尝试从数据库读取
     config = db.query(SystemConfig).filter(SystemConfig.key == "menu_config").first()
     if config and config.value:
         return json.loads(config.value)
-    
-    # 使用默认配置
     return DEFAULT_MENU

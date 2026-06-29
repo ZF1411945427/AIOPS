@@ -1,3 +1,19 @@
+### 2026-06-30: Git pull 后菜单不显示混沌工程的根因与修复
+- `git pull` 拉取了混沌工程模块（`chaos.py` + 前端视图 + `menu_config.json` 更新）
+- **根因**: 菜单 API（`menu.py`）优先从 DB 读取 menu_config，没有则回退到文件。DB 为空时正常返回文件内容。
+- **实际 Bug**: `uvicorn --reload` 在 Windows 上热重载失效——旧子进程不退出，新进程无法绑定端口 8000，导致代码修改不生效
+- **修复**: 用 `powershell Get-Process python* | Stop-Process -Force` 彻底杀掉所有 Python 进程后重启
+- **验证**: `/api/menu` 返回 10 组菜单（含"混沌工程"）
+- **教训**: Windows 上改后端代码后不要依赖 hot-reload，直接 `npx kill-port 8000` 再启动
+
+### 2026-06-30: 从 GitHub 克隆项目到新目录并启动服务
+- 将远程仓库 `ZF1411945427/AIOPS` 克隆到 `E:\AIOPS\project04`
+- 修复 dotfiles（.gitattributes, .gitignore, .hermes.md）未复制的问题
+- 构建 Vue 前端（`npm run build`）修复后端启动报错 `frontend/dist not found`
+- 启动后端 `python run.py` → http://localhost:8000
+- 启动前端 `npm run dev` → http://localhost:3000
+- Demo 数据自动种子化成功
+
 ### 2026-06-30: 修复 Git 提交 — 移除 node_modules，提交完整项目
 - 发现 `frontend/node_modules` 被错误跟踪，使用 `git rm --cached` 移除
 - 更新 .gitignore：添加 `.codebuddy/`、`tok.txt`
