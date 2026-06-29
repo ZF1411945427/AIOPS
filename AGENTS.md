@@ -30,6 +30,27 @@ MEMORY.md 按时间倒序记录，最新的在最上面。
 浏览器访问 http://localhost:3000 使用 Vue 前端
 浏览器访问 http://localhost:8000 使用原有 Jinja2 前端(兼容保留)
 
+### ⚠️ Windows 热重载大坑（重要！）
+`uvicorn --reload` 在 Windows 上**热重载不可靠**：
+- 修改 Python 文件后，uvicorn 检测到变更→尝试重启子进程
+- 但**旧子进程不会真正退出**，仍然占用端口 8000
+- 新子进程因端口被占而启动失败
+- 结果是：**代码看似改了，实际运行的还是旧代码**
+
+**强制重启的正确方式**（三步）：
+```bash
+# 1. 杀掉所有残留 Python 进程
+powershell -Command "Get-Process python* | Stop-Process -Force"
+
+# 2. 确认端口已释放
+python -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',8000)); s.close(); print('OK')"
+
+# 3. 重新启动
+python run.py
+```
+
+**不要依赖** `npx kill-port 8000` 或 `taskkill`，它们常杀不干净。
+
 ### 构建 Vue 前端
 ```bash
 cd frontend && npm run build
