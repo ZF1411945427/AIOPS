@@ -98,6 +98,8 @@
           <div class="form-links">
             <a href="/product" class="form-link">了解产品 →</a>
             <span class="form-link-sep">·</span>
+            <a href="/product/overview" class="form-link">产品全景 →</a>
+            <span class="form-link-sep">·</span>
             <a href="/register" class="form-link">注册账号</a>
           </div>
         </div>

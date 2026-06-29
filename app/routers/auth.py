@@ -60,6 +60,10 @@ def login_page(request: Request):
 def product_intro(request: Request):
     return templates.TemplateResponse("product_intro.html", {"request": request})
 
+@router.get("/product/overview", response_class=HTMLResponse)
+def product_overview(request: Request):
+    return templates.TemplateResponse("product_overview.html", {"request": request})
+
 
 @router.post("/login")
 async def login(request: Request, db: Session = Depends(get_db)):
