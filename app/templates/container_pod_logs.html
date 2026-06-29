@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}日志 - {{ pod.name.split('/')[-1] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>日志: {{ pod.name.split('/')[-1] }}</h1>
+    <a href="/containers/pod/{{ pod.id }}" class="link">← 返回 Pod 详情</a>
+</div>
+
+<div class="toolbar">
+    <button class="btn btn-sm" onclick="fetchLogs()">刷新</button>
+    <button class="btn btn-sm" onclick="startStream()">实时流</button>
+    <button class="btn btn-sm" onclick="stopStream()">停止</button>
+</div>
+
+<div class="panel">
+    <div class="panel-body" style="padding:0">
+        <pre id="logOutput" style="background:#1e1e1e;color:#d4d4d4;padding:16px;font-size:12px;line-height:1.5;overflow:auto;max-height:70vh;margin:0;border-radius:6px;white-space:pre-wrap;font-family:'Cascadia Code','Fira Code',monospace"></pre>
+    </div>
+</div>
+
+<script>
+var logEl = document.getElementById('logOutput');
+var ws = null;
+
+function fetchLogs() {
+    fetch('/containers/pod/{{ pod.id }}/logdata?tail=200')
+        .then(r => r.text())
+        .then(t => { logEl.textContent = t; })
+        .catch(e => { logEl.textContent = 'Error: ' + e; });
+}
+
+function startStream() {
+    if (ws) ws.close();
+    logEl.textContent = '[连接到实时日志流...]\n';
+    ws = new WebSocket('ws://' + location.host + '/containers/ws/pod/{{ pod.id }}/logs');
+    ws.onmessage = function(e) {
+        logEl.textContent += e.data + '\n';
+        logEl.scrollTop = logEl.scrollHeight;
+    };
+    ws.onerror = function() { logEl.textContent += '[连接错误]\n'; };
+    ws.onclose = function() { logEl.textContent += '[连接关闭]\n'; };
+}
+
+function stopStream() {
+    if (ws) { ws.close(); ws = null; }
+}
+
+fetchLogs();
+</script>
+{% endblock %}

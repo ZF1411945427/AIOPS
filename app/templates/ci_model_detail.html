@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ model.display_name or model.name }}{% endblock %}
+{% block content %}
+<h1>{{ model.display_name or model.name }} <code>{{ model.name }}</code></h1>
+<p class="text-sm">{{ model.description }}</p>
+{% if model.parent_type %}<span class="badge">父类型: {{ model.parent_type }}</span>{% endif %}
+
+<a href="/ci-models" class="btn btn-sm btn-secondary">← 返回</a>
+<form method="POST" action="/ci-models/{{ model.id }}/delete" style="display:inline" onsubmit="return confirm('确定删除?')">
+<button class="btn btn-sm btn-danger">删除</button>
+</form>
+
+<h3>属性定义</h3>
+<form method="POST" action="/ci-models/{{ model.id }}/attrs/new" class="row g-2 mb-3">
+<div class="col-auto"><input name="name" class="form-control" placeholder="属性名" required></div>
+<div class="col-auto"><input name="display_name" class="form-control" placeholder="显示名"></div>
+<div class="col-auto">
+<select name="field_type" class="form-select">
+<option value="string">字符串</option>
+<option value="int">整数</option>
+<option value="float">浮点数</option>
+<option value="bool">布尔</option>
+<option value="text">文本</option>
+</select>
+</div>
+<div class="col-auto">
+<label><input name="required" type="checkbox" value="true"> 必填</label>
+</div>
+<div class="col-auto"><input name="default_value" class="form-control" placeholder="默认值"></div>
+<div class="col-auto"><input name="order" class="form-control" type="number" value="0" style="width:60px"></div>
+<div class="col-auto"><button type="submit" class="btn btn-sm btn-primary">添加</button></div>
+</form>
+
+<div style="display:flex;flex-direction:column;gap:4px">
+{% for a in attrs %}
+<div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ a.name }}</strong>
+<span class="text-sm text-muted">{{ a.display_name }}</span>
+<span class="badge">{{ a.field_type }}</span>
+{% if a.required %}<span class="badge warning">必填</span>{% endif %}
+</div>
+<div class="text-xs text-muted">
+默认: {{ a.default_value or '-' }}
+<form method="POST" action="/ci-models/{{ model.id }}/attrs/{{ a.id }}/delete" style="display:inline" onsubmit="return confirm('删除?')">
+<button class="btn btn-sm btn-danger">删除</button>
+</form>
+</div>
+</div></div>
+{% endfor %}
+</div>
+
+<h3>使用此 CI 类型的资产</h3>
+<div style="display:flex;flex-direction:column;gap:4px">
+{% for a in assets %}
+<div class="card"><div class="card-body"><a href="/assets/{{ a.id }}">{{ a.name }}</a></div></div>
+{% else %}
+<div class="text-sm text-muted">暂无资产使用此 CI 类型</div>
+{% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="report-page">
+  <div class="report-header">
+    <div>
+      <h2>📊 运维报表</h2>
+      <p class="text-muted">自动生成运维告警、资产与事件统计报告，支持日报 / 周报 / 月报</p>
+    </div>
+    <div class="report-actions">
+      <form method="POST" action="/reports/generate/daily" style="display:inline">
+        <button class="btn btn-primary">📅 生成日报</button>
+      </form>
+      <form method="POST" action="/reports/generate/weekly" style="display:inline">
+        <button class="btn btn-primary">📅 生成周报</button>
+      </form>
+      <form method="POST" action="/reports/generate/monthly" style="display:inline">
+        <button class="btn btn-primary">📅 生成月报</button>
+      </form>
+    </div>
+  </div>
+
+  {% if reports %}
+  <div class="report-list">
+    {% for r in reports %}
+    <div class="report-card" onclick="window.location.href='/reports/{{ r.id }}'">
+      <div class="report-card-header">
+        <div class="report-type-badge type-{{ r.type }}">
+          {% if r.type == 'daily' %}日报{% elif r.type == 'weekly' %}周报{% elif r.type == 'monthly' %}月报{% else %}报表{% endif %}
+        </div>
+        <h3>{{ r.title }}</h3>
+      </div>
+      <div class="report-card-body">
+        <div class="report-meta">
+          <span class="meta-item">🕐 {{ r.period_start.strftime('%m-%d %H:%M') if r.period_start else '-' }} ~ {{ r.period_end.strftime('%m-%d %H:%M') if r.period_end else '-' }}</span>
+          <span class="meta-item">📝 {{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+        <div class="report-summary">{{ r.summary[:120] }}{% if r.summary|length > 120 %}...{% endif %}</div>
+      </div>
+      <div class="report-card-footer">
+        <a href="/reports/{{ r.id }}" class="report-view-btn">查看详情 →</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">📋</div>
+    <div class="empty-title">暂无报表</div>
+    <div class="empty-desc">点击上方按钮生成日报 / 周报 / 月报</div>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+{% raw %}
+.report-page { padding: 8px 4px; }
+.report-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+}
+.report-header h2 { font-size: 1.3rem; font-weight: 700; margin: 0 0 4px; }
+.report-header .text-muted { font-size: 0.82rem; margin: 0; }
+.report-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.report-actions .btn { font-size: 0.82rem; padding: 7px 16px; }
+
+.report-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 14px;
+}
+.report-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 18px 20px;
+  cursor: pointer; transition: all 0.25s ease;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.report-card:hover {
+  border-color: var(--accent); box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.report-card-header { display: flex; align-items: center; gap: 10px; }
+.report-card-header h3 { font-size: 1rem; font-weight: 600; margin: 0; flex: 1; }
+.report-type-badge {
+  font-size: 0.72rem; font-weight: 600; padding: 3px 10px;
+  border-radius: 20px; white-space: nowrap;
+}
+.report-type-badge.type-daily { background: rgba(37,99,235,0.12); color: #2563eb; }
+.report-type-badge.type-weekly { background: rgba(16,163,74,0.12); color: #16a34a; }
+.report-type-badge.type-monthly { background: rgba(168,85,247,0.12); color: #a855f7; }
+
+.report-meta { display: flex; gap: 16px; font-size: 0.76rem; color: var(--text-secondary); }
+.report-summary {
+  font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;
+  white-space: pre-wrap; max-height: 60px; overflow: hidden;
+}
+.report-card-footer { border-top: 1px solid var(--border); padding-top: 10px; }
+.report-view-btn {
+  font-size: 0.8rem; color: var(--accent); text-decoration: none; font-weight: 500;
+}
+.report-view-btn:hover { text-decoration: underline; }
+
+@media (max-width: 768px) {
+  .report-list { grid-template-columns: 1fr; }
+}
+{% endraw %}
+</style>
+{% endblock %}

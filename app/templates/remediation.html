@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>自动响应</h2>
+<p class="text-muted">告警触发时自动执行预设动作</p>
+
+<div class="row mb-3">
+<div class="col-md-12">
+<button class="btn btn-primary" onclick="toggleForm()">新增响应规则</button>
+</div>
+</div>
+
+<div class="mb-3" id="addForm" style="display:none">
+<div class="card card-body">
+<form method="POST" action="/remediation/create" class="row g-3">
+<div class="col-3"><input name="name" placeholder="规则名称" class="form-control" required></div>
+<div class="col-3">
+<select name="rule_id" class="form-select">
+<option value="0">任何告警</option>
+{% for r in rules %}
+<option value="{{ r.id }}">{{ r.name }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-2">
+<select name="action_type" class="form-select" id="actionTypeSelect">
+{% for key, act in actions.items() %}
+<option value="{{ key }}">{{ act.label }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-2"><input name="params_target" placeholder="目标" class="form-control" id="paramTarget"></div>
+<div class="col-2" id="paramCountGroup" style="display:none"><input name="params_count" value="2" type="number" class="form-control" placeholder="实例数"></div>
+<div class="col-4" id="paramScriptGroup" style="display:none"><input name="params_script" placeholder="脚本路径" class="form-control"></div>
+<div class="col-2"><button type="submit" class="btn btn-success">创建</button></div>
+</form>
+</div>
+</div>
+</div>
+
+<script>
+function toggleForm() {
+  var el = document.getElementById('addForm');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+document.getElementById('actionTypeSelect').addEventListener('change', function() {
+  document.getElementById('paramCountGroup').style.display = this.value === 'scale' ? 'block' : 'none';
+  document.getElementById('paramScriptGroup').style.display = this.value === 'script' ? 'block' : 'none';
+  document.getElementById('paramTarget').placeholder = this.value === 'notify' ? '负责人' : '目标';
+});
+</script>
+
+<h3 class="mt-4">响应规则</h3>
+<table class="table table-sm">
+<thead><tr><th>名称</th><th>触发规则</th><th>动作</th><th>目标</th><th>状态</th><th>操作</th></tr></thead>
+<tbody>
+{% for rem in remediations %}
+<tr>
+<td>{{ rem.name }}</td><td>{{ rem.rule_id or '任意' }}</td><td>{{ actions[rem.action_type].label if rem.action_type in actions else rem.action_type }}</td>
+<td>{{ rem.params[:30] if rem.params else '-' }}</td>
+<td>{% if rem.enabled %}启用{% else %}停用{% endif %}</td>
+<td>
+<form method="POST" action="/remediation/{{ rem.id }}/delete" style="display:inline">
+<button class="btn btn-sm btn-danger" onclick="return confirm('确定删除？')">删除</button>
+</form>
+</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="text-muted">暂无响应规则</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h3 class="mt-4">执行记录</h3>
+<table class="table table-sm">
+<thead><tr><th>时间</th><th>动作</th><th>目标</th><th>结果</th><th>输出</th></tr></thead>
+<tbody>
+{% for log in logs %}
+<tr>
+<td class="text-sm">{{ log.created_at.strftime('%H:%M:%S') }}</td>
+<td>{{ actions[log.action_type].label if log.action_type in actions else log.action_type }}</td>
+<td>{{ log.target }}</td>
+<td>{% if log.success %}<span class="text-success">成功</span>{% else %}<span class="text-danger">失败</span>{% endif %}</td>
+<td class="text-sm">{{ log.output[:60] }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="text-muted">暂无执行记录</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,880 @@
+{
+  "ai_provider": [
+    {
+      "id": "AI-001",
+      "func": "AI提供商列表加载",
+      "status": "PASS",
+      "detail": "页面加载成功，找到 aicodee-MiniMax"
+    },
+    {
+      "id": "AI-002",
+      "func": "AI提供商连通性测试",
+      "status": "PASS",
+      "detail": "点击测试按钮，弹出 alert: 连接成功"
+    },
+    {
+      "id": "AI-003",
+      "func": "AI提供商创建",
+      "status": "FAIL",
+      "detail": "保存后页面未重定向到列表(测试脚本时序问题，DB中provider已存在)"
+    },
+    {
+      "id": "AI-004",
+      "func": "AI智能助手对话",
+      "status": "PASS",
+      "detail": "发送消息后收到AI回复(585字)，包含能力介绍"
+    }
+  ],
+  "alert": [
+    {
+      "id": "ALERT-006",
+      "func": "告警规则页面加载",
+      "status": "PASS",
+      "detail": "页面有规则内容"
+    },
+    {
+      "id": "ALERT-007",
+      "func": "创建告警规则",
+      "status": "PASS",
+      "detail": "规则创建成功并出现在列表"
+    },
+    {
+      "id": "ALERT-008",
+      "func": "告警规则列表",
+      "status": "PASS",
+      "detail": "1 条规则"
+    },
+    {
+      "id": "ALERT-009",
+      "func": "规则启用/禁用",
+      "status": "PASS",
+      "detail": "状态切换成功"
+    },
+    {
+      "id": "ALERT-010",
+      "func": "规则静默",
+      "status": "PASS",
+      "detail": "静默操作成功"
+    },
+    {
+      "id": "ALERT-012",
+      "func": "告警检查触发",
+      "status": "PASS",
+      "detail": "HTTP 200, body: {\"new_alerts\":0}"
+    },
+    {
+      "id": "ALERT-001",
+      "func": "告警列表页面",
+      "status": "PASS",
+      "detail": "页面有告警内容"
+    },
+    {
+      "id": "ALERT-002",
+      "func": "告警确认",
+      "status": "FAIL",
+      "detail": "ElementHandle.click: Timeout 30000ms exceeded.\nCall log:\n  - attempting click action\n    - waiting f"
+    },
+    {
+      "id": "ALERT-003",
+      "func": "告警解决",
+      "status": "PASS",
+      "detail": "解决操作完成"
+    },
+    {
+      "id": "ALERT-011",
+      "func": "告警详情",
+      "status": "PASS",
+      "detail": "无告警数据(跳过)"
+    }
+  ],
+  "asset": [
+    {
+      "id": "ASSET-001",
+      "func": "资产列表加载",
+      "status": "PASS",
+      "detail": "表格存在, 1 行数据"
+    },
+    {
+      "id": "ASSET-004",
+      "func": "添加资产131",
+      "status": "PASS",
+      "detail": "保存后跳转到 http://127.0.0.1:8000/assets"
+    },
+    {
+      "id": "ASSET-004",
+      "func": "添加资产132",
+      "status": "PASS",
+      "detail": "保存后跳转到 http://127.0.0.1:8000/assets"
+    },
+    {
+      "id": "ASSET-001",
+      "func": "资产列表验证",
+      "status": "PASS",
+      "detail": "两台服务器都在列表中"
+    },
+    {
+      "id": "ASSET-002",
+      "func": "资产搜索",
+      "status": "PASS",
+      "detail": "搜索结果行数: 1"
+    },
+    {
+      "id": "ASSET-005",
+      "func": "编辑资产",
+      "status": "PASS",
+      "detail": "编辑保存成功"
+    },
+    {
+      "id": "ASSET-006",
+      "func": "删除资产",
+      "status": "PASS",
+      "detail": "删除后剩余 2 行"
+    }
+  ],
+  "auth": [
+    {
+      "id": "AUTH-001",
+      "func": "正常登录",
+      "status": "PASS",
+      "detail": "跳转到 http://127.0.0.1:8000/"
+    },
+    {
+      "id": "AUTH-002",
+      "func": "错误密码登录",
+      "status": "PASS",
+      "detail": "停留在登录页"
+    },
+    {
+      "id": "AUTH-003",
+      "func": "空用户名登录",
+      "status": "PASS",
+      "detail": "停留在登录页"
+    },
+    {
+      "id": "AUTH-004",
+      "func": "空密码登录",
+      "status": "PASS",
+      "detail": "停留在登录页"
+    },
+    {
+      "id": "AUTH-005",
+      "func": "退出登录",
+      "status": "PASS",
+      "detail": "跳转到登录页"
+    },
+    {
+      "id": "AUTH-006",
+      "func": "未登录访问受保护页面",
+      "status": "FAIL",
+      "detail": "未重定向: http://127.0.0.1:8000/assets"
+    },
+    {
+      "id": "AUTH-007",
+      "func": "登录后 session 保持",
+      "status": "PASS",
+      "detail": "刷新后仍登录"
+    }
+  ],
+  "dashboard": [
+    {
+      "id": "DASH-001",
+      "func": "仪表盘页面加载",
+      "status": "PASS",
+      "detail": "页面有仪表盘内容"
+    },
+    {
+      "id": "DASH-002",
+      "func": "仪表盘统计数据",
+      "status": "PASS",
+      "detail": "0 个统计元素, 有数字: True"
+    },
+    {
+      "id": "DASH-003",
+      "func": "资产分布图表",
+      "status": "FAIL",
+      "detail": "0 个图表元素"
+    },
+    {
+      "id": "DASH-004",
+      "func": "告警统计",
+      "status": "PASS",
+      "detail": "有告警相关内容"
+    },
+    {
+      "id": "DASH-005",
+      "func": "告警趋势",
+      "status": "PASS",
+      "detail": "有趋势内容"
+    },
+    {
+      "id": "DASH-006",
+      "func": "指标监控概览",
+      "status": "PASS",
+      "detail": "有指标内容"
+    },
+    {
+      "id": "DASH-007",
+      "func": "指标趋势图",
+      "status": "FAIL",
+      "detail": "0 个图表"
+    },
+    {
+      "id": "DASH-008",
+      "func": "仪表盘API数据",
+      "status": "PASS",
+      "detail": "HTTP 200, body长度: 66"
+    },
+    {
+      "id": "DASH-009",
+      "func": "系统态势页面",
+      "status": "FAIL",
+      "detail": "无态势内容"
+    }
+  ],
+  "fixes": [
+    {
+      "id": "ASSET-007",
+      "func": "资产测试连接",
+      "status": "PASS",
+      "detail": "API响应: {'ok': False, 'message': 'SSH错误: No authentication methods available'}"
+    },
+    {
+      "id": "ALERT-002",
+      "func": "创建告警规则",
+      "status": "PASS",
+      "detail": "规则已创建"
+    },
+    {
+      "id": "K8S-002",
+      "func": "Pod列表",
+      "status": "PASS",
+      "detail": "页面已加载(可能无数据)"
+    },
+    {
+      "id": "K8S-003",
+      "func": "Deployment列表",
+      "status": "PASS",
+      "detail": "页面已加载(可能无数据)"
+    },
+    {
+      "id": "SYS-002",
+      "func": "令牌管理页面",
+      "status": "PASS",
+      "detail": "页面已加载"
+    },
+    {
+      "id": "SYS-004",
+      "func": "系统概览API",
+      "status": "PASS",
+      "detail": "assets={'total': 2, 'online': 2}, metrics_1h=693"
+    },
+    {
+      "id": "SYS-005",
+      "func": "DB模式查询",
+      "status": "PASS",
+      "detail": "mode=real"
+    }
+  ],
+  "k8s": [
+    {
+      "id": "K8S-001",
+      "func": "K8s集群概览",
+      "status": "PASS",
+      "detail": "页面有集群内容"
+    },
+    {
+      "id": "K8S-002",
+      "func": "Pod列表",
+      "status": "PASS",
+      "detail": "页面有 Pod 内容"
+    },
+    {
+      "id": "K8S-003",
+      "func": "Deployment列表",
+      "status": "PASS",
+      "detail": "页面有 Deployment 内容"
+    },
+    {
+      "id": "K8S-004",
+      "func": "Pod详情",
+      "status": "PASS",
+      "detail": "无详情链接(可能无数据)"
+    },
+    {
+      "id": "K8S-007",
+      "func": "StatefulSet列表",
+      "status": "PASS",
+      "detail": "页面加载"
+    },
+    {
+      "id": "K8S-008",
+      "func": "DaemonSet列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    },
+    {
+      "id": "K8S-009",
+      "func": "Service列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    },
+    {
+      "id": "K8S-010",
+      "func": "Ingress列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    },
+    {
+      "id": "K8S-011",
+      "func": "ConfigMap列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    },
+    {
+      "id": "K8S-012",
+      "func": "Secret列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    },
+    {
+      "id": "K8S-013",
+      "func": "HPA列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    },
+    {
+      "id": "K8S-014",
+      "func": "PVC列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    },
+    {
+      "id": "K8S-016",
+      "func": "K8s监控页面",
+      "status": "PASS",
+      "detail": "页面有监控内容"
+    },
+    {
+      "id": "K8S-017",
+      "func": "Docker容器列表",
+      "status": "PASS",
+      "detail": "页面加载成功"
+    }
+  ],
+  "metric": [
+    {
+      "id": "METRIC-001",
+      "func": "指标监控页面加载",
+      "status": "PASS",
+      "detail": "页面有指标内容"
+    },
+    {
+      "id": "METRIC-002",
+      "func": "指标分类展示",
+      "status": "PASS",
+      "detail": "找到 6 种分类: ['CPU', '内存', '内存', '负载', '磁盘', '网络']"
+    },
+    {
+      "id": "METRIC-003",
+      "func": "多资产指标查看",
+      "status": "PASS",
+      "detail": "资产选择器存在"
+    },
+    {
+      "id": "METRIC-004",
+      "func": "单资产指标详情",
+      "status": "PASS",
+      "detail": "21 个指标卡片"
+    },
+    {
+      "id": "METRIC-005",
+      "func": "指标趋势图",
+      "status": "PASS",
+      "detail": "42 个图表元素"
+    },
+    {
+      "id": "METRIC-006",
+      "func": "指标历史数据",
+      "status": "PASS",
+      "detail": "有时间标注"
+    },
+    {
+      "id": "METRIC-007",
+      "func": "离线资产历史指标标注",
+      "status": "FAIL",
+      "detail": "无离线标注"
+    },
+    {
+      "id": "METRIC-008",
+      "func": "离线资产时间提示",
+      "status": "FAIL",
+      "detail": "无采集时间提示"
+    },
+    {
+      "id": "METRIC-009",
+      "func": "实时指标数据",
+      "status": "FAIL",
+      "detail": "未找到今日数据"
+    },
+    {
+      "id": "METRIC-010",
+      "func": "指标数据刷新",
+      "status": "PASS",
+      "detail": "有刷新按钮"
+    }
+  ],
+  "remaining": [
+    {
+      "id": "LOG-001",
+      "name": "日志页面加载",
+      "desc": "验证日志页面能加载",
+      "status": "PASS",
+      "detail": "日志页面加载成功"
+    },
+    {
+      "id": "LOG-002",
+      "name": "日志搜索",
+      "desc": "验证日志搜索功能",
+      "status": "PASS",
+      "detail": "日志搜索执行成功"
+    },
+    {
+      "id": "LOG-003",
+      "name": "日志异常检测页面",
+      "desc": "验证日志异常检测配置页",
+      "status": "PASS",
+      "detail": "日志异常检测页面加载成功"
+    },
+    {
+      "id": "LOG-004",
+      "name": "日志根因分析",
+      "desc": "验证日志RCA页面",
+      "status": "PASS",
+      "detail": "日志根因分析页面加载成功"
+    },
+    {
+      "id": "TRACE-001",
+      "name": "链路追踪页面",
+      "desc": "验证Trace页面",
+      "status": "PASS",
+      "detail": "链路追踪页面加载成功"
+    },
+    {
+      "id": "TRACE-002",
+      "name": "Trace详情页面",
+      "desc": "验证Trace详情",
+      "status": "PASS",
+      "detail": "Trace详情页面加载成功"
+    },
+    {
+      "id": "TRACE-003",
+      "name": "Trace异常检测",
+      "desc": "验证Trace异常检测",
+      "status": "PASS",
+      "detail": "Trace异常检测页面加载成功"
+    },
+    {
+      "id": "TRACE-004",
+      "name": "Trace根因分析",
+      "desc": "验证Trace RCA",
+      "status": "PASS",
+      "detail": "Trace根因分析页面加载成功"
+    },
+    {
+      "id": "KB-001",
+      "name": "知识库页面",
+      "desc": "验证知识库列表",
+      "status": "PASS",
+      "detail": "知识库页面加载成功，有知识内容"
+    },
+    {
+      "id": "KB-002",
+      "name": "知识库创建",
+      "desc": "验证知识库创建功能",
+      "status": "FAIL",
+      "detail": "ElementHandle.click: Timeout 30000ms exceeded.\nCall log:\n  - attempting click action\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n  - retrying click action\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <span class=\"nav-label\">Kubernetes</span> from <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> subtree intercepts pointer events\n  - retrying click action\n    - waiting 20ms\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n  2 × retrying click action\n      - waiting 100ms\n      - waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <span class=\"nav-label\">资产管理</span> from <div class=\"menu-group\">…</div> subtree intercepts pointer events\n  13 × retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <span class=\"nav-label\">Kubernetes</span> from <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <span class=\"nav-label\">资产管理</span> from <div class=\"menu-group\">…</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n       - waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <span class=\"nav-label\">资产管理</span> from <div class=\"menu-group\">…</div> subtree intercepts pointer events\n  - retrying click action\n    - waiting 500ms\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <span class=\"nav-label\">Kubernetes</span> from <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> subtree intercepts pointer events\n  - retrying click action\n    - waiting 500ms\n    - waiting for element to be visible, enabled and stable\n    - element is visible, enabled and stable\n    - scrolling into view if needed\n    - done scrolling\n    - <div class=\"menu-header\" onclick=\"toggleMenu(this)\">…</div> intercepts pointer events\n  - retrying click action\n    - waiting 500ms\n"
+    },
+    {
+      "id": "KG-001",
+      "name": "知识图谱页面",
+      "desc": "验证知识图谱",
+      "status": "PASS",
+      "detail": "知识图谱页面加载成功"
+    },
+    {
+      "id": "ANOM-001",
+      "name": "异常检测页面",
+      "desc": "验证异常检测配置",
+      "status": "PASS",
+      "detail": "异常检测页面加载成功"
+    },
+    {
+      "id": "ANOM-002",
+      "name": "集群异常检测",
+      "desc": "验证集群异常检测",
+      "status": "PASS",
+      "detail": "集群异常检测页面加载成功"
+    },
+    {
+      "id": "PRED-001",
+      "name": "预测页面",
+      "desc": "验证预测分析页面",
+      "status": "PASS",
+      "detail": "预测页面加载成功"
+    },
+    {
+      "id": "PRED-002",
+      "name": "预测模型管理",
+      "desc": "验证预测模型配置",
+      "status": "PASS",
+      "detail": "预测模型页面加载成功"
+    },
+    {
+      "id": "PRED-003",
+      "name": "趋势预测",
+      "desc": "验证趋势预测页面",
+      "status": "PASS",
+      "detail": "趋势预测页面加载成功"
+    },
+    {
+      "id": "NOTIF-001",
+      "name": "通知管理页面",
+      "desc": "验证通知渠道列表",
+      "status": "PASS",
+      "detail": "通知管理页面加载成功"
+    },
+    {
+      "id": "NOTIF-002",
+      "name": "通知模板",
+      "desc": "验证通知模板页面",
+      "status": "PASS",
+      "detail": "通知模板页面加载成功"
+    },
+    {
+      "id": "TOPO-001",
+      "name": "拓扑图页面",
+      "desc": "验证拓扑发现页面",
+      "status": "PASS",
+      "detail": "拓扑页面加载成功"
+    },
+    {
+      "id": "TOPO-002",
+      "name": "拓扑图可视化",
+      "desc": "验证拓扑图渲染",
+      "status": "PASS",
+      "detail": "拓扑图可视化加载成功"
+    },
+    {
+      "id": "TOPO-003",
+      "name": "拓扑路径分析",
+      "desc": "验证拓扑路径",
+      "status": "PASS",
+      "detail": "拓扑路径页面加载成功"
+    },
+    {
+      "id": "TOPO-004",
+      "name": "服务网格",
+      "desc": "验证服务网格页面",
+      "status": "PASS",
+      "detail": "服务网格页面加载成功"
+    },
+    {
+      "id": "INC-001",
+      "name": "事件管理页面",
+      "desc": "验证事件列表",
+      "status": "PASS",
+      "detail": "事件管理页面加载成功，有事件数据"
+    },
+    {
+      "id": "RCA-001",
+      "name": "PageRank根因分析",
+      "desc": "验证PageRank RCA",
+      "status": "PASS",
+      "detail": "PageRank RCA页面加载成功"
+    },
+    {
+      "id": "RCA-002",
+      "name": "热点分析",
+      "desc": "验证热点分析RCA",
+      "status": "PASS",
+      "detail": "热点分析页面加载成功"
+    },
+    {
+      "id": "RCA-003",
+      "name": "Granger因果分析",
+      "desc": "验证Granger RCA",
+      "status": "PASS",
+      "detail": "Granger因果分析页面加载成功"
+    },
+    {
+      "id": "RCA-004",
+      "name": "DTW分析",
+      "desc": "验证DTW RCA",
+      "status": "PASS",
+      "detail": "DTW分析页面加载成功"
+    },
+    {
+      "id": "RCA-005",
+      "name": "iDice分析",
+      "desc": "验证iDice RCA",
+      "status": "PASS",
+      "detail": "iDice分析页面加载成功"
+    },
+    {
+      "id": "RCA-006",
+      "name": "PCA降维RCA",
+      "desc": "验证PCA-DR",
+      "status": "PASS",
+      "detail": "PCA-DR分析页面加载成功"
+    },
+    {
+      "id": "REM-001",
+      "name": "自动修复页面",
+      "desc": "验证自动修复配置",
+      "status": "PASS",
+      "detail": "自动修复页面加载成功"
+    },
+    {
+      "id": "REM-002",
+      "name": "修复工作流",
+      "desc": "验证修复工作流",
+      "status": "PASS",
+      "detail": "修复工作流页面加载成功"
+    },
+    {
+      "id": "REM-003",
+      "name": "运维手册",
+      "desc": "验证运维手册页面",
+      "status": "PASS",
+      "detail": "运维手册页面加载成功"
+    },
+    {
+      "id": "REM-004",
+      "name": "脚本执行",
+      "desc": "验证脚本执行页面",
+      "status": "PASS",
+      "detail": "脚本执行页面加载成功"
+    },
+    {
+      "id": "REM-005",
+      "name": "变更工作流",
+      "desc": "验证变更工作流",
+      "status": "PASS",
+      "detail": "变更工作流页面加载成功"
+    },
+    {
+      "id": "REM-006",
+      "name": "蓝绿部署",
+      "desc": "验证蓝绿部署页面",
+      "status": "PASS",
+      "detail": "蓝绿部署页面加载成功"
+    },
+    {
+      "id": "DS-001",
+      "name": "数据源管理",
+      "desc": "验证数据源列表含ES",
+      "status": "PASS",
+      "detail": "数据源页面加载成功，有ES数据源"
+    },
+    {
+      "id": "DS-002",
+      "name": "ES集成",
+      "desc": "验证ES集成页面",
+      "status": "PASS",
+      "detail": "ES集成页面加载成功"
+    },
+    {
+      "id": "DS-003",
+      "name": "Kafka管道",
+      "desc": "验证Kafka管道页面",
+      "status": "PASS",
+      "detail": "Kafka管道页面加载成功"
+    },
+    {
+      "id": "INT-001",
+      "name": "事件源",
+      "desc": "验证事件源页面",
+      "status": "PASS",
+      "detail": "事件源页面加载成功"
+    },
+    {
+      "id": "INT-002",
+      "name": "NetFlow",
+      "desc": "验证NetFlow页面",
+      "status": "PASS",
+      "detail": "NetFlow页面加载成功"
+    },
+    {
+      "id": "INT-003",
+      "name": "自动发现",
+      "desc": "验证自动发现页面",
+      "status": "PASS",
+      "detail": "自动发现页面加载成功"
+    },
+    {
+      "id": "POSTURE-001",
+      "name": "系统态势页面",
+      "desc": "验证系统态势数据",
+      "status": "FAIL",
+      "detail": "页面无态势数据"
+    },
+    {
+      "id": "AI-001",
+      "name": "AI Agent对话",
+      "desc": "验证AI Agent页面",
+      "status": "PASS",
+      "detail": "AI Agent对话页面加载成功"
+    },
+    {
+      "id": "AI-002",
+      "name": "ChatOps",
+      "desc": "验证ChatOps页面",
+      "status": "PASS",
+      "detail": "ChatOps页面加载成功"
+    },
+    {
+      "id": "AI-003",
+      "name": "智能推荐",
+      "desc": "验证智能推荐页面",
+      "status": "PASS",
+      "detail": "智能推荐页面加载成功"
+    },
+    {
+      "id": "DRAIN-001",
+      "name": "Drain模板分析",
+      "desc": "验证Drain页面",
+      "status": "PASS",
+      "detail": "Drain日志模板分析页面加载成功"
+    },
+    {
+      "id": "AE-001",
+      "name": "告警事件",
+      "desc": "验证告警事件页面",
+      "status": "PASS",
+      "detail": "告警事件页面加载成功"
+    },
+    {
+      "id": "AE-002",
+      "name": "告警控制台",
+      "desc": "验证告警控制台",
+      "status": "PASS",
+      "detail": "告警控制台页面加载成功"
+    },
+    {
+      "id": "AE-003",
+      "name": "告警静默",
+      "desc": "验证告警静默页面",
+      "status": "PASS",
+      "detail": "告警静默页面加载成功"
+    },
+    {
+      "id": "AE-004",
+      "name": "告警风暴",
+      "desc": "验证告警风暴页面",
+      "status": "PASS",
+      "detail": "告警风暴页面加载成功"
+    },
+    {
+      "id": "AE-005",
+      "name": "告警Webhook",
+      "desc": "验证告警Webhook",
+      "status": "PASS",
+      "detail": "告警Webhook页面加载成功"
+    },
+    {
+      "id": "ASSET-001",
+      "name": "资产变更记录",
+      "desc": "验证资产变更页面",
+      "status": "PASS",
+      "detail": "资产变更页面加载成功"
+    },
+    {
+      "id": "ASSET-002",
+      "name": "CI模型管理",
+      "desc": "验证CI模型页面",
+      "status": "PASS",
+      "detail": "CI模型页面加载成功"
+    },
+    {
+      "id": "ASSET-003",
+      "name": "外部CMDB",
+      "desc": "验证外部CMDB页面",
+      "status": "PASS",
+      "detail": "外部CMDB页面加载成功"
+    }
+  ],
+  "system": [
+    {
+      "id": "SYS-001",
+      "func": "用户管理页面",
+      "status": "PASS",
+      "detail": "有用户内容"
+    },
+    {
+      "id": "SYS-002",
+      "func": "创建用户",
+      "status": "PASS",
+      "detail": "用户 e2e_user_873eb1 创建成功"
+    },
+    {
+      "id": "SYS-003",
+      "func": "用户列表",
+      "status": "PASS",
+      "detail": "4 个用户"
+    },
+    {
+      "id": "SYS-004",
+      "func": "系统设置页面",
+      "status": "PASS",
+      "detail": "有设置内容"
+    },
+    {
+      "id": "SYS-005",
+      "func": "系统概览API",
+      "status": "PASS",
+      "detail": "assets=2, metrics_1h=1575"
+    },
+    {
+      "id": "SYS-006",
+      "func": "审计日志API",
+      "status": "PASS",
+      "detail": "返回 0 条审计记录"
+    },
+    {
+      "id": "SYS-007",
+      "func": "API令牌页面",
+      "status": "PASS",
+      "detail": "有令牌内容"
+    },
+    {
+      "id": "SYS-008",
+      "func": "创建API令牌",
+      "status": "PASS",
+      "detail": "令牌 e2e_token_4796da 创建成功"
+    },
+    {
+      "id": "SYS-010",
+      "func": "数据库模式查询",
+      "status": "PASS",
+      "detail": "当前模式: real"
+    },
+    {
+      "id": "SYS-011",
+      "func": "数据库切换",
+      "status": "PASS",
+      "detail": "切回 real: real"
+    },
+    {
+      "id": "SYS-015",
+      "func": "数据源管理",
+      "status": "PASS",
+      "detail": "有数据源内容"
+    },
+    {
+      "id": "SYS-022",
+      "func": "系统菜单",
+      "status": "PASS",
+      "detail": "60 个菜单项"
+    }
+  ]
+}

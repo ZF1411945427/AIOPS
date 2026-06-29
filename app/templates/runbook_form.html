@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑' if rb else '新建' }} Runbook{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>{{ '编辑' if rb else '新建' }} Runbook</h1>
+    <a href="/runbooks" class="link">← 返回列表</a>
+</div>
+
+<form method="POST" action="{{ '/runbooks/' ~ rb.id ~ '/edit' if rb else '/runbooks/new' }}">
+    <div class="row" style="display:flex;flex-direction:column;gap:8px;max-width:800px">
+        <div>
+            <label>标题</label>
+            <input name="title" value="{{ rb.title if rb else '' }}" class="form-control" required>
+        </div>
+        <div style="display:flex;gap:12px">
+            <div style="flex:1">
+                <label>分类</label>
+                <input name="category" value="{{ rb.category if rb else 'general' }}" class="form-control" placeholder="general, network, database ...">
+            </div>
+            <div style="flex:1">
+                <label>严重级别</label>
+                <select name="severity" class="form-control">
+                    <option value="info" {{ 'selected' if rb and rb.severity == 'info' }}>Info</option>
+                    <option value="warning" {{ 'selected' if not rb or rb.severity == 'warning' }}>Warning</option>
+                    <option value="critical" {{ 'selected' if rb and rb.severity == 'critical' }}>Critical</option>
+                </select>
+            </div>
+            <div style="flex:1">
+                <label>资产类型</label>
+                <input name="asset_type" value="{{ rb.asset_type if rb else '' }}" class="form-control" placeholder="server, pod, service ...">
+            </div>
+        </div>
+        <div>
+            <label>标签 (逗号分隔)</label>
+            <input name="tags" value="{{ rb.tags if rb else '' }}" class="form-control">
+        </div>
+        <div>
+            <label>症状描述</label>
+            <textarea name="symptom" rows="4" class="form-control">{{ rb.symptom if rb else '' }}</textarea>
+        </div>
+        <div>
+            <label>诊断步骤</label>
+            <textarea name="diagnosis" rows="4" class="form-control">{{ rb.diagnosis if rb else '' }}</textarea>
+        </div>
+        <div>
+            <label>处理步骤</label>
+            <textarea name="steps" rows="6" class="form-control">{{ rb.steps if rb else '' }}</textarea>
+        </div>
+        <div>
+            <button type="submit" class="btn btn-primary">保存</button>
+            <a href="/runbooks" class="btn">取消</a>
+        </div>
+    </div>
+</form>
+{% endblock %}

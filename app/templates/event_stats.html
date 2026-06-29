@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>事件统计</h2>
+
+<div class="row mb-4">
+<div class="col-md-4">
+<div class="card text-center">
+<div class="card-body">
+<h3 class="text-primary">{{ total }}</h3>
+<p class="text-muted mb-0">总事件数</p>
+</div>
+</div>
+</div>
+<div class="col-md-4">
+<div class="card text-center">
+<div class="card-body">
+<h3 class="text-warning">{{ warnings }}</h3>
+<p class="text-muted mb-0">警告事件</p>
+</div>
+</div>
+</div>
+<div class="col-md-4">
+<div class="card text-center">
+<div class="card-body">
+<h3 class="text-danger">{{ criticals }}</h3>
+<p class="text-muted mb-0">严重事件</p>
+</div>
+</div>
+</div>
+</div>
+
+<div class="row">
+<div class="col-md-6">
+<h4>按资源类型</h4>
+<table class="table table-sm">
+<thead><tr><th>类型</th><th>数量</th></tr></thead>
+<tbody>
+{% for kind, cnt in by_kind %}
+<tr><td>{{ kind }}</td><td>{{ cnt }}</td></tr>
+{% else %}
+<tr><td colspan="2" class="text-muted">暂无数据</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+<div class="col-md-6">
+<h4>按原因</h4>
+<table class="table table-sm">
+<thead><tr><th>原因</th><th>数量</th></tr></thead>
+<tbody>
+{% for reason, cnt in by_reason %}
+<tr><td>{{ reason }}</td><td>{{ cnt }}</td></tr>
+{% else %}
+<tr><td colspan="2" class="text-muted">暂无数据</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% endblock %}

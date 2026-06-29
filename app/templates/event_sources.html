@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}外部事件源集成{% endblock %}
+{% block content %}
+<h1>外部事件源集成</h1>
+<p class="text-sm text-muted">接入 Zabbix / Prometheus / 自定义 Webhook 等外部告警事件</p>
+
+<form method="POST" action="/event-sources/create" class="row g-2 mb-3">
+<div class="col-md-3"><label>名称</label><input name="name" class="form-control" required></div>
+<div class="col-md-2">
+<label>类型</label>
+<select name="source_type" class="form-select">
+<option value="zabbix">Zabbix</option><option value="prometheus">Prometheus</option>
+<option value="webhook">Webhook</option><option value="generic">通用</option>
+</select>
+</div>
+<div class="col-md-4"><label>API URL</label><input name="api_url" class="form-control" placeholder="http://zabbix.example.com/zabbix" required></div>
+<div class="col-md-2"><label>同步间隔(min)</label><input name="sync_interval" class="form-control" type="number" value="60"></div>
+<div class="col-md-1"><label>认证JSON</label><input name="auth_json" class="form-control" value='{"user":"Admin","password":"zabbix"}'></div>
+<div class="col-12"><button type="submit" class="btn btn-primary">添加</button></div>
+</form>
+
+<h3>事件源列表</h3>
+<div style="display:flex;flex-direction:column;gap:3px">
+{% for s in sources %}
+<div class="card"><div class="card-body py-1 d-flex justify-content-between align-items-center">
+<div>
+<strong>{{ s.name }}</strong> <span class="badge bg-secondary">{{ s.source_type }}</span>
+<span class="text-xs text-muted">{{ s.api_url[:50] }}..</span>
+{% if s.last_sync %}<span class="text-xs">上次同步: {{ s.last_sync.strftime('%m-%d %H:%M') }}</span>{% endif %}
+</div>
+<div style="display:flex;gap:6px;align-items:center">
+<span class="badge bg-{{ 'success' if s.enabled else 'secondary' }}">{{ '已启用' if s.enabled else '已禁用' }}</span>
+<form method="POST" action="/event-sources/toggle/{{ s.id }}" style="display:inline">
+<button type="submit" class="btn btn-sm btn-outline-{{ 'warning' if s.enabled else 'success' }}">{{ '禁用' if s.enabled else '启用' }}</button>
+</form>
+<form method="POST" action="/event-sources/sync/{{ s.id }}" style="display:inline">
+<button type="submit" class="btn btn-sm btn-outline-primary">同步</button>
+</form>
+</div>
+</div></div>
+{% else %}
+<div class="text-muted">暂无配置</div>
+{% endfor %}
+</div>
+{% endblock %}

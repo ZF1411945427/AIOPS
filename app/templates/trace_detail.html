@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Trace 详情{% endblock %}
+{% block content %}
+<h1>Trace 详情: <code>{{ trace_id[:32] }}...</code></h1>
+<p class="text-sm text-muted">{{ spans|length }} spans</p>
+
+<div style="display:flex;flex-direction:column;gap:2px">
+{% for s in spans %}
+<div class="card"><div class="card-body py-1" style="margin-left:{{ s.parent_span_id and '24px' or '0' }}">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ s.service_name }}</strong> <span class="text-sm">/ {{ s.operation_name }}</span>
+{% if s.parent_span_id %}<span class="badge bg-secondary">child</span>{% endif %}
+</div>
+<div>
+<span class="badge bg-{{ 'success' if s.status == 'OK' else 'danger' }}">{{ s.duration_ms }}ms</span>
+</div>
+</div>
+<div class="text-sm text-muted">
+Span: {{ s.span_id[:16] }}.. | Start: {{ s.start_time.strftime('%H:%M:%S.%f') }} | End: {{ s.end_time.strftime('%H:%M:%S.%f') }}
+</div>
+</div></div>
+{% endfor %}
+</div>
+{% endblock %}

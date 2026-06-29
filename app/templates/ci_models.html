@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}CI 模型管理{% endblock %}
+{% block content %}
+<h1>CI 模型管理</h1>
+<a href="/ci-models/new" class="btn btn-primary mb-2">新建 CI 类型</a>
+
+<div style="display:flex;flex-direction:column;gap:6px">
+{% for m in models %}
+<div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<a href="/ci-models/{{ m.id }}"><strong>{{ m.display_name or m.name }}</strong></a>
+<code class="text-sm">{{ m.name }}</code>
+<span class="badge">{{ attr_counts.get(m.id, 0) }} 属性</span>
+{% if m.parent_type %}<span class="badge">父类型: {{ m.parent_type }}</span>{% endif %}
+</div>
+<div class="text-sm text-muted">{{ m.description[:60] if m.description else '' }}</div>
+</div></div>
+{% endfor %}
+</div>
+{% endblock %}

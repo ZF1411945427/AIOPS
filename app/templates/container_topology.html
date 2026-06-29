@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}容器拓扑{% endblock %}
+{% block head %}
+<style>
+.container-topo ul { padding-left: 20px; list-style: none; position: relative; }
+.container-topo li { position: relative; padding: 3px 0 3px 20px; }
+.container-topo li::before { content: ''; position: absolute; left: 0; top: 0; bottom: 50%; border-left: 2px solid var(--border); width: 14px; }
+.container-topo li::after { content: ''; position: absolute; left: 0; top: 50%; bottom: 0; border-left: 2px solid var(--border); width: 14px; }
+.container-topo li:last-child::after { display: none; }
+.container-topo > li::before, .container-topo > li::after { display: none; }
+.container-topo .node { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 6px; font-size: 13px; border: 1px solid transparent; cursor: default; }
+.container-topo .type-cluster { background: #e8eaf6; border-color: #7986cb; color: #283593; }
+.container-topo .type-namespace { background: #e0f2f1; border-color: #4db6ac; color: #00695c; }
+.container-topo .type-node { background: #fff3e0; border-color: #ffb74d; color: #e65100; }
+.container-topo .type-deployment { background: #e3f2fd; border-color: #64b5f6; color: #1565c0; }
+.container-topo .type-statefulset { background: #e8eaf6; border-color: #9575cd; color: #4527a0; }
+.container-topo .type-daemonset { background: #f3e5f5; border-color: #ce93d8; color: #7b1fa2; }
+.container-topo .type-pod { background: #fce4ec; border-color: #ef9a9a; color: #c62828; }
+.container-topo .type-service { background: #e8f5e9; border-color: #81c784; color: #2e7d32; }
+.container-topo .type-container { background: #fff8e1; border-color: #ffd54f; color: #f57f17; }
+.container-topo .tag { font-size: 10px; padding: 0 6px; border-radius: 3px; opacity: 0.7; }
+.container-topo .online { color: #4caf50; }
+.container-topo .offline { color: #f44336; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>容器拓扑</h1>
+    <p>Kubernetes 集群资源依赖关系</p>
+    <a href="/containers" class="link">← 返回容器概览</a>
+</div>
+
+<div class="panel">
+    <div class="panel-body">
+        {% if trees %}
+        <div class="container-topo">
+            <ul>
+            {% for node in trees recursive %}
+            <li>
+                <div class="node type-{{ node.ci_type }}">
+                    <span class="{{ 'online' if node.status == 'online' else 'offline' }}">●</span>
+                    <strong>{{ node.name }}</strong>
+                    <small class="tag">({{ node.ci_type }})</small>
+                    {% if node.attrs.get('phase') %}
+                    <small class="tag">{{ node.attrs.phase }}</small>
+                    {% endif %}
+                    {% if node.attrs.get('pod_ip') %}
+                    <small class="text-muted">{{ node.attrs.pod_ip }}</small>
+                    {% endif %}
+                    {% if node.attrs.get('replicas') is not none %}
+                    <small class="tag">{{ node.attrs.replicas }} 副本</small>
+                    {% endif %}
+                </div>
+                {% if node.children %}
+                <ul>{{ loop(node.children) }}</ul>
+                {% endif %}
+            </li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% else %}
+        <p class="empty">暂无容器拓扑数据，请添加 K8s 数据源</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

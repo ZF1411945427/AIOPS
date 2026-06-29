@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Runbook 管理{% endblock %}
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
+    <h1>Runbook 管理</h1>
+    <a href="/runbooks/new" class="btn btn-primary btn-sm">+ 新建 Runbook</a>
+</div>
+
+<div class="nav-tabs" style="margin-bottom:12px">
+    <a href="/runbooks" class="tab {{ 'active' if not current_cat }}">全部</a>
+    {% for c in categories %}
+    <a href="/runbooks?category={{ c }}" class="tab {{ 'active' if current_cat == c }}">{{ c }}</a>
+    {% endfor %}
+</div>
+
+<div class="row" style="display:flex;flex-direction:column;gap:8px">
+{% for rb in runbooks %}
+    <div class="card">
+        <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+                <a href="/runbooks/{{ rb.id }}" class="link" style="font-weight:600">{{ rb.title }}</a>
+                <span class="text-sm" style="margin-left:8px">
+                    <span class="badge {{ 'danger' if rb.severity == 'critical' else 'warning' }}">{{ rb.severity }}</span>
+                    <span class="badge">{{ rb.category }}</span>
+                    {% if rb.asset_type %}<span class="badge">{{ rb.asset_type }}</span>{% endif %}
+                </span>
+                <div class="text-sm" style="color:#666;margin-top:4px">{{ rb.symptom[:100] }}{% if rb.symptom|length > 100 %}...{% endif %}</div>
+            </div>
+            <div style="white-space:nowrap">
+                <a href="/runbooks/{{ rb.id }}/edit" class="btn btn-sm">编辑</a>
+                <form method="POST" action="/runbooks/{{ rb.id }}/delete" style="display:inline" onsubmit="return confirm('确定删除?')">
+                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+{% else %}
+    <div class="panel"><div class="panel-body text-sm" style="color:#888">暂无 Runbook</div></div>
+{% endfor %}
+</div>
+{% endblock %}

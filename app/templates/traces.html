@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}调用链查询{% endblock %}
+{% block content %}
+<h1>调用链查询</h1>
+
+<form method="POST" action="/traces/query" class="row g-2 mb-3">
+<div class="col-md-3">
+<label>服务</label>
+<select name="service_name" class="form-select">
+<option value="">-- 全部 --</option>
+{% for s in services %}
+<option value="{{ s }}">{{ s }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-md-3">
+<label>操作</label>
+<select name="operation_name" class="form-select">
+<option value="">-- 全部 --</option>
+{% for o in operations %}
+<option value="{{ o }}">{{ o }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-md-3">
+<label>Trace ID</label>
+<select name="trace_id" class="form-select">
+<option value="">-- 全部 --</option>
+{% for t in trace_ids %}
+<option value="{{ t }}">{{ t[:24] }}...</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-md-2"><label>最小时长(ms)</label><input name="min_duration" class="form-control" type="number" value="0"></div>
+<div class="col-md-2"><label>最大时长(ms)</label><input name="max_duration" class="form-control" type="number" value="0"></div>
+<div class="col-md-1"><label>条数</label><input name="limit" class="form-control" type="number" value="100"></div>
+<div class="col-12"><button type="submit" class="btn btn-primary">查询</button></div>
+</form>
+
+{% if spans is not none %}
+<h3>Span 列表 ({{ spans|length }})</h3>
+<div style="display:flex;flex-direction:column;gap:3px">
+{% for s in spans %}
+<a href="/traces/detail/{{ s.trace_id }}" class="card text-decoration-none" style="color:inherit"><div class="card-body py-1" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ s.service_name }}</strong> <span class="text-sm">/ {{ s.operation_name }}</span>
+</div>
+<div>
+<span class="badge bg-{{ 'success' if s.status == 'OK' else 'danger' }}">{{ s.duration_ms }}ms</span>
+<span class="text-xs text-muted">{{ s.start_time.strftime('%H:%M:%S') }}</span>
+</div>
+</div></a>
+{% else %}
+<div class="text-muted">无结果</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

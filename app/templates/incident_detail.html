@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>故障单 #{{ incident.id }}</h2>
+
+<div class="row">
+<div class="col-md-6">
+<div class="card mb-3">
+<div class="card-body">
+<table class="table table-sm mb-0">
+<tr><th>标题</th><td>{{ incident.title }}</td></tr>
+<tr><th>级别</th><td><span class="badge {{ incident.severity }}">{{ incident.severity }}</span></td></tr>
+<tr><th>状态</th><td><span class="badge {{ 'triggered' if incident.status == 'open' else 'resolved' }}">{{ '进行中' if incident.status == 'open' else '已解决' }}</span></td></tr>
+<tr><th>关联告警数</th><td>{{ incident.alert_count }}</td></tr>
+<tr><th>关联资产</th><td>{{ asset.name if asset else incident.asset_id }}</td></tr>
+<tr><th>创建时间</th><td>{{ incident.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td></tr>
+{% if incident.resolved_at %}
+<tr><th>解决时间</th><td>{{ incident.resolved_at.strftime('%Y-%m-%d %H:%M:%S') }}</td></tr>
+{% endif %}
+</table>
+</div>
+</div>
+{% if incident.status == 'open' %}
+<form method="POST" action="/incidents/{{ incident.id }}/resolve">
+<button class="btn btn-success">解决故障单</button>
+</form>
+{% endif %}
+<a href="/incidents/{{ incident.id }}/rca" class="btn btn-primary">根因分析</a>
+<a href="/incidents" class="btn btn-secondary">返回列表</a>
+</div>
+
+<div class="col-md-6">
+<h4>关联告警</h4>
+{% if alerts %}
+<table class="table table-sm">
+<thead><tr><th>ID</th><th>指标</th><th>级别</th><th>状态</th><th>时间</th></tr></thead>
+<tbody>
+{% for alert in alerts %}
+<tr>
+<td><a href="/alerts/{{ alert.id }}">{{ alert.id }}</a></td>
+<td>{{ alert.metric_name }}</td>
+<td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td>
+<td><span class="badge {{ alert.status }}">{{ alert.status }}</span></td>
+<td class="text-sm">{{ alert.created_at.strftime('%m-%d %H:%M') }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p class="text-muted">暂无关联告警</p>
+{% endif %}
+</div>
+</div>
+{% endblock %}

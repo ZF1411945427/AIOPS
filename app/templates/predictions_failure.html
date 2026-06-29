@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}故障概率预测{% endblock %}
+{% block content %}
+<h1>故障概率预测 (未来 {{ hours }} 小时)</h1>
+
+<div class="card card-body mb-3">
+<form method="GET" class="row g-2 align-items-end">
+<div class="col-auto">
+<select name="asset_id" class="form-select" onchange="this.form.submit()">
+<option value="">全部有告警的资产</option>
+{% for a in assets %}
+<option value="{{ a.id }}" {% if asset_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+{% endfor %}
+</select>
+</div>
+</form>
+</div>
+
+{% if results %}
+<div style="display:flex;flex-direction:column;gap:8px">
+{% for r in results %}
+<div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<strong>{{ r.asset.name if r.asset else 'Asset #' ~ asset_id }}</strong>
+{% if r.details %}
+<div class="text-sm text-muted">
+CPU: {{ r.details[0] if r.details|length > 0 else '?' }}% |
+内存: {{ r.details[1] if r.details|length > 1 else '?' }}% |
+磁盘: {{ r.details[2] if r.details|length > 2 else '?' }}%
+</div>
+{% endif %}
+</div>
+<div style="text-align:right">
+<div style="font-size:24px;font-weight:700;color:{{ 'red' if r.average_probability > 70 else 'orange' if r.average_probability > 40 else 'green' }}">
+{{ r.average_probability }}%
+</div>
+<div class="text-sm text-muted">故障概率</div>
+</div>
+</div></div>
+{% endfor %}
+</div>
+{% elif not asset_id %}
+<div class="panel"><div class="panel-body text-sm text-muted">选择资产查看故障概率，或查看当前有告警的资产</div></div>
+{% endif %}
+{% endblock %}

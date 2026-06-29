@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Service Mesh 集成{% endblock %}
+{% block content %}
+<h1>Service Mesh 集成</h1>
+<p class="text-sm text-muted">接入 Istio / Linkerd 网格指标和调用链</p>
+
+<form method="POST" action="/service-mesh/create" class="row g-2 mb-3">
+<div class="col-md-3"><label>名称</label><input name="name" class="form-control" required></div>
+<div class="col-md-2">
+<select name="mesh_type" class="form-select">
+<option value="istio">Istio</option><option value="linkerd">Linkerd</option>
+</select>
+</div>
+<div class="col-md-4"><label>API URL</label><input name="api_url" class="form-control" placeholder="http://localhost:15090"></div>
+<div class="col-md-3"><label>认证 JSON</label><input name="auth_json" class="form-control" value="{}"></div>
+<div class="col-12"><button type="submit" class="btn btn-primary">添加</button></div>
+</form>
+
+<h3>网格配置</h3>
+<div style="display:flex;flex-direction:column;gap:3px">
+{% for c in configs %}
+<div class="card"><div class="card-body py-1 d-flex justify-content-between align-items-center">
+<div>
+<strong>{{ c.name }}</strong> <span class="badge bg-secondary">{{ c.mesh_type }}</span>
+<span class="text-xs">{{ c.api_url or '默认地址' }}</span>
+</div>
+<div style="display:flex;gap:6px;align-items:center">
+<span class="badge bg-{{ 'success' if c.enabled else 'secondary' }}">{{ '已启用' if c.enabled else '已禁用' }}</span>
+<form method="POST" action="/service-mesh/toggle/{{ c.id }}" style="display:inline">
+<button class="btn btn-sm btn-outline-{{ 'warning' if c.enabled else 'success' }}">{{ '禁用' if c.enabled else '启用' }}</button>
+</form>
+<form method="POST" action="/service-mesh/query/{{ c.id }}" style="display:inline">
+<button class="btn btn-sm btn-outline-primary">查询指标</button>
+</form>
+</div>
+</div></div>
+{% else %}<div class="text-muted">暂无配置</div>{% endfor %}
+</div>
+
+{% if result %}
+<h3 class="mt-3">查询结果</h3>
+{% if result.error %}
+<div class="alert alert-danger">{{ result.error }}</div>
+{% else %}
+<p>共 {{ result.count }} 条指标</p>
+<pre class="bg-dark text-light p-2 rounded" style="max-height:400px;overflow:auto">{% for m in result.raw_metrics %}{{ m }}&#10;{% endfor %}</pre>
+{% endif %}
+{% endif %}
+{% endblock %}

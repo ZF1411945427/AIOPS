@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}新建静默排班{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>新建静默排班</h1>
+    <a href="/alert-silence" class="link">← 返回</a>
+</div>
+
+<form method="POST" action="/alert-silence/new" style="max-width:500px">
+    <div class="mb-2">
+        <label>说明</label>
+        <input name="reason" class="form-control" placeholder="如: 每周维护窗口" required>
+    </div>
+    <div class="mb-2">
+        <label>Cron 表达式</label>
+        <input name="cron_expr" class="form-control" value="0 2 * * 0" placeholder="分 时 日 月 周">
+        <div class="text-sm text-muted">例如 <code>0 2 * * 0</code> = 每周日凌晨2点</div>
+    </div>
+    <div class="mb-2">
+        <label>持续分钟数</label>
+        <input name="duration_minutes" type="number" class="form-control" value="120">
+    </div>
+    <div class="mb-2">
+        <label>告警规则 ID（可选，留空匹配所有）</label>
+        <input name="rule_id" type="number" class="form-control">
+    </div>
+    <div class="mb-2">
+        <label>指标名称（可选，留空匹配所有）</label>
+        <input name="metric_name" class="form-control">
+    </div>
+    <div class="mb-2">
+        <label>资产 ID（可选）</label>
+        <input name="asset_id" type="number" class="form-control">
+    </div>
+    <button type="submit" class="btn btn-primary">创建</button>
+</form>
+{% endblock %}

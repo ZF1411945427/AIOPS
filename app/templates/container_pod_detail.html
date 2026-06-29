@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Pod 详情 - {{ pod.name.split('/')[-1] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Pod: {{ pod.name.split('/')[-1] }}</h1>
+    <a href="/containers/pods" class="link">← 返回 Pod 列表</a>
+</div>
+
+{% set attrs = pod.ci_attributes|from_json %}
+
+<div class="row" style="display:flex;gap:16px;flex-wrap:wrap">
+    <div class="card" style="flex:2;min-width:300px">
+        <div class="card-header"><h3>基本信息</h3></div>
+        <div class="card-body">
+            <table class="table">
+                <tr><td>全名</td><td>{{ pod.name }}</td></tr>
+                <tr><td>命名空间</td><td>{{ pod.name.split('/')[0] }}</td></tr>
+                <tr><td>集群</td><td>{{ pod.k8s_cluster }}</td></tr>
+                <tr><td>状态</td>
+                    <td><span class="badge {{ 'online' if attrs.get('phase') == 'Running' else 'warning' }}">{{ attrs.get('phase','?') }}</span></td>
+                </tr>
+                <tr><td>节点</td><td>{{ attrs.get('node','-') }}</td></tr>
+                <tr><td>Pod IP</td><td>{{ attrs.get('pod_ip','-') }}</td></tr>
+                <tr><td>重启次数</td><td>{{ attrs.get('restarts',0) }}</td></tr>
+                <tr><td>QoS Class</td><td>{{ attrs.get('qos_class','-') }}</td></tr>
+                <tr><td>容器</td><td>{{ attrs.get('containers',[]) | join(', ') }}</td></tr>
+            </table>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:200px">
+        <div class="card-header"><h3>操作</h3></div>
+        <div class="card-body">
+            <a href="/containers/pod/{{ pod.id }}/logs" class="btn btn-primary btn-sm" style="display:block;margin-bottom:8px;text-align:center">📋 查看日志</a>
+            <a href="/containers/pod/{{ pod.id }}/terminal" class="btn btn-sm" style="display:block;text-align:center">💻 终端</a>
+        </div>
+    </div>
+</div>
+
+{% if anomalies %}
+<h3 class="mt-3">近期异常事件</h3>
+<div class="panel">
+    <div class="panel-body" style="padding:0">
+        <table class="table" style="margin:0">
+            <thead>
+                <tr><th>时间</th><th>类型</th><th>原因</th><th>消息</th><th>次数</th></tr>
+            </thead>
+            <tbody>
+            {% for ev in anomalies %}
+                <tr>
+                    <td class="text-sm">{{ ev.last_seen.strftime('%m-%d %H:%M') }}</td>
+                    <td><span class="badge {{ 'warning' if ev.severity == 'warning' else 'danger' }}">{{ ev.kind }}</span></td>
+                    <td><strong>{{ ev.reason }}</strong></td>
+                    <td class="text-sm" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ev.message[:120] }}</td>
+                    <td>{{ ev.count }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

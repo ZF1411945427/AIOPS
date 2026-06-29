@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}K8s 资源监控{% endblock %}
+{% block content %}
+<h1>K8s 资源监控</h1>
+
+{% if cluster_info %}
+<div class="cluster-info-bar" style="display:flex;gap:12px;align-items:center;margin-bottom:16px;padding:12px 16px;border-radius:10px;background:rgba(129,140,248,0.06);border:1px solid rgba(129,140,248,0.12);">
+  <span style="font-weight:600;color:var(--primary-light,#818cf8);">当前集群:</span>
+  <span style="font-weight:600;">{{ cluster_info.name }}</span>
+  <span class="badge" style="background:{{ 'rgba(16,185,129,0.15);color:#10b981' if cluster_info.status == 'online' else 'rgba(239,68,68,0.15);color:#ef4444' }};padding:2px 10px;border-radius:20px;font-size:12px;">{{ cluster_info.status or '未知' }}</span>
+  <span style="color:var(--text-muted,#94a3b8);font-size:13px;">{{ cluster_info.endpoint or '' }}</span>
+</div>
+{% endif %}
+
+<div class="card card-body mb-3" style="padding:16px 20px;">
+<form method="GET" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+  <select name="cluster" class="form-select" onchange="this.form.submit()" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(148,163,184,0.2);min-width:180px;">
+    <option value="">全部集群</option>
+    {% for c in clusters %}
+    <option value="{{ c.name }}" {% if cluster == c.name %}selected{% endif %}>{{ c.name }}</option>
+    {% endfor %}
+  </select>
+  <select name="hours" class="form-select" onchange="this.form.submit()" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(148,163,184,0.2);">
+    <option value="1" {% if hours == 1 %}selected{% endif %}>最近 1 小时</option>
+    <option value="6" {% if hours == 6 %}selected{% endif %}>最近 6 小时</option>
+    <option value="24" {% if hours == 24 %}selected{% endif %}>最近 24 小时</option>
+  </select>
+</form>
+</div>
+
+<div class="row" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+    <div class="card" style="flex:1;min-width:120px;text-align:center;padding:16px">
+        <div style="font-size:28px;font-weight:700">{{ node_count }}</div>
+        <div class="text-sm text-muted">节点</div>
+    </div>
+    <div class="card" style="flex:1;min-width:120px;text-align:center;padding:16px">
+        <div style="font-size:28px;font-weight:700">{{ pod_count }}</div>
+        <div class="text-sm text-muted">Pod 总数</div>
+    </div>
+    <div class="card" style="flex:1;min-width:120px;text-align:center;padding:16px">
+        <div style="font-size:28px;font-weight:700">{{ running_pods }}</div>
+        <div class="text-sm text-muted">运行中</div>
+    </div>
+    <div class="card" style="flex:1;min-width:120px;text-align:center;padding:16px">
+        <div style="font-size:28px;font-weight:700">{{ dep_count }}</div>
+        <div class="text-sm text-muted">Deployment</div>
+    </div>
+</div>
+
+<div class="row" style="display:flex;gap:16px;flex-wrap:wrap">
+    <div class="card" style="flex:1;min-width:350px">
+        <div class="card-header"><h3>节点资源</h3></div>
+        <div class="card-body">
+            <canvas id="nodeChart" height="200"></canvas>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:350px">
+        <div class="card-header"><h3>Pod/Deployment 指标</h3></div>
+        <div class="card-body">
+            <canvas id="podChart" height="200"></canvas>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+const nodeData = {{ node_series|safe }};
+const podData = {{ pod_series|safe }};
+
+function makeChart(id, data, label, color) {
+    const ctx = document.getElementById(id).getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: (data || []).map(d => d.t),
+            datasets: [{
+                label: label,
+                data: (data || []).map(d => d.v),
+                borderColor: color,
+                borderWidth: 2,
+                fill: false,
+                tension: 0.3,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { display: false },
+                y: { beginAtZero: true }
+            }
+        }
+    });
+}
+
+if (nodeData.cpu) makeChart('nodeChart', nodeData.cpu, 'CPU Cores', '#3b82f6');
+if (podData.restarts) makeChart('podChart', podData.restarts, 'Pod Restarts', '#ef4444');
+</script>
+{% endblock %}

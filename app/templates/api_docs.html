@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>API 文档</h2>
+<p class="text-muted">数据接入 API — 需在 Authorization 头携带 Bearer Token</p>
+
+<div class="card mb-3">
+<div class="card-header"><strong>POST /api/v1/metrics</strong> — 推送指标数据</div>
+<div class="card-body">
+<pre class="bg-light p-2 rounded" style="font-size:13px;">
+curl -X POST http://localhost:8000/api/v1/metrics \
+  -H "Authorization: Bearer aio_your_token_here" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "name": "cpu_usage",
+    "value": 85.5,
+    "asset": "web-server-01",
+    "unit": "%",
+    "labels": {"host": "web-1", "region": "cn-east"},
+    "timestamp": "2026-06-22T10:00:00"
+  }]'
+</pre>
+<table class="table table-sm mt-2">
+<thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>name</td><td>string</td><td>是</td><td>指标名称</td></tr>
+<tr><td>value</td><td>number</td><td>是</td><td>指标值</td></tr>
+<tr><td>asset</td><td>string</td><td>否</td><td>资产名称 (自动关联)</td></tr>
+<tr><td>unit</td><td>string</td><td>否</td><td>单位</td></tr>
+<tr><td>labels</td><td>object</td><td>否</td><td>标签键值对</td></tr>
+<tr><td>timestamp</td><td>string</td><td>否</td><td>ISO8601 时间 (默认当前)</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="card mb-3">
+<div class="card-header"><strong>POST /api/v1/events</strong> — 推送事件</div>
+<div class="card-body">
+<pre class="bg-light p-2 rounded" style="font-size:13px;">
+curl -X POST http://localhost:8000/api/v1/events \
+  -H "Authorization: Bearer aio_your_token_here" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "cluster": "prod",
+    "namespace": "default",
+    "name": "web-pod-xyz",
+    "kind": "Pod",
+    "reason": "OOMKilling",
+    "message": "Pod was killed due to memory limit",
+    "severity": "critical"
+  }]'
+</pre>
+</div>
+</div>
+
+<div class="card mb-3">
+<div class="card-header"><strong>GET /api/v1/query/metrics</strong> — 查询指标</div>
+<div class="card-body">
+<pre class="bg-light p-2 rounded" style="font-size:13px;">
+curl "http://localhost:8000/api/v1/query/metrics?name=cpu_usage&hours=2&limit=50" \
+  -H "Authorization: Bearer aio_your_token_here"
+</pre>
+<table class="table table-sm mt-2">
+<thead><tr><th>参数</th><th>类型</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>name</td><td>string</td><td>指标名称 (可选)</td></tr>
+<tr><td>asset</td><td>string</td><td>资产名称 (可选)</td></tr>
+<tr><td>hours</td><td>int</td><td>查询最近 N 小时数据 (默认1)</td></tr>
+<tr><td>limit</td><td>int</td><td>最大返回条数 (默认100)</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="card mb-3">
+<div class="card-header"><strong>Token 权限说明</strong></div>
+<div class="card-body">
+<table class="table table-sm">
+<thead><tr><th>权限</th><th>可访问接口</th></tr></thead>
+<tbody>
+<tr><td>read</td><td>GET /api/v1/query/*</td></tr>
+<tr><td>write</td><td>POST /api/v1/metrics, POST /api/v1/events</td></tr>
+<tr><td>admin</td><td>所有接口</td></tr>
+</tbody>
+</table>
+<p class="mt-2">Token 管理请到 <a href="/api-tokens">API 令牌页面</a></p>
+</div>
+</div>
+{% endblock %}

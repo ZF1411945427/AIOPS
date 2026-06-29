@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>故障单管理</h2>
+<p class="text-muted">基于资产维度自动关联告警，归并为故障单</p>
+
+<div class="toolbar">
+<form class="search-form" method="get">
+<select name="status">
+<option value="">全部状态</option>
+<option value="open" {% if status_filter == 'open' %}selected{% endif %}>进行中</option>
+<option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>已解决</option>
+</select>
+<button type="submit" class="btn btn-sm">过滤</button>
+</form>
+</div>
+
+<div class="panel">
+<div class="panel-body">
+{% if incidents %}
+<table class="table">
+<thead>
+<tr><th>ID</th><th>标题</th><th>级别</th><th>状态</th><th>关联告警</th><th>资产</th><th>时间</th><th>操作</th></tr>
+</thead>
+<tbody>
+{% for inc in incidents %}
+<tr>
+<td><a href="/incidents/{{ inc.id }}">{{ inc.id }}</a></td>
+<td>{{ inc.title }}</td>
+<td><span class="badge {{ inc.severity }}">{{ inc.severity }}</span></td>
+<td><span class="badge {{ 'triggered' if inc.status == 'open' else 'resolved' }}">{{ '进行中' if inc.status == 'open' else '已解决' }}</span></td>
+<td>{{ inc.alert_count }}</td>
+<td>{{ inc.asset_id or '-' }}</td>
+<td class="text-sm">{{ inc.created_at.strftime('%m-%d %H:%M') }}</td>
+<td>
+{% if inc.status == 'open' %}
+<form method="POST" action="/incidents/{{ inc.id }}/resolve" style="display:inline">
+<button class="btn btn-sm btn-success">解决</button>
+</form>
+{% endif %}
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p class="empty">暂无故障单</p>
+{% endif %}
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}创建 Deployment{% endblock %}
+{% block content %}
+<h1>创建 Deployment</h1>
+
+<form method="POST" action="/containers/deploy/create" class="row g-3">
+<div class="col-md-4">
+<label>集群</label>
+<select name="cluster" class="form-select" required>
+{% for c in clusters %}
+<option value="{{ c.name }}">{{ c.name }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="col-md-4"><label>命名空间</label><input name="namespace" class="form-control" value="default"></div>
+<div class="col-md-4"><label>名称</label><input name="name" class="form-control" required></div>
+<div class="col-md-6"><label>镜像</label><input name="image" class="form-control" placeholder="nginx:latest" required></div>
+<div class="col-md-2"><label>副本数</label><input name="replicas" class="form-control" type="number" value="1"></div>
+<div class="col-md-2"><label>容器端口</label><input name="container_port" class="form-control" type="number" value="80"></div>
+<div class="col-md-3"><label>CPU 请求</label><input name="cpu_request" class="form-control" value="100m"></div>
+<div class="col-md-3"><label>内存请求</label><input name="mem_request" class="form-control" value="128Mi"></div>
+<div class="col-md-3"><label>CPU 限制</label><input name="cpu_limit" class="form-control" value="500m"></div>
+<div class="col-md-3"><label>内存限制</label><input name="mem_limit" class="form-control" value="512Mi"></div>
+<div class="col-12"><button type="submit" class="btn btn-primary">创建</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}容器管理{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>容器管理</h1>
+    <p>Kubernetes 集群与 Docker 容器统一管理</p>
+</div>
+
+{% if clusters %}
+<div class="row" style="display:flex;gap:16px;flex-wrap:wrap">
+    {% for c in clusters %}
+    <div class="card" style="flex:1;min-width:240px">
+        <div class="card-body">
+            <h3>{{ c.name }}</h3>
+            <div class="text-sm text-muted">K8s 集群</div>
+            <div class="mt-2">
+                <span class="badge online">在线</span>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="row mt-3" style="display:flex;gap:16px;flex-wrap:wrap">
+    <div class="card" style="flex:1;min-width:160px">
+        <div class="card-body">
+            <div class="stat-number">{{ nodes|length }}</div>
+            <div class="text-sm text-muted">节点</div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:160px">
+        <div class="card-body">
+            <div class="stat-number">{{ namespaces|length }}</div>
+            <div class="text-sm text-muted">命名空间</div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:160px">
+        <div class="card-body">
+            <div class="stat-number">{{ deployments|length }}</div>
+            <div class="text-sm text-muted">Deployment</div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:160px">
+        <div class="card-body">
+            <div class="stat-number">{{ pods|length }}</div>
+            <div class="text-sm text-muted">Pod</div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:160px">
+        <div class="card-body">
+            <div class="stat-number">{{ services|length }}</div>
+            <div class="text-sm text-muted">Service</div>
+        </div>
+    </div>
+    <div class="card" style="flex:1;min-width:160px">
+        <div class="card-body">
+            <div class="stat-number">{{ docker_containers|length }}</div>
+            <div class="text-sm text-muted">Docker 容器</div>
+        </div>
+    </div>
+</div>
+
+<div class="toolbar mt-3">
+    <a href="/containers/pods" class="btn btn-sm">Pod 列表</a>
+    <a href="/containers/deployments" class="btn btn-sm">Deployment 列表</a>
+    <a href="/containers/docker" class="btn btn-sm">Docker 容器</a>
+    <a href="/assets?ci_type=node" class="btn btn-sm">节点列表</a>
+    <a href="/assets?ci_type=service" class="btn btn-sm">Service 列表</a>
+</div>
+
+{% if pods %}
+<div class="panel mt-3">
+    <div class="panel-header"><h3>Pod 概览</h3></div>
+    <div class="panel-body">
+        <table class="table">
+            <thead><tr><th>名称</th><th>集群</th><th>状态</th><th>IP</th><th>重启次数</th></tr></thead>
+            <tbody>
+                {% for p in pods[:20] %}
+                <tr>
+                    <td>{{ p.name.split('/')[-1] }}</td>
+                    <td class="text-sm">{{ p.k8s_cluster }}</td>
+                    <td>
+                        {% set phase = (p.ci_attributes|from_json).get('phase','') %}
+                        <span class="badge {{ 'online' if phase == 'Running' else 'warning' }}">{{ phase }}</span>
+                    </td>
+                    <td class="text-sm">{{ (p.ci_attributes|from_json).get('pod_ip','-') }}</td>
+                    <td>{{ (p.ci_attributes|from_json).get('restarts',0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

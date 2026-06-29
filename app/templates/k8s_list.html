@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 style="margin-bottom:12px;">{{ title }} 管理</h2>
+
+{% if cluster_info %}
+<div class="cluster-info-bar" style="display:flex;gap:12px;align-items:center;margin-bottom:16px;padding:12px 16px;border-radius:10px;background:rgba(129,140,248,0.06);border:1px solid rgba(129,140,248,0.12);">
+  <span style="font-weight:600;color:var(--primary-light,#818cf8);">当前集群:</span>
+  <span style="font-weight:600;">{{ cluster_info.name }}</span>
+  <span class="badge" style="background:{{ 'rgba(16,185,129,0.15);color:#10b981' if cluster_info.status == 'online' else 'rgba(239,68,68,0.15);color:#ef4444' }};padding:2px 10px;border-radius:20px;font-size:12px;">{{ cluster_info.status or '未知' }}</span>
+  <span style="color:var(--text-muted,#94a3b8);font-size:13px;">{{ cluster_info.endpoint or '' }}</span>
+</div>
+{% endif %}
+
+<div class="card card-body mb-3" style="padding:16px 20px;">
+<form method="GET" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+  <select name="cluster" class="form-select" onchange="this.form.submit()" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(148,163,184,0.2);min-width:180px;">
+    <option value="">选择集群</option>
+    {% for c in clusters %}
+    <option value="{{ c.name }}" {% if cluster == c.name %}selected{% endif %}>{{ c.name }}</option>
+    {% endfor %}
+  </select>
+  {% if cluster and title != "PV" %}
+  <input name="namespace" class="form-control" placeholder="命名空间" value="{{ namespace }}" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(148,163,184,0.2);">
+  {% endif %}
+  <button type="submit" class="btn btn-primary" style="padding:8px 20px;border-radius:8px;background:var(--primary,#6366f1);color:#fff;border:none;cursor:pointer;">查询</button>
+</form>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+{% if items %}
+<div style="overflow-x:auto;">
+<table class="table">
+<thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+<tbody>
+{% for item in items %}
+<tr>{% for k in keys %}<td>{{ item[k] }}</td>{% endfor %}</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% elif cluster and not error %}
+<p class="text-muted">未找到 {{ title }}</p>
+{% endif %}
+{% endblock %}
