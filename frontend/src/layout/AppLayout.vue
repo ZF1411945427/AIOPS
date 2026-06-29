@@ -155,6 +155,9 @@
           <OnCallView v-else-if="activeView === 'oncall-schedule'" />
           <EscalationPolicyView v-else-if="activeView === 'escalation-policy'" />
           <AvailabilityReportView v-else-if="activeView === 'availability-report'" />
+          <ChaosExperimentView v-else-if="activeView === 'chaos-experiment'" />
+          <ChaosReportView v-else-if="activeView === 'chaos-report'" />
+          <ChaosScenarioView v-else-if="activeView === 'chaos-scenario'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -173,7 +176,7 @@ import {
   Odometer, ChatDotSquare, DataLine, Tickets, Operation, Monitor,
   Box, Setting, TrendCharts, Coin, Connection, WarningFilled, Search,
   Lightning, User, Tools, Link, MoonNight, Sunny, DataBoard, Loading,
-  Cpu, DataAnalysis, Cloudy
+  Cpu, DataAnalysis, Cloudy, Warning
 } from '@element-plus/icons-vue'
 import AIOpsChatWidget from '@/components/AIOpsChatWidget.vue'
 import DashboardView from '@/views/DashboardView.vue'
@@ -192,6 +195,9 @@ import SLOConfigView from '@/views/SLOConfigView.vue'
 import SLAView from '@/views/SLAView.vue'
 import EscalationPolicyView from '@/views/EscalationPolicyView.vue'
 import AvailabilityReportView from '@/views/AvailabilityReportView.vue'
+import ChaosExperimentView from '@/views/ChaosExperimentView.vue'
+import ChaosReportView from '@/views/ChaosReportView.vue'
+import ChaosScenarioView from '@/views/ChaosScenarioView.vue'
 import request from '@/api/request'
 
 const appStore = useAppStore()
@@ -215,14 +221,14 @@ const menuGroups = ref([])
 const ICON_MAP = {
   Odometer, ChatDotSquare, DataLine, Tickets, Operation, Monitor,
   Box, Setting, TrendCharts, Coin, Connection, WarningFilled, Search,
-  Lightning, User, Tools, Link, Cpu, DataAnalysis, Cloudy
+  Lightning, User, Tools, Link, Cpu, DataAnalysis, Cloudy, Warning
 }
 
 function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'agent-audit', 'op-audit', 'menu-config', 'system-posture', 'trace-view', 'trace-agent-guide', 'metrics-view', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report'])
+const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'agent-audit', 'op-audit', 'menu-config', 'system-posture', 'trace-view', 'trace-agent-guide', 'metrics-view', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario'])
 
 function _flattenItems(items) {
   const result = []
