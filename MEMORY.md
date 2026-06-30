@@ -1,3 +1,31 @@
+### 2026-06-30: 前端性能优化 — 代码分割 + 懒加载 + 图标树摇
+- **根因诊断**: JS 单文件 2.4MB + CSS 单文件 413KB，无代码分割，所有视图（含 ECharts）全部打在主包
+- **vite.config.js**: 新增 `rollupOptions.output.manualChunks` 分拆 5 个 vendor 块（core/element/echarts/axios/other）
+- **AppLayout.vue**: 18 个视图组件从 `import` 改为 `defineAsyncComponent` 懒加载，首屏只加载 DashboardView
+- **main.js**: 移除全局 `ElementPlusIconsVue` 注册（300+ 图标），tree-shaking 生效
+- **ChaosScenarioView.vue**: 修复 `getCategoryIcon` 从字符串改为组件引用（防止全局注册移除后图标不显示）
+- **构建结果对比**:
+  - 旧: JS 2.4MB(单文件), CSS 413KB
+  - 新: vendor-core 29KB + vendor-element 779KB + vendor-echarts 909KB(按需) + vendor-other 462KB + 各视图 2-13KB
+  - 首屏 gzipped 从 ~800KB 降至 ~450KB
+  - ECharts(909KB) 和 17 个视图不再阻塞首屏渲染
+- **部署**: paramiko SFTP 上传 dist 到服务器，无需重启（`serve_spa` 实时读文件）
+
+### 2026-06-30: 恢复 K8s/Docker 完整子菜单 — 13 + 2 个子项
+- 用户反馈「容器与 K8s」菜单只剩下 2 项（Kubernetes、Docker 容器）
+- 根因：`menu_config.json` 被精简为 2 个 iframe 入口，丢失了所有子菜单
+- 修复：恢复 Kubernetes 下 13 个子项（集群概览/Pod/Deployment/StatefulSet/DaemonSet/Service/Ingress/ConfigMap/Secret/HPA/PVC/PV/容器拓扑），Docker 下 2 个子项（概览/列表）
+- 部署：上传更新后的 `menu_config.json`，清空 DB 中的陈旧 `menu_config` 记录，重启 uvicorn 重新加载
+- 验证：`/api/menu` 返回完整 13+2 子菜单结构
+
+### 2026-06-30: 新增产品全景页 + 分页内容平衡 + 登录页入口链接
+- **product_overview.html** 新建：五大领域改为 2 列 grid 布局（原纵向堆叠溢出视口）
+- 安全/对比/CTA 三个内容太少的 section 合并为"安全可靠，效果可见"一个 section
+- 后端 Jinja2 登录页 `login.html` 加"产品全景 →"链接（`login.html:47`）
+- Vue 前端 `LoginView.vue` 加"产品全景 →"链接（`LoginView.vue:101`）
+- 重新构建 Vue 前端（`npm run build`）使链接生效
+- 推送 GitHub：commit `45c9f76`
+
 ### 2026-06-30: Git pull 后菜单不显示混沌工程的根因与修复
 - `git pull` 拉取了混沌工程模块（`chaos.py` + 前端视图 + `menu_config.json` 更新）
 - **根因**: 菜单 API（`menu.py`）优先从 DB 读取 menu_config，没有则回退到文件。DB 为空时正常返回文件内容。

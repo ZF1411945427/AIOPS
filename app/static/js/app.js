@@ -127,16 +127,19 @@ var ClusterKeeper = {
     });
 
     var urlParams = new URLSearchParams(window.location.search);
-    if (!urlParams.has('cluster')) {
+    var clusterFromUrl = urlParams.get('cluster') || '';
+    if (clusterFromUrl) {
+      localStorage.setItem(this.key, clusterFromUrl);
+    } else {
       var saved = localStorage.getItem(this.key);
       if (saved && !select.value) {
-        select.value = saved;
-        var form = select.closest('form');
-        if (form) form.submit();
+        for (var i = 0; i < select.options.length; i++) {
+          if (select.options[i].value === saved) {
+            select.value = saved;
+            break;
+          }
+        }
       }
-    } else {
-      var clusterVal = urlParams.get('cluster') || '';
-      if (clusterVal) localStorage.setItem(this.key, clusterVal);
     }
   }
 };

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}终端 - {{ pod.name.split('/')[-1] }}{% endblock %}
 {% block head %}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.min.css">
+<link rel="stylesheet" href="/static/css/xterm.min.css">
 {% endblock %}
 {% block content %}
 <div class="page-header">
@@ -11,8 +11,8 @@
 
 <div id="terminal" style="height:70vh;background:#1e1e1e;border-radius:6px;overflow:hidden"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.min.js"></script>
+<script src="/static/js/xterm.min.js"></script>
+<script src="/static/js/xterm-addon-fit.min.js"></script>
 <script>
 var term = new Terminal({
     cursorBlink: true,
