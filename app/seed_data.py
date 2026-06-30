@@ -8,7 +8,7 @@ from app.models import (
     User, Asset, AssetRelation, AssetLifecycle, CiModel, CiAttribute,
     AlertRule, Alert, Incident, IncidentAlert, AlertSuppression,
     AlertSilenceSchedule, AlertWebhook,
-    K8sEvent, MetricRecord,
+    K8sEvent, MetricRecord, Span,
     ChatSession, ChatMessage, ToolInvocation, PendingAction,
     ChangeRequest, ChangeTask,
     KnowledgeBase, Runbook,
@@ -28,10 +28,10 @@ def seed_all():
     # Use a marker to track if seed has been applied
     from app.models import SystemConfig
     marker = db.query(SystemConfig).filter(SystemConfig.key == "seed_data_applied").first()
-    if marker and marker.value == "v1":
+    if marker and marker.value == "v2":
         db.close()
         return
-    marker_v = "v1"
+    marker_v = "v2"
     # Remove the old marker if exists (will be re-created at end)
     if marker:
         db.delete(marker)
@@ -670,6 +670,128 @@ def seed_all():
                 existing_attr = db.query(CiAttribute).filter(CiAttribute.ci_model_id == cm.id, CiAttribute.name == an).first()
                 if not existing_attr:
                     db.add(CiAttribute(ci_model_id=cm.id, name=an, display_name=al, field_type=ft, default_value=dv, order=j))
+
+    # ── Traces / Spans (beautiful demo data) ──
+    if db.query(Span).count() < 3:
+        trace_data = [
+            # Trace 1: 用户下单流程 (正常)
+            ("trace-order-001", "api-gateway", "POST /api/orders", 200, "OK", "", [
+                ("span-1-1", "user-service", "validateToken", 25, "OK", ""),
+                ("span-1-2", "order-service", "createOrder", 120, "OK", ""),
+                ("span-1-3", "inventory-service", "checkStock", 40, "OK", "span-1-2"),
+                ("span-1-4", "payment-service", "processPayment", 65, "OK", "span-1-2"),
+                ("span-1-5", "notification-service", "sendOrderConfirmation", 30, "OK", ""),
+            ]),
+            # Trace 2: 商品搜索 (正常)
+            ("trace-search-002", "api-gateway", "GET /api/products/search", 160, "OK", "", [
+                ("span-2-1", "product-service", "searchProducts", 140, "OK", ""),
+                ("span-2-2", "product-service", "esQuery", 80, "OK", "span-2-1"),
+                ("span-2-3", "product-service", "rankResults", 35, "OK", "span-2-1"),
+            ]),
+            # Trace 3: 用户登录 (正常)
+            ("trace-auth-003", "api-gateway", "POST /api/auth/login", 85, "OK", "", [
+                ("span-3-1", "user-service", "authenticate", 55, "OK", ""),
+                ("span-3-2", "user-service", "queryUser", 20, "OK", "span-3-1"),
+                ("span-3-3", "user-service", "generateToken", 12, "OK", ""),
+            ]),
+            # Trace 4: 订单查询 — 慢 SQL (警告)
+            ("trace-slow-004", "api-gateway", "GET /api/orders/list", 520, "WARN", "", [
+                ("span-4-1", "order-service", "listOrders", 500, "WARN", ""),
+                ("span-4-2", "order-service", "queryOrders", 380, "WARN", "span-4-1"),
+            ]),
+            # Trace 5: 支付失败 (错误)
+            ("trace-err-005", "api-gateway", "POST /api/payment/pay", 160, "ERROR", "", [
+                ("span-5-1", "order-service", "getOrder", 35, "OK", ""),
+                ("span-5-2", "payment-service", "charge", 100, "ERROR", ""),
+                ("span-5-3", "payment-service", "validateBalance", 15, "OK", "span-5-2"),
+                ("span-5-4", "payment-service", "refund", 40, "OK", "span-5-2"),
+            ]),
+            # Trace 6: 库存更新 (正常)
+            ("trace-inv-006", "api-gateway", "PUT /api/inventory/update", 95, "OK", "", [
+                ("span-6-1", "inventory-service", "updateStock", 75, "OK", ""),
+                ("span-6-2", "inventory-service", "updateDB", 45, "OK", "span-6-1"),
+                ("span-6-3", "inventory-service", "publishEvent", 15, "OK", "span-6-1"),
+            ]),
+            # Trace 7: 用户注册 (正常)
+            ("trace-reg-007", "api-gateway", "POST /api/auth/register", 210, "OK", "", [
+                ("span-7-1", "user-service", "createUser", 160, "OK", ""),
+                ("span-7-2", "user-service", "insertDB", 35, "OK", "span-7-1"),
+                ("span-7-3", "user-service", "hashPassword", 50, "OK", "span-7-1"),
+                ("span-7-4", "notification-service", "sendWelcomeEmail", 40, "OK", ""),
+            ]),
+            # Trace 8: 商品详情 + 推荐 (正常)
+            ("trace-prod-008", "api-gateway", "GET /api/products/12345", 110, "OK", "", [
+                ("span-8-1", "product-service", "getProduct", 65, "OK", ""),
+                ("span-8-2", "product-service", "cacheGet", 6, "OK", "span-8-1"),
+                ("span-8-3", "product-service", "queryDB", 25, "OK", "span-8-1"),
+                ("span-8-4", "product-service", "getRecommendations", 35, "OK", ""),
+            ]),
+            # Trace 9: 批量订单导出 (正常)
+            ("trace-exp-009", "api-gateway", "GET /api/orders/export", 450, "OK", "", [
+                ("span-9-1", "order-service", "exportOrders", 430, "OK", ""),
+                ("span-9-2", "order-service", "queryAllOrders", 200, "OK", "span-9-1"),
+                ("span-9-3", "order-service", "generateCSV", 180, "OK", "span-9-1"),
+                ("span-9-4", "notification-service", "notifyExportReady", 25, "OK", ""),
+            ]),
+            # Trace 10: 退款流程 (正常)
+            ("trace-ref-010", "api-gateway", "POST /api/orders/refund", 280, "OK", "", [
+                ("span-10-1", "order-service", "validateRefund", 40, "OK", ""),
+                ("span-10-2", "payment-service", "processRefund", 150, "OK", ""),
+                ("span-10-3", "payment-service", "refundToWallet", 80, "OK", "span-10-2"),
+                ("span-10-4", "inventory-service", "restoreStock", 35, "OK", ""),
+                ("span-10-5", "notification-service", "sendRefundEmail", 30, "OK", ""),
+            ]),
+            # Trace 11: 商品列表 (正常)
+            ("trace-list-011", "api-gateway", "GET /api/products", 90, "OK", "", [
+                ("span-11-1", "product-service", "listProducts", 70, "OK", ""),
+                ("span-11-2", "product-service", "queryCache", 8, "OK", "span-11-1"),
+                ("span-11-3", "product-service", "batchQueryPrices", 35, "OK", "span-11-1"),
+            ]),
+            # Trace 12: 健康检查 (正常, 快速)
+            ("trace-hc-012", "api-gateway", "GET /api/health", 15, "OK", "", [
+                ("span-12-1", "user-service", "healthCheck", 8, "OK", ""),
+                ("span-12-2", "order-service", "healthCheck", 5, "OK", ""),
+                ("span-12-3", "payment-service", "healthCheck", 6, "OK", ""),
+            ]),
+        ]
+        for trace_id, root_svc, root_op, root_dur, root_status, root_parent, spans in trace_data:
+            now = hours_ago(random.randint(0, 72))
+            t0 = now
+            # Create root span
+            root_span_id = spans[0][0] if spans else f"{trace_id}-root"
+            db.add(Span(
+                trace_id=trace_id, span_id=root_span_id, parent_span_id="",
+                service_name=root_svc, operation_name=root_op,
+                start_time=t0, end_time=t0 + timedelta(milliseconds=root_dur),
+                duration_ms=root_dur, status=root_status,
+                tags=json.dumps({
+                    "http.method": root_op.split()[0],
+                    "http.url": root_op.split()[1] if " " in root_op else "/",
+                    "component": "http",
+                }),
+            ))
+            # Create child spans
+            for sid, svc, op, dur, status, parent in spans:
+                span_start = t0 + timedelta(milliseconds=random.randint(0, max(1, root_dur - dur)))
+                span_parent = parent if parent else root_span_id
+                db.add(Span(
+                    trace_id=trace_id, span_id=sid, parent_span_id=span_parent,
+                    service_name=svc, operation_name=op,
+                    start_time=span_start,
+                    end_time=span_start + timedelta(milliseconds=dur),
+                    duration_ms=dur, status=status,
+                    tags=json.dumps({
+                        "component": "rpc" if parent or True else "http",
+                        "peer.service": root_svc if parent else svc,
+                        "error.message": "余额不足，支付失败" if status == "ERROR" else "",
+                        "db.type": "mysql" if "DB" in op or "query" in op or "insert" in op or "update" in op else "",
+                        "db.statement": "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50" if "queryOrders" in op else (
+                            "UPDATE inventory SET quantity = quantity - ? WHERE product_id = ?" if "updateDB" in op else (
+                            "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)" if "insertDB" in op else ""
+                        )),
+                    }),
+                ))
+        print("[seed] 12 beautiful traces seeded with realistic microservice spans")
 
     # ── AlertSuppression (5) ──
     if db.query(AlertSuppression).count() < 3:

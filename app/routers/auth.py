@@ -84,7 +84,7 @@ async def login(request: Request, db: Session = Depends(get_db)):
     if not user or user.password_hash != hash_password(pwd):
         if is_json:
             return JSONResponse({"ok": False, "message": "用户名或密码错误"}, status_code=401)
-        return templates.TemplateResponse("login.html", {"request": request, "error": "用户名或密码错误"})
+        return RedirectResponse(url="/login?error=用户名或密码错误", status_code=303)
 
     request.session["user_id"] = user.id
 
