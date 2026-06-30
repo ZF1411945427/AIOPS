@@ -11,6 +11,7 @@ mimetypes.add_type("text/javascript", ".mjs")
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -46,8 +47,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware, secret_key="aiops-secret-key-change-in-production")
+
+
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/vue-assets/") or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+app.add_middleware(CacheControlMiddleware)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.mount("/vue-assets", StaticFiles(directory="frontend/dist"), name="vue_assets")

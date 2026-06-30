@@ -235,14 +235,104 @@
       {
         "key": "kubernetes",
         "label": "Kubernetes",
-        "type": "iframe",
-        "path": "/k8s/overview"
+        "items": [
+          {
+            "key": "k8s-overview",
+            "label": "集群概览",
+            "type": "iframe",
+            "path": "/k8s/overview"
+          },
+          {
+            "key": "k8s-pods",
+            "label": "Pod",
+            "type": "iframe",
+            "path": "/containers/pods"
+          },
+          {
+            "key": "k8s-deployments",
+            "label": "Deployment",
+            "type": "iframe",
+            "path": "/containers/deployments"
+          },
+          {
+            "key": "k8s-statefulsets",
+            "label": "StatefulSet",
+            "type": "iframe",
+            "path": "/k8s/statefulsets"
+          },
+          {
+            "key": "k8s-daemonsets",
+            "label": "DaemonSet",
+            "type": "iframe",
+            "path": "/k8s/daemonsets"
+          },
+          {
+            "key": "k8s-services",
+            "label": "Service",
+            "type": "iframe",
+            "path": "/k8s/services"
+          },
+          {
+            "key": "k8s-ingresses",
+            "label": "Ingress",
+            "type": "iframe",
+            "path": "/k8s/ingresses"
+          },
+          {
+            "key": "k8s-configmaps",
+            "label": "ConfigMap",
+            "type": "iframe",
+            "path": "/k8s/configmaps"
+          },
+          {
+            "key": "k8s-secrets",
+            "label": "Secret",
+            "type": "iframe",
+            "path": "/k8s/secrets"
+          },
+          {
+            "key": "k8s-hpas",
+            "label": "HPA",
+            "type": "iframe",
+            "path": "/k8s/hpas"
+          },
+          {
+            "key": "k8s-pvcs",
+            "label": "PVC",
+            "type": "iframe",
+            "path": "/k8s/pvcs"
+          },
+          {
+            "key": "k8s-pvs",
+            "label": "PV",
+            "type": "iframe",
+            "path": "/k8s/pvs"
+          },
+          {
+            "key": "k8s-topology",
+            "label": "容器拓扑",
+            "type": "iframe",
+            "path": "/containers/topology"
+          }
+        ]
       },
       {
         "key": "docker",
         "label": "Docker 容器",
-        "type": "iframe",
-        "path": "/containers/docker"
+        "items": [
+          {
+            "key": "docker-overview",
+            "label": "Docker 概览",
+            "type": "iframe",
+            "path": "/containers"
+          },
+          {
+            "key": "docker-list",
+            "label": "Docker 容器列表",
+            "type": "iframe",
+            "path": "/containers/docker"
+          }
+        ]
       }
     ]
   },
