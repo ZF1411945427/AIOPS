@@ -37,5 +37,4 @@ try {
 window.addEventListener('error', (e) => {
   window.__vueErrors = window.__vueErrors || []
   window.__vueErrors.push(e.message)
-  document.title = '[ERROR] ' + document.title
 })

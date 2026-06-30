@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 import json
 from datetime import datetime, timedelta
 
@@ -79,6 +79,20 @@ class OnCallScheduleResponse(BaseModel):
     current_period_start: datetime
     current_period_end: datetime
 
+    @field_validator("members", mode="before")
+    @classmethod
+    def parse_members(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator("schedule", mode="before")
+    @classmethod
+    def parse_schedule(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
 
 class EscalationPolicyCreate(BaseModel):
     name: str
@@ -98,6 +112,27 @@ class EscalationPolicyResponse(BaseModel):
     wait_minutes: List[int]
     notify_channels: List[str]
     is_active: bool
+
+    @field_validator("levels", mode="before")
+    @classmethod
+    def parse_levels(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator("wait_minutes", mode="before")
+    @classmethod
+    def parse_wait_minutes(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator("notify_channels", mode="before")
+    @classmethod
+    def parse_notify_channels(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
 
 # ==================== SLO 接口 ====================
