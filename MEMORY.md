@@ -1,3 +1,9 @@
+### 2026-07-01: 登录页绚烂星空动画完成
+- **LoginView.vue**: 添加 Canvas 星场动画（160颗星星、15%暖橙色星、闪烁效果、偶发流星）
+- **CSS**: 添加 `.starfield` 绝对定位覆盖 brand-col 区域，`pointer-events: none`
+- **生命周期**: `onMounted` 初始化动画 + ResizeObserver 自适应，`onBeforeUnmount` 清理
+- **构建 & 重启**: `npm run build` 成功，后端重启完成
+
 ### 2026-06-30: 前端性能优化 — 代码分割 + 懒加载 + 图标树摇
 - **根因诊断**: JS 单文件 2.4MB + CSS 单文件 413KB，无代码分割，所有视图（含 ECharts）全部打在主包
 - **vite.config.js**: 新增 `rollupOptions.output.manualChunks` 分拆 5 个 vendor 块（core/element/echarts/axios/other）

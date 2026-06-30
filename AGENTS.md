@@ -51,6 +51,21 @@ python run.py
 
 **不要依赖** `npx kill-port 8000` 或 `taskkill`，它们常杀不干净。
 
+### ⚠️ 后端启动方式（重要！）
+在 opencode 的 bash 工具中直接运行 `python run.py` 会**随 bash 会话超时而终止进程**。
+必须使用 Windows `start` 命令在新窗口中启动：
+
+```bash
+start "AIOps Backend" python run.py
+```
+
+### ⚠️ 登录页路由（重要！）
+**登录页由 Vue SPA 渲染，不是 Jinja2 模板！**
+- 路由 `GET /login` → `auth.py:_serve_vue()` → `frontend/dist/index.html`
+- **真正的登录页组件**: `frontend/src/views/LoginView.vue`
+- ~~`app/templates/login.html` 是旧 Jinja2 模板，**已废弃不用**（死代码 dead code）~~ **已删除**
+- 修改登录页 UI 必须改 `LoginView.vue`，然后 `npm run build --prefix frontend` 构建
+
 ### 构建 Vue 前端
 ```bash
 cd frontend && npm run build

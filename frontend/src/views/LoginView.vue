@@ -5,6 +5,7 @@
     <div class="login-wrap">
       <!-- Brand side -->
       <div class="brand-col">
+        <canvas ref="starCanvas" class="starfield" />
         <div class="brand-inner">
           <div class="brand-logo">
             <span class="logo-mark">AI</span>
@@ -111,16 +112,119 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 
 const router = useRouter()
+const route = useRoute()
 const formRef = ref(null)
 const loading = ref(false)
-const errorMsg = ref('')
+const errorMsg = ref(route.query.error || '')
 const year = new Date().getFullYear()
+
+/* ─── Starfield ─── */
+const starCanvas = ref(null)
+let animId = null
+
+function initStarfield() {
+  const canvas = starCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  const dpr = window.devicePixelRatio || 1
+  let w = canvas.parentElement.clientWidth
+  let h = canvas.parentElement.clientHeight
+  canvas.width = w * dpr
+  canvas.height = h * dpr
+  canvas.style.width = w + 'px'
+  canvas.style.height = h + 'px'
+  ctx.scale(dpr, dpr)
+
+  const cx = w / 2
+  const cy = h / 2
+  const MAX_RADIUS = Math.sqrt(w * w + h * h) / 2 + 80
+
+  const stars = []
+  const STAR_COUNT = 200
+  const BRAND_COLOR = [199, 81, 46]
+
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const useBrand = Math.random() < 0.12
+    const dist = Math.random() * MAX_RADIUS
+    const angle = Math.random() * Math.PI * 2
+    stars.push({
+      dist,
+      angle,
+      x: cx + Math.cos(angle) * dist,
+      y: cy + Math.sin(angle) * dist,
+      r: 0.4 + Math.random() * 2.0,
+      baseAlpha: 0.3 + Math.random() * 0.7,
+      speed: (0.08 + Math.random() * 0.25) * (1 - dist / MAX_RADIUS * 0.6),
+      phase: Math.random() * Math.PI * 2,
+      color: useBrand ? BRAND_COLOR : null,
+    })
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, w, h)
+
+    for (const s of stars) {
+      s.angle += s.speed * 0.016
+      s.x = cx + Math.cos(s.angle) * s.dist
+      s.y = cy + Math.sin(s.angle) * s.dist
+
+      if (s.x < -50 || s.x > w + 50 || s.y < -50 || s.y > h + 50) {
+        s.dist = Math.random() * MAX_RADIUS
+        s.angle = Math.random() * Math.PI * 2
+        s.x = cx + Math.cos(s.angle) * s.dist
+        s.y = cy + Math.sin(s.angle) * s.dist
+      }
+
+      const a = s.baseAlpha * (0.5 + 0.5 * Math.sin(t * 1.2 + s.phase))
+      ctx.beginPath()
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+      if (s.color) {
+        ctx.fillStyle = `rgba(${s.color[0]},${s.color[1]},${s.color[2]},${a})`
+      } else {
+        ctx.fillStyle = `rgba(255,255,255,${a})`
+      }
+      ctx.fill()
+    }
+  }
+
+  let start = null
+  function loop(ts) {
+    if (!start) start = ts
+    draw((ts - start) / 1000)
+    animId = requestAnimationFrame(loop)
+  }
+
+  animId = requestAnimationFrame(loop)
+
+  const ro = new ResizeObserver(() => {
+    w = canvas.parentElement.clientWidth
+    h = canvas.parentElement.clientHeight
+    canvas.width = w * dpr
+    canvas.height = h * dpr
+    canvas.style.width = w + 'px'
+    canvas.style.height = h + 'px'
+    ctx.scale(dpr, dpr)
+  })
+  ro.observe(canvas.parentElement)
+  return ro
+}
+
+let resizeObserver = null
+
+onMounted(() => {
+  resizeObserver = initStarfield()
+})
+
+onBeforeUnmount(() => {
+  if (animId) cancelAnimationFrame(animId)
+  if (resizeObserver) resizeObserver.disconnect()
+})
 
 const form = reactive({
   username: '',
@@ -191,7 +295,7 @@ async function handleLogin() {
 
 /* ─── Brand side ─── */
 .brand-col {
-  flex: 0 0 55%;
+  flex: 0 0 65%;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -223,6 +327,16 @@ async function handleLogin() {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(13,148,136,0.1) 0%, transparent 70%);
   pointer-events: none;
+}
+
+.starfield {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .brand-inner {
@@ -327,7 +441,7 @@ async function handleLogin() {
 
 .form-inner {
   width: 100%;
-  max-width: 400px;
+  max-width: 360px;
   flex: 1;
 }
 
