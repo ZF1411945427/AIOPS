@@ -2,8 +2,6 @@
    AIOps — 全局样式 (porting from SxDevOps)
    ============================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
 :root {
   --primary: #6366f1;
   --primary-light: #818cf8;
