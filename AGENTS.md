@@ -66,6 +66,27 @@ start "AIOps Backend" python run.py
 - ~~`app/templates/login.html` 是旧 Jinja2 模板，**已废弃不用**（死代码 dead code）~~ **已删除**
 - 修改登录页 UI 必须改 `LoginView.vue`，然后 `npm run build --prefix frontend` 构建
 
+### 多 Agent 编排套件 (kdco/opencode-workspace)
+项目已接入 OCX + kdco/workspace bundle，提供 plan/build 编排者 + coder/researcher/reviewer/scribe 专家的多 Agent 协作能力。
+配置在 `.opencode/`（agent/skill/plugin）和 `opencode.json`（权限/MCP/模型），**被 .gitignore 排除，换机需重装**。
+
+换机重装步骤：
+```bash
+# 1. 装运行时 (bun 是 OCX 和 TS 插件的依赖)
+npm install -g bun ocx
+# bun.exe 不在 PATH 时，手动加: C:\Users\<user>\AppData\Roaming\npm\node_modules\bun\bin
+
+# 2. 项目级初始化 + 装 bundle
+ocx init
+ocx registry add https://registry.kdco.dev --name kdco
+ocx add kdco/workspace
+
+# 3. 装 TS 插件的 npm 依赖
+cd .opencode && bun install
+```
+
+启动多 Agent：重启 opencode 后用 `--agent plan` 或 `--agent build` 进入编排者模式，编排者会自动用 `task` 工具委派给专家 agent。
+
 ### 构建 Vue 前端
 ```bash
 cd frontend && npm run build
