@@ -1,3 +1,305 @@
+### 2026-07-03: 代码层兜底检测 LLM 幻觉执行（文本说"已提议"但没调工具）
+- **背景**: system prompt 强化后 MiniMax 仍臆想——17:54 用户说"确认"，LLM 回复"已提议安装 nginx 请点击确认"但 tool_calls=NO，没调 propose_action，无 PendingAction，前端无按钮。数据库证据：PA 35(17:54:20) 后再无新 PA，两条"确认"消息的 assistant 回复 tool_calls 全空
+- **根因**: MiniMax 多轮对话后退化为文本模拟，system prompt 约束不够强，需要代码层兜底
+- **改动** `app/services/agent_service.py` process_chat_message 循环结束后新增幻觉执行检测：
+  - 检测条件：tool_results 里无 propose_action 调用 + content 含"已提议/请点击确认/请确认是否执行/操作已提交/执行中请稍候"任一关键词
+  - 命中后强制再调一次 LLM（timeout_override=30），messages 追加系统警告"你说已提议但没调 propose_action 工具，请立即调用"
+  - 重试响应做文本标签兼容解析（_parse_text_tool_calls），如果真的调了 propose_action 则执行它 + 创建 PendingAction
+  - 重试后仍没调工具则用重试 content 作为最终回复
+- **安全**: 重试调的 propose_action 仍走 allow_internal=False（LLM 路径）；PendingAction 创建逻辑与正常路径一致；只在检测到幻觉时才触发，不影响正常对话
+- **验证**: py_compile PASS；后端重启 HTTP 200
+- **专业名词**: 幻觉执行兜底(Hallucination Fallback)——代码层检测 LLM 的虚假执行声明并强制重试；防御性编程(Defensive Programming)——不信任 LLM 的自述，用客观证据（tool_calls）验证
+
+### 2026-07-03: 修复 LLM 模拟执行不调 propose_action（system prompt 强化约束）
+- **背景**: 用户反馈"没弹出确认按钮"。查数据库发现 17:43 之后的消息 tool_calls=[]——LLM 在文本里写"已提议修改 yum 配置"、"安装任务已提交执行中"等，但**实际没调 propose_action 工具**，没创建 PendingAction，前端自然没确认按钮。LLM 把用户的"确认"回复当成执行指令，自己在文本里演了一出"提议→确认→执行"的戏
+- **根因**: MiniMax 模型在多轮对话后"忘记"了工具调用流程，改为在文本里模拟执行。system prompt 对"必须调工具"的约束不够强
+- **改动** `app/services/agent_service.py` DEFAULT_SYSTEM_PROMPT: 新增「⚠️ 严禁模拟执行」段落，明确 5 条规则：
+  1. 禁止在回复文本中假装已执行操作
+  2. 禁止把用户"确认"回复当执行指令
+  3. 每次操作必须调 propose_action 工具，不要只在文本写"已提议"
+  4. 正确流程：调 propose_action → 回复"请在界面点击确认" → 等待界面确认 → 系统执行
+  5. 错误流程：文本写"已提议/执行中"但不调工具 → 无确认按钮 → 操作永远不执行
+- **验证**: py_compile PASS；后端重启 HTTP 200
+- **专业名词**: 幻觉执行(Hallucinated Execution)——LLM 编造不存在的操作结果；工具调用纪律(Tool Call Discipline)——强制 LLM 通过工具而非文本完成操作
+
+### 2026-07-03: 修复异步 confirm 时序竞争（status 终态先于 LLM 总结落库）
+- **背景**: 异步 confirm 改造后，用户仍需切回会话才能看到结果。根因：后台线程先 `db.commit()` 把 status 置为 executed/failed（is_terminal=true），**然后**才调 LLM 总结。前端轮询到 is_terminal 时 assistant 消息还没存入数据库，loadMessages 拿不到 AI 回复
+- **改动** `app/services/agent_service.py` _async_execute_action: 把 status 更新延迟到 LLM 总结/兜底消息落库之后——保持 executing 状态直到 assistant 消息 add_message 完成，再一次性 commit 把 status 置为终态。这样前端轮询到 is_terminal 时 assistant 消息已存在，loadMessages 能即时拿到
+- **时序修正**:
+  - 之前：执行命令 → commit(executed) → LLM 总结 → add_message → commit（轮询到 executed 时消息还没存）
+  - 现在：执行命令 → LLM 总结 → add_message → commit(executed)（轮询到 executed 时消息已存）
+- **验证**: py_compile PASS；后端重启 HTTP 200
+- **专业名词**: 时序竞争(Race Condition)——多个操作交错执行导致依赖顺序被破坏；终态屏障(Terminal Barrier)——把终态更新放在所有副作用之后，确保观察者看到终态时所有数据已就绪
+
+### 2026-07-03: confirm 改异步执行 + LLM 总结可选兜底（修复卡住 + 反馈保障）
+- **背景**: confirm 同步执行 SSH 命令 + LLM 总结耗时 30-50s，超过前端 timeout 导致卡住；LLM 总结超时跳过后用户无任何反馈
+- **方案**: A 异步执行（立即返回 executing，后台线程执行+总结，前端轮询）+ B LLM 总结可选（超时/失败用 result message 兜底）
+- **改动1** `app/models.py`: PendingAction 加 `STATUS_EXECUTING = "executing"` 状态（confirmed→executing→executed/failed）
+- **改动2** `app/services/agent_service.py`:
+  - 顶部加 `import threading` + `from app.database import get_session_for, get_db_mode`
+  - confirm_pending_action 改异步：立即置 STATUS_EXECUTING + 返回，后台线程执行
+  - 新增 `_async_execute_action(action_id, session_id, message_id, tool_name, payload, title, action_type)`：独立 db session 后台线程执行命令 + ToolInvocation 审计 + 更新 status/result_payload + 调 _summarize_execution_result；LLM 总结失败/超时用 result message 兜底（`f"**{title}** — {status_text}\n\n{fallback_msg}"`）存为 assistant 消息；异常兜底标记 failed 不崩溃
+- **改动3** `app/routers/agent_chat.py`: 新增 `GET /pending/{action_id}/status` 查询状态接口，返回 {status, result_message, is_terminal}，前端轮询用
+- **改动4** `frontend/src/views/AgentChatView.vue`:
+  - confirmAction 改为：confirm 立即返回 → 弹"命令正在远程执行中" → `pollPendingStatus(id)` 每 2s 轮询最多 60s → 终态后 loadMessages 拉取 LLM 总结/兜底消息
+  - 新增 `pollPendingStatus(id)` 函数（30 次轮询，is_terminal 即停）
+  - 兼容同步模式兜底（理论上不走但保留）
+- **安全**: 后台线程独立 db session 不与请求 session 冲突；行锁/payload 校验/allow_internal/ToolInvocation 审计全部保留；LLM 总结超时不影响命令执行结果；线程 daemon=True 随进程退出
+- **验证**: py_compile 3 文件 PASS；npm build 成功；后端重启 HTTP 200
+- **专业名词**: 异步执行(Asynchronous Execution)——耗时操作后台进行，主线程立即返回；轮询(Polling)——客户端定期查询状态直到终态；兜底降级(Fallback Degradation)——非关键路径失败时用简单方案替代，确保用户有反馈
+
+### 2026-07-03: 修复确认后卡住（LLM 总结超时 + 前端 timeout 不够）
+- **背景**: 用户点确认后前端一直显示"执行中..."卡住。根因：confirm 路径 SSH 执行命令（yum install 等可能 30s）+ _summarize_execution_result 调 LLM 总结（provider.timeout_seconds 可能很长）叠加，超过前端 axios 60s timeout
+- **改动1** `app/services/agent_service.py` call_llm: 加 `timeout_override: Optional[int]` 参数，可覆盖 provider.timeout_seconds；_summarize_execution_result 传 `timeout_override=20`，LLM 总结最多 20s 超时就跳过（不影响 confirm 结果，命令已执行）
+- **改动2** `frontend/src/api/request.js`: axios timeout 60s → 120s（confirm 操作 SSH+LLM 耗时可能 50s+，留足余量）
+- **安全**: LLM 总结超时跳过只影响"AI 是否给出自然语言总结"，不影响命令执行结果（已写入 result_payload + ToolInvocation 审计）；confirm 行锁/payload 校验/allow_internal 全部保留
+- **验证**: py_compile PASS；npm build 成功；后端重启 HTTP 200
+- **专业名词**: 超时保护(Timeout Guard)——非关键路径加短超时，防止级联卡死；级联超时(Cascading Timeout)——多个耗时操作串联导致总耗时超限
+
+### 2026-07-03: 修复 sendMessage 后 pending-bar 不显示（改用 loadMessages 拉取）
+- **背景**: 用户让 AI 执行操作，AI 回复"已提议请确认"但待确认条（pending-bar）没显示，用户无法点确认。根因：sendMessage 成功后手动 push 消息 + 手动设置 pendingActions 不可靠（pendingActions 可能未正确设置或渲染时机问题）
+- **改动** `frontend/src/views/AgentChatView.vue` sendMessage: 去掉手动 push + 手动设置 pendingActions，改为 `await loadMessages(activeSessionId.value)` 从后端重新拉取——与 confirmAction 保持一致，以后端数据库为单一数据源，pendingActions 从 /agent/history 的 pending_actions 获取确保 pending-bar 即时显示；无 session_id 时兜底手动 push
+- **验证**: npm build 成功；后端重启 HTTP 200
+- **专业名词**: 单一数据源(Single Source of Truth)——消息和 pendingActions 都从后端拉取，避免前端手动构造导致状态不一致
+
+### 2026-07-03: 修复确认后需切页才能看到结果（前端重新加载消息 + 按钮 loading）
+- **背景**: 上一条修复让 confirm 后后端调 LLM 生成总结存为 assistant 消息，但前端手动 push 不可靠（reply 可能为空/渲染时机问题），用户需切到其他页面再切回来（触发 loadMessages 从后端拉取）才能看到结果
+- **改动** `frontend/src/views/AgentChatView.vue`:
+  - 新增 `confirmingId` ref 跟踪正在确认的动作 id
+  - confirmAction 去掉手动 push，改为 `await loadMessages(activeSessionId.value)` 重新从后端拉取消息——后端 _summarize_execution_result 已把 LLM 总结存为 assistant 消息，拉取即可即时显示，不依赖 reply 字段是否非空
+  - 确认按钮加 `:disabled="confirmingId === pa.id"` + spinner 动画 + "执行中..."文案——后端要执行命令+LLM 总结可能 3-10 秒，让用户知道正在处理
+  - cancel 按钮也禁用防止并发操作
+  - 新增 .confirm-spinner CSS（2px border + spin 动画）+ .pending-btn:disabled 样式
+- **验证**: npm build 成功；后端重启 HTTP 200
+- **专业名词**: 单一数据源(Single Source of Truth)——以后端数据库为消息唯一来源，前端拉取而非手动构造，避免状态不一致；乐观更新 vs 服务端重取——此处选服务端重取更可靠
+
+### 2026-07-03: 修复确认后无后续回复（confirm 路径补 LLM 总结）
+- **背景**: 用户点确认后命令执行成功（/agent/pending 页显示 executed + 输出），但聊天页无 AI 总结回复。根因：confirm_pending_action 只执行命令写 result_payload，不回灌 LLM，用户在聊天页看不到 AI 对执行结果的总结——反馈回路在 confirm 路径断裂
+- **改动1** `app/services/agent_service.py`: confirm_pending_action 重构执行部分（合并 try/except 为统一流程），末尾新增 `_summarize_execution_result(db, action, result, config)` 函数——查 session/provider/config，构造 messages（system prompt + 历史 + 执行结果作为 user 消息），调 call_llm 让它总结执行结果，存为 assistant 消息，返回 reply 字段；LLM 总结失败 try/except 静默降级返回空串不影响 confirm 结果
+- **改动2** `frontend/src/views/AgentChatView.vue` confirmAction: 拿到 data.result.reply 后 push 到 messages 列表 + scrollToBottom，让用户在聊天页看到 AI 总结
+- **返回值变化**: confirm_pending_action 返回值从 {success, status, result} 变为 {success, status, result, reply}；confirm_action 路由透传，前端按 result.reply 取
+- **安全性**: LLM 总结只读 result_payload（已执行结果），不再执行任何工具；confirm 行锁/payload 校验/allow_action_execution/ToolInvocation 审计全部保留；_summarize_execution_result 失败不影响已执行的命令
+- **验证**: py_compile PASS；npm build 成功；后端重启 HTTP 200
+- **专业名词**: 反馈回路闭合(Feedback Loop Closure)——执行结果回灌 LLM 生成总结，用户得到闭环反馈；静默降级(Silent Degradation)——非关键路径失败不影响主流程
+
+### 2026-07-03: 单轮工具调用改为多轮 agentic loop（修复 MiniMax 多步操作卡住）
+- **背景**: 用户让 AI 重启 nginx，AI 第一轮调 query_assets 查资产后，二次 LLM 响应又包含工具调用（想继续 propose_action），但代码只支持单轮工具调用——二次响应的工具调用被忽略，`<minimax:tool_call>` 标签原样显示给用户，AI "只回复一次没有下文"
+- **根因**: `process_chat_message` 的工具调用处理是单轮设计——第一次 call_llm → 解析 tool_calls → 执行工具 → 二次 call_llm → 只取 content 不再解析工具调用。MiniMax 等模型需要多轮（query_assets → propose_action → 总结回复），二次响应中的工具调用（含文本标签格式）被忽略
+- **改动** `app/services/agent_service.py` process_chat_message (279-460 行): 把单次 LLM 调用 + 单次二次调用改为 `for round_idx in range(max_rounds=5)` 循环
+  - 每轮：解析 response → 文本标签兼容解析 `_parse_text_tool_calls` → 清理 content 标签 `_strip_text_tool_call_tags` → 无工具调用则 break → 执行工具 + ToolInvocation 审计 + PendingAction 创建 → 把 assistant message + tool results 追加到 messages → 下一轮 call_llm
+  - 每轮 content 都做标签清理（不论是否解析出工具调用），避免标签落库或显示
+  - 循环外兜底清理：达到 max_rounds 时最后一轮 content 可能含标签，再清理一次
+  - 保留全部安全逻辑：allow_internal=False（LLM 路径）、ToolInvocation 审计、PendingAction 创建、免确认路径、schema 校验
+- **验证**: `python -m py_compile` PASS；后端重启 HTTP 200
+- **哲学合规**: Atomic Predictability（每轮独立解析+执行+清理，同输入同输出）、Fail Fast（LLM 错误立即返回）、Intentional Naming（round_idx/max_rounds/round_tool_results 自解释）
+- **专业名词**: Agentic Loop（智能体循环）——LLM 反复"思考→调工具→观察结果→再思考"直到完成任务；单轮工具调用(Single-turn Tool Call)→多轮工具调用(Multi-turn Tool Call)是从聊天机器人到智能体的关键升级
+
+### 2026-07-03: 拆分 execute_run_script 新增 execute_run_command（修复工具语义错配）
+- **背景**: 用户报告 execute_run_script 报"非法脚本路径: ps aux | grep -E '[n]ginx|nginx'..."。根因：LLM 把诊断命令字符串填入 script 字段，但工具语义是"执行已存在的脚本文件路径"，白名单校验（仅字母数字下划线-点/斜杠）拒绝空格/管道/引号等命令字符。工具语义与真实需求（执行临时诊断命令）错配
+- **方案**: 拆成两个工具——保留 execute_run_script（执行脚本路径，critical）+ 新增 execute_run_command（执行任意命令，critical，危险命令黑名单拦截）。语义清晰，诊断命令和脚本执行分开管控
+- **改动1** `app/services/remediation_service.py`:
+  - 顶部加 `import re` + `from typing import Optional`
+  - 新增 `_DANGEROUS_CMD_PATTERNS`（12 条正则黑名单）+ `_DANGEROUS_CMD_RE` 编译常量 + `_check_dangerous_command(command) -> Optional[str]` 检测函数
+  - 黑名单覆盖：rm -rf /、mkfs、dd if=、shutdown、reboot、halt、poweroff、fork bomb(:(){:|:&};:)、chmod -R 777 /、> /dev/sda、curl|bash、wget|bash
+  - execute_action 新增 `run_command` 分支：命令长度限制 1000 字符 + 黑名单拦截 + _remote_exec 远程执行 timeout=30s
+  - ACTIONS 字典加 `"run_command": {"label": "执行命令", "template": "{command}"}`
+- **改动2** `app/services/mcp_tools.py`: execute_run_script 之后新增 execute_run_command 工具（name/description/input_schema{command,asset_id}/risk_level=critical/expose_to_llm=False/handler 查资产+校验 online+ssh+调 execute_action("run_command",...)）；list_executable_actions 和 propose_action 白名单自动纳入（因 execute_ 前缀 + get_internal_tools 动态收集，无需手动注册）
+- **改动3** `app/services/agent_service.py`: DEFAULT_SYSTEM_PROMPT 远程操作安全规则加 2 条——诊断命令(ps/df/free/top/grep/cat)用 execute_run_command 不用 execute_run_script；execute_run_command 会拦截危险命令不要绕过
+- **安全防护**:
+  - 危险命令黑名单硬拦截（不依赖 LLM 自律）：rm -rf /、mkfs、dd、shutdown、reboot、halt、poweroff、fork bomb、chmod -R 777 /、> /dev/sda、curl|bash、wget|bash
+  - 命令长度限制 1000 字符防超长命令攻击
+  - 资产状态校验（online）+ 连接类型校验（ssh）+ asset_id 必填（与 execute_restart_service 等一致）
+- **验证**: `python -m py_compile` 3 文件 PASS；后端重启 HTTP 200
+- **哲学合规**: Intentional Naming（execute_run_script=脚本路径 / execute_run_command=任意命令，语义分离）、Fail Fast（危险命令黑名单入口硬拦截）、Parse Don't Validate（正则在边界匹配拦截，内部信任已过滤命令）
+- **专业名词**: 工具语义错配(Tool Semantic Mismatch)——工具设计与实际使用场景不符；命令黑名单(Command Blacklist)——硬编码危险命令模式阻止执行；职责分离(Separation of Concerns)——脚本执行与命令执行分开管控
+
+### 2026-07-03: 修复运维操作本机执行安全隐患（改为 SSH 远程执行）
+- **背景**: 用户让 AI 重启 nginx 失败报 `[WinError 2] 系统找不到指定的文件`。排查发现 `remediation_service.execute_action` 用 `subprocess.run(["systemctl","restart",service])` **直接在 AIOps 本机执行**，target 参数被忽略形同虚设。若 AIOps 部署在 Linux 上会真的重启 AIOps 自身服务，是严重安全隐患。用户指出"不应该是远程我添加的资产服务器之类的进行操作吗"——正确，应通过 SSH 连到 CMDB 登记的资产远程执行
+- **根因**: `execute_action(action_type, params, target="localhost")` 的 target 是字符串占位符从未被用于建立连接；restart/clean/script 三类操作都 `subprocess.run` 本机命令；与项目已有的 SSH 基础设施（metric_collector._ssh_connect 用 paramiko 连资产采集指标）逻辑断层
+- **改动1** `app/services/remediation_service.py`: execute_action 签名从 `(action_type, params, target:str)` 改为 `(action_type, params, asset:Asset)`；新增 `_ssh_connect(asset)` 从 asset.connection_config 读 ssh_user/password/port 建立 paramiko 连接（复用 metric_collector 的连接逻辑）；新增 `_remote_exec(asset, command, timeout)` 远程执行单条命令返回 (success, output)；restart/clean/script 三类操作改为 `sudo systemctl restart`/`find ... -delete`/`bash script` 通过 SSH 远程执行；加服务名/路径/脚本路径白名单校验防注入（仅字母数字下划线-点/斜杠）；clean 路径限制 /tmp /var /opt /home 前缀防 `rm -rf /`
+- **改动2** `app/services/mcp_tools.py`: execute_restart_service / execute_clean_disk / execute_run_script 三个工具的 input_schema 把 `target:string` 改为 `asset_id:integer`（必填）；handler 内 `db.query(Asset).get(asset_id)` 查资产，校验 status==online + connection_type==ssh，再调 execute_action 远程执行；资产不存在/离线/非 ssh 类型均 Fail Fast 抛 ValueError
+- **改动3** `app/services/agent_service.py`: DEFAULT_SYSTEM_PROMPT 加"远程操作安全规则"段落——要求 payload 必须含 asset_id、提议前先 query_assets 查 asset_id、用户未指定目标主机应先询问，明确"不在本机执行"
+- **改动4** `app/services/remediation_service.py` check_and_remediate: 自动响应场景按 alert.asset_id 查 Asset 对象传入 execute_action（签名变更同步）；asset 不存在时返回 (False, 错误描述) 不执行
+- **安全增强**:
+  - 本机执行→远程执行：AIOps 服务器永远不碰自身服务，操作目标必须是 CMDB 登记的资产
+  - 资产状态校验：仅 online 资产可执行，离线资产直接拒绝
+  - 连接类型校验：仅 ssh 类型支持，kubernetes/snmp/http 等类型拒绝
+  - 命令注入防护：服务名/脚本路径白名单字符校验，clean 路径前缀白名单
+  - SSH 凭据从 asset.connection_config 读取（加密存储），不在 payload 中传输
+- **验证**: `python -m py_compile` 3 文件 PASS；后端重启 HTTP 200
+- **专业名词**: 命令注入(Command Injection)——未校验输入拼接 shell 命令导致任意命令执行；最小权限(Least Privilege)——操作目标限定为已授权资产；纵深防御(Defense in Depth)——asset_id 校验+状态校验+连接类型校验+字符白名单多层独立防护
+
+### 2026-07-03: 修复待确认动作"静默失败"反馈回路断裂
+- **背景**: 用户让 AI 重启 nginx 失败时，界面上看不到失败原因。根因：后端 `confirm_pending_action` 执行 execute_* 失败后把原因写入 `PendingAction.result_payload`，但前端三个断点导致用户完全无感知——① Vue confirmAction 丢弃返回值无条件弹"已确认"；② `/agent/pending` 页只显示 status 文字不展开 result_payload；③ confirm 路径不记 ToolInvocation，`/agent/invocations` 也查不到。失败 message 只静躺数据库，构成"静默失败(Silent Failure)"缺陷
+- **改动1** `app/services/agent_service.py` confirm_pending_action (531-560 行): 加 exec_start/exec_latency 计时 + 创建 ToolInvocation 审计记录（成功/失败/异常三路径都记），补全确认路径审计盲区，与 LLM 路径/免确认路径的 tool_start/tool_latency 风格一致
+- **改动2** `app/routers/agent_chat.py` pending_list 路由 (233-258 行): 查询 actions 后遍历解析 result_payload 为 a.result_message——失败取 parsed.message、成功取 parsed.result.message（嵌套结构），try/except 容错，供模板展示
+- **改动3** `app/templates/agent_pending.html` 状态列 (41-52 行): failed/executed 状态时在 status 文字下方小字展示 result_message（max-width 260px），用户可在待确认列表页追溯失败原因
+- **改动4** `frontend/src/views/AgentChatView.vue` confirmAction (220-231 行): 读取后端返回 data.result，按 result.success 分流——成功弹 ElMessage.success(执行 message)、失败弹 ElMessage.error(失败原因, duration 6000ms)，不再无条件弹"已确认"
+- **安全性**: 未改动 confirm 行锁/payload schema 校验/allow_action_execution 开关/allow_internal 防护；ToolInvocation 审计只追加不改变执行逻辑；result_message 是只读展示字段，不影响状态机
+- **验证**: `python -m py_compile app/services/agent_service.py app/routers/agent_chat.py` PASS；`npm run build --prefix frontend` 成功（仅 chunk 体积警告，非错误）
+- **哲学合规**: Atomic Predictability（计时是纯计算、ToolInvocation 是声明式追加）、Intentional Naming（exec_start/exec_latency 与既有 tool_start/tool_latency 风格一致）、Fail Loud（失败原因不再静默吞掉，弹窗+列表页双通道暴露）
+- **专业名词**: 静默失败(Silent Failure)——操作失败但无可见信号；反馈回路断裂(Broken Feedback Loop)——执行结果未回传操作者；审计盲区(Audit Blind Spot)——执行路径未落入审计日志
+
+### 2026-07-03: 清理 bundle 卸载后两处无害保留（声明性残留）
+- **背景**: 上一条已卸载 bundle 实体文件，本次清理剩余的两处声明性残留（.gitignore 排除规则 + AGENTS.md 重装说明）
+- **改动1** `.gitignore`: 删除第 45 行 `.opencode/`、第 71 行 `.ocx/`（bundle 专用排除规则，bundle 已卸载无需保留）；**保留** `opencode.json`（第 69-70 行，opencode 自身配置含 GPUStack API Key，与 bundle 无关，仍需禁止入库）
+- **改动2** `AGENTS.md`: 删除第 69-88 行「多 Agent 编排套件 (kdco/opencode-workspace)」整段（含换机重装步骤 ocx init / ocx add kdco/workspace / bun install、--agent plan/build 启动说明），与「构建 Vue 前端」段落合并
+- **验证**: grep `.opencode|.ocx` 于 .gitignore 0 匹配；grep `kdco|ocx|多 Agent|编排者|workspace bundle` 于 AGENTS.md 0 匹配；`opencode.json` 仍在 .gitignore 第 69 行（API Key 防泄露不变）
+- **影响**: 项目内已无任何 bundle 相关引用（实体 + 声明性残留全清）；未来如需重新接入 bundle，需重新手动添加 .gitignore 排除规则 + AGENTS.md 重装说明
+- **提醒**: 全局 npm 包 ocx/bun（机器层）未卸载，如需彻底从机器移除执行 `npm uninstall -g ocx bun`
+
+### 2026-07-03: 彻底卸载 kdco/opencode-workspace 多 Agent 编排套件
+- **背景**: 用户要求彻底卸载 bundle，恢复到只有模型配置的干净状态（反向操作于 2026-07-03 的"接入 kdco/opencode-workspace"条目）
+- **删除**: `D:\AIOPS\project04\.opencode\` 整个目录（含 .gitignore/agents/bun.lock/commands/node_modules/ocx.jsonc/package.json/plugins/skills/tools 共 11 项；node_modules 用 robocopy /MIR 镜像空目录清空以规避 Windows 长路径/只读文件，再 Remove-Item 删空壳）；`D:\AIOPS\project04\.ocx\` 目录
+- **保留不动**: `.hermes.md`（hermes 用，与 bundle 无关）、`AGENTS.md`（项目规则）、`C:\Users\zhuming\.hermes\`（未动）
+- **opencode.json 恢复**: 覆盖写回 2026-07-02 原始干净模型配置（$schema + model=gpustack/glm-5.2 + provider.gpustack），删除 bundle 合并进去的 permission/agent/mcp/instructions/plugin 所有块
+- **验证**: `.opencode` 与 `.ocx` 均不存在；opencode.json 是合法 JSON，顶层 keys 仅 `$schema/model/provider`，baseURL=`http://172.25.1.13:30088/v1` 正确；grep 搜 `researcher|coder|reviewer|scribe|context7|exa|gh_grep|philosophy|opencode-dcp` 返回 0 匹配；grep 搜 `"permission"|"agent"|"mcp"|"instructions"|"plugin"` 返回 0 匹配
+- **影响**: 多 Agent 编排能力（plan/build/coder/researcher/reviewer/scribe/explore + 3 个 MCP + 2 个 npm 插件 + 5 个本地 skill）全部移除；opencode 回到单 agent + GLM-5.2 模型配置
+- **提醒**: 当前运行中的 opencode 会话仍加载旧配置，需重启 opencode 才能让卸载生效；`.opencode/` / `opencode.json` / `.ocx/` 仍被项目 `.gitignore` 排除；未来如需重新接入，按 AGENTS.md 的 ocx init + ocx add kdco/workspace 步骤重装
+
+### 2026-07-03: 修改 hermes 模型配置 glm-5.1 → glm-5.2
+- **背景**: hermes（独立 AI Agent 编程助手，运行在 pythonw.exe，配置文件 `C:\Users\zhuming\.hermes\config.yaml`）原配置使用 glm-5.1 模型，用户要求升级到 glm-5.2，与 opencode 当前使用的模型保持一致
+- **配置文件**: `C:\Users\zhuming\.hermes\config.yaml`（不在项目目录内，在用户主目录）
+- **改动**: 3 处 `glm-5.1` 全部改为 `glm-5.2`（models key / provider 内 model / 顶层 default），base_url(`http://172.25.1.13:30088/v1`)、api_key(`gpustack_8ba6f58b92975bf2_01b707031fe7acef7bcc370fbe98e4de`)、provider name(`zhuming1`) 均保持不变
+- **验证**: 重读文件确认 3 处已变更；grep 搜索 `glm-5.1` 返回 0 匹配，无旧版本残留
+- **提醒**: hermes 若正在运行需重启进程才能让新配置生效
+- **关键认知**: hermes 与 opencode 是两套并行的独立 AI Agent 系统，opencode 无法直接控制 hermes；hermes 安装在 `C:\Users\zhuming\AppData\Local\hermes\hermes-agent\`，CLI 入口可能是该目录下的 `hermes` 文件
+
+### 2026-07-03: 修复 MiniMax 文本工具调用 reviewer 审查的 1 Major + 4 Minor
+- **背景**: 上一轮新增 `_parse_text_tool_calls` / `_strip_text_tool_call_tags` 修复 MiniMax 把工具调用编码在 content 文本标签的问题，reviewer APPROVE 但发现 1 Major + 4 Minor，本次收尾修复
+- **改动文件**: 仅 `app/services/agent_service.py`（4处）+ `app/services/mcp_tools.py`（1处），未动前端/call_llm/call_mcp_tool/mcp_registry/其他后端
+- **Major #1 (协议合规)**: 二次 LLM 调用 message 序列违反 OpenAI 协议
+  - 位置: agent_service.py:288-304 文本解析块
+  - 根因: MiniMax 文本路径下 `message["tool_calls"]` 为 None/缺失（正是触发文本解析的原因），原修复只清理了 content 未补全 tool_calls，导致传给二次 LLM 的序列为 `{role:assistant, content:"文字"（无tool_calls）} + {role:tool, tool_call_id:"text_call_0"}`，标准端点返回 400，二次总结回复丢失
+  - 修复: 文本解析成功后补全 `message["tool_calls"] = parsed`，使 assistant 消息带 tool_calls 字段，role:tool 消息有对应 tool_calls 可跟。生成的 id `text_call_{idx}` 与后续 tool 消息 tool_call_id（tc.get("id","")）一致，协议完全合规
+- **Minor #2 (正则兼容)**: 属性值仅支持双引号
+  - 位置: agent_service.py:84-91 正则常量
+  - 根因: `<invoke\s+name="([^"]+)">` 只匹配双引号，模型偶发输出 `name='x'` 或 `name=x` 时不匹配 → 不创建 PendingAction，content 原样显示
+  - 修复: `_INVOKE_RE` / `_PARAM_RE` 改为 `["\']?([^"\'\s>]+)["\']?\s*` 支持可选单/双/无引号；**同步更新 `_ORPHAN_INVOKE_RE`** 保持一致（否则单引号 invoke 块在游离场景下残留）
+- **Minor #3 (类型校验)**: payload 类型不校验
+  - 位置: mcp_tools.py:995-1000 propose_action handler
+  - 根因: `_parse_text_tool_calls` 中 json.loads 失败回退原字符串，导致 propose_action 收到 payload 为 str，第1027行 `f not in payload` 对字符串做子串匹配行为异常
+  - 修复: payload is None 校验后加 `if not isinstance(payload, dict): raise ValueError`，str/list/int 等非 dict 类型入口 Fail Fast，被 call_mcp_tool 包装为 error 返回 LLM
+- **Minor #4 (游离标签清理)**: _strip_text_tool_call_tags 不清理游离 parameter
+  - 位置: agent_service.py:143-147
+  - 修复: 函数末尾 return 前追加 `cleaned = _PARAM_RE.sub('', cleaned)` 兜底清理游离 `<parameter>` 标签（invoke 匹配失败时的残留）
+- **Minor #1 (仅注释)**: _PARAM_RE 非贪婪 .*? 限制
+  - 位置: agent_service.py:86-87
+  - 处理: 加注释说明非贪婪在第一个 `</parameter>` 处停止，参数值内含此子串会误截断，实际 json.dumps 输出几乎不会含此串，暂不处理
+- **安全性保证**: 现有 tool_calls 处理块、二次 LLM 调用、安全防护逻辑（allow_internal=False）、confirm/cancel 行锁全部不动；只是让文本格式工具调用协议合规、正则更健壮、类型校验更严格
+- **验证**: `python -m py_compile` 2 文件 PASS；临时脚本 41 项全 PASS（双引号回归 / 单引号 / 无引号 / str·list·int payload 抛 ValueError / dict payload 不误判 / 游离 parameter 清理 / 单引号 invoke 块清理 / Major#1 message.tool_calls 补全 + tool_call_id 一致性 + content 清理 / 3 个正则可选引号单测），脚本验证后已删除
+- **哲学合规**: Early Exit（payload 非 dict 立即抛错）、Parse Don't Validate（正则在边界匹配可选引号、类型在入口校验）、Fail Fast（非法类型立即 ValueError）、Intentional Naming（注释说明限制与决策理由、_ORPHAN_INVOKE_RE 注释说明与 _INVOKE_RE 一致性）
+
+### 2026-07-03: 修复 MiniMax 等模型 content 文本标签工具调用兼容性（模型兼容 bug）
+- **背景**: 用户使用 MiniMax 模型（OpenAI 兼容协议）时，模型把工具调用编码在 `content` 文本标签里（`<minimax:tool_call><invoke name="..."><parameter>...`），而非标准 OpenAI `message.tool_calls` 结构化字段。导致 `process_chat_message` 第 210 行 `tool_calls_raw = message.get("tool_calls")` 取到 None，工具调用处理块整段跳过，不创建 PendingAction，含标签的 content 原样返回给用户。任何不严格遵循 OpenAI function calling 结构化返回、而将工具调用编码在 content 文本中的模型（MiniMax 某些版本、部分国产模型）都会触发，只读查询工具 query_* 同样失效
+- **改动文件**: 仅 `app/services/agent_service.py`（单文件，未动前端/call_llm/call_mcp_tool/mcp_registry/其他后端）
+- **方案**: 方案A 文本标签兼容解析——新增纯函数把 content 文本标签解析为标准 OpenAI tool_calls 结构，让文本格式工具调用进入现有处理流程
+- **改动1**: 顶部加 `import re`
+- **改动2**: `call_llm` 之后新增 4 个模块级正则常量 + 2 个纯函数
+  - `_INVOKE_RE` = `<invoke\s+name="([^"]+)">(.*?)</invoke>` (DOTALL) 匹配工具块
+  - `_PARAM_RE` = `<parameter\s+name="([^"]+)">(.*?)</parameter>` (DOTALL) 匹配参数
+  - `_TOOL_CALL_TAG_RE` / `_ORPHAN_INVOKE_RE` 用于 content 清理
+  - `_parse_text_tool_calls(content) -> List[Dict]`：Early Exit（空/无 `<invoke` 标签返回 []）；finditer 遍历所有 invoke 块；参数值边界处 json.loads（成功用解析值如 payload→dict，失败用原字符串如 title）；返回标准 `[{id:"text_call_{idx}", function:{name, arguments:json.dumps}}]`
+  - `_strip_text_tool_call_tags(content) -> str`：移除 `<minimax:tool_call>...</minimax:tool_call>` 整块 + 兜底移除游离 `<invoke>...</invoke>` 块，保留剩余文字
+- **改动3**: `process_chat_message` 第 279-292 行（原 210 行附近），`tool_calls_raw` 取值后加兼容块：`if not tool_calls_raw:` → 从 content 解析 → 解析成功则 `tool_calls_raw = parsed` 并同步清理 `message["content"]` 与 `content` 变量（避免标签经二次 LLM 调用回退或 add_message 落库时原样显示）
+- **安全性保证**: 解析出的工具名仍经 `call_mcp_tool(tool_name, arguments, db=db, user_id=user_id, allow_internal=False)`（LLM 路径，第 306 行已传 allow_internal=False）；execute_* 工具（expose_to_llm=False）仍被 allow_internal 校验拒绝；propose_action 正常走 _pending_action 创建流程；**未改动 call_mcp_tool / allow_internal / mcp_registry 逻辑**，只是让文本格式工具调用能进入现有处理流程
+- **现有逻辑不动**: tool_calls 处理块（297-398 行原 215-316）、二次 LLM 调用（400-417 行原 318-335）、confirm/cancel 行锁全部保留
+- **验证**: `python -m py_compile app/services/agent_service.py` PASS；临时脚本 33 项全 PASS（实际 MiniMax content 解析 / 空字符串 / None / 普通文本无 invoke / 多 invoke 块 / content 清理 / 外层文字保留 / 游离 invoke 清理 / 空参数值 / 数字参数解析为 int），脚本验证后已删除
+- **哲学合规**: Early Exit（content 空/无 invoke 标签立即返回 []）、Parse Don't Validate（参数值边界处 json.loads，内部信任已解析类型）、Atomic Predictability（两个纯函数同输入同输出、正则编译为模块级常量）、Fail Loud（无 invoke 返回空列表不静默吞掉）、Intentional Naming（`_parse_text_tool_calls` / `_strip_text_tool_call_tags` 自解释）
+
+### 2026-07-03: 修复 Phase 6 验证的 2 个 minor 观察点（待确认动作收尾）
+- **背景**: Phase 6 验证发现 2 个不影响功能但不完美的观察点，本次收尾修复让代码更健壮
+- **改动文件**: 仅 `app/services/agent_service.py`（单文件，未动前端/其他后端/测试）
+- **修复点1 (minor)**: 免确认路径 latency_ms=0 硬编码
+  - 位置: process_chat_message 免确认路径 else 分支 (agent_service.py:296-316)
+  - 现状: execute_* 调用前后无计时，ToolInvocation.latency_ms 硬编码 0，非真实执行延迟
+  - 修复: 在 call_mcp_tool(exec_tool_name, pa_payload, db=db, allow_internal=True) 调用前后用 exec_start/exec_latency 计时（与 LLM 路径 tool_start/tool_latency 风格一致），写入真实毫秒数
+  - 附带: schema 校验失败分支 (agent_service.py:290-291) latency_ms 保持 0，加注释说明"未真实调用工具，仅做 schema 校验即被拒绝，故延迟记 0"
+- **修复点2 (minor)**: cancel_pending_action 未用行锁
+  - 位置: cancel_pending_action (agent_service.py:459-472)
+  - 现状: cancel 路径查询 PendingAction 未用 with_for_update()，与 confirm_pending_action (agent_service.py:406-408) 不对称，并发 confirm+cancel 有轻微 TOCTOU
+  - 修复: 改为与 confirm 一致的行锁模式 `.with_for_update().first()`，加注释说明与 confirm 对称 + SQLite 静默退化 + MySQL/PostgreSQL 真正生效；保留原有 status==pending 早退和 canceled 置位逻辑不变
+- **未破坏既有逻辑**: confirm 行锁 (406-408) ✅、payload 校验 (430-435) ✅、配置开关 allow_action_execution (412-414) ✅、兜底对象 (process_chat_message 144-151) ✅、allow_internal 防护 ✅ 全部保留
+- **验证**: `python -m py_compile app/services/agent_service.py` PASS
+- **哲学合规**: Early Exit（cancel 仍先校验 status==pending 早退）、Atomic Predictability（计时是纯计算、行锁是声明式）、Intentional Naming（exec_start/exec_latency 与既有 tool_start/tool_latency 风格一致）
+
+### 2026-07-03: Phase 6 端到端验证完成（待确认动作全链路补全）
+- **验证范围**: 7 个改动文件 py_compile + 工具注册数 + 后端启动 + API 健康检查 + 状态机/审计逻辑代码审查
+- **6.1 静态验证**: py_compile 7 文件全 PASS；临时脚本 16 项全 PASS（脚本验证后已删除）
+  - get_mcp_manifest()=11 (9 read_only + list_executable_actions + propose_action, execute_* 被过滤)
+  - get_internal_tools()=14 (全 execute_ 前缀)
+  - action_type 集合与 propose_action 白名单一致 (14 个)
+  - _RISK_ORDER={"low":1,"medium":2,"high":3,"critical":4} 正确
+  - execute_restart_service risk=high required=['service','target'] expose_to_llm=False
+- **6.2 后端启动 + 健康检查**: 杀残留进程 + 端口释放 + start 新窗口启动 + 等待 10s
+  - GET /login => 200 (服务起来)
+  - 未登录: /agent/pending, /agent/history/1, /agent/sessions, /docs => 303 (中间件工作)
+  - 登录后: /agent/history/1 => 200 (a.title/reason 不报 500), /agent/pending => 200, /agent/sessions => 200, /agent/invocations => 200
+- **6.3 代码审查**:
+  - 状态机重入防护: confirm_pending_action (agent_service.py:401-405) with_for_update 行锁 + status==pending 早退, 重复 confirm 被拒绝 ✅
+  - 审计完整性: 免确认路径 (agent_service.py:296-310) ToolInvocation 含 tool_name/status/payload/结果 ✅ (latency_ms=0 硬编码, minor)
+  - cancel 路径: (agent_service.py:455-457) 校验 status==pending 才允许取消 ✅ (未用 with_for_update, 与 confirm 不对称, minor TOCTOU)
+- **观察点 (minor, 不阻断)**:
+  1. 免确认路径 ToolInvocation latency_ms=0 硬编码 (agent_service.py:307), 非真实执行延迟
+  2. cancel_pending_action 未用 with_for_update 行锁 (agent_service.py:455), 与 confirm 不对称, 并发 confirm+cancel 有轻微 TOCTOU
+- **结论**: Phase 6 验证全 PASS, 待确认动作全链路功能正常, 可交付
+
+### 2026-07-03: 修复 Phase 4 reviewer 审查的 4 个问题（待确认动作功能补全收尾）
+- **背景**: Phase 1-5 全部实施完毕，reviewer 审查发现 4 个遗留问题，本次收尾修复
+- **问题1 (Major 安全)**: `propose_action` 的 risk_level 可被 LLM 降级
+  - 根因: `mcp_tools.py` 原 `risk_level = user_risk if user_risk else valid_actions[action_type]`，LLM 传 "low" 可把 execute_restart_service (登记 high) 标为低危，确认 UI 显示低危徽章诱导用户草率确认，破坏"知情同意"安全控制
+  - 修复: 新增 `_RISK_ORDER = {"low":1,"medium":2,"high":3,"critical":4}` 常量 (mcp_tools.py:936)，取 LLM 指定值与登记值中更高者——**只允许升级不允许降级**；并对非法 risk_level 值 Fail Fast 抛 ValueError (入口 Parse Don't Validate 增强)
+  - 升级逻辑: `if user_risk and _RISK_ORDER[user_risk] > _RISK_ORDER[registered_risk]: risk_level=user_risk else: risk_level=registered_risk`
+- **问题2 (Minor)**: reason 字段被收集后丢弃
+  - 根因: propose_action 收集 reason 放入 _pending_action，但 process_chat_message 创建 PendingAction 时未取 reason，且 PendingAction 模型无 reason 列，LLM 解释的"为什么提议这个操作"被丢弃
+  - 修复: ① models.py PendingAction 加 `reason = Column(String(500), nullable=True)` (risk_level 后); ② agent_service.py 创建 PendingAction 传 `reason=pa_data.get("reason","")`; ③ agent_chat.py session_history_json JSON 路由返回 `reason: a.reason or ""`; ④ agent_chat.html + agent_pending.html Jinja2 模板展示 reason; ⑤ **main.py 加幂等迁移** (SQLite create_all 不 ALTER 已存在表，历史库需 ALTER TABLE pending_actions ADD COLUMN reason，try/except 忽略列已存在)
+- **问题3 (Minor)**: propose 边界未校验 payload schema
+  - 根因: propose_action 对 payload 只检查 is None，不校验是否符合对应 execute_* 的 input_schema，与 system prompt 文档承诺不一致
+  - 修复: mcp_tools.py 顶部新增导入 `get_mcp_tool`，propose_action handler 内联校验 required 必填字段——`exec_tool=get_mcp_tool(f"execute_{action_type}")`，检查 required 字段是否都在 payload 中，缺失抛 ValueError (call_mcp_tool 包装为 error 返回 LLM); confirm 阶段 agent_service._validate_payload_schema 仍二次校验（纵深防御，不破坏 Phase 5）
+- **问题4 (Minor)**: 隐含假设 internal 工具必带 execute_ 前缀
+  - 根因: confirm 路径用 f"execute_{action_type}" 拼工具名，若未来有 internal 工具不带 execute_ 前缀，confirm 会拼错名导致 Tool not found 静默失败
+  - 修复: list_executable_actions (mcp_tools.py:951) 和 propose_action 白名单 (mcp_tools.py:1001) 都加 `if not tool.name.startswith("execute_"): continue` 过滤，非 execute_ 前缀的 internal 工具不暴露给 propose_action，从源头避免拼接错误（当前14个工具全为 execute_ 前缀，过滤暂不改变行为，纯防御未来）
+- **改动文件**: app/services/mcp_tools.py (4处)、app/models.py (1处)、app/services/agent_service.py (1处)、app/routers/agent_chat.py (1处)、app/templates/agent_chat.html (1处)、app/templates/agent_pending.html (2处)、app/main.py (1处幂等迁移)
+- **验证**: `python -m py_compile` 5 个文件全部通过；导入验证 14 个 internal 工具全 execute_ 前缀、_RISK_ORDER 升级逻辑 5 场景模拟正确、execute_restart_service risk=high required=['service','target']
+- **迁移说明**: 项目无 Alembic，用 `Base.metadata.create_all` 建表（不 ALTER 已存在表）。main.py 在建表后对两个 engine 幂等执行 `ALTER TABLE pending_actions ADD COLUMN reason VARCHAR(500)`，try/except 忽略列已存在，确保 demo/real 历史库都能用上 reason 字段，无需手动重置数据库
+- **未改动**: 前端 Vue、Phase 1-5 已有逻辑、测试
+
+
+- **漏洞等级**: Critical（reviewer 审查发现最严重问题）
+- **攻击路径**: `get_mcp_manifest()` 用 `expose_to_llm` 把 execute_* 从 LLM 工具清单隐藏，但 `call_mcp_tool()` 完全不检查该字段；`process_chat_message` 直接取 LLM 响应里的 `tool_name` 调 `call_mcp_tool`，未校验是否在 manifest 中。LLM 可在 tool_call 构造 `{"name":"execute_restart_service",...}`，`_MCP_TOOLS` 字典有该 handler 会被直接执行，绕过 PendingAction 确认闭环
+- **修复方案**: `call_mcp_tool` 增加 `allow_internal=False` 参数做纵深防御
+- **改动1** `app/services/mcp_registry.py:57-70`: `call_mcp_tool` 签名加 `allow_internal: bool = False`；取出 tool 后、执行前加校验 `if not tool.expose_to_llm and not allow_internal: return {"status":"error","message":"Tool '{name}' is internal-only and cannot be called directly"}`
+- **改动2** `app/services/agent_service.py:211`: `process_chat_message` 处理 LLM tool_calls 的调用显式传 `allow_internal=False`（LLM 路径禁止 internal 工具）
+- **改动3** `app/services/agent_service.py:309`: `confirm_pending_action` 内部调用加 `allow_internal=True`（确认路径允许执行 execute_*）
+- **安全效果**: LLM 直调 execute_* → 返回 `{"status":"error","message":"Tool 'execute_*' is internal-only and cannot be called directly"}`；confirm 内部路径 → 正常执行 execute_*
+- **验证**: `python -m py_compile app/services/mcp_registry.py app/services/agent_service.py` 通过；未改动 mcp_tools.py / agent_chat.py / 前端 / 其他文件
+- **最小化改动**: 3 处，仅签名+1 个 guard + 2 处调用点加参数，不破坏现有功能
+
+### 2026-07-03: 待确认动作 Phase 2 - 注册 14 个 execute_* 执行工具
+- **目标**: 补全 `confirm_pending_action` 执行链路。Phase 1 已给 `MCPToolDef` 加 `expose_to_llm` 字段 + `get_mcp_manifest` 加过滤；本阶段在 `mcp_tools.py` 注册 14 个 `execute_*` 工具
+- **改动文件**: `app/services/mcp_tools.py`（顶部加 `from app.services import remediation_service, alert_service, incident_service, asset_service`；末尾追加 14 个工具，文件 422→912 行）
+- **14 个工具** (name → risk_level):
+  1. execute_restart_service (high) → remediation_service.execute_action("restart",...)
+  2. execute_clean_disk (high) → execute_action("clean",...)
+  3. execute_run_script (critical) → execute_action("script",...) [注: service 用脚本**路径**非内容, `bash script_path`]
+  4. execute_acknowledge_alert (low) → alert_service.acknowledge_alert
+  5. execute_resolve_alert (low) → alert_service.resolve_alert
+  6. execute_resolve_incident (low) → incident_service.resolve_incident
+  7. execute_silence_alert (medium) → alert_service.create_silence(rule_id,minutes,reason)
+  8. execute_create_alert_rule (medium) → alert_service.create_rule(db, data)
+  9. execute_update_alert_rule (medium) → alert_service.update_rule(db, rule_id, data)
+  10. execute_delete_alert_rule (high) → alert_service.delete_rule
+  11. execute_create_asset (medium) → asset_service.create_asset(db, data)
+  12. execute_update_asset (medium) → asset_service.update_asset(db, asset_id, data)
+  13. execute_delete_asset (high) → asset_service.delete_asset
+  14. execute_probe_assets (low) → asset_service.probe_assets
+- **关键设计决策**: handler 业务失败时**抛异常**而非返回 `{"status":"error",...}` dict。原因: `call_mcp_tool` (mcp_registry.py:62-63) 在 handler 无异常时强制包成 `{"status":"success","result":...}`; 若 handler 返回 error dict 会被误包为 success, 导致 `confirm_pending_action` (agent_service.py:310) 的 `result.get("status")=="success"` 误判成功。抛异常则 call_mcp_tool 返回 `{"status":"error","message":...}`, confirm 正确判定失败
+- **expose_to_llm=False**: 14 个工具全部设置, 防止 LLM 直调绕过确认。验证: `get_mcp_manifest()` 返回 9 个 (execute_* 全被过滤), `get_mcp_tool()`/`call_mcp_tool()` 仍可按名找到 (confirm 路径可用)
+- **注册模式**: 与现有 9 个 read_only 工具一致 — `@register_mcp_tool(name,description,input_schema,risk_level,expose_to_llm=False)` + handler 自管理 db (`_get_db()` + try/finally close_db) + Early Exit 必填参数检查 + Fail Fast (service 返回 None/False 抛 ValueError)
+- **input_schema**: create/update_rule、create/update_asset 用嵌套 `data` object 对象 (与 service 签名 `create_rule(db, data)` 对齐); 其余用扁平参数
+- **验证**: `python -m py_compile` 通过; 导入模块确认 23 个工具注册 (9 read_only + 14 execute_*); risk_level 与任务清单完全一致
+- **未改动**: agent_service.py / agent_chat.py / 前端 / seed_data (Phase 1 已改不动); propose_action / list_executable_actions 留给 Phase 3
+
 ### 2026-07-03: 告警列表服务端分页 + 临时文件清理
 - **告警分页**: `alert_service.list_alerts()` 增加 `page`/`per_page` 参数，返回 `(alerts, total)`；`alerts.py` 路由计算分页信息；`alerts.html` 加分页控件（上一页/下一页/页码省略、"共 N 条"提示）
 - **run.py**: `reload=True` 改为 `reload=False`（规避 Windows 热重载旧进程不退出的坑）

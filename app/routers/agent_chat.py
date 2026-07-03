@@ -127,7 +127,7 @@ def session_history_json(session_id: int, request: Request, db: Session = Depend
             .order_by(ChatMessage.created_at.asc()).all()
         ]
         pending_list = [
-            {"id": a.id, "title": a.description, "risk_level": a.risk_level}
+            {"id": a.id, "title": a.title, "risk_level": a.risk_level, "reason": a.reason or ""}
             for a in db.query(PendingAction)
             .filter(PendingAction.session_id == session.id, PendingAction.status == PendingAction.STATUS_PENDING).all()
         ]
@@ -188,11 +188,38 @@ def delete_session(session_id: int, request: Request, db: Session = Depends(get_
 @router.post("/pending/{action_id}/confirm")
 def confirm_action(action_id: int, request: Request, db: Session = Depends(get_db)):
     user_name = request.session.get("username", "unknown")
-    confirm_pending_action(db, action_id, user_name)
+    result = confirm_pending_action(db, action_id, user_name)
     accept = request.headers.get("accept", "")
     if "json" in accept:
-        return {"status": "ok"}
+        return {"status": "ok", "result": result}
     return RedirectResponse(url="/agent/chat", status_code=303)
+
+
+@router.get("/pending/{action_id}/status")
+def pending_status(action_id: int, request: Request, db: Session = Depends(get_db)):
+    """查询待确认动作的执行状态（前端轮询用）."""
+    action = db.query(PendingAction).filter(PendingAction.id == action_id).first()
+    if not action:
+        return {"status": "not_found"}
+    # 解析 result_payload 提取 message
+    result_message = ""
+    if action.result_payload and action.result_payload != "{}":
+        try:
+            parsed = json.loads(action.result_payload)
+            result_message = parsed.get("message", "")
+            if not result_message:
+                inner = parsed.get("result", {})
+                if isinstance(inner, dict):
+                    result_message = inner.get("message", "")
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {
+        "status": action.status,
+        "result_message": result_message,
+        "is_terminal": action.status in (
+            PendingAction.STATUS_EXECUTED, PendingAction.STATUS_FAILED, PendingAction.STATUS_CANCELED
+        ),
+    }
 
 
 @router.post("/pending/{action_id}/cancel")
@@ -240,6 +267,20 @@ def pending_list(request: Request, db: Session = Depends(get_db)):
         .order_by(PendingAction.created_at.desc())
         .all()
     )
+    # 解析 result_payload 供模板展示执行结果/失败原因（修复静默失败反馈回路）
+    for a in actions:
+        a.result_message = ""
+        if a.result_payload and a.result_payload != "{}":
+            try:
+                parsed = json.loads(a.result_payload)
+                if parsed.get("status") == "error":
+                    a.result_message = parsed.get("message", "")
+                elif parsed.get("status") == "success":
+                    inner = parsed.get("result") or {}
+                    if isinstance(inner, dict):
+                        a.result_message = inner.get("message", "")
+            except (json.JSONDecodeError, TypeError):
+                pass
     return templates.TemplateResponse("agent_pending.html", {
         "request": request,
         "actions": actions,

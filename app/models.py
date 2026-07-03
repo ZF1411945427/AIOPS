@@ -913,6 +913,7 @@ class PendingAction(Base):
 
     STATUS_PENDING = "pending"
     STATUS_CONFIRMED = "confirmed"
+    STATUS_EXECUTING = "executing"
     STATUS_CANCELED = "canceled"
     STATUS_EXECUTED = "executed"
     STATUS_FAILED = "failed"
@@ -923,6 +924,7 @@ class PendingAction(Base):
     action_type = Column(String(64), nullable=False)
     title = Column(String(128), default="")
     risk_level = Column(String(16), default=RISK_LOW)
+    reason = Column(String(500), nullable=True)
     status = Column(String(16), default=STATUS_PENDING)
     action_payload = Column(Text, default="{}")
     result_payload = Column(Text, default="{}")
