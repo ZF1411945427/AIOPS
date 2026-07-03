@@ -4,6 +4,36 @@
 - **清理**: 删除临时调试文件 `_fix_templates.py`、`_test_login.py`、`cookies.txt`
 - **安全**: `opencode.json`（含 GPUStack API Key）加入 `.gitignore`，禁止入库
 
+### 2026-07-03: 接入 kdco/opencode-workspace 多 Agent 编排套件（A 方案完整安装）
+- **来源**: https://github.com/kdcokenny/opencode-workspace（bundle）+ https://github.com/kdcokenny/ocx（OCX 包管理器）
+- **安装方式**: 组件模式（`ocx add kdco/workspace`，非 profile 模式），保留项目原有 GLM-5.2 模型配置
+- **前置依赖**: bun 1.3.14（`npm install -g bun`，bun.exe 路径 `C:\Users\zhuming\AppData\Roaming\npm\node_modules\bun\bin` 已加入用户 PATH）+ ocx 2.0.11（`npm install -g ocx`，需 bun 运行时）
+- **安装步骤**: `ocx init`(项目级) → `ocx registry add https://registry.kdco.dev --name kdco` → `ocx add kdco/workspace` → `.opencode/` 内 `bun install`（装 zod/unique-names-generator/node-notifier/detect-terminal/jsonc-parser）
+- **安装结果**: 17 个组件进 `.opencode/`:
+  - 4 agent: coder/researcher/reviewer/scribe（.md 文件）
+  - 5 skill: plan-protocol/plan-review/code-philosophy/frontend-philosophy/code-review
+  - 4 plugin: workspace-plugin/background-agents/notify/worktree + kdco-primitives 共享模块（.ts）
+  - 1 command: /review
+  - 1 tool: philosophy.md（全局 instructions）
+- **opencode.json 合并**: ocx 自动把 bundle 的 opencode 配置合并进项目 opencode.json:
+  - 7 个 agent 的 permission + build 的 prompt（plan/build/explore 编排者 + coder/researcher/reviewer/scribe 专家）
+  - 3 个 MCP: context7 / exa / gh_grep（remote，researcher 专用）
+  - 2 个 npm 插件: @tarquinen/opencode-dcp@3.1.3 / @franlol/opencode-md-table-formatter@0.0.6
+  - 全局 permission: webfetch=deny / task=deny / worktree_*=deny
+  - **模型保留**: 顶层 `model: gpustack/glm-5.2`，所有 agent 默认用 GLM-5.2（bundle 原默认是 OpenCode Zen 免费模型，组件模式下不注入 model 字段）
+- **修复 build agent prompt 转义 bug**: registry.jsonc 源数据里 build prompt 的换行被过度转义为 `\\\\\\\\n`（8 反斜杠），opencode.json 里 10 处替换为 `\\n`（JSON 换行），JSON 合法性 + 真换行均已验证
+- **验证**: `opencode agent list` 显示 11 个 agent:
+  - 新增编排者: plan (primary) / build (primary)
+  - 新增专家: coder / researcher / reviewer / scribe (subagent)
+  - opencode 内置: compaction / explore / general / summary / title
+  - .opencode/skills/ 下 5 个 skill 目录已被 opencode 自动授权（external_directory 权限条目可见）
+- **架构**: 编排者(plan/build)只读+task委派 → 专家(coder/researcher/reviewer/scribe/explore)各司其职；plan_save/plan_read/delegate 等自定义工具由 workspace-plugin.ts + background-agents.ts 提供
+- **重要提醒**:
+  1. `.opencode/` / `opencode.json` / `.ocx/` 均被项目 `.gitignore` 排除（line 45/70/68），多 agent 配置**不入 git**，换机需重装
+  2. 当前运行中的 opencode 会话加载的是旧配置，**需重启 opencode 才能激活多 agent**
+  3. 2 个 npm 插件首次启动需联网安装（opencode 自动 npx）
+  4. researcher 的 3 个 MCP 是公网服务，内网/无代理环境可能连不通
+
 ### 2026-07-02: opencode 模型配置切换为 GPUStack (GLM-5.1)
 - 创建 `opencode.json`，自定义 provider 指向 GPU 集群 API
 - 端点: `http://172.25.1.13:30088/v1`，模型: `glm-5.1`

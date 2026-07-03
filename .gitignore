@@ -68,3 +68,4 @@ tok.txt
 
 # ===== 开发工具配置（含 API Key，禁止入库）=====
 opencode.json
+.ocx/
