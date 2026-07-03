@@ -14,10 +14,12 @@ templates = get_templates()
 
 
 @router.get("", response_class=HTMLResponse)
-def alert_list(request: Request, status: str = "", severity: str = "", db: Session = Depends(get_db)):
-    alerts = alert_service.list_alerts(db, status, severity)
+def alert_list(request: Request, status: str = "", severity: str = "", page: int = 1, db: Session = Depends(get_db)):
+    per_page = 20
+    alerts, total = alert_service.list_alerts(db, status, severity, page, per_page)
     rules = alert_service.list_rules(db)
     stats = alert_service.get_alert_stats(db)
+    total_pages = (total + per_page - 1) // per_page
     return templates.TemplateResponse("alerts.html", {
         "request": request,
         "alerts": alerts,
@@ -25,6 +27,10 @@ def alert_list(request: Request, status: str = "", severity: str = "", db: Sessi
         "stats": stats,
         "status_filter": status,
         "severity_filter": severity,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
     })
 
 

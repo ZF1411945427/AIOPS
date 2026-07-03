@@ -202,13 +202,16 @@ def get_alert_detail(db: Session, alert_id: int):
     }
 
 
-def list_alerts(db: Session, status: str = "", severity: str = ""):
+def list_alerts(db: Session, status: str = "", severity: str = "", page: int = 1, per_page: int = 20):
     q = db.query(Alert)
     if status:
         q = q.filter(Alert.status == status)
     if severity:
         q = q.filter(Alert.severity == severity)
-    return q.order_by(Alert.created_at.desc()).all()
+    q = q.order_by(Alert.created_at.desc())
+    total = q.count()
+    alerts = q.offset((page - 1) * per_page).limit(per_page).all()
+    return alerts, total
 
 
 def acknowledge_alert(db: Session, alert_id: int):

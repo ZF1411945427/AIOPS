@@ -1,3 +1,18 @@
+### 2026-07-03: 告警列表服务端分页 + 临时文件清理
+- **告警分页**: `alert_service.list_alerts()` 增加 `page`/`per_page` 参数，返回 `(alerts, total)`；`alerts.py` 路由计算分页信息；`alerts.html` 加分页控件（上一页/下一页/页码省略、"共 N 条"提示）
+- **run.py**: `reload=True` 改为 `reload=False`（规避 Windows 热重载旧进程不退出的坑）
+- **清理**: 删除临时调试文件 `_fix_templates.py`、`_test_login.py`、`cookies.txt`
+- **安全**: `opencode.json`（含 GPUStack API Key）加入 `.gitignore`，禁止入库
+
+### 2026-07-02: opencode 模型配置切换为 GPUStack (GLM-5.1)
+- 创建 `opencode.json`，自定义 provider 指向 GPU 集群 API
+- 端点: `http://172.25.1.13:30088/v1`，模型: `glm-5.1`
+- 使用 `@ai-sdk/openai-compatible` 适配 OpenAI 兼容接口
+
+### 2026-07-02: 从 GitHub 拉取更新并启动项目
+- `git pull` 更新到最新 `8487377`，27 个文件变更（+539/-157）
+- 后端 8000 / 前端 3000 均已启动成功
+
 ### 2026-07-01: 登录页绚烂星空动画完成
 - **LoginView.vue**: 添加 Canvas 星场动画（160颗星星、15%暖橙色星、闪烁效果、偶发流星）
 - **CSS**: 添加 `.starfield` 绝对定位覆盖 brand-col 区域，`pointer-events: none`

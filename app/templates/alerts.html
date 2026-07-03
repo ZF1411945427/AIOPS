@@ -78,6 +78,9 @@
 
 <div class="panel">
     <div class="panel-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <span class="text-sm text-muted">共 {{ total }} 条告警，第 {{ page }}/{{ total_pages }} 页</span>
+        </div>
         {% if alerts %}
         <table class="table">
             <thead>
@@ -124,6 +127,32 @@
         {% endif %}
     </div>
 </div>
+
+{% if total_pages > 1 %}
+<div class="pagination" style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:16px">
+    {% if page > 1 %}
+    <a href="?status={{ status_filter }}&severity={{ severity_filter }}&page={{ page - 1 }}" class="btn btn-sm">上一页</a>
+    {% else %}
+    <span class="btn btn-sm" style="opacity:0.4;cursor:not-allowed">上一页</span>
+    {% endif %}
+
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}
+        <span class="btn btn-sm btn-primary">{{ p }}</span>
+        {% elif p <= 3 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
+        <a href="?status={{ status_filter }}&severity={{ severity_filter }}&page={{ p }}" class="btn btn-sm">{{ p }}</a>
+        {% elif p == 4 or p == total_pages - 2 %}
+        <span class="text-muted">...</span>
+        {% endif %}
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <a href="?status={{ status_filter }}&severity={{ severity_filter }}&page={{ page + 1 }}" class="btn btn-sm">下一页</a>
+    {% else %}
+    <span class="btn btn-sm" style="opacity:0.4;cursor:not-allowed">下一页</span>
+    {% endif %}
+</div>
+{% endif %}
 
 <script>
 function checkAlerts() {
