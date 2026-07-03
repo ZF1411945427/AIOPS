@@ -63,8 +63,11 @@
               <el-tag :type="riskTagType(pa.risk_level)" size="small" effect="light">{{ pa.risk_level }}</el-tag>
             </div>
             <div class="pending-actions">
-              <button class="pending-btn confirm" @click="confirmAction(pa.id)">确认</button>
-              <button class="pending-btn cancel" @click="cancelAction(pa.id)">取消</button>
+              <button class="pending-btn confirm" :disabled="confirmingId === pa.id" @click="confirmAction(pa.id)">
+                <span v-if="confirmingId === pa.id" class="confirm-spinner"></span>
+                {{ confirmingId === pa.id ? '执行中...' : '确认' }}
+              </button>
+              <button class="pending-btn cancel" :disabled="confirmingId === pa.id" @click="cancelAction(pa.id)">取消</button>
             </div>
           </div>
         </div>
@@ -90,6 +93,7 @@ const messagesRef = ref(null)
 const inputMessage = ref('')
 const loading = ref(false)
 const loadingSessions = ref(false)
+const confirmingId = ref(null)
 const sessions = ref([])
 const messages = ref([])
 const activeSessionId = ref(null)
@@ -191,7 +195,14 @@ async function sendMessage() {
       if (!sessions.value.find(s => s.id === data.session_id))
         sessions.value.unshift({ id: data.session_id, title: message.slice(0, 64) })
     }
-    messages.value.push({ role: 'assistant', content: data.reply, created_at: new Date().toISOString() })
+    // 重新从后端加载消息
+    if (activeSessionId.value) {
+      await loadMessages(activeSessionId.value)
+    } else {
+      messages.value.push({ role: 'assistant', content: data.reply, created_at: new Date().toISOString() })
+    }
+    // 优先用 send 响应的 pending_actions（最可靠，同 db session 创建）
+    // loadMessages 的 /agent/history 可能因 db session 隔离返回空 pending_actions
     if (data.pending_actions && data.pending_actions.length > 0)
       pendingActions.value = data.pending_actions
     await nextTick()
@@ -218,8 +229,58 @@ async function deleteSession(id) {
 }
 
 async function confirmAction(id) {
-  try { await request.post(`/agent/pending/${id}/confirm`); ElMessage.success('已确认'); pendingActions.value = pendingActions.value.filter(a => a.id !== id) }
-  catch (e) { ElMessage.error('操作失败: ' + e.message) }
+  confirmingId.value = id
+  try {
+    const data = await request.post(`/agent/pending/${id}/confirm`)
+    const result = data.result || {}
+    // 异步模式：confirm 立即返回 executing，后台线程执行命令+LLM总结
+    if (result.status === 'executing') {
+      ElMessage.info('命令正在远程执行中，请稍候...')
+      // 轮询状态直到终态（executed/failed/canceled）
+      const pollResult = await pollPendingStatus(id)
+      if (pollResult.status === 'executed') {
+        ElMessage.success('执行成功')
+      } else if (pollResult.status === 'failed') {
+        ElMessage({ message: pollResult.result_message || '执行失败', type: 'error', duration: 6000 })
+      }
+      // 重新加载消息：后端已把 LLM 总结或兜底 message 存为 assistant 消息
+      if (activeSessionId.value) {
+        await loadMessages(activeSessionId.value)
+      }
+    } else {
+      // 兼容同步模式（理论上不会走到，但兜底）
+      const execResult = result.result || {}
+      if (result.success) {
+        ElMessage.success(execResult.message || '执行成功')
+      } else {
+        ElMessage({ message: execResult.message || '执行失败', type: 'error', duration: 6000 })
+      }
+      if (result.reply) {
+        messages.value.push({ role: 'assistant', content: result.reply, created_at: new Date().toISOString() })
+        await nextTick()
+        scrollToBottom(true)
+      }
+      if (activeSessionId.value) {
+        await loadMessages(activeSessionId.value)
+      }
+    }
+    pendingActions.value = pendingActions.value.filter(a => a.id !== id)
+  } catch (e) { ElMessage.error('操作失败: ' + e.message) }
+  finally { confirmingId.value = null }
+}
+
+async function pollPendingStatus(id) {
+  // 轮询 /pending/{id}/status，每 2s 一次，最多 60s（30 次）
+  for (let i = 0; i < 30; i++) {
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    try {
+      const data = await request.get(`/agent/pending/${id}/status`)
+      if (data.is_terminal) {
+        return data
+      }
+    } catch (e) { /* 忽略单次轮询错误，继续 */ }
+  }
+  return { status: 'timeout', result_message: '执行超时，请稍后查看待确认列表' }
 }
 
 async function cancelAction(id) {
@@ -238,4 +299,12 @@ async function cancelAction(id) {
 }
 .session-item:hover .session-del-btn { display: flex; }
 .session-del-btn:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
+.confirm-spinner {
+  display: inline-block; width: 12px; height: 12px;
+  border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+  vertical-align: middle; margin-right: 4px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.pending-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

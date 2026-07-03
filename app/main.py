@@ -32,6 +32,17 @@ from app.routers.chaos import seed_chaos_scenarios
 for _mode, _eng in get_all_engines().items():
     Base.metadata.create_all(bind=_eng)
 
+# SQLite create_all 只建新表不 ALTER 已存在表, 需幂等迁移补充 PendingAction.reason 列
+# (历史库已存在 pending_actions 表, 不迁移会导致 INSERT 含 reason 字段失败)
+from sqlalchemy import text as _sa_text
+for _eng in get_all_engines().values():
+    with _eng.connect() as _conn:
+        try:
+            _conn.execute(_sa_text("ALTER TABLE pending_actions ADD COLUMN reason VARCHAR(500)"))
+            _conn.commit()
+        except Exception:
+            pass  # 列已存在则忽略; create_all 已保证表存在
+
 app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
 
 PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide"}

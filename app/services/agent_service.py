@@ -1,6 +1,8 @@
 import json
+import re
 import time
 import hashlib
+import threading
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -11,27 +13,48 @@ from app.models import (
     AIProvider, AgentConfig, ChatSession, ChatMessage,
     PendingAction, ToolInvocation, MCPServer,
 )
-from app.services.mcp_registry import get_mcp_manifest, call_mcp_tool
+from app.services.mcp_registry import get_mcp_manifest, call_mcp_tool, get_mcp_tool
+from app.database import get_session_for, get_db_mode
 
 
-DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你能够帮助用户：
+DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 
-1. **查询资源**：查看资产列表、告警、指标、日志、K8s 资源等
+1. **查询资源**：查看资产、告警、指标、日志、K8s 资源等
 2. **分析问题**：分析告警根因、异常检测结果、调用链等
-3. **生成任务**：生成运维任务（脚本执行、巡检等）
-4. **提供建议**：基于平台数据给出运维建议
+3. **执行运维操作**：通过"提议-确认"闭环执行写操作（重启服务、清理磁盘、确认/解决告警、管理规则与资产等）
 
-你可以使用平台提供的工具来获取信息。对于任何有风险的操作（创建、修改、删除、执行），你必须生成待确认动作，等待用户确认后才能执行。
+## 工具使用规则（必须严格遵守！）
+- **只读查询**：直接调用 query_* / list_* / get_* / analyze_* 等查询工具。
+- **运维操作（写/执行）**：严禁直接调用 execute_* 工具（它们是内部工具，已被禁用）。必须按以下流程：
+  1. 先调用 `list_executable_actions` 查看可用动作清单及其 action_type、参数 schema、风险等级。
+  2. 再调用 `propose_action` 提议动作（传入合法 action_type、title、payload、reason）。
+  3. 系统会生成待确认动作并在界面上显示确认按钮，用户点击按钮后自动执行。你不要假设已执行。
+  4. **禁止臆造 action_type**，必须使用 list_executable_actions 返回的合法值；payload 必须符合对应 execute_* 工具的参数 schema。
 
-回答格式要求：
+## ⚠️ 严禁模拟执行（极重要！）
+- **禁止在回复文本中假装已执行操作**。你不能自己说"已执行"、"执行中"、"操作完成"等，除非你真正调用了 propose_action 工具并看到返回的 _pending_action。
+- **禁止把用户的"确认"回复当作执行指令**。用户说"确认"只是在回复你的提议，真正的执行由系统在用户点击界面按钮后自动完成。
+- **每次需要执行运维操作时，必须调用 propose_action 工具**，不要只在文本里写"已提议"。如果没有调用 propose_action 工具，就没有待确认动作，用户界面不会显示确认按钮，操作永远不会执行。
+- **正确流程**：用户要求操作 → 调用 propose_action 工具 → 工具返回 _pending_action → 回复用户"已提议，请在界面点击确认按钮" → 等待用户在界面点击确认 → 系统自动执行并返回结果。
+- **错误流程**：用户要求操作 → 你在文本里写"已提议/执行中/已完成"但不调用 propose_action → 没有创建待确认动作 → 用户看不到确认按钮 → 操作永远不执行。
+
+## 远程操作安全规则（重要！）
+- 重启服务(execute_restart_service)、清理磁盘(execute_clean_disk)、执行脚本(execute_run_script)、执行命令(execute_run_command) 必须通过 SSH 远程执行，**不在本机执行**。
+- payload 必须包含 `asset_id`（CMDB 资产 ID），系统会通过该资产的 SSH 连接配置远程登录目标主机执行命令。
+- 提议前应先用 query_assets 查询资产，把目标主机的 asset_id 填入 payload。切勿使用 localhost 或本机 IP。
+- 若用户未指定目标主机，应先询问"要对哪台资产执行操作"，再查 asset_id。
+- **诊断命令**（如 ps/df/free/top/grep/cat 查看进程/磁盘/内存等）用 execute_run_command，不要用 execute_run_script（后者只执行已存在的脚本文件路径）。
+- execute_run_command 会拦截危险命令（rm -rf /、mkfs、dd、shutdown、reboot 等），不要尝试绕过。
+
+## 回答格式
 1. 先给出结论
 2. 列出证据（引用数据来源）
 3. 分析风险（如果有操作建议）
 4. 给出具体建议或下一步操作"""
 
 
-def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Dict]] = None) -> Dict:
-    """Call OpenAI-compatible API"""
+def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Dict]] = None, timeout_override: Optional[int] = None) -> Dict:
+    """Call OpenAI-compatible API. timeout_override 可覆盖 provider.timeout_seconds 防卡死."""
     if not provider or not provider.is_enabled:
         return {"error": "Provider not available"}
 
@@ -59,12 +82,86 @@ def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Di
             f"{base_url}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=provider.timeout_seconds,
+            timeout=timeout_override or provider.timeout_seconds,
         )
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
         return {"error": str(e)}
+
+
+# MiniMax 等模型把工具调用编码在 content 文本标签里（非标准 OpenAI tool_calls 结构）：
+#   <minimax:tool_call>
+#   <invoke name="propose_action">
+#   <parameter name="action_type">restart_service</parameter>
+#   ...
+#   </invoke>
+#   </minimax:tool_call>
+# 下列正则把上述文本解析为标准 tool_calls，让后续处理流程统一执行。
+# 属性值兼容可选引号（双引号/单引号/无引号），防模型偶发输出 name='x' 或 name=x 时不匹配
+_INVOKE_RE = re.compile(r'<invoke\s+name=["\']?([^"\'\s>]+)["\']?\s*>(.*?)</invoke>', re.DOTALL)
+# 注：非贪婪 .*? 在第一个 </parameter> 处停止。若参数值内含 </parameter> 子串会误截断，
+# 实际中 json.dumps 输出几乎不会含此串，按标签深度解析（如 html.parser）收益有限，暂不处理
+_PARAM_RE = re.compile(r'<parameter\s+name=["\']?([^"\'\s>]+)["\']?\s*>(.*?)</parameter>', re.DOTALL)
+_TOOL_CALL_TAG_RE = re.compile(r'<minimax:tool_call>.*?</minimax:tool_call>', re.DOTALL)
+# 与 _INVOKE_RE 保持一致的可选引号模式，用于清理游离 invoke 块（无捕获组，仅用于 sub 清理）
+_ORPHAN_INVOKE_RE = re.compile(r'<invoke\s+name=["\']?[^"\'\s>]+["\']?\s*>.*?</invoke>', re.DOTALL)
+
+
+def _parse_text_tool_calls(content: str) -> List[Dict]:
+    """从 content 文本中解析内嵌的工具调用标签，构造标准 OpenAI tool_calls 结构.
+
+    部分模型（如 MiniMax 某些版本）不返回结构化 tool_calls 字段，而是把工具调用
+    编码在 content 文本标签中。本函数把这种文本解析为标准 tool_calls 结构。
+
+    参数值会尝试 json.loads：成功用解析值（如 payload 这种 JSON 字符串 → dict），
+    失败用原字符串（如 title 这种纯文本）。无 invoke 标签时返回空列表。
+    """
+    # Early Exit：空内容或不含 invoke 标签，直接返回空列表，不进入正则解析
+    if not content or "<invoke" not in content:
+        return []
+
+    tool_calls: List[Dict] = []
+    for idx, invoke_match in enumerate(_INVOKE_RE.finditer(content)):
+        tool_name = invoke_match.group(1)
+        body = invoke_match.group(2)
+
+        parsed_args: Dict[str, Any] = {}
+        for param_match in _PARAM_RE.finditer(body):
+            param_name = param_match.group(1)
+            raw_value = param_match.group(2)
+            # Parse Don't Validate：边界处尝试 JSON 解析，成功用解析值，
+            # 失败保留原字符串（纯文本参数如 title）
+            try:
+                parsed_args[param_name] = json.loads(raw_value)
+            except (json.JSONDecodeError, ValueError):
+                parsed_args[param_name] = raw_value
+
+        tool_calls.append({
+            "id": f"text_call_{idx}",
+            "function": {
+                "name": tool_name,
+                "arguments": json.dumps(parsed_args, ensure_ascii=False),
+            },
+        })
+
+    return tool_calls
+
+
+def _strip_text_tool_call_tags(content: str) -> str:
+    """从 content 中剥离工具调用标签文本，保留剩余文字回复.
+
+    先移除 <minimax:tool_call>...</minimax:tool_call> 整块（含外层包装），
+    再兜底移除游离的 <invoke>...</invoke> 块，避免标签文本原样显示给用户。
+    """
+    # Early Exit：空内容无需清理
+    if not content:
+        return ""
+    cleaned = _TOOL_CALL_TAG_RE.sub('', content)
+    cleaned = _ORPHAN_INVOKE_RE.sub('', cleaned)
+    # 兜底：清理可能游离的 <parameter> 标签（invoke 匹配失败时的残留）
+    cleaned = _PARAM_RE.sub('', cleaned)
+    return cleaned.strip()
 
 
 def get_or_create_session(db: Session, user_id: int, session_id: Optional[int] = None) -> ChatSession:
@@ -129,12 +226,21 @@ def process_chat_message(
 ) -> Dict:
     """Main entry point for chat message processing"""
     session = get_or_create_session(db, user_id, session_id)
+    # 查询时不过滤 is_enabled：管理员禁用配置时仍能拿到记录，
+    # 用它自身的 require_confirmation/allow_action_execution 值，
+    # 避免禁用反而触发纯内存兜底对象误走免确认路径（与 confirm 路径查询保持一致）
     config = db.query(AgentConfig).filter(
-        AgentConfig.name == config_name, AgentConfig.is_enabled == True
+        AgentConfig.name == config_name
     ).first()
 
     if not config:
-        config = AgentConfig(name="default", is_enabled=True)
+        # 兜底纯内存对象：显式传入安全默认值，不依赖 SQLAlchemy column default
+        # （column default 仅在 INSERT/flush 时生效，纯内存对象访问为 None，
+        #  会导致 require_confirmation 为 None → if 判定为 False → 误走免确认路径）
+        config = AgentConfig(
+            name="default", is_enabled=True,
+            require_confirmation=True, allow_action_execution=True,
+        )
 
     provider = None
     if config.default_provider_id:
@@ -179,7 +285,9 @@ def process_chat_message(
             },
         })
 
-    # Call LLM
+    # Call LLM (支持多轮工具调用循环，最多 5 轮防无限循环)
+    # MiniMax 等模型可能需要多轮：query_assets 查资产 → propose_action 提议 → 二次总结回复
+    # 单轮设计会导致二次 LLM 响应中的工具调用被忽略，标签原样显示给用户
     start = time.time()
     response = call_llm(provider, messages, openai_tools if openai_tools else None)
     latency = int((time.time() - start) * 1000)
@@ -189,26 +297,57 @@ def process_chat_message(
         add_message(db, session.id, "assistant", error_text, message_type="error")
         return {"session_id": session.id, "reply": error_text, "error": True}
 
-    # Process response
-    choice = response.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    content = message.get("content", "") or ""
-    tool_calls_raw = message.get("tool_calls")
-
     tool_results = []
     pending_actions = []
+    content = ""
+    max_rounds = 5
+    last_round_tool_names: List[str] = []
 
-    if tool_calls_raw:
+    for round_idx in range(max_rounds):
+        # Parse response
+        choice = response.get("choices", [{}])[0]
+        message = choice.get("message", {})
+        content = message.get("content", "") or ""
+        tool_calls_raw = message.get("tool_calls")
+
+        # 兼容性修复：部分模型（如 MiniMax）将工具调用编码在 content 文本标签中
+        # 而非标准 tool_calls 结构化字段，需从 content 解析
+        if not tool_calls_raw:
+            content_text = message.get("content") or ""
+            parsed = _parse_text_tool_calls(content_text)
+            if parsed:
+                tool_calls_raw = parsed
+                # 补全结构化 tool_calls 字段，使后续 LLM 调用遵守 OpenAI 协议：
+                # role: tool 消息必须紧跟在带 tool_calls 的 assistant 消息之后，
+                # 否则标准端点返回 400。生成的 id 为 text_call_{idx}，
+                # 与后续 tool 消息的 tool_call_id（tc.get("id", "")）一致，协议完全合规。
+                message["tool_calls"] = parsed
+
+        # 无论是否解析出工具调用，都清理 content 中的标签文本
+        # 避免标签经 add_message 落库或显示给用户
+        if content and ("<minimax:tool_call" in content or "<invoke" in content or "<parameter" in content):
+            cleaned = _strip_text_tool_call_tags(content)
+            message["content"] = cleaned
+            content = cleaned
+
+        # 无工具调用：当前 content 即最终回复，结束循环
+        if not tool_calls_raw:
+            break
+
+        # 执行工具调用
+        round_tool_results = []
+        last_round_tool_names = []
         for tc in tool_calls_raw:
             tool_name = tc["function"]["name"]
+            last_round_tool_names.append(tool_name)
             try:
                 arguments = json.loads(tc["function"]["arguments"])
             except (json.JSONDecodeError, KeyError):
                 arguments = {}
 
-            # Call tool
+            # Call tool (LLM 路径：禁止调用 internal-only 工具，强制走确认闭环)
             tool_start = time.time()
-            tool_result = call_mcp_tool(tool_name, arguments, db=db, user_id=user_id)
+            tool_result = call_mcp_tool(tool_name, arguments, db=db, user_id=user_id, allow_internal=False)
             tool_latency = int((time.time() - tool_start) * 1000)
 
             # Record invocation
@@ -224,6 +363,11 @@ def process_chat_message(
             db.add(invocation)
             db.commit()
 
+            round_tool_results.append({
+                "tool_name": tool_name,
+                "result": tool_result,
+                "tool_call_id": tc.get("id", ""),
+            })
             tool_results.append({
                 "tool_name": tool_name,
                 "result": tool_result,
@@ -235,41 +379,169 @@ def process_chat_message(
                 result_data = tool_result.get("result", {})
                 if isinstance(result_data, dict) and result_data.get("_pending_action"):
                     pa_data = result_data["_pending_action"]
-                    pa = PendingAction(
-                        session_id=session.id,
-                        message_id=user_msg.id,
-                        action_type=pa_data.get("action_type", "unknown"),
-                        title=pa_data.get("title", ""),
-                        risk_level=pa_data.get("risk_level", "low"),
-                        action_payload=json.dumps(pa_data.get("payload", {}), ensure_ascii=False),
-                    )
-                    db.add(pa)
-                    db.commit()
-                    pending_actions.append({
-                        "id": pa.id,
-                        "title": pa.title,
-                        "risk_level": pa.risk_level,
-                        "action_type": pa.action_type,
-                    })
+                    action_type = pa_data.get("action_type", "unknown")
+                    pa_payload = pa_data.get("payload", {})
 
-        # If there were tool calls, call LLM again with results
-        if tool_results:
-            tool_response_messages = list(messages)
-            tool_response_messages.append(message)
+                    if config.require_confirmation:
+                        # 默认路径：创建待确认动作，等用户在 UI 确认后由 confirm_pending_action 执行
+                        pa = PendingAction(
+                            session_id=session.id,
+                            message_id=user_msg.id,
+                            action_type=action_type,
+                            title=pa_data.get("title", ""),
+                            risk_level=pa_data.get("risk_level", "low"),
+                            reason=pa_data.get("reason", ""),
+                            action_payload=json.dumps(pa_payload, ensure_ascii=False),
+                        )
+                        db.add(pa)
+                        db.commit()
+                        pending_actions.append({
+                            "id": pa.id,
+                            "title": pa.title,
+                            "risk_level": pa.risk_level,
+                            "action_type": pa.action_type,
+                        })
+                    else:
+                        # 免确认路径：跳过 PendingAction，直接走 execute_* 工具层执行
+                        # 仍受 allow_internal=True 防护约束，不绕过工具注册体系
+                        exec_tool_name = f"execute_{action_type}"
+                        # 与 confirm 路径一致：执行前校验 payload schema，
+                        # 防 LLM 在 require_confirmation=False 时构造畸形 payload 直接执行
+                        schema_error = _validate_payload_schema(exec_tool_name, pa_payload)
+                        if schema_error:
+                            # 校验失败：不执行真实动作，回填 error 结果供 LLM 看到
+                            exec_result = {"status": "error", "message": f"payload 校验失败：{schema_error}"}
+                            round_tool_results[-1]["result"] = exec_result
+                            tool_results[-1]["result"] = exec_result
+                            db.add(ToolInvocation(
+                                session_id=session.id,
+                                message_id=user_msg.id,
+                                tool_name=exec_tool_name,
+                                status="failed",
+                                # 未真实调用工具，仅做 schema 校验即被拒绝，故延迟记 0
+                                latency_ms=0,
+                                request_payload=json.dumps(pa_payload, ensure_ascii=False),
+                                response_summary=json.dumps(exec_result, ensure_ascii=False),
+                            ))
+                            db.commit()
+                        else:
+                            # 与 LLM 路径 tool_start/tool_latency 计时风格一致，
+                            # 记录 execute_* 真实执行延迟，供审计与性能分析
+                            exec_start = time.time()
+                            exec_result = call_mcp_tool(
+                                exec_tool_name, pa_payload, db=db, allow_internal=True
+                            )
+                            exec_latency = int((time.time() - exec_start) * 1000)
+                            # 用真实执行结果替换 propose 占位结果，供 LLM 下一轮调用参考
+                            round_tool_results[-1]["result"] = exec_result
+                            tool_results[-1]["result"] = exec_result
+                            # 追加执行调用的审计记录，保证工具调用可追溯
+                            db.add(ToolInvocation(
+                                session_id=session.id,
+                                message_id=user_msg.id,
+                                tool_name=exec_tool_name,
+                                status="success" if exec_result.get("status") == "success" else "failed",
+                                latency_ms=exec_latency,
+                                request_payload=json.dumps(pa_payload, ensure_ascii=False),
+                                response_summary=json.dumps(exec_result, ensure_ascii=False),
+                            ))
+                            db.commit()
 
-            for tr in tool_results:
-                tool_response_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tr["tool_call_id"],
-                    "content": json.dumps(tr["result"], ensure_ascii=False),
-                })
+        # 准备下一轮 LLM 调用：把 assistant message + tool results 加入 messages
+        messages.append(message)
+        for tr in round_tool_results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tr["tool_call_id"],
+                "content": json.dumps(tr["result"], ensure_ascii=False),
+            })
 
-            second_response = call_llm(provider, tool_response_messages)
-            if "error" not in second_response:
-                second_choice = second_response.get("choices", [{}])[0]
-                second_msg = second_choice.get("message", {})
-                if second_msg.get("content"):
-                    content = second_msg["content"]
+        # 下一轮 LLM 调用（带工具结果，让 LLM 决定继续调工具还是给出最终回复）
+        response = call_llm(provider, messages, openai_tools if openai_tools else None)
+        if "error" in response:
+            error_text = f"调用 LLM 失败: {response['error']}"
+            add_message(db, session.id, "assistant", error_text, message_type="error")
+            return {"session_id": session.id, "reply": error_text, "error": True}
+
+    # 兜底：循环结束（达到 max_rounds 或无工具调用 break）后，
+    # 若 content 仍含标签（如最后一轮 LLM 又想调工具但达到上限），清理之
+    if content and ("<minimax:tool_call" in content or "<invoke" in content or "<parameter" in content):
+        content = _strip_text_tool_call_tags(content)
+
+    # 幻觉执行检测：LLM 回复"已提议/请点击确认"但最后一轮没调 propose_action
+    # MiniMax 模型多轮对话后容易退化成文本模拟，不调工具只在文本里说"已提议"
+    # 注意：不能只看 tool_results 里有没有 propose_action（前面轮次可能调过），
+    # 必须看最后一轮是否调了 propose_action——如果最后一轮没调但 content 说"已提议"，就是幻觉
+    _hallucination_keywords = ["已提议", "请点击确认", "请确认是否执行", "操作已提交", "执行中，请稍候", "待确认"]
+    # 最后一轮的 tool_results：loop break 时 round_tool_results 是最后一轮的，
+    # 但 loop 内 break 时 round_tool_results 可能未定义（第一轮就无工具调用）
+    _last_round_tool_names = [tr["tool_name"] for tr in round_tool_results] if 'round_tool_results' in dir() else []
+    _last_round_has_propose = "propose_action" in _last_round_tool_names
+    if (not _last_round_has_propose and content
+            and any(kw in content for kw in _hallucination_keywords)):
+        # 强制提醒 LLM：你在文本里说"已提议"但没调工具，必须调 propose_action
+        messages.append({"role": "assistant", "content": content})
+        messages.append({"role": "user", "content": (
+            "【系统警告】你说已提议但你并没有调用 propose_action 工具！"
+            "没有调用工具就不会创建待确认动作，用户界面不会显示确认按钮，操作永远不会执行。"
+            "请立即调用 propose_action 工具来真正提议操作，不要只在文本里说已提议。"
+        )})
+        retry_resp = call_llm(provider, messages, openai_tools if openai_tools else None, timeout_override=30)
+        if "error" not in retry_resp:
+            retry_msg = retry_resp.get("choices", [{}])[0].get("message", {})
+            retry_content = retry_msg.get("content", "") or ""
+            retry_tool_calls = retry_msg.get("tool_calls")
+            # 文本标签兼容
+            if not retry_tool_calls:
+                parsed = _parse_text_tool_calls(retry_content)
+                if parsed:
+                    retry_tool_calls = parsed
+                    retry_msg["tool_calls"] = parsed
+                    retry_content = _strip_text_tool_call_tags(retry_content)
+            # 如果重试后真的调了 propose_action，执行它
+            if retry_tool_calls:
+                for tc in retry_tool_calls:
+                    t_name = tc["function"]["name"]
+                    try:
+                        t_args = json.loads(tc["function"]["arguments"])
+                    except (json.JSONDecodeError, KeyError):
+                        t_args = {}
+                    if t_name == "propose_action":
+                        t_result = call_mcp_tool(t_name, t_args, db=db, user_id=user_id, allow_internal=False)
+                        db.add(ToolInvocation(
+                            session_id=session.id, message_id=user_msg.id,
+                            tool_name=t_name,
+                            status="success" if t_result["status"] == "success" else "failed",
+                            latency_ms=0,
+                            request_payload=json.dumps(t_args, ensure_ascii=False),
+                            response_summary=json.dumps(t_result, ensure_ascii=False),
+                        ))
+                        db.commit()
+                        tool_results.append({"tool_name": t_name, "result": t_result, "tool_call_id": tc.get("id", "")})
+                        # 创建 PendingAction
+                        if t_result.get("status") == "success":
+                            r_data = t_result.get("result", {})
+                            if isinstance(r_data, dict) and r_data.get("_pending_action"):
+                                pa_data = r_data["_pending_action"]
+                                if config.require_confirmation:
+                                    pa = PendingAction(
+                                        session_id=session.id, message_id=user_msg.id,
+                                        action_type=pa_data.get("action_type", "unknown"),
+                                        title=pa_data.get("title", ""),
+                                        risk_level=pa_data.get("risk_level", "low"),
+                                        reason=pa_data.get("reason", ""),
+                                        action_payload=json.dumps(pa_data.get("payload", {}), ensure_ascii=False),
+                                    )
+                                    db.add(pa)
+                                    db.commit()
+                                    pending_actions.append({
+                                        "id": pa.id, "title": pa.title,
+                                        "risk_level": pa.risk_level, "action_type": pa.action_type,
+                                    })
+                content = retry_content or content
+            else:
+                # 重试后仍然没调工具，在 content 里追加提示用户
+                content = retry_content or content
 
     # Save assistant reply
     assistant_msg = add_message(
@@ -292,33 +564,234 @@ def process_chat_message(
     return result
 
 
-def confirm_pending_action(db: Session, action_id: int, user_name: str) -> bool:
-    action = db.query(PendingAction).filter(PendingAction.id == action_id).first()
+def _payload_type_matches(value: Any, expected: str) -> bool:
+    """JSON Schema 类型与 Python 值的基本匹配（bool 与 int 严格区分）."""
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "object":
+        return isinstance(value, dict)
+    return True  # 未知类型放行，避免误伤
+
+
+def _validate_payload_schema(tool_name: str, payload: Dict) -> Optional[str]:
+    """按 execute_* 工具的 input_schema 校验 payload.
+
+    返回错误描述字符串；None 表示校验通过。宽松校验：只检查 required 必填字段
+    是否存在，并对 schema 中声明的字段做基本类型匹配，防 LLM 构造畸形 payload.
+    """
+    tool = get_mcp_tool(tool_name)
+    if not tool:
+        return f"工具 '{tool_name}' 不存在"
+    schema = tool.input_schema or {}
+    properties = schema.get("properties", {}) or {}
+    required = schema.get("required", []) or []
+    # 必填字段检查
+    for field in required:
+        if field not in payload:
+            return f"缺少必填字段 '{field}'"
+    # 已声明字段的类型基本检查
+    for field, value in payload.items():
+        spec = properties.get(field)
+        if not spec:
+            continue  # schema 未声明的字段放行（宽松）
+        expected_type = spec.get("type")
+        if expected_type and not _payload_type_matches(value, expected_type):
+            return f"字段 '{field}' 类型应为 {expected_type}，实际为 {type(value).__name__}"
+    return None
+
+
+def confirm_pending_action(db: Session, action_id: int, user_name: str) -> Dict:
+    # 行锁防 TOCTOU：并发确认同一动作时，后到事务等待先到事务提交后再读，
+    # 此时 status 已非 pending，直接走早退分支。SQLite 下 with_for_update 静默
+    # 退化为普通查询（开发环境单进程可接受），MySQL/PostgreSQL 上真正生效。
+    action = db.query(PendingAction).filter(
+        PendingAction.id == action_id
+    ).with_for_update().first()
     if not action or action.status != PendingAction.STATUS_PENDING:
-        return False
+        return {"success": False, "status": "not_found", "message": "待确认动作不存在或已被处理"}
+
+    # 读取配置开关（查不到配置则按默认值 True 处理）
+    config = db.query(AgentConfig).filter(AgentConfig.name == "default").first()
+    allow_exec = config.allow_action_execution if config else True
+
+    # 统一的失败收尾：标记 STATUS_FAILED 并记录原因
+    def _fail(message: str) -> Dict:
+        action.status = PendingAction.STATUS_FAILED
+        action.confirmed_by = user_name
+        action.confirmed_at = datetime.now()
+        fail_result = {"status": "error", "message": message}
+        action.result_payload = json.dumps(fail_result, ensure_ascii=False)
+        db.commit()
+        return {"success": False, "status": PendingAction.STATUS_FAILED, "result": fail_result}
+
+    # 早退出：管理员已全局禁止动作执行
+    if not allow_exec:
+        return _fail("管理员已禁止动作执行（allow_action_execution=False）")
+
+    # payload schema 重新校验（防 LLM 在 propose 阶段构造畸形 payload，confirm 时原样执行造成危害）
+    payload = json.loads(action.action_payload) if action.action_payload else {}
+    tool_name = f"execute_{action.action_type}"
+    schema_error = _validate_payload_schema(tool_name, payload)
+    if schema_error:
+        return _fail(f"payload 校验失败：{schema_error}")
 
     action.status = PendingAction.STATUS_CONFIRMED
     action.confirmed_by = user_name
     action.confirmed_at = datetime.now()
 
-    # Execute the action
-    try:
-        payload = json.loads(action.action_payload) if action.action_payload else {}
-        tool_name = f"execute_{action.action_type}"
-        result = call_mcp_tool(tool_name, payload)
-
-        action.status = PendingAction.STATUS_EXECUTED
-        action.result_payload = json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        action.status = PendingAction.STATUS_FAILED
-        action.result_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
-
+    # 异步执行：立即置 STATUS_EXECUTING + 返回，后台线程执行命令 + LLM 总结
+    # 修复 confirm 卡住——SSH 执行 + LLM 总结可能 30-50s，同步阻塞超过前端 timeout
+    action.status = PendingAction.STATUS_EXECUTING
+    action.result_payload = ""
     db.commit()
-    return True
+
+    # 后台线程执行（独立 db session，避免与请求 session 冲突）
+    _async_execute_action(action.id, action.session_id, action.message_id,
+                          tool_name, payload, action.title, action.action_type)
+
+    return {"success": True, "status": PendingAction.STATUS_EXECUTING,
+            "result": {"status": "executing", "message": "命令正在远程执行中，请稍候..."}}
+
+
+def _async_execute_action(action_id: int, session_id: int, message_id: Optional[int],
+                          tool_name: str, payload: Dict, title: str, action_type: str):
+    """后台线程执行待确认动作 + LLM 总结，独立 db session.
+
+    执行完成后：更新 PendingAction.status + result_payload + ToolInvocation 审计 +
+    调 LLM 总结存为 assistant 消息（失败/超时用 result message 兜底，不依赖 LLM）。
+    """
+    def _run():
+        SessionLocal = get_session_for(get_db_mode())
+        db = SessionLocal()
+        try:
+            action = db.query(PendingAction).filter(PendingAction.id == action_id).first()
+            if not action:
+                return
+
+            # 执行命令
+            exec_start = time.time()
+            result: Dict
+            try:
+                result = call_mcp_tool(tool_name, payload, db=db, allow_internal=True)
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+            exec_latency = int((time.time() - exec_start) * 1000)
+
+            # 审计
+            db.add(ToolInvocation(
+                session_id=session_id,
+                message_id=message_id,
+                tool_name=tool_name,
+                status="success" if result.get("status") == "success" else "failed",
+                latency_ms=exec_latency,
+                request_payload=json.dumps(payload, ensure_ascii=False),
+                response_summary=json.dumps(result, ensure_ascii=False),
+            ))
+
+            is_success = result.get("status") == "success"
+            action.result_payload = json.dumps(result, ensure_ascii=False)
+            # 注意：status 暂不更新为 executed/failed，先保持 executing，
+            # 等 LLM 总结/兜底消息落库后再更新——否则前端轮询到 is_terminal
+            # 时 assistant 消息还没存进去，loadMessages 拿不到 AI 回复
+
+            # LLM 总结（可选：超时/失败用 result message 兜底）
+            config = db.query(AgentConfig).filter(AgentConfig.name == "default").first()
+            reply = _summarize_execution_result(db, action, result, config)
+            # LLM 总结失败/超时：用 result 里的 message 兜底，确保用户有反馈
+            if not reply:
+                status_text = "执行成功" if is_success else "执行失败"
+                # 从嵌套结构提取 message
+                fallback_msg = result.get("message", "")
+                if not fallback_msg:
+                    inner = result.get("result", {})
+                    if isinstance(inner, dict):
+                        fallback_msg = inner.get("message", "")
+                reply = f"**{title}** — {status_text}\n\n{fallback_msg}"
+                add_message(db, session_id, "assistant", reply)
+
+            # LLM 总结/兜底消息已落库，现在更新 status 为终态
+            # 前端轮询到 is_terminal 时 assistant 消息已存在，loadMessages 能拿到
+            action.status = PendingAction.STATUS_EXECUTED if is_success else PendingAction.STATUS_FAILED
+            db.commit()
+        except Exception:
+            # 兜底：标记 failed，不崩溃
+            try:
+                action = db.query(PendingAction).filter(PendingAction.id == action_id).first()
+                if action and action.status == PendingAction.STATUS_EXECUTING:
+                    action.status = PendingAction.STATUS_FAILED
+                    action.result_payload = json.dumps(
+                        {"status": "error", "message": "后台执行异常"}, ensure_ascii=False)
+                    db.commit()
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+
+def _summarize_execution_result(db: Session, action: PendingAction, result: Dict, config: Optional[AgentConfig]) -> str:
+    """确认执行后调 LLM 把执行结果总结成自然语言回复，存为 assistant 消息.
+
+    LLM 总结失败不影响 confirm 结果（命令已执行），仅 try/except 静默降级返回空串。
+    """
+    try:
+        session_obj = db.query(ChatSession).filter(ChatSession.id == action.session_id).first()
+        if not session_obj:
+            return ""
+        provider = None
+        if config and config.default_provider_id:
+            provider = db.query(AIProvider).filter(
+                AIProvider.id == config.default_provider_id, AIProvider.is_enabled == True,
+            ).first()
+        if not provider:
+            provider = db.query(AIProvider).filter(AIProvider.is_enabled == True).first()
+        if not provider:
+            return ""
+
+        system_prompt = (config.system_prompt if config else None) or DEFAULT_SYSTEM_PROMPT
+        msgs: List[Dict] = [{"role": "system", "content": system_prompt}]
+        msgs.extend(get_message_history(db, session_obj, config))
+        # 把执行结果作为上下文让 LLM 总结（不暴露原始 JSON，用结构化描述）
+        result_json = json.dumps(result, ensure_ascii=False)
+        status_text = "成功" if result.get("status") == "success" else "失败"
+        msgs.append({"role": "user", "content": (
+            f"[系统通知] 待确认动作已执行完成。\n"
+            f"动作标题: {action.title}\n"
+            f"动作类型: {action.action_type}\n"
+            f"执行状态: {status_text}\n"
+            f"执行结果: {result_json}\n\n"
+            f"请用简洁的自然语言向用户总结执行结果，如果失败请说明原因并给出建议。"
+        )})
+
+        resp = call_llm(provider, msgs, timeout_override=20)
+        if "error" not in resp:
+            reply = resp.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+            if reply:
+                add_message(db, session_obj.id, "assistant", reply)
+                return reply
+    except Exception:
+        pass
+    return ""
 
 
 def cancel_pending_action(db: Session, action_id: int) -> bool:
-    action = db.query(PendingAction).filter(PendingAction.id == action_id).first()
+    # 行锁防 TOCTOU：与 confirm_pending_action 保持对称，并发 confirm+cancel
+    # 时后到事务等待先到事务提交后再读，此时 status 已非 pending，走早退分支。
+    # SQLite 下 with_for_update 静默退化为普通查询（开发环境单进程可接受），
+    # MySQL/PostgreSQL 上真正生效。
+    action = db.query(PendingAction).filter(
+        PendingAction.id == action_id
+    ).with_for_update().first()
     if not action or action.status != PendingAction.STATUS_PENDING:
         return False
 

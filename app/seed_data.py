@@ -25,6 +25,16 @@ from app.services import config_service
 
 def seed_all():
     db = get_session_for(get_db_mode())()
+
+    # AgentConfig 播种（独立于 marker 版本，确保已部署环境也能生效）
+    # 保证配置开关有持久化记录，用户可通过管理界面修改；幂等：已存在则跳过
+    if not db.query(AgentConfig).first():
+        db.add(AgentConfig(
+            name="default", is_enabled=True,
+            require_confirmation=True, allow_action_execution=True,
+        ))
+        db.commit()
+
     # Use a marker to track if seed has been applied
     from app.models import SystemConfig
     marker = db.query(SystemConfig).filter(SystemConfig.key == "seed_data_applied").first()
@@ -799,6 +809,8 @@ def seed_all():
         for rule in rules:
             db.add(AlertSuppression(rule_id=rule.id, rule_name=rule.name, metric_name=rule.metric_name,
                 suppressed_count=random.randint(1, 10), reason=random.choice(["dedup", "storm", "silence"])))
+
+    # ── AgentConfig 已在 seed_all() 开头独立播种（独立于 marker，确保已部署环境也能生效）──
 
     # Mark seed as applied
     marker_obj = SystemConfig(key="seed_data_applied", value=marker_v, description="Seed data version marker")

@@ -42,7 +42,6 @@ backend_new.log
 
 # ===== 截图 / 运行时产物 =====
 screenshots/
-.opencode/
 .codebuddy/
 
 # ===== 编辑器 / 系统 =====
@@ -68,4 +67,3 @@ tok.txt
 
 # ===== 开发工具配置（含 API Key，禁止入库）=====
 opencode.json
-.ocx/
