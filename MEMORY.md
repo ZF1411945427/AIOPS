@@ -1,3 +1,15 @@
+### 2026-07-04: 修复4处空壳功能——登录页死链接+记住我+菜单项添加
+- **排查**: Task agent 全量扫描 21 个 Vue 视图 + AppLayout + 80+ Jinja2 模板 + 80+ 后端路由交叉验证, 仅发现 4 处空壳 (项目整体完成度很高)
+- **空壳1** `LoginView.vue:85` "忘记密码?" 死链接 `/forgot-password` → 后端无此路由 (企业内部运维平台不支持自助找回密码, 用户由管理员创建)
+- **空壳2** `LoginView.vue:104` "注册账号" 死链接 `/register` → 后端无此路由 (同上, 不支持自助注册)
+- **修复1+2**: 删除两个死链接 (保留"了解产品/产品全景"真实链接)
+- **空壳3** `LoginView.vue:84` "记住我"复选框 `form.remember` 在 `handleLogin` 中未传后端, 勾选无作用
+- **修复3**: 前端实现"记住我"——勾选登录成功后 localStorage 存用户名 (`aiops_login_remember`), 下次打开登录页自动填充用户名并勾选; 取消勾选则清除存储. 不需后端配合 (记住的是用户名而非密码, 安全)
+- **空壳4** `MenuConfig.vue:173` `addItem()` 只弹 `ElMessage.info('请直接在下方 JSON 中添加')` 提示, 无实际添加逻辑
+- **修复4**: `addItem` 改为弹 `el-dialog` 让用户填 所属分组/名称/Key/路径/类型(iframe|vue), `confirmAddItem` 校验 key 不重复后 push 到对应分组 items, 同步更新 jsonText. 另给 el-tree 节点加"删除"按钮 + `removeNode` 函数 (ElMessageBox 确认后从 menuData 删除), 让菜单管理可视化操作而非只能手编 JSON
+- **验证**: npm build 成功
+- **专业名词**: 死链接(Dead Link)——指向不存在资源的超链接; 空壳功能(Placeholder Feature)——UI 控件存在但背后无业务逻辑; 交叉验证(Cross-validation)——前端调用路径与后端路由逐一比对确认契约一致
+
 ### 2026-07-04: 顶栏系统通知真实化——后端聚合接口 + 前端定时拉取
 - **问题**: `AppLayout.vue:214-218` 顶栏铃铛的 `notifications` 和 `noticeCount` 全是硬编码假数据（"检测到3条未处理告警"、"192.168.100.129 CPU负载超过80%"、"K8s集群节点状态正常"），不反映真实系统状态
 - **后端** `app/routers/notifications.py`: 新增 `GET /notifications/api/recent` 接口, 实时聚合 4 类真实数据:

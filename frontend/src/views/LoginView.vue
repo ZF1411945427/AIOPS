@@ -82,7 +82,6 @@
 
             <div class="form-options">
               <el-checkbox v-model="form.remember" class="login-checkbox">记住我</el-checkbox>
-              <a href="/forgot-password" class="forgot-link">忘记密码？</a>
             </div>
 
             <el-button
@@ -100,8 +99,6 @@
             <a href="/product" class="form-link">了解产品 →</a>
             <span class="form-link-sep">·</span>
             <a href="/product/overview" class="form-link">产品全景 →</a>
-            <span class="form-link-sep">·</span>
-            <a href="/register" class="form-link">注册账号</a>
           </div>
         </div>
 
@@ -226,11 +223,22 @@ onBeforeUnmount(() => {
   if (resizeObserver) resizeObserver.disconnect()
 })
 
+const REMEMBER_KEY = 'aiops_login_remember'
+
 const form = reactive({
   username: '',
   password: '',
   remember: false,
 })
+
+// 恢复"记住我"保存的用户名
+try {
+  const saved = localStorage.getItem(REMEMBER_KEY)
+  if (saved) {
+    form.username = saved
+    form.remember = true
+  }
+} catch (e) {}
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -251,6 +259,11 @@ async function handleLogin() {
       password: form.password,
     })
     if (res?.ok || res?.success) {
+      // "记住我"：勾选则存用户名，未勾选则清除
+      try {
+        if (form.remember) localStorage.setItem(REMEMBER_KEY, form.username)
+        else localStorage.removeItem(REMEMBER_KEY)
+      } catch (e) {}
       ElMessage.success('登录成功')
       router.push('/')
     } else {

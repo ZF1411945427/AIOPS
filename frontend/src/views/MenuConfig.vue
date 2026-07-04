@@ -34,11 +34,18 @@
           v-if="treeData.length"
         >
           <template #default="{ node, data }">
-            <span style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <span style="display:flex;align-items:center;gap:8px;font-size:13px;flex:1">
               <el-icon><component :is="getIcon(data.icon)" /></el-icon>
               <span style="font-weight:600;color:var(--text-primary)">{{ data.label }}</span>
               <el-tag size="small" type="info">{{ data.type === 'group' ? '分组' : data.path }}</el-tag>
               <span v-if="data.items && data.items.length" style="color:var(--text-muted);font-size:11px">{{ data.items.length }} 项</span>
+              <el-button
+                size="small"
+                type="danger"
+                text
+                style="margin-left:auto;padding:2px 6px"
+                @click.stop="removeNode(data)"
+              >删除</el-button>
             </span>
           </template>
         </el-tree>
@@ -68,12 +75,47 @@
         <div v-if="jsonError" style="color:var(--danger);font-size:11px;margin-top:4px">{{ jsonError }}</div>
       </div>
     </div>
+
+    <!-- 添加菜单项对话框 -->
+    <el-dialog v-model="addDialogVisible" title="添加菜单项" width="440px">
+      <el-form :model="addForm" label-width="80px" size="default">
+        <el-form-item label="所属分组">
+          <el-select v-model="addForm.groupIndex" placeholder="选择分组" style="width:100%">
+            <el-option
+              v-for="(g, idx) in menuData"
+              :key="g.key"
+              :label="g.label"
+              :value="idx"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="名称">
+          <el-input v-model="addForm.label" placeholder="如：告警中心" />
+        </el-form-item>
+        <el-form-item label="Key">
+          <el-input v-model="addForm.key" placeholder="如：alert-center" />
+        </el-form-item>
+        <el-form-item label="路径">
+          <el-input v-model="addForm.path" placeholder="如：/alerts" />
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-radio-group v-model="addForm.type">
+            <el-radio value="iframe">iframe（Jinja2页面）</el-radio>
+            <el-radio value="vue">vue（Vue页面）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAddItem">添加</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, reactive } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Odometer, ChatDotSquare, DataLine, Tickets, Operation, Monitor,
   Box, Setting, TrendCharts, Coin, Connection, WarningFilled, Search, Lightning
@@ -85,6 +127,8 @@ const menuData = ref([])
 const search = ref('')
 const jsonText = ref('')
 const jsonError = ref('')
+const addDialogVisible = ref(false)
+const addForm = reactive({ groupIndex: 0, key: '', label: '', path: '', type: 'iframe' })
 
 const ICON_MAP = {
   Odometer, ChatDotSquare, DataLine, Tickets, Operation, Monitor,
@@ -171,7 +215,84 @@ function addGroup() {
 }
 
 function addItem() {
-  ElMessage.info('请直接在下方 JSON 中添加菜单项，保存后生效')
+  if (!menuData.value.length) {
+    ElMessage.warning('请先添加分组')
+    return
+  }
+  // 重置表单，默认选第一个分组
+  addForm.groupIndex = 0
+  addForm.key = 'item_' + Date.now()
+  addForm.label = ''
+  addForm.path = '/'
+  addForm.type = 'iframe'
+  addDialogVisible.value = true
+}
+
+function confirmAddItem() {
+  if (!addForm.label.trim()) {
+    ElMessage.warning('请输入菜单项名称')
+    return
+  }
+  if (!addForm.key.trim()) {
+    ElMessage.warning('请输入菜单项 key')
+    return
+  }
+  if (!addForm.path.trim()) {
+    ElMessage.warning('请输入路径')
+    return
+  }
+  const group = menuData.value[addForm.groupIndex]
+  if (!group) {
+    ElMessage.error('所选分组不存在')
+    return
+  }
+  if (!group.items) group.items = []
+  // 检查 key 重复
+  const allKeys = []
+  menuData.value.forEach(g => {
+    allKeys.push(g.key)
+    if (g.items) g.items.forEach(i => allKeys.push(i.key))
+  })
+  if (allKeys.includes(addForm.key)) {
+    ElMessage.error('key 已存在，请换一个')
+    return
+  }
+  group.items.push({
+    key: addForm.key.trim(),
+    label: addForm.label.trim(),
+    path: addForm.path.trim(),
+    type: addForm.type,
+  })
+  jsonText.value = JSON.stringify(menuData.value, null, 2)
+  addDialogVisible.value = false
+  ElMessage.success('已添加，记得点击"保存配置"生效')
+}
+
+function removeNode(data) {
+  ElMessageBox.confirm(
+    `确定删除"${data.label}"吗？${data.items && data.items.length ? `该节点下有 ${data.items.length} 个子项，将一并删除。` : ''}`,
+    '删除确认',
+    { type: 'warning' }
+  ).then(() => {
+    // 先尝试作为顶层分组删除
+    const gIdx = menuData.value.findIndex(g => g.key === data.key)
+    if (gIdx >= 0) {
+      menuData.value.splice(gIdx, 1)
+    } else {
+      // 作为子项删除
+      for (const g of menuData.value) {
+        if (g.items) {
+          const iIdx = g.items.findIndex(i => i.key === data.key)
+          if (iIdx >= 0) {
+            g.items.splice(iIdx, 1)
+            break
+          }
+        }
+      }
+    }
+    jsonText.value = JSON.stringify(menuData.value, null, 2)
+    ElMessage.success('已删除，记得点击"保存配置"生效')
+  }).catch(() => {})
 }
 
 onMounted(loadMenu)
