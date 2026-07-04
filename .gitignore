@@ -43,6 +43,13 @@ backend_new.log
 # ===== 截图 / 运行时产物 =====
 screenshots/
 .codebuddy/
+*.png
+nul
+
+# ===== 根目录临时测试脚本 / 临时依赖 =====
+/test_*.py
+/package.json
+/package-lock.json
 
 # ===== 编辑器 / 系统 =====
 .vscode/

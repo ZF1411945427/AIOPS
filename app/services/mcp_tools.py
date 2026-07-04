@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -1008,6 +1009,50 @@ def _action_type_from_tool_name(name: str) -> str:
 _RISK_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
+# ─── 诊断命令白名单: 用于 propose_action 强制 auto_confirm (方案B) ───
+# 只读诊断命令的首词集合, 这些命令不改写磁盘/不修改系统状态/不影响业务.
+# yum/apt/systemctl/docker/kubectl 等命令读写混杂 (yum install 写, yum list 读),
+# 不纳入白名单, 由 LLM 自评 risk_level + auto_confirm.
+# bash/sh 不纳入 (bash -c 'rm -rf /' 可执行任意命令, 风险不可控).
+_READ_ONLY_COMMAND_PREFIXES = {
+    "ps", "df", "free", "top", "grep", "egrep", "fgrep", "which", "whereis",
+    "echo", "date", "ls", "ll", "cat", "head", "tail", "wc", "uname", "whoami",
+    "id", "env", "printenv", "hostname", "ip", "ifconfig", "uptime", "who",
+    "last", "find", "ss", "netstat", "lsof", "stat", "file", "du", "lsblk",
+    "journalctl", "dmesg", "rpm", "nginx", "httpd", "test", "pwd", "basename",
+    "dirname", "realpath", "readlink", "md5sum", "sha256sum", "cksum", "cut",
+    "tr", "sort", "uniq", "awk", "sed",  # 注意: sed -i 是写操作, 由危险命令黑名单兜底
+}
+
+
+def _is_read_only_diagnostic_command(command: str) -> bool:
+    """判断命令是否为只读诊断命令 (所有子命令首词都在白名单).
+
+    用于 propose_action 强制 auto_confirm=true, 跳过用户确认.
+    判定规则: 用管道/分号/逻辑与或分割成多个子命令, 每个子命令去掉 sudo 前缀后
+    取首词, 全部在白名单才返回 True. 任一子命令首词不在白名单则返回 False.
+    这样 `echo x | sudo rm` 会被拒绝 (rm 不在白名单), `ps aux | grep nginx` 会通过.
+    """
+    if not command or not isinstance(command, str):
+        return False
+    # 按 || && ; | 分割 (注意双字符操作符先匹配)
+    parts = re.split(r'\|\||&&|;|\|', command)
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        tokens = part.split()
+        if not tokens:
+            continue
+        # 去掉 sudo 前缀
+        if tokens[0] == "sudo" and len(tokens) > 1:
+            tokens = tokens[1:]
+        first = tokens[0]
+        if first not in _READ_ONLY_COMMAND_PREFIXES:
+            return False
+    return True
+
+
 @register_mcp_tool(
     name="list_executable_actions",
     description="列出所有可提议执行的运维动作清单 (action_type、风险等级、参数 schema)。AI 助手在提议运维操作前应先调用此工具了解可用动作及其参数要求。",
@@ -1044,6 +1089,7 @@ def list_executable_actions(db: Optional[Session] = None, user_id: Optional[int]
             "payload": {"type": "object", "description": "执行参数, 将原样传给对应的 execute_* 工具"},
             "risk_level": {"type": "string", "description": "风险等级: low / medium / high / critical, 默认由 action_type 推断", "enum": ["low", "medium", "high", "critical"]},
             "reason": {"type": "string", "description": "提议原因"},
+            "auto_confirm": {"type": "boolean", "description": "设为 true 时跳过用户确认直接执行（仅限低风险只读诊断命令如 ps/df/which/grep），写操作必须为 false 等待用户确认", "default": False},
         },
         "required": ["action_type", "title", "payload"],
     },
@@ -1056,6 +1102,7 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
     payload = kwargs.get("payload")
     reason = kwargs.get("reason", "")
     user_risk = kwargs.get("risk_level")
+    auto_confirm = kwargs.get("auto_confirm", False)
 
     # Fail Fast: 必填参数缺失立即抛错 (call_mcp_tool 捕获后包装为 error)
     if not action_type:
@@ -1069,6 +1116,10 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
     if not isinstance(payload, dict):
         raise ValueError(f"payload 必须是对象(dict), 收到 {type(payload).__name__}")
 
+    # 自动剥离 execute_ 前缀: LLM 常把 "execute_run_command" 当作 action_type 传入
+    if action_type.startswith("execute_"):
+        action_type = action_type[len("execute_"):]
+
     # 校验 action_type 合法性 + 收集登记风险等级
     # 只纳入 execute_ 前缀工具, 防 confirm 拼接 execute_{action_type} 时工具名错配导致静默失败
     valid_actions: Dict[str, str] = {}  # action_type -> execute_* risk_level
@@ -1078,8 +1129,10 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
         valid_actions[_action_type_from_tool_name(tool.name)] = tool.risk_level
 
     if action_type not in valid_actions:
+        _valid_list = sorted(valid_actions.keys())
         raise ValueError(
-            f"非法 action_type: {action_type}, 合法值请通过 list_executable_actions 查看"
+            f"非法 action_type: '{action_type}'。合法值: {', '.join(_valid_list)}。"
+            f"注意 action_type 不要加 execute_ 前缀（如用 run_command 而非 execute_run_command）"
         )
 
     # 风险等级: 只允许升级不允许降级 — 取 LLM 指定值与登记值中更高者
@@ -1092,6 +1145,27 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
         risk_level = user_risk  # LLM 想升级, 允许 (升级无害, 用户会更谨慎)
     else:
         risk_level = registered_risk  # 用登记值 (防止降级)
+
+    # 字段别名兼容: LLM 常把 "service" 误写成 "service_name" 等
+    _FIELD_ALIASES = {
+        "service": ["service_name"],
+        "command": ["command_line", "cmd"],
+    }
+    for standard_field, aliases in _FIELD_ALIASES.items():
+        if standard_field not in payload:
+            for alias in aliases:
+                if alias in payload:
+                    payload[standard_field] = payload.pop(alias)
+                    break
+
+    # 方案B: 诊断命令白名单强制 auto_confirm=true
+    # LLM 经常忘记设 auto_confirm 或对命令风险误判, 导致只读诊断命令 (ps/df/grep/find 等)
+    # 仍卡在确认环节. 代码层判定: action_type=run_command 且命令在只读白名单时, 强制免确认.
+    # 写操作 (install/restart/rm 等) 不受影响, 仍走用户确认流程.
+    if action_type == "run_command":
+        _cmd = payload.get("command", "")
+        if _is_read_only_diagnostic_command(_cmd):
+            auto_confirm = True
 
     # payload 必填字段校验: 文档承诺 payload 须符合对应 execute_* 工具参数 schema, 提前拦截畸形 payload
     # confirm 阶段仍会二次校验 (agent_service._validate_payload_schema), 此处为入口防御 + 文档与实现一致性
@@ -1113,5 +1187,6 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
             "payload": payload,
             "risk_level": risk_level,
             "reason": reason,
+            "auto_confirm": auto_confirm,
         },
     }

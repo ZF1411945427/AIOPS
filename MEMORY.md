@@ -1,3 +1,138 @@
+### 2026-07-04: 修复链式推进 max_rounds 太小 + 意图词幻觉检测
+- **问题**: 爸爸实测 session 49 (重启 nginx) 发现链式推进"停了"——AI 说"让我进一步检查 nginx 安装情况："后无下文. 查 DB 发现链式推进**实际工作了**: TI#353-361 显示 3 轮 loop 自主执行了 6 个诊断命令 (query_assets→systemctl status→nginx -t→which/find→rpm -qa), 全部 auto_confirm=true 免确认 (方案B生效). 但用户只看到 msg#432 半截句子
+- **根因1**: `max_rounds=3` 太小——3 轮用完后 LLM 还想继续但被截断, 最后一轮的 content "让我进一步检查..." (半截句子, 末尾冒号) 被存为最终消息
+- **根因2**: `if not tool_calls_raw: break` 没有幻觉检测——LLM 说"让我检查"但不生成 tool_calls 结构 (跟主对话幻觉执行同构), 直接 break 存了半截句子
+- **修复1** `agent_service.py:_continue_after_execution`: max_rounds 3→8, 给足够轮次完成诊断链
+- **修复2** `agent_service.py`: 新增 `_CONTINUE_INTENT_RE` 正则 (让我/我来/我将/我会/接下来/下一步 + 检查/查看/执行/排查/分析/看看/继续/确认/验证/查找/试试/尝试) + `_has_continue_intent(content)` 函数 (末尾冒号也算意图). loop 中 `if not tool_calls_raw` 分支前加意图词检测: 命中且重试次数<2 时追加 warning "你说了让我检查但没调工具, 请立即调用 propose_action" 强制 LLM 调工具, 而非直接 break
+- **修复3** `agent_service.py`: loop 达 max_rounds 时如果最后一轮仍调了工具 (`last_had_tool_calls=True`), 再调一次 LLM **不带 tools** 强制给出最终总结 (否则用户只看到半截句子). 新增 `final_msgs` 追加 "已达到最大自动执行轮次, 请汇报最终结果, 不要再调用工具"
+- **修复4** `agent_service.py:confirm_pending_action`: event.wait timeout 90s→180s (8 轮 loop + 最终总结可能超 90s)
+- **修复5** `frontend/src/api/request.js`: axios timeout 120s→200s (匹配后端 180s + 余量)
+- **system prompt 强化** `_CONTINUE_SYSTEM_SUFFIX` 追加第 4 条: "禁止只说不做——不要写'让我进一步检查'后不调用工具, 如果说要检查就必须立即调用 propose_action"
+- **验证**: py_compile PASS; 意图词检测 12/12 PASS; npm build 成功; 后端重启 HTTP 200
+- **待爸爸实测**: 用"重启 nginx"类任务验证链式推进是否完整跑到底 (8 轮 + 最终总结)
+- **专业名词**: 意图词幻觉检测(Intent Word Hallucination Detection)——检测 LLM "说要继续但不调工具"的文本模式并强制重试; 截断兜底总结(Truncation Fallback Summary)——loop 达上限时强制 LLM 不带工具生成最终总结, 避免用户看到半截句子
+
+### 2026-07-04: AI 智能三方案升级 + 右下角悬浮按钮可拖动
+- **问题回顾**: session 48 (37 条消息, 重启 nginx) 实证 AI 不智能——写操作执行后链条断裂, 用户需反复喂"需要/执行/继续"; 诊断命令 (find/nginx -t/ss) 仍卡在确认环节; AI 用"需要我...吗?"开放式问句结尾
+- **根因1**: `_async_execute_action` 执行成功后只调 `_summarize_execution_result` 做文字总结, 不进入 agentic loop, AI 无法自主推进下一步
+- **根因2**: `auto_confirm` 完全由 LLM 自评 (`mcp_tools.py:1060` kwargs.get), LLM 经常忘记设, 导致只读诊断命令也走用户确认
+- **根因3**: system prompt 缺少"禁止开放式问句"硬约束, AI 习惯性问"需要我继续吗"
+- **方案A 链式推进 (Chained Proactive Continuation)** `agent_service.py`: 新增 `_continue_after_execution(db, action, result, config, user_id)` 函数替代 `_summarize_execution_result` 在 `_async_execute_action` 中的调用. 执行成功后进入最多 3 轮 agentic loop: 构造 system prompt (原 prompt + `_CONTINUE_SYSTEM_SUFFIX` 链式推进指令) + 历史 + 执行结果通知 → LLM 决定下一步 (propose_action 提议新动作 / query_* 查询 / 最终总结). 需确认动作创建 PendingAction 后停 loop 等用户确认 (形成"确认→自动推进→确认"链); 诊断命令 auto_confirm=true 直接执行继续 loop. 复用 `_parse_text_tool_calls`/`_strip_text_tool_call_tags`/`_validate_payload_schema` 兼容 MiniMax 文本工具调用. 失败/超时返回空串由 `_async_execute_action` 兜底
+- **方案B 诊断命令强制免确认 (Force-Delegation)** `mcp_tools.py`: 新增 `_READ_ONLY_COMMAND_PREFIXES` 白名单 (ps/df/free/top/grep/which/echo/date/ls/cat/find/ss/netstat/lsof/journalctl/rpm/nginx 等 40+ 只读命令首词) + `_is_read_only_diagnostic_command(command)` 判定函数 (按 `||`/`&&`/`;`/`|` 分割子命令, 去 sudo 前缀, 全部首词在白名单才 True). `propose_action` 内 action_type=run_command 且白名单命中时强制 `auto_confirm=true`, 不依赖 LLM 自评. yum/apt/systemctl/docker/kubectl/bash/sh 不纳入白名单 (读写混杂或可执行任意命令)
+- **方案C prompt 强化** `agent_service.py:DEFAULT_SYSTEM_PROMPT`: "任务规划与自主推进"段落追加——禁止"需要我继续吗?"/"是否需要..."/"要不要我..."等开放式问句结尾; 每条回复必须以①工具调用②明确结论③具体选项之一结尾; 强调"用户确认一次后期望你自主完成剩余步骤"
+- **右下角悬浮按钮可拖动** `frontend/src/components/AIOpsChatWidget.vue`:
+  - 触发按钮 + 面板 header 均可拖动 (mousedown→mousemove→mouseup, 位移<5px 算点击)
+  - 拖动后根容器切换为 left/top 定位 (widgetStyle 计算属性), 面板跟随 (panelStyle, 防视口溢出)
+  - 位置存 localStorage (`aiops_chat_widget_pos`), onMounted 恢复
+  - header 加 cursor:move + user-select:none, 拖动时禁用 hover scale
+- **验证**:
+  - py_compile 2 文件 PASS; npm build 成功
+  - 方案B 单元测试 21/22 PASS (唯一 FAIL 是非法 shell `&&&`, 判定 False 走确认也安全)
+  - 方案B 集成测试 8/8 PASS: 只读命令 (ps/df/find/nginx -t/journalctl) 全部 auto_confirm=True, 写操作 (yum install/systemctl restart/rm -rf) 全部 False, restart_service 不受影响
+  - 方案A: import + 函数签名 + `_async_execute_action` 调用关系验证通过; `_summarize_execution_result` 保留备用
+  - 后端重启 HTTP 200
+- **未做完整 E2E**: 方案A 链式推进需真实 LLM + confirm 端到端验证, 代码逻辑是 process_chat_message agentic loop 的复用版, 爸爸实际试用确认效果
+- **专业名词**: 链式推进(Chained Proactive Continuation)——写操作完成后自动把结果回流 LLM 触发下一轮 agentic loop, 形成"确认→推进→确认"链; 免确认强制下推(Force-Delegation)——诊断命令风险等级由代码白名单判定而非 LLM 自评; 开放式问句抑制(Open-Ended Question Suppression)——禁止 AI 用"需要我...吗"结尾推卸推进责任
+
+- **问题根源**: AI 被动式反应架构——每执行一步就问用户"需要继续吗"（76 条消息中用户说了 15+ 次"需要"），诊断命令和写操作混用同一确认流程，执行后从不自动验证
+- **修复A(系统 prompt 重写)** `agent_service.py:24-71`: 新增三大行为准则
+  1. **任务规划与自主推进**：列出计划 → 自主执行 → 统一汇报。禁止每步问"需要继续吗"
+  2. **诊断命令自动执行**：ps/df/which/grep 等只读命令调 propose_action 时设 `auto_confirm=true`，跳过确认直接执行
+  3. **自动验证执行结果**：写操作后自动执行验证命令，失败自动重试替代方案
+- **修复B(auto_confirm 参数)** `mcp_tools.py:1047,1060,1136`: propose_action 新增 `auto_confirm` 参数，传给 `_pending_action`
+- **修复C(后端处理)** `agent_service.py:403`: 检测 `_pending_action.auto_confirm=true` 时跳过 PendingAction 创建，走自动执行路径
+- **验证**: propose_action auto_confirm=true/false 正确传递。E2E 测试通过
+- **专业名词**: 主动推理架构(Proactive Reasoning Architecture)——AI 从被动响应升级为主动规划-执行-验证的自主智能体
+
+### 2026-07-04: 新增两层防线——execute_前缀自动剥离 + 重试失败后强制替换内容
+- **新问题**: DB 验证 msg 366, LLM 传 `action_type="execute_run_command"`(多了 execute_ 前缀) → propose_action 返回 error → LLM 仍写"✅ 操作已成功提议"。即使 3 次重试循环，retry LLM 也继续幻觉
+- **修复A(根源)** `app/services/mcp_tools.py:1072-1074`: 在 action_type 校验前自动剥离 `execute_` 前缀。`execute_run_command` → `run_command`，校验通过
+- **修复B(兜底)** `app/services/agent_service.py:578-596`: 重试循环结束后若 content 仍含幻觉关键词且 propose_action 未成功→强制替换为错误信息"❌ 提议操作失败：{错误详情}"
+- **验证**: `execute_run_command` 测试成功自动转换为 `run_command`。E2E 测试通过
+- **专业名词**: 双重保险(Dual-layer Defense)——上游容错(输入清洗) + 下游兜底(输出替换)消除幻觉残留风险
+
+### 2026-07-04: 修复资产探测定时任务——串行→并行(10并发)，逐条 commit 防丢失
+- **问题**: 资产 39.96.51.45 实际可 SSH 登录但显示 offline。37 台 offline 资产每台 socket 超时 10 秒 → 串行总耗时 370 秒。旧代码在循环结束时一次性 commit，中途任何异常会导致全部更新丢失
+- **修复** `app/services/asset_service.py:64-131`: 改为 ThreadPoolExecutor(max_workers=10) 并行探测，每资产独立 Session + 立即 commit
+- **验证**: 44 台资产从串行 370 秒→并行 40 秒。Asset 44 状态已正确更新为 online
+- **专业名词**: 资产健康探测(Asset Health Probing)——定时检测资产可达性并更新状态
+
+### 2026-07-04: 修复幻觉检测 retry 失效——单次重试改为 3 次循环 + 字段别名兼容
+- **发现**: 旧幻觉检测只有一次 retry，但 retry LLM 可能也继续幻觉（不调 propose_action），导致幻觉内容仍被保存
+- **DB 验证 msg 344**: LLM 调了 propose_action 但传 `service_name` 而非 `service` → error, 仍写"⏳ **已成功提议！**"。ToolInvocation 记录 status=failed。旧重试后 LLM 仍没调 propose_action，最终保存了幻觉内容
+- **修复1** `app/services/agent_service.py:487-576`: 单次 retry → 最多 3 次循环。每次 retry 后重新检查 `_propose_success` 和内容关键词，直到 propose_action 成功或无幻觉关键词
+- **修复2** `app/services/mcp_tools.py:1098-1109`: 新增 `_FIELD_ALIASES` 映射 (`service_name→service`, `command_line/cmd→command`)。在 payload 必填字段校验前自动转换，防止 LLM 用别名字段名导致校验失败
+- **Playwright 验证**: 测试通过（confirm 流程、DOM 更新、DB 更新全部正常）
+- **专业名词**: 重试循环退火 (Retry Loop Annealing)——通过多轮重试 + 每轮上下文增强破除 LLM 幻觉模式
+
+### 2026-07-04: 修复两个"确认按钮不出现"的根因（幻觉检测加强 + 执行总结 prompt 限制）
+- **场景1**: 主对话中 AI 调了 propose_action 但返回 error（如 action_type="execute_run_command" 多了 execute_ 前缀），AI 仍写"✅ 操作已提议成功"。旧幻觉检测只看"最后一轮有没有调 propose_action"（调了但失败也算），跳过重试
+- **修复1** `app/services/agent_service.py:485-513`: 改为检查"所有轮次中 propose_action 是否成功过"。失败→重试，警告包含具体错误信息
+- **修复1b** `app/services/mcp_tools.py:1080-1083`: 错误信息加上合法 action_type 列表 + 提示不要带 execute_ 前缀
+- **场景2**: 执行总结 `_summarize_execution_result` 用的 system prompt 和主对话一样（包含"请在界面点击确认"），LLM 在总结失败时写"请在界面上点击确认继续"但没调 propose_action → 用户看到文字但没确认按钮
+- **修复2** `app/services/agent_service.py:817`: 总结 prompt 追加限制"这是执行结果总结，不是新操作提议，不要写'请点击确认'"
+- **Playwright 验证**: 测试通过，执行总结消息不再出现"请点击确认"
+- **专业名词**: 执行总结幻觉(Execution Summary Hallucination)——总结 LLM 用主对话思维生成误导性确认提示
+
+### 2026-07-04: 前端 confirm 后消息不更新问题——已修复，Playwright E2E 测试通过 ✅
+- **问题回顾**: confirm 后后端 DB 有新消息但前端 DOM 不更新。之前 Playwright 测到 DB:7→8 但 DOM:6→6（仅有 6 条），怀疑 Vue 响应式问题
+- **根因查清**: 不是 Vue 响应式问题。前次失败是因为旧测试的 session 只有 6 条消息，且旧代码的 pending-bar 消失时序与 `loadMessages` 有竞态——`pendingActions.value = []` 在 `loadMessages` 内设值导致 pending-bar 消失，但测试立即检查 DOM 时 Vue 可能尚未完成重渲染
+- **实际修复验证**: 3 次 Playwright E2E 测试全部通过：
+  - API 调用链：`POST /agent/pending/54/confirm` (6.1s) → `status:"completed"` → `GET /agent/history/36` (loadMessages) → 消息数 9→10 ✅
+  - DB 验证：10 条消息（原来 9 条），action 状态 executed ✅
+  - DOM 验证：10 条 `.msg-row` ✅
+- **结论**: `threading.Event` 同步 + `loadMessages` 直调方案可靠。前端无需额外修改
+
+### 2026-07-04: 修复 confirm 始终返回 JSON——移除 Accept 头判断（浏览器 XHR 默认 Accept=*/* 不包含 "json" 导致 303 重定向）
+- **根因**: `agent_chat.py` confirm/cancel 路由用 `if "json" in accept` 判断返回 JSON 还是 303 重定向。浏览器 XHR 默认 Accept 为 `*/*`，不包含 `"json"` 子串 → 永远走 303 重定向 → Axios 收到 HTML 页面而非 JSON → 前端流程中断，无法触发 `loadMessages`
+- **修复**: `app/routers/agent_chat.py`:
+  - `confirm_action`: 移除 Accept 头判断和 RedirectResponse，始终返回 `{"status": "ok", "result": result}`
+  - `cancel_action`: 同上，始终返回 `{"status": "ok"}`
+- **验证**: 无 Accept 头 / Accept: `*/*` / Accept: `application/json,...` 三种情况均返回 200 JSON ✅
+- **端到端测试**: 新建 pending action (id=54, session=36, run_command: `echo "Hello"`) → 模拟浏览器无 Accept 头调用 confirm → 5.1s 返回 `status:"completed"` → 消息数 5→6，LLM 总结 "✅ 测试命令执行成功" 自动出现在历史中 ✅
+
+### 2026-07-04: API 测试验证——threading.Event 同步方案正常工作
+- **验证方式**: 通过 Python requests 模拟前端 API 调用（POST `/login` 获取 session cookie → POST `/agent/pending/{id}/confirm` 带 `Accept: application/json` 头 → GET `/agent/history/{session_id}` 检查结果）
+- **测试动作1** pending_id=42 (session=39, type=restart_service, title="重启 39.96.51.45 服务器 nginx"):
+  - confirm 返回 JSON（非 HTML 重定向）
+  - SSH 远程执行 `systemctl restart nginx` → Unit not found → status=failed
+  - `_summarize_execution_result` 调 LLM 生成总结 → 新 assistant 消息 "❌ 重启失败" 自动出现在历史中
+  - 消息数 2→3
+- **测试动作2** pending_id=37 (session=36, type=run_command, title="检查 nginx 安装状态"):
+  - confirm 返回 `{"status":"ok","result":{"success":true,"status":"completed","result":{"status":"completed","message":"执行完成"}}}`
+  - SSH 执行 `which nginx || rpm -qa | grep -i nginx || ...` → NOT_INSTALLED → status=executed
+  - LLM 总结建议安装 nginx → 新 assistant 消息出现
+  - 消息数 4→5
+- **结论**: threading.Event 同步 + `status: "completed"` 路径工作正常，前端无需轮询即可刷新看到新消息
+
+### 2026-07-03: 修复结果不回显——后端 threading.Event 同步等执行完再返回
+- **根因**: note `确认→轮询→loadMessages` 模式有竞态条件：后端 `_async_execute_action` 先 `add_message`(commit) 再更新 `action.status`(commit)，前端轮询到终态后调 `loadMessages` 时后台线程的 commit 可能尚未对新的 DB session 可见，导致拿不到新消息
+- **改动** `app/services/agent_service.py`:
+  - confirm_pending_action: 用 `threading.Event` 等后台线程完成(最多90s)，返回 `"completed"` 而非立即返回 `"executing"`
+  - `_async_execute_action`: finally 块中 `event.set()` 通知 confirm 接口
+- **改动** `frontend/src/views/AgentChatView.vue`:
+  - `result.status === 'completed'` 直接 `loadMessages`（新消息已落库），不再走轮询
+  - `result.status === 'executing'` 降级为前端轮询历史（超时兜底）
+- **效果**: 常见情况(执行+LLM总结<90s)零轮询，confirm 响应后立即 refresh 拿到新消息
+
+### 2026-07-03: 修复确认按钮不弹出（幻觉检测关键词漏匹配）
+- **问题**: LLM 回复"✅ 已提交安装请求"和"请在界面上点击确认按钮执行"，但幻觉检测关键词只有"操作已提交"和"请点击确认"，字面不匹配导致漏检，LLM 文本模拟未调 propose_action，前端的确认按钮不出
+- **改动**: `app/services/agent_service.py:475` 扩展关键词列表，新增 `"已提交"`, `"已提交安装"`, `"已提交请求"`, `"点击确认"`, `"确认按钮"`, `"确认执行"` 等变体
+
+### 2026-07-03: 修复 AI 确认执行后结果不回显（需回切对话才能看到）
+- **问题**: 点击确认后，`confirmAction` 轮询 PendingAction 状态 → 检测到终态 → 调 `loadMessages` 加载消息。但后台线程中 `add_message`（消息落库）和 `action.status`（状态更新）分两次提交，存在竞态条件：前端检测到终态时，新消息可能尚未对新 DB session 可见，导致 `loadMessages` 拿不到新消息
+- **改动**: `frontend/src/views/AgentChatView.vue`
+  - 移除 `pollPendingStatus`（旧：轮询 PendingAction 状态 + 单独调 loadMessages）
+  - 新增 `pollSessionForNewMessage`：直接轮询 `/agent/history/{sessionId}` 检测消息数增长，检测到新消息后直接用轮询结果更新界面，消除 HTTP 请求间隙
+  - 轮询上限从 30 次(60s) 提升至 60 次(120s)，给慢 LLM 总结留足时间
+  - 超时时提示用户手动刷新，不再静默失败
+
+### 2026-07-03: 从 hub 拉取最新代码
+- `git pull origin main` — Fast-forward `8487377..20e2048`
+- 合并内容: AI 智能助手多轮工具调用、SSH 远程执行、异步确认闭环、幻觉检测、告警列表服务端分页等
+- 清理: 远程已删除的 sxdevops 参考项目代码、数据库临时文件 `.db-shm/.db-wal`
+- 状态: 工作区干净，已追上 origin/main
+
 ### 2026-07-03: 代码层兜底检测 LLM 幻觉执行（文本说"已提议"但没调工具）
 - **背景**: system prompt 强化后 MiniMax 仍臆想——17:54 用户说"确认"，LLM 回复"已提议安装 nginx 请点击确认"但 tool_calls=NO，没调 propose_action，无 PendingAction，前端无按钮。数据库证据：PA 35(17:54:20) 后再无新 PA，两条"确认"消息的 assistant 回复 tool_calls 全空
 - **根因**: MiniMax 多轮对话后退化为文本模拟，system prompt 约束不够强，需要代码层兜底

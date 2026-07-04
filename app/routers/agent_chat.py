@@ -189,10 +189,7 @@ def delete_session(session_id: int, request: Request, db: Session = Depends(get_
 def confirm_action(action_id: int, request: Request, db: Session = Depends(get_db)):
     user_name = request.session.get("username", "unknown")
     result = confirm_pending_action(db, action_id, user_name)
-    accept = request.headers.get("accept", "")
-    if "json" in accept:
-        return {"status": "ok", "result": result}
-    return RedirectResponse(url="/agent/chat", status_code=303)
+    return {"status": "ok", "result": result}
 
 
 @router.get("/pending/{action_id}/status")
@@ -225,10 +222,7 @@ def pending_status(action_id: int, request: Request, db: Session = Depends(get_d
 @router.post("/pending/{action_id}/cancel")
 def cancel_action(action_id: int, request: Request, db: Session = Depends(get_db)):
     cancel_pending_action(db, action_id)
-    accept = request.headers.get("accept", "")
-    if "json" in accept:
-        return {"status": "ok"}
-    return RedirectResponse(url="/agent/chat", status_code=303)
+    return {"status": "ok"}
 
 
 @router.get("/invocations")
