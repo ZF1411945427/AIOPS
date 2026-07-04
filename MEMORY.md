@@ -1,3 +1,21 @@
+### 2026-07-04: 顶栏系统通知真实化——后端聚合接口 + 前端定时拉取
+- **问题**: `AppLayout.vue:214-218` 顶栏铃铛的 `notifications` 和 `noticeCount` 全是硬编码假数据（"检测到3条未处理告警"、"192.168.100.129 CPU负载超过80%"、"K8s集群节点状态正常"），不反映真实系统状态
+- **后端** `app/routers/notifications.py`: 新增 `GET /notifications/api/recent` 接口, 实时聚合 4 类真实数据:
+  1. 未处理告警 (status=triggered/firing, 最近24h, critical优先, 前5条)
+  2. 未解决事件 (incidents.status != resolved/closed, 前3条)
+  3. 离线资产 (assets.status != online, 按last_checked排序, 前3条)
+  4. 待确认AI动作 (pending_actions.status=pending, 前3条)
+  - 返回 `{notifications: [...], count: N}`, count=未处理告警+未解决事件+待确认动作总数
+  - 新增 `_relative_time(dt, now)` 把 datetime 转成 "x分钟前/小时前/天前"
+  - 修复 SQLAlchemy `func.case` 误用 → 改为 `sqlalchemy.case` (func.case 不支持 else_ 参数)
+- **前端** `frontend/src/layout/AppLayout.vue`:
+  - 删除硬编码 notifications 数组, 改为 `loadNotifications()` 调 `/notifications/api/recent` 拉真实数据
+  - onMounted 启动 30s 定时刷新 (`setInterval`), onBeforeUnmount 清理 (`clearInterval`)
+  - 通知点击跳转 route 已对齐 menu_config.json 的 key (alerts/incident/asset-list/pending-actions)
+  - 失败静默降级 (顶栏通知非关键路径, 不弹错误)
+- **验证**: 接口登录后 200, 返回 11 条真实通知 (5告警+3事件+3离线资产), count=154; npm build 成功; 后端重启 HTTP 200
+- **专业名词**: 通知聚合(Notification Aggregation)——多数据源实时汇总成统一通知流; 轮询刷新(Polling Refresh)——客户端定时拉取保持数据新鲜度
+
 ### 2026-07-04: 修复告警中心乱码——anomaly_service.py 源文件 GBK 误读
 - **问题**: 告警中心 #322-#331 告警 message 显示乱码 "3蟽寮傚父妫€娴?- cpu_usage 3sigma jiance: cpu_usage 鍋忛珮 (z=4.28, 鍧囧€?4.17, 蟽=9.59)"
 - **根因**: `app/services/anomaly_service.py` 源文件被某个编辑器以 GBK 保存了 UTF-8 内容, 导致中文字符串损坏. 文件本身是合法 UTF-8, 但内容是 GBK 误读后的乱码字符:
