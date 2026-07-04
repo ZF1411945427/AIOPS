@@ -1,16 +1,21 @@
 <template>
-  <div class="aiops-chat-widget">
+  <div class="aiops-chat-widget" :style="widgetStyle">
     <!-- Floating bubble trigger -->
-    <button class="chat-trigger" :class="{ open: isOpen }" @click="toggleOpen">
+    <button
+      class="chat-trigger"
+      :class="{ open: isOpen, dragging: isDragging }"
+      @mousedown="onTriggerMouseDown"
+      @click="onTriggerClick"
+    >
       <span class="trigger-icon" v-if="!isOpen">🤖</span>
       <span class="trigger-icon close-icon" v-else>✕</span>
     </button>
 
     <!-- Chat panel -->
     <Transition name="slide-up">
-      <div v-if="isOpen" class="chat-panel">
-        <!-- Header -->
-        <div class="panel-header">
+      <div v-if="isOpen" class="chat-panel" :style="panelStyle">
+        <!-- Header (可拖动) -->
+        <div class="panel-header" @mousedown="onPanelHeaderMouseDown">
           <div class="panel-header-left">
             <span class="panel-title">AIOps 智能助手</span>
             <span class="panel-subtitle" v-if="activeSession">当前会话</span>
@@ -116,11 +121,12 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 
 const STORAGE_KEY = 'aiops_last_session_id'
+const POS_STORAGE_KEY = 'aiops_chat_widget_pos'
 
 const isOpen = ref(false)
 const showSessionList = ref(false)
@@ -141,6 +147,115 @@ const suggestedQuestions = ref([
   '查看 K8s 集群状态',
 ])
 let restoring = false
+
+// ── 拖拽相关状态 ──
+// widgetPos: null=未拖动（用默认右下角定位）；{left, top}=已拖动到指定坐标
+const widgetPos = ref(null)
+const isDragging = ref(false)
+const dragInfo = ref({ startX: 0, startY: 0, originLeft: 0, originTop: 0, moved: false })
+const DRAG_THRESHOLD = 5 // 位移阈值，超过则判定为拖动而非点击
+
+// 计算根容器样式：未拖动时使用默认 right/bottom 定位，拖动后切换为 left/top 定位
+const widgetStyle = computed(() => {
+  if (!widgetPos.value) return {}
+  return { left: widgetPos.value.left + 'px', top: widgetPos.value.top + 'px', right: 'auto', bottom: 'auto' }
+})
+
+// 面板样式：跟随触发按钮位置，保证打开时不会超出视口
+const panelStyle = computed(() => {
+  if (!widgetPos.value) return {}
+  const p = widgetPos.value
+  const PANEL_W = 400
+  const PANEL_H = 580
+  const TRIGGER_OFFSET = 88 // 触发按钮上方 88px 处显示面板
+  let left = p.left
+  let top = p.top - TRIGGER_OFFSET - PANEL_H + 52 // 让面板底部贴近触发按钮上方
+  // 防溢出
+  if (left + PANEL_W > window.innerWidth - 8) left = window.innerWidth - PANEL_W - 8
+  if (left < 8) left = 8
+  if (top < 8) top = 8
+  if (top + PANEL_H > window.innerHeight - 8) top = window.innerHeight - PANEL_H - 8
+  return { left: left + 'px', top: top + 'px', right: 'auto', bottom: 'auto' }
+})
+
+// 触发按钮鼠标按下：记录起始位置，挂载全局移动/抬起监听
+function onTriggerMouseDown(e) {
+  if (e.button !== 0) return // 只响应左键
+  const rect = e.currentTarget.getBoundingClientRect()
+  dragInfo.value = {
+    startX: e.clientX,
+    startY: e.clientY,
+    originLeft: rect.left,
+    originTop: rect.top,
+    moved: false,
+  }
+  isDragging.value = true
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+// 面板 header 鼠标按下：拖动整个组件（已打开时也可拖）
+function onPanelHeaderMouseDown(e) {
+  if (e.button !== 0) return
+  // 点击 header 内的按钮不触发拖动
+  if (e.target.closest('.panel-btn')) return
+  const triggerEl = document.querySelector('.aiops-chat-widget .chat-trigger')
+  const rect = triggerEl ? triggerEl.getBoundingClientRect() : e.currentTarget.getBoundingClientRect()
+  dragInfo.value = {
+    startX: e.clientX,
+    startY: e.clientY,
+    originLeft: rect.left,
+    originTop: rect.top,
+    moved: false,
+  }
+  isDragging.value = true
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+function onMouseMove(e) {
+  const dx = e.clientX - dragInfo.value.startX
+  const dy = e.clientY - dragInfo.value.startY
+  if (!dragInfo.value.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+  dragInfo.value.moved = true
+  let newLeft = dragInfo.value.originLeft + dx
+  let newTop = dragInfo.value.originTop + dy
+  // 限制在视口内（按钮 52px 大小，至少保留一半可见可点击）
+  const HALF = 26
+  newLeft = Math.max(-HALF, Math.min(window.innerWidth - HALF, newLeft))
+  newTop = Math.max(-HALF, Math.min(window.innerHeight - HALF, newTop))
+  widgetPos.value = { left: newLeft, top: newTop }
+}
+
+function onMouseUp() {
+  isDragging.value = false
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+  // 持久化位置（只在真实拖动后保存，避免点击误存）
+  if (dragInfo.value.moved && widgetPos.value) {
+    try { localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(widgetPos.value)) } catch (e) {}
+  }
+}
+
+// 区分点击与拖动：拖动过则不触发 toggle
+function onTriggerClick() {
+  if (dragInfo.value.moved) return
+  toggleOpen()
+}
+
+// 恢复上次位置
+function restorePos() {
+  try {
+    const saved = localStorage.getItem(POS_STORAGE_KEY)
+    if (saved) widgetPos.value = JSON.parse(saved)
+  } catch (e) {}
+}
+
+onMounted(() => { restorePos() })
+onBeforeUnmount(() => {
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+})
 
 function toggleOpen() {
   isOpen.value = !isOpen.value
@@ -380,11 +495,18 @@ defineExpose({ toggleOpen })
   align-items: center;
   justify-content: center;
   position: relative;
+  user-select: none;
 }
 
 .chat-trigger:hover {
   transform: scale(1.08);
   box-shadow: 0 6px 24px rgba(99,102,241,0.45);
+}
+
+.chat-trigger.dragging {
+  cursor: grabbing;
+  transform: none !important;
+  transition: none !important;
 }
 
 .chat-trigger.open {
@@ -441,6 +563,8 @@ defineExpose({ toggleOpen })
   border-bottom: 1px solid rgba(148,163,184,0.12);
   background: linear-gradient(180deg, rgba(248,251,255,0.98), rgba(243,247,255,0.94));
   flex-shrink: 0;
+  cursor: move;
+  user-select: none;
 }
 
 .panel-header-left {

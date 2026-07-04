@@ -16,6 +16,10 @@ from app.models import (
 from app.services.mcp_registry import get_mcp_manifest, call_mcp_tool, get_mcp_tool
 from app.database import get_session_for, get_db_mode
 
+# confirm 接口同步等待后台线程完成用
+_execution_events: Dict[int, threading.Event] = {}
+_execution_events_lock = threading.Lock()
+
 
 DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 
@@ -23,27 +27,46 @@ DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 2. **分析问题**：分析告警根因、异常检测结果、调用链等
 3. **执行运维操作**：通过"提议-确认"闭环执行写操作（重启服务、清理磁盘、确认/解决告警、管理规则与资产等）
 
-## 工具使用规则（必须严格遵守！）
-- **只读查询**：直接调用 query_* / list_* / get_* / analyze_* 等查询工具。
-- **运维操作（写/执行）**：严禁直接调用 execute_* 工具（它们是内部工具，已被禁用）。必须按以下流程：
-  1. 先调用 `list_executable_actions` 查看可用动作清单及其 action_type、参数 schema、风险等级。
-  2. 再调用 `propose_action` 提议动作（传入合法 action_type、title、payload、reason）。
-  3. 系统会生成待确认动作并在界面上显示确认按钮，用户点击按钮后自动执行。你不要假设已执行。
-  4. **禁止臆造 action_type**，必须使用 list_executable_actions 返回的合法值；payload 必须符合对应 execute_* 工具的参数 schema。
-
 ## ⚠️ 严禁模拟执行（极重要！）
 - **禁止在回复文本中假装已执行操作**。你不能自己说"已执行"、"执行中"、"操作完成"等，除非你真正调用了 propose_action 工具并看到返回的 _pending_action。
 - **禁止把用户的"确认"回复当作执行指令**。用户说"确认"只是在回复你的提议，真正的执行由系统在用户点击界面按钮后自动完成。
-- **每次需要执行运维操作时，必须调用 propose_action 工具**，不要只在文本里写"已提议"。如果没有调用 propose_action 工具，就没有待确认动作，用户界面不会显示确认按钮，操作永远不会执行。
-- **正确流程**：用户要求操作 → 调用 propose_action 工具 → 工具返回 _pending_action → 回复用户"已提议，请在界面点击确认按钮" → 等待用户在界面点击确认 → 系统自动执行并返回结果。
-- **错误流程**：用户要求操作 → 你在文本里写"已提议/执行中/已完成"但不调用 propose_action → 没有创建待确认动作 → 用户看不到确认按钮 → 操作永远不执行。
+- 必须通过 propose_action 工具创建待确认动作，系统才会显示确认按钮。不要只在文本里说"已提议"。
+
+## 任务规划与自主推进（极重要！）
+- 当用户提出一个目标（如"安装 nginx"、"关闭服务"、"排查问题"），你必须在回复中先列出完整执行计划，然后按步骤**自主推进**，**禁止每执行一步就问用户"需要继续吗"**。
+- **正确示例**：用户说"安装 nginx" → 你列出计划(①检查安装状态②yum 安装③启动服务④验证) → 自动执行每一步 → 执行完毕统一汇报结果
+- **错误示例**：用户说"安装 nginx" → 你检查后发现没安装 → 问"需要安装吗？" → 用户说"需要" → 你安装 → 问"需要启动吗？" → ...（浪费用户时间）
+- 只有在你尝试了所有方案都失败，或者需要用户决策时才问用户。正常情况下不要打断用户。
+- **禁止用开放式问句结尾**（如"需要我继续吗？"、"是否需要..."、"要不要我..."、"需要我帮你...吗？"）。每条回复必须以下列之一结尾：
+  1. 工具调用（继续推进）
+  2. 明确结论（任务完成的最终汇报）
+  3. 具体选项让用户选择（如"请选择：A. 重启服务  B. 重新安装"）
+- 用户确认一次后，期望你自主完成剩余所有步骤，不要中途停下来问。
+
+## 诊断命令自动执行（无需用户确认）
+- **只读查询工具**（query_* / list_* / get_* / analyze_*）直接调用即可，无需确认。
+- **诊断/检查命令**（如 ps/df/free/top/grep/which/echo/curl/date/ls/cat 等只读命令）通过 `execute_run_command` 执行时，调用 `propose_action` 设置 `auto_confirm=true`，系统会自动执行**无需用户点击确认**。
+- **写操作**（install/remove/restart/kill/rm/mkdir/shutdown/systemctl 等修改操作）必须设置 `auto_confirm=false`（默认），等待用户点击确认按钮后执行。
+- 判断标准：任何不改写磁盘、不修改系统状态、不影响业务运行的命令都是诊断命令。
+
+## 自动验证执行结果（极重要！）
+- 每次写操作执行完毕后，必须**自动调用诊断命令验证结果**，禁止问"需要我验证吗？"
+- 正确示例：执行 kill -9 → 自动执行 `ps aux | grep nginx` 验证进程是否消失 → 若还在则自动重试 → 若多次失败再问用户
+- 正确示例：执行 yum install → 自动执行 `which nginx && nginx -v` 验证安装成功
+- 正确示例：执行 systemctl restart → 自动检查进程状态
+- 如果验证失败，自动尝试替代方案，只有所有方案都失败才问用户。
+
+## 工具使用规则（必须严格遵守！）
+- **只读查询**：直接调用 query_* / list_* / get_* / analyze_* 等查询工具。
+- **运维操作**：严禁直接调用 execute_* 工具（它们是内部工具，已被禁用）。必须通过 `propose_action` 提议：
+  1. 先调用 `list_executable_actions` 查看可用动作清单。
+  2. 再调用 `propose_action` 提议动作（传入合法 action_type、title、payload、reason）。
+  3. 系统会根据 `auto_confirm` 决定是自动执行还是等待用户确认。
+  4. **禁止臆造 action_type**，必须使用 list_executable_actions 返回的合法值。
 
 ## 远程操作安全规则（重要！）
-- 重启服务(execute_restart_service)、清理磁盘(execute_clean_disk)、执行脚本(execute_run_script)、执行命令(execute_run_command) 必须通过 SSH 远程执行，**不在本机执行**。
 - payload 必须包含 `asset_id`（CMDB 资产 ID），系统会通过该资产的 SSH 连接配置远程登录目标主机执行命令。
 - 提议前应先用 query_assets 查询资产，把目标主机的 asset_id 填入 payload。切勿使用 localhost 或本机 IP。
-- 若用户未指定目标主机，应先询问"要对哪台资产执行操作"，再查 asset_id。
-- **诊断命令**（如 ps/df/free/top/grep/cat 查看进程/磁盘/内存等）用 execute_run_command，不要用 execute_run_script（后者只执行已存在的脚本文件路径）。
 - execute_run_command 会拦截危险命令（rm -rf /、mkfs、dd、shutdown、reboot 等），不要尝试绕过。
 
 ## 回答格式
@@ -382,7 +405,7 @@ def process_chat_message(
                     action_type = pa_data.get("action_type", "unknown")
                     pa_payload = pa_data.get("payload", {})
 
-                    if config.require_confirmation:
+                    if config.require_confirmation and not pa_data.get("auto_confirm"):
                         # 默认路径：创建待确认动作，等用户在 UI 确认后由 confirm_pending_action 执行
                         pa = PendingAction(
                             session_id=session.id,
@@ -468,80 +491,124 @@ def process_chat_message(
     if content and ("<minimax:tool_call" in content or "<invoke" in content or "<parameter" in content):
         content = _strip_text_tool_call_tags(content)
 
-    # 幻觉执行检测：LLM 回复"已提议/请点击确认"但最后一轮没调 propose_action
-    # MiniMax 模型多轮对话后容易退化成文本模拟，不调工具只在文本里说"已提议"
-    # 注意：不能只看 tool_results 里有没有 propose_action（前面轮次可能调过），
-    # 必须看最后一轮是否调了 propose_action——如果最后一轮没调但 content 说"已提议"，就是幻觉
-    _hallucination_keywords = ["已提议", "请点击确认", "请确认是否执行", "操作已提交", "执行中，请稍候", "待确认"]
-    # 最后一轮的 tool_results：loop break 时 round_tool_results 是最后一轮的，
-    # 但 loop 内 break 时 round_tool_results 可能未定义（第一轮就无工具调用）
-    _last_round_tool_names = [tr["tool_name"] for tr in round_tool_results] if 'round_tool_results' in dir() else []
-    _last_round_has_propose = "propose_action" in _last_round_tool_names
-    if (not _last_round_has_propose and content
-            and any(kw in content for kw in _hallucination_keywords)):
-        # 强制提醒 LLM：你在文本里说"已提议"但没调工具，必须调 propose_action
+    # 幻觉执行检测：LLM 回复"已提议/请点击确认"但 propose_action 未成功
+    # LLM 多轮对话后容易退化成文本模拟——下面两种情况都触发重试：
+    # 1. 没调 propose_action，只在文本说"已提议"
+    # 2. 调了 propose_action 但返回错误，文本仍说"已提议成功"（忽略工具错误）
+    # 最多重试 3 次，防止单次重试后 LLM 继续幻觉
+    _hallucination_keywords = [
+        "已提议", "已提交", "已提交安装", "已提交请求",
+        "请点击确认", "点击确认", "确认按钮",
+        "请确认是否执行", "确认执行",
+        "操作已提交", "执行中，请稍候", "待确认",
+    ]
+    _max_hallucination_retries = 3
+    for _hallu_try in range(_max_hallucination_retries):
+        _propose_success = any(
+            tr.get("result", {}).get("status") == "success"
+            for tr in tool_results
+            if tr.get("tool_name") == "propose_action"
+        )
+        if _propose_success or not content:
+            break
+        if not any(kw in content for kw in _hallucination_keywords):
+            break
+
+        # 构造更具体的警告信息：区分"没调用"和"调用失败"
+        _last_propose = None
+        for tr in tool_results:
+            if tr.get("tool_name") == "propose_action":
+                _last_propose = tr.get("result", {})
+        if _last_propose:
+            _err_msg = _last_propose.get("message", "")
+            _warning = (
+                f"【系统警告】你调用了 propose_action 但返回错误：{_err_msg}。"
+                "但你却在回复中说已提议成功，这是错误的！"
+                "用户界面不会有确认按钮，操作永远不会执行。"
+                "请检查错误信息，修正参数后重新调用 propose_action 工具。"
+            )
+        else:
+            _warning = (
+                "【系统警告】你说已提议但你并没有调用 propose_action 工具！"
+                "没有调用工具就不会创建待确认动作，用户界面不会显示确认按钮，操作永远不会执行。"
+                "请立即调用 propose_action 工具来真正提议操作，不要只在文本里说已提议。"
+            )
         messages.append({"role": "assistant", "content": content})
-        messages.append({"role": "user", "content": (
-            "【系统警告】你说已提议但你并没有调用 propose_action 工具！"
-            "没有调用工具就不会创建待确认动作，用户界面不会显示确认按钮，操作永远不会执行。"
-            "请立即调用 propose_action 工具来真正提议操作，不要只在文本里说已提议。"
-        )})
+        messages.append({"role": "user", "content": _warning})
         retry_resp = call_llm(provider, messages, openai_tools if openai_tools else None, timeout_override=30)
-        if "error" not in retry_resp:
-            retry_msg = retry_resp.get("choices", [{}])[0].get("message", {})
-            retry_content = retry_msg.get("content", "") or ""
-            retry_tool_calls = retry_msg.get("tool_calls")
-            # 文本标签兼容
-            if not retry_tool_calls:
-                parsed = _parse_text_tool_calls(retry_content)
-                if parsed:
-                    retry_tool_calls = parsed
-                    retry_msg["tool_calls"] = parsed
-                    retry_content = _strip_text_tool_call_tags(retry_content)
-            # 如果重试后真的调了 propose_action，执行它
-            if retry_tool_calls:
-                for tc in retry_tool_calls:
-                    t_name = tc["function"]["name"]
-                    try:
-                        t_args = json.loads(tc["function"]["arguments"])
-                    except (json.JSONDecodeError, KeyError):
-                        t_args = {}
-                    if t_name == "propose_action":
-                        t_result = call_mcp_tool(t_name, t_args, db=db, user_id=user_id, allow_internal=False)
-                        db.add(ToolInvocation(
-                            session_id=session.id, message_id=user_msg.id,
-                            tool_name=t_name,
-                            status="success" if t_result["status"] == "success" else "failed",
-                            latency_ms=0,
-                            request_payload=json.dumps(t_args, ensure_ascii=False),
-                            response_summary=json.dumps(t_result, ensure_ascii=False),
-                        ))
-                        db.commit()
-                        tool_results.append({"tool_name": t_name, "result": t_result, "tool_call_id": tc.get("id", "")})
-                        # 创建 PendingAction
-                        if t_result.get("status") == "success":
-                            r_data = t_result.get("result", {})
-                            if isinstance(r_data, dict) and r_data.get("_pending_action"):
-                                pa_data = r_data["_pending_action"]
-                                if config.require_confirmation:
-                                    pa = PendingAction(
-                                        session_id=session.id, message_id=user_msg.id,
-                                        action_type=pa_data.get("action_type", "unknown"),
-                                        title=pa_data.get("title", ""),
-                                        risk_level=pa_data.get("risk_level", "low"),
-                                        reason=pa_data.get("reason", ""),
-                                        action_payload=json.dumps(pa_data.get("payload", {}), ensure_ascii=False),
-                                    )
-                                    db.add(pa)
-                                    db.commit()
-                                    pending_actions.append({
-                                        "id": pa.id, "title": pa.title,
-                                        "risk_level": pa.risk_level, "action_type": pa.action_type,
-                                    })
-                content = retry_content or content
-            else:
-                # 重试后仍然没调工具，在 content 里追加提示用户
-                content = retry_content or content
+        if "error" in retry_resp:
+            content = retry_resp.get("error", "重试 LLM 调用失败")
+            break
+        retry_msg = retry_resp.get("choices", [{}])[0].get("message", {})
+        content = retry_msg.get("content", "") or ""
+        retry_tool_calls = retry_msg.get("tool_calls")
+        # 文本标签兼容
+        if not retry_tool_calls:
+            parsed = _parse_text_tool_calls(content)
+            if parsed:
+                retry_tool_calls = parsed
+                retry_msg["tool_calls"] = parsed
+                content = _strip_text_tool_call_tags(content)
+        # 如果重试后调了工具，执行之
+        if retry_tool_calls:
+            for tc in retry_tool_calls:
+                t_name = tc["function"]["name"]
+                try:
+                    t_args = json.loads(tc["function"]["arguments"])
+                except (json.JSONDecodeError, KeyError):
+                    t_args = {}
+                t_result = call_mcp_tool(t_name, t_args, db=db, user_id=user_id, allow_internal=False)
+                db.add(ToolInvocation(
+                    session_id=session.id, message_id=user_msg.id,
+                    tool_name=t_name,
+                    status="success" if t_result["status"] == "success" else "failed",
+                    latency_ms=0,
+                    request_payload=json.dumps(t_args, ensure_ascii=False),
+                    response_summary=json.dumps(t_result, ensure_ascii=False),
+                ))
+                db.commit()
+                tool_results.append({"tool_name": t_name, "result": t_result, "tool_call_id": tc.get("id", "")})
+                # 创建 PendingAction
+                if t_name == "propose_action" and t_result.get("status") == "success":
+                    r_data = t_result.get("result", {})
+                    if isinstance(r_data, dict) and r_data.get("_pending_action"):
+                        pa_data = r_data["_pending_action"]
+                        if config.require_confirmation:
+                            pa = PendingAction(
+                                session_id=session.id, message_id=user_msg.id,
+                                action_type=pa_data.get("action_type", "unknown"),
+                                title=pa_data.get("title", ""),
+                                risk_level=pa_data.get("risk_level", "low"),
+                                reason=pa_data.get("reason", ""),
+                                action_payload=json.dumps(pa_data.get("payload", {}), ensure_ascii=False),
+                            )
+                            db.add(pa)
+                            db.commit()
+                            pending_actions.append({
+                                "id": pa.id, "title": pa.title,
+                                "risk_level": pa.risk_level, "action_type": pa.action_type,
+                            })
+            # 执行了工具后，重新检查幻觉状态（下一轮循环）
+            continue
+        else:
+            # 重试后仍然没调工具，继续循环检查 content 是否仍含幻觉关键词
+            continue
+
+    # 兜底：重试循环结束后仍含幻觉关键词且 propose_action 未成功，强制替换
+    if (not any(
+            tr.get("result", {}).get("status") == "success"
+            for tr in tool_results
+            if tr.get("tool_name") == "propose_action"
+    ) and content and any(kw in content for kw in _hallucination_keywords)):
+        _last_propose = None
+        for tr in tool_results:
+            if tr.get("tool_name") == "propose_action":
+                _last_propose = tr.get("result", {})
+        if _last_propose:
+            _err_msg = _last_propose.get("message", "")
+            content = f"❌ 提议操作失败：{_err_msg}\n\n请修正参数后重新发起操作。"
+        else:
+            content = "❌ 操作提议失败：AI 未正确调用 propose_action 工具。请刷新页面重新发起。"
 
     # Save assistant reply
     assistant_msg = add_message(
@@ -647,18 +714,33 @@ def confirm_pending_action(db: Session, action_id: int, user_name: str) -> Dict:
     action.confirmed_by = user_name
     action.confirmed_at = datetime.now()
 
-    # 异步执行：立即置 STATUS_EXECUTING + 返回，后台线程执行命令 + LLM 总结
-    # 修复 confirm 卡住——SSH 执行 + LLM 总结可能 30-50s，同步阻塞超过前端 timeout
+    # 置 STATUS_EXECUTING，准备执行
     action.status = PendingAction.STATUS_EXECUTING
     action.result_payload = ""
     db.commit()
+
+    # 创建同步事件
+    event = threading.Event()
+    with _execution_events_lock:
+        _execution_events[action.id] = event
 
     # 后台线程执行（独立 db session，避免与请求 session 冲突）
     _async_execute_action(action.id, action.session_id, action.message_id,
                           tool_name, payload, action.title, action.action_type)
 
-    return {"success": True, "status": PendingAction.STATUS_EXECUTING,
-            "result": {"status": "executing", "message": "命令正在远程执行中，请稍候..."}}
+    # 等后台线程完成（最多 180s），消除前端轮询竞态条件
+    # 链式推进最多 8 轮 agentic loop + 最终总结, 每轮 LLM 30s, 需要更长超时
+    completed = event.wait(timeout=180)
+
+    with _execution_events_lock:
+        _execution_events.pop(action.id, None)
+
+    if completed:
+        return {"success": True, "status": "completed",
+                "result": {"status": "completed", "message": "执行完成"}}
+    else:
+        return {"success": True, "status": PendingAction.STATUS_EXECUTING,
+                "result": {"status": "executing", "message": "命令正在远程执行中，请稍候..."}}
 
 
 def _async_execute_action(action_id: int, session_id: int, message_id: Optional[int],
@@ -702,10 +784,11 @@ def _async_execute_action(action_id: int, session_id: int, message_id: Optional[
             # 等 LLM 总结/兜底消息落库后再更新——否则前端轮询到 is_terminal
             # 时 assistant 消息还没存进去，loadMessages 拿不到 AI 回复
 
-            # LLM 总结（可选：超时/失败用 result message 兜底）
+            # 方案A: 链式推进——执行成功后进入 agentic loop, 让 LLM 自主决定下一步
+            # (提议启动/验证/最终总结), 形成"确认→自动推进→确认"链
             config = db.query(AgentConfig).filter(AgentConfig.name == "default").first()
-            reply = _summarize_execution_result(db, action, result, config)
-            # LLM 总结失败/超时：用 result 里的 message 兜底，确保用户有反馈
+            reply = _continue_after_execution(db, action, result, config, user_id=None)
+            # 链式推进失败/超时：用 result 里的 message 兜底，确保用户有反馈
             if not reply:
                 status_text = "执行成功" if is_success else "执行失败"
                 # 从嵌套结构提取 message
@@ -734,6 +817,11 @@ def _async_execute_action(action_id: int, session_id: int, message_id: Optional[
                 pass
         finally:
             db.close()
+            # 通知 confirm 接口线程已完成
+            with _execution_events_lock:
+                event = _execution_events.get(action_id)
+                if event:
+                    event.set()
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
@@ -771,6 +859,7 @@ def _summarize_execution_result(db: Session, action: PendingAction, result: Dict
             f"执行状态: {status_text}\n"
             f"执行结果: {result_json}\n\n"
             f"请用简洁的自然语言向用户总结执行结果，如果失败请说明原因并给出建议。"
+            f"重要：这是执行结果总结，不是新操作提议，不要写'请点击确认'、'请在界面点击确认'或类似内容。"
         )})
 
         resp = call_llm(provider, msgs, timeout_override=20)
@@ -782,6 +871,250 @@ def _summarize_execution_result(db: Session, action: PendingAction, result: Dict
     except Exception:
         pass
     return ""
+
+
+# ─── 方案A: 链式推进 (Chained Proactive Continuation) ───
+# 写操作 confirm 执行成功后, 不再只做文字总结, 而是把执行结果作为新输入重新进入 agentic loop,
+# 让 LLM 自己决定下一步 (提议启动/验证/或给最终总结). 形成"确认→自动推进→确认"链.
+# 与 _summarize_execution_result 的区别: 后者只调一次 LLM 生成总结, 不进入工具调用循环;
+# 本函数进入最多 8 轮 agentic loop, LLM 可继续调 propose_action/query_*/execute_* (免确认).
+_CONTINUE_SYSTEM_SUFFIX = """
+
+## 当前任务上下文：链式推进模式
+你刚才提议的一个写操作已被用户确认并执行完成，执行结果已在上一条消息中给出。
+现在请你根据执行结果决定下一步：
+1. **继续推进计划下一步**：如果原计划还有后续步骤（如安装后启动、启动后验证），立即调用 propose_action 提议下一个动作。诊断命令会自动执行无需确认，写操作会等待用户确认。
+2. **给出最终总结**：如果原计划已全部完成，或执行失败且无替代方案，用简洁自然语言向用户汇报最终结果。
+3. **禁止问"需要我继续吗？"、"是否需要..."等开放式问句**。要么直接调工具推进，要么给结论。用户确认了一次就期望你自主完成剩余步骤。
+4. **禁止只说不做**：不要写"让我进一步检查"、"我来排查一下"等话语后不调用工具。如果你说要检查，就必须立即调用 propose_action 工具执行检查命令。
+"""
+
+# 意图词检测: LLM 说"让我检查/我来排查"但没调工具的幻觉模式
+# 用于 _continue_after_execution 的幻觉检测, 命中后追加 warning 强制 LLM 调工具
+_CONTINUE_INTENT_RE = re.compile(
+    r'(让我|我来|我将|我会|接下来|下一步).{0,6}(检查|查看|执行|排查|分析|看看|继续|确认|验证|查找|试试|尝试|排查一下|看一下)',
+    re.DOTALL,
+)
+
+
+def _has_continue_intent(content: str) -> bool:
+    """检测 content 是否含'说要继续检查但没调工具'的意图词模式."""
+    if not content:
+        return False
+    # 末尾是冒号（"让我进一步检查："这种半截句子）也算意图
+    if content.rstrip().endswith(("：", ":")):
+        return True
+    return bool(_CONTINUE_INTENT_RE.search(content))
+
+
+def _continue_after_execution(db: Session, action: PendingAction, result: Dict, config: Optional[AgentConfig], user_id: Optional[int]) -> str:
+    """执行成功后进入 agentic loop, 让 LLM 自主决定下一步 (提议新动作/验证/最终总结).
+
+    返回最终 assistant 回复内容 (已存入数据库). 失败/超时返回空串, 由调用方兜底.
+    与 _summarize_execution_result 的区别: 后者只生成文字总结不调工具; 本函数进入
+    最多 8 轮工具调用循环, LLM 可继续 propose_action 形成链式推进.
+    """
+    try:
+        session_obj = db.query(ChatSession).filter(ChatSession.id == action.session_id).first()
+        if not session_obj:
+            return ""
+        provider = None
+        if config and config.default_provider_id:
+            provider = db.query(AIProvider).filter(
+                AIProvider.id == config.default_provider_id, AIProvider.is_enabled == True,
+            ).first()
+        if not provider:
+            provider = db.query(AIProvider).filter(AIProvider.is_enabled == True).first()
+        if not provider:
+            return ""
+
+        # 构造 system prompt: 原始 prompt + 链式推进指令
+        base_prompt = (config.system_prompt if config else None) or DEFAULT_SYSTEM_PROMPT
+        system_prompt = base_prompt + _CONTINUE_SYSTEM_SUFFIX
+
+        msgs: List[Dict] = [{"role": "system", "content": system_prompt}]
+        msgs.extend(get_message_history(db, session_obj, config))
+        # 执行结果作为系统通知 (不存为 user 消息, 避免污染对话历史)
+        result_json = json.dumps(result, ensure_ascii=False)
+        status_text = "成功" if result.get("status") == "success" else "失败"
+        msgs.append({"role": "user", "content": (
+            f"[系统通知] 待确认动作已执行完成。\n"
+            f"动作标题: {action.title}\n"
+            f"动作类型: {action.action_type}\n"
+            f"执行状态: {status_text}\n"
+            f"执行结果: {result_json}\n\n"
+            f"请根据执行结果继续推进计划下一步，或给出最终总结。"
+        )})
+
+        # Build MCP tools manifest
+        mcp_tools = get_mcp_manifest()
+        openai_tools = []
+        for t in mcp_tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"],
+                },
+            })
+
+        content = ""
+        max_rounds = 8
+        last_had_tool_calls = False
+        intent_retry_count = 0  # 意图词幻觉重试次数
+        _MAX_INTENT_RETRIES = 2
+        for round_idx in range(max_rounds):
+            resp = call_llm(provider, msgs, openai_tools if openai_tools else None, timeout_override=30)
+            if "error" in resp:
+                # LLM 调用失败: 用 result message 兜底, 不继续 loop
+                return ""
+            choice = resp.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            content = message.get("content", "") or ""
+            tool_calls_raw = message.get("tool_calls")
+
+            # 文本标签兼容 (MiniMax 等)
+            if not tool_calls_raw:
+                parsed = _parse_text_tool_calls(content)
+                if parsed:
+                    tool_calls_raw = parsed
+                    message["tool_calls"] = parsed
+            if content and ("<minimax:tool_call" in content or "<invoke" in content or "<parameter" in content):
+                cleaned = _strip_text_tool_call_tags(content)
+                message["content"] = cleaned
+                content = cleaned
+
+            # 无工具调用: 检查是否含意图词 (说"让我检查"但没调工具)
+            if not tool_calls_raw:
+                if content and intent_retry_count < _MAX_INTENT_RETRIES and _has_continue_intent(content):
+                    # 意图词幻觉: LLM 说要检查但没调工具, 追加 warning 强制调工具
+                    intent_retry_count += 1
+                    msgs.append({"role": "assistant", "content": content})
+                    msgs.append({"role": "user", "content": (
+                        "【系统警告】你说了'让我进一步检查'或类似话语，但没有调用任何工具。"
+                        "请立即调用 propose_action 工具来执行检查命令（诊断命令会自动执行无需确认），"
+                        "或者给出最终总结。不要只说不做。"
+                    )})
+                    continue
+                # 真的没工具调用也没意图词 (或重试上限): 存 content 结束
+                if content:
+                    add_message(db, session_obj.id, "assistant", content)
+                return content
+
+            last_had_tool_calls = True
+            round_tool_results = []
+            has_new_pending = False  # 本轮是否创建了需用户确认的 PendingAction
+            for tc in tool_calls_raw:
+                tool_name = tc["function"]["name"]
+                try:
+                    arguments = json.loads(tc["function"]["arguments"])
+                except (json.JSONDecodeError, KeyError):
+                    arguments = {}
+
+                tool_start = time.time()
+                tool_result = call_mcp_tool(tool_name, arguments, db=db, user_id=user_id, allow_internal=False)
+                tool_latency = int((time.time() - tool_start) * 1000)
+
+                db.add(ToolInvocation(
+                    session_id=session_obj.id,
+                    message_id=action.message_id,
+                    tool_name=tool_name,
+                    status="success" if tool_result.get("status") == "success" else "failed",
+                    latency_ms=tool_latency,
+                    request_payload=json.dumps(arguments, ensure_ascii=False),
+                    response_summary=json.dumps(tool_result, ensure_ascii=False),
+                ))
+                db.commit()
+
+                round_tool_results.append({
+                    "tool_name": tool_name,
+                    "result": tool_result,
+                    "tool_call_id": tc.get("id", ""),
+                })
+
+                # propose_action 成功 → 创建 PendingAction 或 auto_confirm 执行
+                if tool_result.get("status") == "success":
+                    result_data = tool_result.get("result", {})
+                    if isinstance(result_data, dict) and result_data.get("_pending_action"):
+                        pa_data = result_data["_pending_action"]
+                        pa_action_type = pa_data.get("action_type", "unknown")
+                        pa_payload = pa_data.get("payload", {})
+
+                        if config.require_confirmation and not pa_data.get("auto_confirm"):
+                            # 需用户确认: 创建 PendingAction, 标记 has_new_pending, loop 结束后等用户确认
+                            pa = PendingAction(
+                                session_id=session_obj.id,
+                                message_id=action.message_id,
+                                action_type=pa_action_type,
+                                title=pa_data.get("title", ""),
+                                risk_level=pa_data.get("risk_level", "low"),
+                                reason=pa_data.get("reason", ""),
+                                action_payload=json.dumps(pa_payload, ensure_ascii=False),
+                            )
+                            db.add(pa)
+                            db.commit()
+                            has_new_pending = True
+                        else:
+                            # 免确认路径 (诊断命令): 直接执行, 继续 loop 让 LLM 看结果
+                            exec_tool_name = f"execute_{pa_action_type}"
+                            schema_error = _validate_payload_schema(exec_tool_name, pa_payload)
+                            if schema_error:
+                                exec_result = {"status": "error", "message": f"payload 校验失败：{schema_error}"}
+                                round_tool_results[-1]["result"] = exec_result
+                            else:
+                                exec_start = time.time()
+                                exec_result = call_mcp_tool(exec_tool_name, pa_payload, db=db, allow_internal=True)
+                                exec_latency = int((time.time() - exec_start) * 1000)
+                                round_tool_results[-1]["result"] = exec_result
+                                db.add(ToolInvocation(
+                                    session_id=session_obj.id,
+                                    message_id=action.message_id,
+                                    tool_name=exec_tool_name,
+                                    status="success" if exec_result.get("status") == "success" else "failed",
+                                    latency_ms=exec_latency,
+                                    request_payload=json.dumps(pa_payload, ensure_ascii=False),
+                                    response_summary=json.dumps(exec_result, ensure_ascii=False),
+                                ))
+                                db.commit()
+
+            # 把 assistant message + tool results 加入 msgs, 准备下一轮
+            msgs.append(message)
+            for tr in round_tool_results:
+                msgs.append({
+                    "role": "tool",
+                    "tool_call_id": tr["tool_call_id"],
+                    "content": json.dumps(tr["result"], ensure_ascii=False),
+                })
+
+            # 如果本轮创建了需用户确认的 PendingAction, loop 结束 (等用户确认后链式继续)
+            if has_new_pending:
+                # 给用户一个文字提示, 说明已提议下一步 (content 可能已含 LLM 的说明)
+                if content:
+                    add_message(db, session_obj.id, "assistant", content)
+                return content
+
+        # 达到 max_rounds: 如果最后一轮 LLM 仍调了工具 (说明还想继续但被截断),
+        # 再调一次 LLM 不带 tools, 强制它给出最终总结 (否则用户只看到半截句子)
+        if last_had_tool_calls:
+            final_msgs = msgs + [{"role": "user", "content": (
+                "【系统通知】已达到最大自动执行轮次。请根据以上所有执行结果，"
+                "用简洁的自然语言向用户汇报最终结果（包括已执行的诊断命令和发现的问题）。"
+                "不要再调用工具，只给出总结。"
+            )}]
+            final_resp = call_llm(provider, final_msgs, None, timeout_override=30)
+            if "error" not in final_resp:
+                final_content = final_resp.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                if final_content:
+                    content = final_content
+        # 清理可能的标签, 存最终 content
+        if content and ("<minimax:tool_call" in content or "<invoke" in content or "<parameter" in content):
+            content = _strip_text_tool_call_tags(content)
+        if content:
+            add_message(db, session_obj.id, "assistant", content)
+        return content
+    except Exception:
+        return ""
 
 
 def cancel_pending_action(db: Session, action_id: int) -> bool:

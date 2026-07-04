@@ -233,22 +233,21 @@ async function confirmAction(id) {
   try {
     const data = await request.post(`/agent/pending/${id}/confirm`)
     const result = data.result || {}
-    // 异步模式：confirm 立即返回 executing，后台线程执行命令+LLM总结
-    if (result.status === 'executing') {
-      ElMessage.info('命令正在远程执行中，请稍候...')
-      // 轮询状态直到终态（executed/failed/canceled）
-      const pollResult = await pollPendingStatus(id)
-      if (pollResult.status === 'executed') {
-        ElMessage.success('执行成功')
-      } else if (pollResult.status === 'failed') {
-        ElMessage({ message: pollResult.result_message || '执行失败', type: 'error', duration: 6000 })
-      }
-      // 重新加载消息：后端已把 LLM 总结或兜底 message 存为 assistant 消息
+    if (result.status === 'completed') {
+      // 后端同步等待执行完成（threading.Event），新消息已落库，直接刷新
+      ElMessage.success('执行完成')
       if (activeSessionId.value) {
         await loadMessages(activeSessionId.value)
       }
+    } else if (result.status === 'executing') {
+      // 后端超时(90s 未完成)，降级为前端轮询历史
+      ElMessage.info('命令正在远程执行中，请稍候...')
+      const history = await pollSessionForNewMessage(activeSessionId.value, messages.value.length)
+      if (history) {
+        messages.value = history.messages || []
+        pendingActions.value = history.pending_actions || []
+      }
     } else {
-      // 兼容同步模式（理论上不会走到，但兜底）
       const execResult = result.result || {}
       if (result.success) {
         ElMessage.success(execResult.message || '执行成功')
@@ -269,18 +268,21 @@ async function confirmAction(id) {
   finally { confirmingId.value = null }
 }
 
-async function pollPendingStatus(id) {
-  // 轮询 /pending/{id}/status，每 2s 一次，最多 60s（30 次）
-  for (let i = 0; i < 30; i++) {
+async function pollSessionForNewMessage(sessionId, beforeCount) {
+  for (let i = 0; i < 60; i++) {
     await new Promise(resolve => setTimeout(resolve, 2000))
     try {
-      const data = await request.get(`/agent/pending/${id}/status`)
-      if (data.is_terminal) {
+      const data = await request.get(`/agent/history/${sessionId}`)
+      const msgs = data.messages || []
+      if (msgs.length > beforeCount) {
+        await nextTick()
+        scrollToBottom(true)
         return data
       }
-    } catch (e) { /* 忽略单次轮询错误，继续 */ }
+    } catch (e) { /* 忽略单次轮询错误 */ }
   }
-  return { status: 'timeout', result_message: '执行超时，请稍后查看待确认列表' }
+  ElMessage.warning('执行结果加载超时，请稍后手动刷新')
+  return null
 }
 
 async function cancelAction(id) {

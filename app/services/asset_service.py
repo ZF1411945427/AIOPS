@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.models import Asset
+from app.database import get_session_for, get_db_mode
 
 
 def list_assets(db: Session, search: str = "", type: str = "", ci_type: str = ""):
@@ -66,34 +67,66 @@ def probe_assets(db: Session):
     from app.services.connection_service import ConnectionTester
     from datetime import datetime
     import json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
 
     assets = db.query(Asset).all()
     changed = []
-    for asset in assets:
+
+    # 为每个资产新建独立 Session，线程安全地并行探测
+    # ThreadPoolExecutor 最多 10 并发，防止大量离线资产 SSH 超时串行拖垮总耗时
+    _probe_db_factory = lambda: get_session_for(get_db_mode())()
+    _lock = threading.Lock()
+
+    def _probe_one(asset):
         if not asset.ip:
-            continue
-        # 解析连接配置
-        config = {}
+            return None
+        # 用独立 Session 避免跨线程共用
+        sess = _probe_db_factory()
         try:
-            raw = asset.connection_config
-            if isinstance(raw, str):
-                config = json.loads(raw) if raw else {}
-            else:
-                config = raw or {}
-        except (json.JSONDecodeError, TypeError):
+            # 重新从 DB 获取资产行
+            a = sess.query(Asset).filter(Asset.id == asset.id).first()
+            if not a:
+                return None
+            # 解析连接配置
             config = {}
+            try:
+                raw = a.connection_config
+                if isinstance(raw, str):
+                    config = json.loads(raw) if raw else {}
+                else:
+                    config = raw or {}
+            except (json.JSONDecodeError, TypeError):
+                config = {}
 
-        result = ConnectionTester.test(asset.connection_type or "ssh", asset.ip, config)
-        old_status = asset.status
-        new_status = "online" if result.get("ok") else "offline"
-        asset.status = new_status
-        asset.last_checked = datetime.now()
-        asset.latency_ms = int(result.get("latency_ms", 0)) if result.get("ok") else None
+            result = ConnectionTester.test(a.connection_type or "ssh", a.ip, config)
+            old_status = a.status
+            new_status = "online" if result.get("ok") else "offline"
+            a.status = new_status
+            a.last_checked = datetime.now()
+            a.latency_ms = int(result.get("latency_ms", 0)) if result.get("ok") else None
+            sess.commit()
 
-        if old_status != new_status:
-            changed.append({"id": asset.id, "name": asset.name,
-                            "old": old_status, "new": new_status,
-                            "message": result.get("message", "")})
+            if old_status != new_status:
+                return {"id": a.id, "name": a.name,
+                        "old": old_status, "new": new_status,
+                        "message": result.get("message", "")}
+            return None
+        except Exception as e:
+            sess.rollback()
+            print(f"[probe] {asset.name}({asset.ip}) 探测异常: {e}")
+            return None
+        finally:
+            sess.close()
 
-    db.commit()
+    # 限制并发数 10，避免同时开太多 SSH 连接
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_probe_one, a): a for a in assets}
+        for future in as_completed(futures):
+            c = future.result()
+            if c:
+                changed.append(c)
+                with _lock:
+                    print(f"[probe] {c['name']}({futures[future].ip}): {c['old']} -> {c['new']} ({c['message']})")
+
     return changed
