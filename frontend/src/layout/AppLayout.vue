@@ -168,7 +168,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
 import {
@@ -210,12 +210,20 @@ const activeView = ref('dashboard')
 const activePath = ref(null)
 const currentTitle = ref(_savedMenu ? '' : '运行概览')
 const activeMenu = ref(_savedMenu || 'dashboard')
-const noticeCount = ref(3)
-const notifications = ref([
-  { icon: '🚨', title: '检测到 3 条未处理告警', time: '2 分钟前', route: 'alert-center' },
-  { icon: '⚡', title: '192.168.100.129 CPU 负载超过 80%', time: '10 分钟前', route: 'alert-center' },
-  { icon: '📦', title: 'K8s 集群节点状态正常', time: '30 分钟前', route: 'k8s-overview' },
-])
+const noticeCount = ref(0)
+const notifications = ref([])
+let notifTimer = null
+
+async function loadNotifications() {
+  try {
+    const data = await request.get('/notifications/api/recent')
+    notifications.value = data.notifications || []
+    noticeCount.value = data.count || 0
+  } catch (e) {
+    // 静默失败，不打扰用户（顶栏通知非关键路径）
+    console.error('load notifications:', e)
+  }
+}
 const menuGroups = ref([])
 
 const ICON_MAP = {
@@ -315,6 +323,10 @@ onMounted(async () => {
   // 获取当前数据库模式
   appStore.fetchDbMode()
 
+  // 加载真实系统通知 + 30s 定时刷新
+  loadNotifications()
+  notifTimer = setInterval(loadNotifications, 30000)
+
   try {
     const data = await request.get('/api/menu')
     menuGroups.value = Array.isArray(data) ? data : (data.menu || [])
@@ -327,6 +339,13 @@ onMounted(async () => {
     ElMessage.error('加载菜单失败: ' + e.message)
   } finally {
     menuLoading.value = false
+  }
+})
+
+onBeforeUnmount(() => {
+  if (notifTimer) {
+    clearInterval(notifTimer)
+    notifTimer = null
   }
 })
 
