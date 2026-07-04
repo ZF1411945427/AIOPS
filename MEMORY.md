@@ -1,3 +1,16 @@
+### 2026-07-04: 修复告警中心乱码——anomaly_service.py 源文件 GBK 误读
+- **问题**: 告警中心 #322-#331 告警 message 显示乱码 "3蟽寮傚父妫€娴?- cpu_usage 3sigma jiance: cpu_usage 鍋忛珮 (z=4.28, 鍧囧€?4.17, 蟽=9.59)"
+- **根因**: `app/services/anomaly_service.py` 源文件被某个编辑器以 GBK 保存了 UTF-8 内容, 导致中文字符串损坏. 文件本身是合法 UTF-8, 但内容是 GBK 误读后的乱码字符:
+  - `3蟽寮傚父妫€娴?` → `3σ异常检测`
+  - `鍋忛珮` → `偏高`, `鍋忎綆` → `偏低`
+  - `鍧囧€?` → `均值`, `蟽` → `σ`
+  - `EWMA寮傚父妫€娴?` → `EWMA异常检测`
+  - `娈嬪樊` → `残差`, `伪` → `α`
+- **修复1** `anomaly_service.py`: 5 行乱码源码修复 (L52 tag, L84/93 3σ检测, L126/135 EWMA检测)
+- **修复2** 数据库: UPDATE 已有乱码告警 #322-#331 的 message 字段, 8 个 REPLACE 还原中文
+- **验证**: py_compile PASS; DB 查询确认 #322-#331 全部显示正常中文; 后端重启 HTTP 200; 全项目 py 文件扫描 0 乱码残留
+- **专业名词**: 编码误读损坏(Encoding Misinterpretation Corruption)——文件以错误编码保存导致字符损坏; 摩尔定律式乱码(Mojibake)——UTF-8 字节被 GBK 解码后产生的乱码模式
+
 ### 2026-07-04: 修复链式推进 max_rounds 太小 + 意图词幻觉检测
 - **问题**: 爸爸实测 session 49 (重启 nginx) 发现链式推进"停了"——AI 说"让我进一步检查 nginx 安装情况："后无下文. 查 DB 发现链式推进**实际工作了**: TI#353-361 显示 3 轮 loop 自主执行了 6 个诊断命令 (query_assets→systemctl status→nginx -t→which/find→rpm -qa), 全部 auto_confirm=true 免确认 (方案B生效). 但用户只看到 msg#432 半截句子
 - **根因1**: `max_rounds=3` 太小——3 轮用完后 LLM 还想继续但被截断, 最后一轮的 content "让我进一步检查..." (半截句子, 末尾冒号) 被存为最终消息

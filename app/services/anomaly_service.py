@@ -49,7 +49,7 @@ def toggle_config(db: Session, config_id: int):
 
 
 def _has_recent_alert(db: Session, metric_name: str, asset_id: int, algorithm: str, config_name: str) -> bool:
-    tag = f"{'EWMA' if algorithm == 'ewma' else '3蟽'}寮傚父"
+    tag = f"{'EWMA' if algorithm == 'ewma' else '3σ'}异常"
     return bool(
         db.query(Alert)
         .filter(
@@ -81,7 +81,7 @@ def _detect_sigma(db: Session, config: AnomalyConfig, records: list) -> Alert | 
         return None
 
     is_high = latest.value > mean
-    direction = "鍋忛珮" if is_high else "鍋忎綆"
+    direction = "偏高" if is_high else "偏低"
     return Alert(
         rule_id=None,
         asset_id=config.asset_id or records[0].asset_id,
@@ -90,7 +90,7 @@ def _detect_sigma(db: Session, config: AnomalyConfig, records: list) -> Alert | 
         threshold=round(mean + config.sensitivity * stddev, 2),
         severity="warning" if z_score < 4 else "critical",
         status="triggered",
-        message=f"3蟽寮傚父妫€娴?- {config.name}: {config.metric_name} {direction} (z={round(z_score,2)}, 鍧囧€?{round(mean,2)}, 蟽={round(stddev,2)})",
+        message=f"3σ异常检测- {config.name}: {config.metric_name} {direction} (z={round(z_score,2)}, 均值={round(mean,2)}, σ={round(stddev,2)})",
     )
 
 
@@ -123,7 +123,7 @@ def _detect_ewma(db: Session, config: AnomalyConfig, records: list) -> Alert | N
     if _has_recent_alert(db, config.metric_name, config.asset_id, "ewma", config.name):
         return None
 
-    direction = "鍋忛珮" if residual > 0 else "鍋忎綆"
+    direction = "偏高" if residual > 0 else "偏低"
     return Alert(
         rule_id=None,
         asset_id=config.asset_id or records[0].asset_id,
@@ -132,7 +132,7 @@ def _detect_ewma(db: Session, config: AnomalyConfig, records: list) -> Alert | N
         threshold=round(ewma + threshold * std_res, 2),
         severity="warning" if norm_residual < 5 else "critical",
         status="triggered",
-        message=f"EWMA寮傚父妫€娴?- {config.name}: {config.metric_name} {direction} (娈嬪樊={round(norm_residual,2)}, 伪={round(alpha,2)}, EWMA={round(ewma,2)})",
+        message=f"EWMA异常检测- {config.name}: {config.metric_name} {direction} (残差={round(norm_residual,2)}, α={round(alpha,2)}, EWMA={round(ewma,2)})",
     )
 
 
