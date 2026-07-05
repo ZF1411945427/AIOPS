@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.template_utils import get_templates
+from app.template_utils import get_templates, parse_json_config
 from app.models import DataSource
 
 router = APIRouter(prefix="/k8s", tags=["k8s_resources"])
@@ -13,7 +13,7 @@ templates = get_templates()
 
 def _get_k8s_client(ds: DataSource):
     from kubernetes import config, client
-    cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+    cfg = parse_json_config(ds.auth_config)
     if cfg.get("kubeconfig"):
         config.load_kube_config_from_dict(cfg["kubeconfig"])
     else:
@@ -256,6 +256,15 @@ def cluster_overview(request: Request, db: Session = Depends(get_db)):
     clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
     overviews = []
     errors = []
+    # 全局汇总
+    total_nodes = 0
+    total_healthy_nodes = 0
+    total_pods = 0
+    total_running_pods = 0
+    total_deployments = 0
+    total_namespaces = 0
+    total_services = 0
+    healthy_clusters = 0
     for ds in clusters:
         # 跳过已知不可达的数据源，避免 K8s API 调用超时卡死页面
         if ds.last_status == "error" or not ds.endpoint:
@@ -263,8 +272,9 @@ def cluster_overview(request: Request, db: Session = Depends(get_db)):
                 "name": ds.name,
                 "endpoint": ds.endpoint,
                 "status": "error" if ds.last_status == "error" else "unknown",
-                "nodes": 0, "healthy_nodes": 0,
-                "pods": 0, "deployments": 0,
+                "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
+                "pods": 0, "running_pods": 0, "pod_running_rate": 0,
+                "deployments": 0, "namespaces": 0, "services": 0,
                 "last_scrape": ds.last_scrape,
             })
             if ds.last_status == "error":
@@ -276,31 +286,73 @@ def cluster_overview(request: Request, db: Session = Depends(get_db)):
             nodes = v1.list_node().items
             pods = v1.list_pod_for_all_namespaces().items
             deployments = apps_v1.list_deployment_for_all_namespaces().items
+            try:
+                namespaces = v1.list_namespace().items
+                ns_count = len(namespaces)
+            except Exception:
+                ns_count = 0
+            try:
+                services = v1.list_service_for_all_namespaces().items
+                svc_count = len(services)
+            except Exception:
+                svc_count = 0
             healthy_nodes = sum(1 for n in nodes if all(c.status == "True" for c in n.status.conditions if c.type == "Ready"))
+            running_pods = sum(1 for p in pods if (p.status.phase or "") == "Running")
+            node_rate = round(healthy_nodes / len(nodes) * 100, 1) if nodes else 0
+            pod_rate = round(running_pods / len(pods) * 100, 1) if pods else 0
             overviews.append({
                 "name": ds.name,
                 "endpoint": ds.endpoint,
                 "status": ds.last_status,
                 "nodes": len(nodes),
                 "healthy_nodes": healthy_nodes,
+                "node_health_rate": node_rate,
                 "pods": len(pods),
+                "running_pods": running_pods,
+                "pod_running_rate": pod_rate,
                 "deployments": len(deployments),
+                "namespaces": ns_count,
+                "services": svc_count,
                 "last_scrape": ds.last_scrape,
             })
+            total_nodes += len(nodes)
+            total_healthy_nodes += healthy_nodes
+            total_pods += len(pods)
+            total_running_pods += running_pods
+            total_deployments += len(deployments)
+            total_namespaces += ns_count
+            total_services += svc_count
+            if ds.last_status == "online":
+                healthy_clusters += 1
         except Exception as e:
             errors.append(f"{ds.name}: {e}")
             overviews.append({
                 "name": ds.name,
                 "endpoint": ds.endpoint,
                 "status": "error",
-                "nodes": 0, "healthy_nodes": 0,
-                "pods": 0, "deployments": 0,
+                "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
+                "pods": 0, "running_pods": 0, "pod_running_rate": 0,
+                "deployments": 0, "namespaces": 0, "services": 0,
                 "last_scrape": ds.last_scrape,
             })
+    summary = {
+        "cluster_count": len(clusters),
+        "healthy_clusters": healthy_clusters,
+        "total_nodes": total_nodes,
+        "total_healthy_nodes": total_healthy_nodes,
+        "node_health_rate": round(total_healthy_nodes / total_nodes * 100, 1) if total_nodes else 0,
+        "total_pods": total_pods,
+        "total_running_pods": total_running_pods,
+        "pod_running_rate": round(total_running_pods / total_pods * 100, 1) if total_pods else 0,
+        "total_deployments": total_deployments,
+        "total_namespaces": total_namespaces,
+        "total_services": total_services,
+    }
     return templates.TemplateResponse("k8s_overview.html", {
         "request": request,
         "overviews": overviews,
         "errors": errors,
+        "summary": summary,
     })
 
 

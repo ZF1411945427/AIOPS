@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ExtEventSource, Alert
-from app.template_utils import get_templates
+from app.template_utils import get_templates, parse_json_config
 
 router = APIRouter(prefix="/event-sources", tags=["event-sources"])
 templates = get_templates()
@@ -48,7 +48,7 @@ def sync_source(src_id: int, db: Session = Depends(get_db)):
     if not src:
         return PlainTextResponse("Source not found", 404)
     try:
-        auth = json.loads(src.auth_config) if isinstance(src.auth_config, str) else src.auth_config or {}
+        auth = parse_json_config(src.auth_config)
         headers = {}
         token = auth.get("token") or auth.get("password", "")
         if token:

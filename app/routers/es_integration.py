@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import DataSource, K8sEvent
-from app.template_utils import get_templates
+from app.template_utils import get_templates, parse_json_config
 
 router = APIRouter(prefix="/es-integration", tags=["es_integration"])
 templates = get_templates()
@@ -24,7 +24,7 @@ def sync_events_to_es(ds_id: int, db: Session = Depends(get_db)):
     try:
         from elasticsearch import Elasticsearch
         import json
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         username = cfg.get("username")
         password = cfg.get("password")
         api_key = cfg.get("api_key", "")

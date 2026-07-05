@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ExtCmdbConfig, Asset
-from app.template_utils import get_templates
+from app.template_utils import get_templates, parse_json_config
 
 router = APIRouter(prefix="/ext-cmdb", tags=["ext-cmdb"])
 templates = get_templates()
@@ -48,7 +48,7 @@ def sync_cmdb(cfg_id: int, db: Session = Depends(get_db)):
     if not cfg:
         return PlainTextResponse("Config not found", 404)
     try:
-        auth = json.loads(cfg.auth_config) if isinstance(cfg.auth_config, str) else cfg.auth_config or {}
+        auth = parse_json_config(cfg.auth_config)
         headers = {}
         token = auth.get("token") or auth.get("api_key", "")
         if token:
