@@ -1236,3 +1236,232 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
             "auto_confirm": auto_confirm,
         },
     }
+
+
+# ─── SOP 工作流引擎 Tools (AI 触发多步运维剧本) ───
+# list_workflow_templates: 枚举可用 SOP 模板 (read_only)
+# propose_workflow: 创建 WorkflowRun + NodeRun 并立即执行只读节点, 写操作节点置 awaiting_confirm (advisory)
+# 与 propose_action 的区别: propose_action 单步动作, propose_workflow 多步 DAG 编排
+# 复用 execute_* 内部工具作为节点动作, 复用 PendingAction 确认理念 (节点 awaiting_confirm 状态)
+
+
+@register_mcp_tool(
+    name="list_workflow_templates",
+    description="列出可用的 SOP 工作流模板。AI 助手处理多步骤运维任务时应先调用此工具了解可用剧本，再用 propose_workflow 触发。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "category": {"type": "string", "description": "按分类筛选: disk / service / scaling / healing / custom"},
+            "only_enabled": {"type": "boolean", "description": "仅返回已启用模板", "default": True},
+        },
+    },
+    risk_level="read_only",
+)
+def list_workflow_templates(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        from app.services import workflow_service
+        category = kwargs.get("category") or None
+        only_enabled = bool(kwargs.get("only_enabled", True))
+        templates = workflow_service.list_templates(db, category=category, only_enabled=only_enabled)
+        return {
+            "count": len(templates),
+            "templates": [
+                {
+                    "id": t["id"],
+                    "name": t["name"],
+                    "description": t["description"],
+                    "category": t["category"],
+                    "trigger_type": t["trigger_type"],
+                    "risk_level": t["risk_level"],
+                    "nodes_count": len(t.get("nodes", [])),
+                    "enabled": t["enabled"],
+                }
+                for t in templates
+            ],
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
+@register_mcp_tool(
+    name="propose_workflow",
+    description="提议执行一个 SOP 工作流。会立即创建工作流实例并自动执行只读步骤，写操作步骤会暂停等待用户在前端确认。AI 助手处理多步骤运维任务时应优先用此工具，而非逐步 propose_action。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "template_id": {"type": "integer", "description": "SOP 模板 ID（可选，无则需提供 nodes/edges）"},
+            "title": {"type": "string", "description": "工作流标题"},
+            "context": {"type": "object", "description": "运行时上下文（asset_id、告警信息等），用于渲染节点 payload 模板"},
+            "nodes": {"type": "array", "description": "自定义节点（无 template_id 时必填），每项含 id/name/action_type/payload_template/requires_confirm/retry_count"},
+            "edges": {"type": "array", "description": "自定义边（无 template_id 时必填），每项含 source/target"},
+        },
+        "required": ["title"],
+    },
+    risk_level="advisory",
+)
+def propose_workflow(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        from app.services import workflow_service
+        template_id = kwargs.get("template_id")
+        title = kwargs.get("title")
+        context = kwargs.get("context") or {}
+        custom_nodes = kwargs.get("nodes")
+        custom_edges = kwargs.get("edges")
+
+        if not title:
+            raise ValueError("缺少必填参数: title")
+        if not template_id and not custom_nodes:
+            raise ValueError("必须提供 template_id 或自定义 nodes")
+
+        run, err = workflow_service.start_workflow_run(
+            db,
+            template_id=template_id,
+            title=title,
+            context=context,
+            trigger_source="ai",
+            session_id=None,
+            custom_nodes=custom_nodes,
+            custom_edges=custom_edges,
+        )
+        if err:
+            return {"status": "error", "message": err}
+
+        run_data = workflow_service.get_run(db, run.id)
+        node_summary = []
+        awaiting = []
+        for nr in run_data.get("node_runs", []):
+            node_summary.append({"node_id": nr["node_id"], "name": nr["node_name"], "status": nr["status"], "requires_confirm": nr["requires_confirm"]})
+            if nr["status"] == "awaiting_confirm":
+                awaiting.append({"node_run_id": nr["id"], "node_id": nr["node_id"], "name": nr["node_name"]})
+
+        return {
+            "status": "created",
+            "run_id": run.id,
+            "title": run.title,
+            "workflow_status": run.status,
+            "node_count": len(node_summary),
+            "awaiting_confirm_count": len(awaiting),
+            "awaiting_confirm_nodes": awaiting,
+            "message": f"工作流 #{run.id} 已创建，只读步骤自动执行中，{len(awaiting)} 个写操作步骤待确认",
+            "_pending_workflow": {"run_id": run.id, "title": run.title},
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── 智能体编排工作流 MCP 工具 (Coze 风格) ───
+# list_agent_workflows: 枚举已发布的智能体工作流 (read_only)
+# run_agent_workflow: 执行智能体工作流，AI 在画布编排的 LLM/知识库/工具/条件分支节点链 (advisory)
+
+
+@register_mcp_tool(
+    name="list_agent_workflows",
+    description="列出可用的智能体编排工作流（Coze 风格可视化编排）。AI 助手处理复杂多步骤任务时可调用此工具了解可用智能体，再用 run_agent_workflow 触发。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "category": {"type": "string", "description": "按分类筛选: analysis / chatbot / healing / report / generic"},
+            "only_enabled": {"type": "boolean", "description": "仅返回已启用工作流", "default": True},
+        },
+    },
+    risk_level="read_only",
+)
+def list_agent_workflows(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        from app.services import agent_workflow_service
+        category = kwargs.get("category") or None
+        only_enabled = bool(kwargs.get("only_enabled", True))
+        workflows = agent_workflow_service.list_workflows(db, category=category, only_enabled=only_enabled)
+        return {
+            "count": len(workflows),
+            "workflows": [
+                {
+                    "id": w["id"],
+                    "name": w["name"],
+                    "description": w["description"],
+                    "category": w["category"],
+                    "trigger_type": w["trigger_type"],
+                    "nodes_count": len(w.get("nodes", [])),
+                    "inputs_schema": w.get("inputs_schema", []),
+                }
+                for w in workflows
+            ],
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
+@register_mcp_tool(
+    name="run_agent_workflow",
+    description="执行一个智能体编排工作流。工作流会按画布编排的节点顺序执行（LLM 推理/知识库检索/工具调用/条件分支等），返回最终输出。AI 助手处理复杂多步骤推理任务时应优先用此工具。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "workflow_id": {"type": "integer", "description": "智能体工作流 ID"},
+            "inputs": {"type": "object", "description": "工作流输入参数，对应 start 节点定义的 inputs schema"},
+        },
+        "required": ["workflow_id", "inputs"],
+    },
+    risk_level="advisory",
+)
+def run_agent_workflow(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        from app.services import agent_workflow_service
+        workflow_id = kwargs.get("workflow_id")
+        inputs = kwargs.get("inputs") or {}
+
+        if not workflow_id:
+            raise ValueError("缺少必填参数: workflow_id")
+
+        run, err = agent_workflow_service.start_workflow_run(
+            db,
+            workflow_id=workflow_id,
+            inputs=inputs,
+            trigger_source="ai",
+            session_id=None,
+        )
+        if err:
+            return {"status": "error", "message": err}
+
+        run_data = agent_workflow_service.get_run(db, run.id)
+        node_summary = []
+        for nr in run_data.get("node_runs", []):
+            node_summary.append({
+                "node_id": nr["node_id"],
+                "name": nr["node_name"],
+                "type": nr["node_type"],
+                "status": nr["status"],
+            })
+
+        return {
+            "status": "completed" if run.status == "completed" else run.status,
+            "run_id": run.id,
+            "workflow_status": run.status,
+            "outputs": run_data.get("outputs", {}),
+            "node_count": len(node_summary),
+            "nodes": node_summary,
+            "error": run_data.get("error", ""),
+            "message": f"智能体工作流 #{run.id} 执行完成，状态: {run.status}",
+        }
+    finally:
+        if close_db:
+            db.close()

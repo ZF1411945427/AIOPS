@@ -207,6 +207,10 @@
           <TopologyView v-else-if="activeView === 'topology'" />
           <TopologyPathView v-else-if="activeView === 'topology-path'" />
           <OpenApiView v-else-if="activeView === 'openapi'" />
+          <WorkflowRunsView v-else-if="activeView === 'workflow-runs'" />
+          <WorkflowTemplatesView v-else-if="activeView === 'workflow-templates'" />
+          <AgentWorkflowEditor v-else-if="activeView === 'agent-workflow-editor'" />
+          <AgentWorkflowRunsView v-else-if="activeView === 'agent-workflow-runs'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -288,6 +292,10 @@ import LifecycleView from '@/views/LifecycleView.vue'
 import TopologyView from '@/views/TopologyView.vue'
 import TopologyPathView from '@/views/TopologyPathView.vue'
 import OpenApiView from '@/views/OpenApiView.vue'
+import WorkflowRunsView from '@/views/WorkflowRunsView.vue'
+import WorkflowTemplatesView from '@/views/WorkflowTemplatesView.vue'
+import AgentWorkflowEditor from '@/views/AgentWorkflowEditor.vue'
+import AgentWorkflowRunsView from '@/views/AgentWorkflowRunsView.vue'
 import request from '@/api/request'
 
 const appStore = useAppStore()
@@ -326,7 +334,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi'])
+const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs'])
 
 function _flattenItems(items) {
   const result = []

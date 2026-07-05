@@ -24,6 +24,11 @@
             {{ row.rotation_type === "weekly" ? "周轮值" : "月轮值" }}
           </template>
         </el-table-column>
+        <el-table-column label="成员">
+          <template #default="{row}">
+            <el-tag v-for="m in (row.members || [])" :key="m" size="small" style="margin: 2px">{{ m }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="current_oncall" label="当前值班人" />
         <el-table-column prop="current_period_start" label="周期开始">
           <template #default="{row}">
@@ -35,11 +40,17 @@
             {{ formatTime(row.current_period_end) }}
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="160">
+          <template #default="{row}">
+            <el-button size="small" @click="showEditDialog(row)">编辑</el-button>
+            <el-button size="small" type="danger" @click="deleteOncall(row)">删除</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
     
-    <!-- 新建对话框 -->
-    <el-dialog v-model="dialogVisible" title="新建值班表" width="500px">
+    <!-- 新建/编辑对话框 -->
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑值班表' : '新建值班表'" width="560px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="团队名">
           <el-input v-model="form.team_name" placeholder="如: 运维组" />
@@ -51,11 +62,23 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="成员">
-          <el-input v-model="membersStr" placeholder="用逗号分隔，如: 张三,李四,王五" />
+          <el-select
+            v-model="form.members"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="选择已有成员或输入新成员（可多选）"
+            style="width: 100%"
+          >
+            <el-option v-for="m in memberCandidates" :key="m" :label="m" :value="m" />
+          </el-select>
+          <div class="hint">已复用 {{ memberCandidates.length }} 名成员，避免重复输入</div>
         </el-form-item>
         <el-form-item label="当前值班人">
-          <el-select v-model="form.current_oncall" placeholder="选择当前值班人">
-            <el-option v-for="m in members" :key="m" :label="m" :value="m" />
+          <el-select v-model="form.current_oncall" placeholder="选择当前值班人" filterable>
+            <el-option v-for="m in form.members" :key="m" :label="m" :value="m" />
           </el-select>
         </el-form-item>
         <el-form-item label="周期开始">
@@ -67,20 +90,22 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="createOncall">确定</el-button>
+        <el-button type="primary" @click="saveOncall">确定</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed } from "vue"
-import { ElMessage } from "element-plus"
+import { ref, onMounted, reactive } from "vue"
+import { ElMessage, ElMessageBox } from "element-plus"
 import axios from "axios"
 
 const oncallList = ref([])
 const currentOncall = ref({})
+const memberCandidates = ref([])
 const dialogVisible = ref(false)
+const editingId = ref(null)
 const form = reactive({
   team_name: "",
   rotation_type: "weekly",
@@ -90,8 +115,6 @@ const form = reactive({
   current_period_start: new Date(),
   current_period_end: new Date()
 })
-const membersStr = ref("")
-const members = computed(() => membersStr.value.split(",").map(m => m.trim()).filter(m => m))
 
 const loadData = async () => {
   try {
@@ -111,28 +134,70 @@ const loadCurrentOncall = async () => {
   }
 }
 
+const loadMemberCandidates = async () => {
+  try {
+    const res = await axios.get("/api/sre/oncall/members")
+    memberCandidates.value = res.data.members || []
+  } catch (e) {
+    console.error(e)
+  }
+}
+
 const showCreateDialog = () => {
+  editingId.value = null
   form.team_name = ""
   form.rotation_type = "weekly"
-  membersStr.value = ""
+  form.members = []
   form.current_oncall = ""
   form.current_period_start = new Date()
   form.current_period_end = new Date()
+  loadMemberCandidates()
   dialogVisible.value = true
 }
 
-const createOncall = async () => {
+const showEditDialog = (row) => {
+  editingId.value = row.id
+  form.team_name = row.team_name
+  form.rotation_type = row.rotation_type
+  form.members = [...(row.members || [])]
+  form.current_oncall = row.current_oncall
+  form.current_period_start = new Date(row.current_period_start)
+  form.current_period_end = new Date(row.current_period_end)
+  loadMemberCandidates()
+  dialogVisible.value = true
+}
+
+const saveOncall = async () => {
   try {
-    await axios.post("/api/sre/oncall", {
+    const payload = {
       ...form,
-      members: members.value,
-      schedule: members.value.map((m, i) => ({ order: i, name: m }))
-    })
-    ElMessage.success("创建成功")
+      members: form.members,
+      schedule: form.members.map((m, i) => ({ order: i, name: m }))
+    }
+    if (editingId.value) {
+      await axios.put(`/api/sre/oncall/${editingId.value}`, payload)
+      ElMessage.success("更新成功")
+    } else {
+      await axios.post("/api/sre/oncall", payload)
+      ElMessage.success("创建成功")
+    }
     dialogVisible.value = false
     loadData()
+    loadMemberCandidates()
   } catch (e) {
-    ElMessage.error("创建失败")
+    ElMessage.error("保存失败")
+  }
+}
+
+const deleteOncall = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确定删除值班表「${row.team_name}」吗？`, "提示", { type: "warning" })
+    await axios.delete(`/api/sre/oncall/${row.id}`)
+    ElMessage.success("删除成功")
+    loadData()
+    loadMemberCandidates()
+  } catch (e) {
+    if (e !== "cancel") ElMessage.error("删除失败")
   }
 }
 
@@ -143,6 +208,7 @@ const formatTime = (time) => {
 onMounted(() => {
   loadData()
   loadCurrentOncall()
+  loadMemberCandidates()
 })
 </script>
 
@@ -158,5 +224,10 @@ onMounted(() => {
 .title {
   font-size: 18px;
   font-weight: bold;
+}
+.hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
 }
 </style>

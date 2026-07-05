@@ -1183,4 +1183,360 @@ Phase 5 (可选) ── 升级与优化
 
 ---
 
+## 十一、智能体编排工作流平台（Coze 风格 — AI 原生可视化编排）
+
+> 最后更新: 2026-07-05
+
+### 11.1 定位与核心区别
+
+| 维度 | 第十章 SOP 工作流引擎 | 第十一章 智能体编排工作流平台 |
+|------|---------------------|---------------------------|
+| **本质** | 固定运维动作链（DF→清理→验证） | AI 原生可视化编排平台（类 Coze/Dify） |
+| **节点类型** | 仅 execute_* 运维动作 | 8 种异构节点（LLM/知识库/工具/条件/代码/HTTP...） |
+| **编排方式** | JSON 配置 DAG | **可视化画布拖拽**（Vue Flow）+ JSON 持久化 |
+| **变量传递** | Jinja2 渲染 payload | 运行时上下文 + 节点输出引用 `{{ nodes.llm1.output.text }}` |
+| **AI 在环** | AI 仅触发，不参与执行 | **LLM 节点在流程中推理**，条件分支由 AI 输出决定路由 |
+| **目标用户** | 运维工程师（选模板） | AI 应用开发者（拖拽搭建智能体） |
+| **类比** | Ansible Playbook | Coze / Dify / LangFlow |
+
+**核心价值**：把"AI 助手"从单一对话升级为**可编排的智能体应用平台**——用户在画布上拖拽 LLM 节点、知识库节点、工具节点、条件分支，搭建定制化 AI 智能体工作流，一键发布为可调用的 AI 应用。
+
+### 11.2 核心概念
+
+```
+工作流 (AgentWorkflow)
+├── 节点 (Node) — 8 种类型
+│   ├── start    — 开始节点：定义输入参数 schema
+│   ├── end      — 结束节点：定义输出映射
+│   ├── llm      — LLM 推理节点：prompt + 模型 + 温度 + system prompt
+│   ├── knowledge — 知识库 RAG 节点：语义检索 Top-K
+│   ├── tool     — 工具节点：调用 MCP 工具（query_*/execute_*）
+│   ├── condition — 条件分支节点：if-elif-else 路由
+│   ├── code     — 代码节点：Python 沙箱执行数据处理
+│   └── http     — HTTP 请求节点：调用外部 API
+├── 边 (Edge) — 节点依赖 + 条件分支路由
+├── 变量 (Variable) — 运行时上下文 + 节点输出引用
+└── 触发 (Trigger) — 对话 / API / 定时 / 告警
+```
+
+### 11.3 节点类型详细设计
+
+#### 11.3.1 Start 节点
+```json
+{
+  "id": "start",
+  "type": "start",
+  "data": {
+    "inputs": [
+      {"key": "question", "type": "string", "required": true, "desc": "用户问题"},
+      {"key": "context", "type": "object", "required": false, "desc": "上下文"}
+    ]
+  }
+}
+```
+- 定义工作流输入参数 schema
+- 运行时 inputs 注入 `runtime_context.nodes.start.output`
+
+#### 11.3.2 End 节点
+```json
+{
+  "id": "end",
+  "type": "end",
+  "data": {
+    "outputs": [
+      {"key": "answer", "value": "{{ nodes.llm1.output.text }}"}
+    ]
+  }
+}
+```
+- 定义工作流输出映射
+- 通过 Jinja2 引用上游节点输出
+
+#### 11.3.3 LLM 推理节点（核心）
+```json
+{
+  "id": "llm1",
+  "type": "llm",
+  "data": {
+    "provider_id": 1,
+    "model": "gpt-4o",
+    "system_prompt": "你是 AIOps 运维专家，根据告警信息分析根因",
+    "user_prompt": "告警: {{ nodes.start.output.question }}\n上下文: {{ nodes.knowledge1.output.docs }}",
+    "temperature": 0.3,
+    "max_tokens": 2000
+  }
+}
+```
+- 调用 `call_llm(provider, messages)` 复用现有 LLM 调用
+- prompt 用 Jinja2 渲染，引用上游节点输出
+- 输出 `{"text": "...", "usage": {...}}` 存入上下文
+
+#### 11.3.4 知识库 RAG 节点
+```json
+{
+  "id": "knowledge1",
+  "type": "knowledge",
+  "data": {
+    "query": "{{ nodes.start.output.question }}",
+    "kb_id": 1,
+    "top_k": 5,
+    "score_threshold": 0.7
+  }
+}
+```
+- 复用 `query_knowledge_rag` MCP 工具
+- 输出 `{"docs": [...], "query": "..."}`
+
+#### 11.3.5 工具节点
+```json
+{
+  "id": "tool1",
+  "type": "tool",
+  "data": {
+    "tool_name": "query_alerts",
+    "parameters": {"severity": "{{ nodes.start.output.severity }}", "limit": 10}
+  }
+}
+```
+- 调用 `call_mcp_tool(tool_name, parameters)` 复用 13+ MCP 工具
+- 输出工具返回结果
+
+#### 11.3.6 条件分支节点
+```json
+{
+  "id": "cond1",
+  "type": "condition",
+  "data": {
+    "branches": [
+      {"condition": "{{ nodes.llm1.output.text contains '严重' }}", "target": "escalate"},
+      {"condition": "{{ nodes.llm1.output.text contains '轻微' }}", "target": "auto_fix"},
+      {"condition": "default", "target": "notify"}
+    ]
+  }
+}
+```
+- 求值 Jinja2 表达式，路由到匹配分支
+- 输出 `{"matched_branch": "escalate"}`
+
+#### 11.3.7 代码节点
+```json
+{
+  "id": "code1",
+  "type": "code",
+  "data": {
+    "code": "result = {'count': len(inputs['alerts']), 'summary': f\"共{len(inputs['alerts'])}条告警\"}",
+    "inputs_mapping": {"alerts": "{{ nodes.tool1.output.alerts }}"}
+  }
+}
+```
+- Python 沙箱执行（`exec` + 受限 globals，禁用 import os/subprocess/socket）
+- 输入通过 `inputs_mapping` 映射，代码访问 `inputs` dict
+- 输出代码中 `result` 变量
+
+#### 11.3.8 HTTP 请求节点
+```json
+{
+  "id": "http1",
+  "type": "http",
+  "data": {
+    "method": "POST",
+    "url": "https://api.example.com/notify",
+    "headers": {"Content-Type": "application/json"},
+    "body": {"message": "{{ nodes.llm1.output.text }}"},
+    "timeout": 10
+  }
+}
+```
+- 调用外部 API
+- 输出 `{"status_code": 200, "body": "..."}`
+
+### 11.4 变量传递机制
+
+**运行时上下文 (Runtime Context)** 是核心数据结构：
+```python
+runtime_context = {
+    "workflow_id": 1,
+    "run_id": 1,
+    "inputs": {"question": "...", "severity": "critical"},
+    "nodes": {
+        "start": {"output": {"question": "...", "severity": "critical"}},
+        "knowledge1": {"output": {"docs": [...], "query": "..."}},
+        "llm1": {"output": {"text": "根因是...", "usage": {...}}},
+        "cond1": {"output": {"matched_branch": "escalate"}},
+        "end": {"output": {"answer": "根因是..."}}
+    }
+}
+```
+
+**引用规则**（Jinja2）：
+- `{{ nodes.<node_id>.output.<key> }}` — 引用任意节点输出
+- `{{ inputs.<key> }}` — 引用工作流输入（等价 `nodes.start.output`）
+- 支持过滤器：`{{ nodes.llm1.output.text | upper }}`、`{{ nodes.tool1.output.alerts | length }}`
+
+**条件表达式**（条件分支节点专用）：
+- 简化语法：`{{ nodes.llm1.output.text contains '严重' }}`
+- 编译为 Python：`'严重' in nodes['llm1']['output']['text']`
+- 支持：contains / eq / ne / gt / lt / in / startswith
+
+### 11.5 执行引擎设计
+
+```
+start_workflow_run(inputs)
+  ├─ 1. 创建 WorkflowRun + 全部 NodeRun (status=pending)
+  ├─ 2. 注入 inputs 到 runtime_context.nodes.start.output
+  ├─ 3. 拓扑排序节点
+  └─ 4. 调度循环 _advance_run():
+       ├─ 遍历拓扑序节点
+       ├─ 跳过非 pending 节点
+       ├─ 检查依赖完成（含条件分支路由）
+       ├─ 渲染节点 config (Jinja2 + runtime_context)
+       ├─ 分发到节点执行器:
+       │   ├─ start_executor → 注入 inputs
+       │   ├─ end_executor → 渲染输出映射
+       │   ├─ llm_executor → call_llm(provider, messages)
+       │   ├─ knowledge_executor → call_mcp_tool('query_knowledge_rag')
+       │   ├─ tool_executor → call_mcp_tool(tool_name, params)
+       │   ├─ condition_executor → 求值分支表达式
+       │   ├─ code_executor → exec 沙箱
+       │   └─ http_executor → requests.request
+       ├─ 节点输出存入 runtime_context.nodes[node_id].output
+       ├─ 条件分支节点：激活匹配分支的下游边，禁用其他分支
+       └─ 全部完成 → finalize run
+```
+
+**节点执行器统一接口**：
+```python
+def execute_node(node_type: str, node_data: dict, runtime_context: dict, db: Session) -> dict:
+    """返回 {"output": {...}, "status": "completed|failed", "error": "..."}"""
+    executor = NODE_EXECUTORS.get(node_type)
+    if not executor:
+        return {"output": {}, "status": "failed", "error": f"未知节点类型: {node_type}"}
+    return executor(node_data, runtime_context, db)
+```
+
+**失败处理策略**：
+- 节点失败 → 标记 failed，下游节点 skipped
+- 不自动重试（区别于 SOP 引擎），由调用方决定是否重试
+- 失败信息存入 NodeRun.error，前端可查看
+
+### 11.6 数据模型
+
+```sql
+-- 智能体工作流编排定义
+agent_workflows:
+  id, name, description, category, nodes(JSON), edges(JSON),
+  inputs_schema(JSON), outputs_schema(JSON),
+  enabled, published_version, created_by, created_at, updated_at
+
+-- 工作流执行实例
+agent_workflow_runs:
+  id, workflow_id, workflow_snapshot(JSON),  -- 执行时的 workflow 快照
+  session_id,  -- 关联 ChatSession（对话触发时）
+  status,  -- pending/running/completed/failed/aborted
+  inputs(JSON), runtime_context(JSON),  -- 输入 + 运行时上下文
+  outputs(JSON),  -- end 节点输出
+  trigger_source,  -- chat/api/schedule/alert
+  started_at, completed_at, created_at
+
+-- 节点执行记录
+agent_workflow_node_runs:
+  id, run_id, node_id, node_type, node_name,
+  config(JSON),  -- 渲染后的节点配置
+  status,  -- pending/running/completed/failed/skipped
+  output(JSON), error,
+  started_at, completed_at, created_at
+```
+
+### 11.7 可视化画布（Vue Flow）
+
+**技术选型**：`@vue-flow/core` — Vue 3 原生、d3-based、社区活跃、支持自定义节点
+
+**画布布局**：
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 工具栏: [保存] [发布] [运行测试] [清空]              工作流名  │
+├──────────┬────────────────────────────────┬─────────────────┤
+│ 节点面板  │                                │ 属性配置抽屉      │
+│          │       Vue Flow 画布             │                  │
+│ ▸ 开始    │   ┌─────┐    ┌─────┐          │ 节点: LLM推理     │
+│ ▸ 结束    │   │start│───→│llm1 │          │ ─────────────── │
+│ ▸ LLM    │   └─────┘    └──┬──┘          │ 模型: gpt-4o     │
+│ ▸ 知识库  │                ↓              │ 温度: 0.3        │
+│ ▸ 工具    │            ┌─────┐            │ System:          │
+│ ▸ 条件    │            │kb1  │            │ [textarea]       │
+│ ▸ 代码    │            └──┬──┘            │ User:            │
+│ ▸ HTTP   │               ↓               │ [textarea]       │
+│          │           ┌─────┐             │                  │
+│          │           │end  │             │                  │
+│          │           └─────┘             │                  │
+└──────────┴────────────────────────────────┴─────────────────┘
+```
+
+**交互**：
+- 从节点面板拖拽节点到画布
+- 节点间拖拽连线（source handle → target handle）
+- 点击节点 → 右侧抽屉显示属性配置
+- 运行测试 → 输入测试数据 → 后端执行 → 画布节点实时显示状态
+- 保存 → 持久化 nodes/edges 到 agent_workflows 表
+
+**自定义节点组件**：每种节点类型一个 Vue 组件，显示图标+名称+状态色
+
+### 11.8 触发方式
+
+| 触发方式 | 实现 | 适用场景 |
+|---------|------|---------|
+| **对话触发** | AI 通过 `run_agent_workflow` MCP 工具触发，关联 ChatSession | 用户在 AI 助手对话中触发智能体 |
+| **API 触发** | `POST /agent-workflow/api/runs/{id}/execute` | 外部系统集成 |
+| **定时触发** | 后台线程 Cron 调度（复用现有 background_loop） | 定时巡检 |
+| **告警触发** | 告警发生时匹配 workflow.trigger_condition | 自动化响应 |
+
+### 11.9 与 AI Agent 管道集成
+
+**MCP 工具**：
+- `list_agent_workflows` — 列出已发布工作流
+- `run_agent_workflow` — 执行工作流，返回 run_id
+
+**会话集成**：
+- 对话触发时关联 `session_id`
+- 工作流执行进度可通过 `GET /agent-workflow/api/runs/{id}` 轮询
+- 前端聊天界面可嵌入工作流执行状态卡片
+
+**与 SOP 工作流引擎（第十章）的关系**：
+- **并存**：SOP 引擎管固定运维动作链，Agent Workflow 管 AI 原生编排
+- **复用**：Agent Workflow 的 tool 节点复用 execute_* MCP 工具
+- **演进**：SOP 模板可逐步迁移为 Agent Workflow（用 LLM 节点替代固定命令）
+
+### 11.10 实施路线图
+
+| Phase | 内容 | 工时 |
+|-------|------|------|
+| **Phase 1** | 后端：数据模型 + 执行引擎 + 8 节点执行器 + API | 已落地 |
+| **Phase 2** | 前端：Vue Flow 画布 + 节点面板 + 属性抽屉 + 运行测试 | 已落地 |
+| **Phase 3** | 集成：MCP 工具 + 菜单注册 + AI Agent 管道集成 | 已落地 |
+| **Phase 4** | 增强：定时触发 + 告警触发 + 工作流版本管理 + 模板市场 | 待规划 |
+
+### 11.11 预置工作流模板
+
+| 模板名 | 节点编排 | 场景 |
+|--------|---------|------|
+| **智能告警分析** | start→query_alerts→knowledge RAG→LLM 根因分析→end | 告警自动根因分析 |
+| **智能运维问答** | start→knowledge RAG→LLM 问答→end | 运维知识问答 |
+| **故障自愈决策** | start→query_alerts→LLM 决策→condition(自愈/升级/通知)→分支→end | AI 决策故障处置 |
+| **变更影响评估** | start→query_change→knowledge RAG→LLM 评估→end | 变更前影响分析 |
+| **巡检报告生成** | start→query_metrics→LLM 总结→end | 自动巡检报告 |
+
+### 11.12 与现有系统的复用关系
+
+| 现有能力 | 复用方式 |
+|---------|---------|
+| `call_llm(provider, messages)` | LLM 节点直接复用，支持多 provider |
+| `query_knowledge_rag` MCP 工具 | 知识库节点复用 RAG 检索 |
+| 13+ `execute_*`/`query_*` MCP 工具 | 工具节点复用全部 MCP 工具 |
+| `AIProvider` 多模型配置 | LLM 节点按 provider_id 选择模型 |
+| `call_mcp_tool` 调度框架 | 工具/知识库节点复用调度 |
+| `ChatSession` 会话管理 | 对话触发关联会话 |
+| 第十章 SOP 引擎拓扑排序 | Agent Workflow 复用 DAG 调度思路 |
+
+---
+
 *最后更新: 2026-07-05*

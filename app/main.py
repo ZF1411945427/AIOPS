@@ -20,7 +20,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
-from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos
+from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
@@ -168,6 +168,8 @@ app.include_router(system_posture.router)
 app.include_router(traces_api.router)
 app.include_router(trace_ingest.router)
 app.include_router(chaos.router)
+app.include_router(workflow.router)
+app.include_router(agent_workflow.router)
 
 
 def init_admin():
@@ -339,5 +341,21 @@ init_admin()
 set_db_mode("demo")
 # 只对 demo 库灌入种子数据
 seed_all()
+# 两个库都播种 SOP 工作流模板（幂等，按 name 去重）
+from app.services.workflow_service import seed_workflow_templates
+from app.services.agent_workflow_service import seed_agent_workflows
+for _mode in ("demo", "real"):
+    set_db_mode(_mode)
+    _seed_db = get_session_for(_mode)()
+    try:
+        _added = seed_workflow_templates(_seed_db)
+        if _added:
+            print(f"[seed] {_mode} 库播种 {_added} 个 SOP 工作流模板")
+        _added2 = seed_agent_workflows(_seed_db)
+        if _added2:
+            print(f"[seed] {_mode} 库播种 {_added2} 个智能体工作流模板")
+    finally:
+        _seed_db.close()
+set_db_mode("demo")
 threading.Thread(target=background_loop, daemon=True).start()
 

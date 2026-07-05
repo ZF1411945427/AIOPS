@@ -3,26 +3,35 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AIOps — 平台全景 · 五大领域</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>AIOps · 智能运维体 — 让运维拥有判断力</title>
 <style>
 :root {
-  --bg:        #F8F9FA;
-  --surface:   #FFFFFF;
-  --surface2:  #F1F3F5;
-  --surface3:  #EEF2FF;
-  --fg:        #111827;
-  --fg2:       #6B7280;
-  --fg3:       #9CA3AF;
-  --border:    #E5E7EB;
-  --primary:   #C7512E;
-  --primary-bg: rgba(199,81,46,0.08);
-  --primary-light: #E87A5A;
-  --teal:      #0D9488;
-  --teal-bg:   rgba(13,148,136,0.08);
+  --bg:        #0B0F19;
+  --bg2:       #111827;
+  --surface:   #161E2E;
+  --surface2:  #1C2535;
+  --surface3:  #232D40;
+  --fg:        #F3F4F6;
+  --fg2:       #9CA3AF;
+  --fg3:       #6B7280;
+  --border:    #2A3548;
+  --primary:   #F97316;
+  --primary-bg: rgba(249,115,22,0.12);
+  --primary-glow: rgba(249,115,22,0.45);
+  --teal:      #14B8A6;
+  --teal-bg:   rgba(20,184,166,0.10);
+  --amber:     #F59E0B;
+  --red:       #EF4444;
+  --violet:    #A78BFA;
+  --indigo:    #818CF8;
   --radius:    16px;
   --radius-sm: 8px;
   --font-sans: 'Plus Jakarta Sans', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --theme-r: 249; --theme-g: 115; --theme-b: 22;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
@@ -36,493 +45,277 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { text-decoration: none; color: inherit; }
-::selection { background: var(--primary); color: #FFFFFF; }
+::selection { background: var(--primary); color: #0B0F19; }
+
+/* ─── DYNAMIC BACKGROUND ─── */
+#bg-canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.bg-aurora { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.aurora-blob { position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.5; will-change: transform; }
+.aurora-blob.b1 { width: 620px; height: 620px; background: radial-gradient(circle, rgba(249,115,22,0.7) 0%, transparent 70%); top: -12%; left: -8%; animation: drift1 90s ease-in-out infinite; }
+.aurora-blob.b2 { width: 520px; height: 520px; background: radial-gradient(circle, rgba(129,140,248,0.4) 0%, transparent 70%); top: 25%; right: -8%; animation: drift2 110s ease-in-out infinite; }
+.aurora-blob.b3 { width: 460px; height: 460px; background: radial-gradient(circle, rgba(20,184,166,0.35) 0%, transparent 70%); bottom: -12%; left: 28%; animation: drift3 100s ease-in-out infinite; }
+.aurora-blob.b4 { width: 380px; height: 380px; background: radial-gradient(circle, rgba(245,158,11,0.3) 0%, transparent 70%); top: 55%; left: 8%; animation: drift4 120s ease-in-out infinite; }
+@keyframes drift1 { 0%,100%{transform:translate(0,0) scale(1);} 33%{transform:translate(140px,90px) scale(1.15);} 66%{transform:translate(70px,180px) scale(0.9);} }
+@keyframes drift2 { 0%,100%{transform:translate(0,0) scale(1);} 33%{transform:translate(-120px,140px) scale(1.1);} 66%{transform:translate(90px,70px) scale(0.95);} }
+@keyframes drift3 { 0%,100%{transform:translate(0,0) scale(1);} 33%{transform:translate(160px,-110px) scale(1.2);} 66%{transform:translate(-90px,-70px) scale(0.9);} }
+@keyframes drift4 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-140px,-90px) scale(1.15);} }
+.bg-grid {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(249,115,22,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(249,115,22,0.04) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 0%, transparent 75%);
+  animation: gridPan 180s linear infinite;
+}
+@keyframes gridPan { from{background-position:0 0,0 0;} to{background-position:60px 60px,60px 60px;} }
+.bg-vignette { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: radial-gradient(ellipse 100% 80% at 50% 50%, transparent 40%, rgba(11,15,25,0.5) 100%); }
 
 /* ─── NAV ─── */
 nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  padding: 0 48px; height: 60px;
+  padding: 0 48px; height: 64px;
   display: flex; align-items: center; justify-content: space-between;
-  background: rgba(248,249,250,0.85);
-  backdrop-filter: blur(16px);
+  background: rgba(11,15,25,0.7);
+  backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
 }
-.logo { font-size: 22px; font-weight: 800; letter-spacing: -0.04em; color: var(--fg); }
+.logo { font-size: 22px; font-weight: 800; letter-spacing: -0.04em; color: var(--fg); display: flex; align-items: baseline; gap: 2px; }
 .logo em { font-style: normal; color: var(--primary); }
-.nav-links { display: flex; gap: 28px; align-items: center; }
+.logo span { color: var(--fg2); font-weight: 400; font-size: 12px; margin-left: 10px; letter-spacing: 0.05em; }
+.nav-links { display: flex; gap: 32px; align-items: center; }
 .nav-links a { font-size: 13px; font-weight: 500; color: var(--fg2); transition: color 0.2s; }
 .nav-links a:hover { color: var(--fg); }
-.nav-btn {
-  padding: 9px 22px;
-  background: var(--fg); color: #FFFFFF;
-  font-size: 13px; font-weight: 600; border: none;
-  border-radius: var(--radius-sm);
-  transition: all 0.2s; cursor: pointer;
-}
-.nav-btn:hover { background: #1F2937; }
+.nav-btn { padding: 9px 22px; background: var(--primary); color: #0B0F19; font-size: 13px; font-weight: 700; border: none; border-radius: var(--radius-sm); transition: all 0.2s; cursor: pointer; }
+.nav-btn:hover { background: #FB923C; box-shadow: 0 0 20px var(--primary-glow); }
 .nav-btn:active { transform: scale(0.97); }
 
 /* ─── SECTIONS ─── */
-section { scroll-snap-align: start; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; padding: 48px 0 0; }
-.container { max-width: 1120px; margin: 0 auto; padding: 0 48px; width: 100%; }
+section { scroll-snap-align: start; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; padding: 80px 0 60px; position: relative; z-index: 1; }
+.container { max-width: 1140px; margin: 0 auto; padding: 0 48px; width: 100%; }
 
 /* ─── HERO ─── */
-.hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+.hero-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 56px; align-items: center; }
 .hero-eyebrow {
-  display: inline-block; padding: 6px 14px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
   background: var(--primary-bg); color: var(--primary);
   font-size: 12px; font-weight: 700;
-  border-radius: 9999px; margin-bottom: 20px;
+  border-radius: 9999px; margin-bottom: 24px;
+  border: 1px solid rgba(249,115,22,0.2);
 }
+.hero-eyebrow .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 8px var(--primary); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
 .hero h1 {
-  font-size: clamp(32px, 3.6vw, 44px);
-  line-height: 1.45; letter-spacing: -0.01em;
-  font-weight: 600; color: var(--fg);
+  font-size: clamp(36px, 4.2vw, 52px);
+  line-height: 1.15; letter-spacing: -0.025em;
+  font-weight: 700; color: var(--fg);
   margin-bottom: 24px;
 }
 .hero h1 .hl { color: var(--primary); }
-.hero h1 .l2 { font-weight: 400; color: var(--fg2); }
-.hero h1 .l3 { }
-.hero p {
-  font-size: 15px; color: var(--fg2); line-height: 1.75;
-  margin-bottom: 32px; max-width: 400px;
-}
-.hero-btns { display: flex; gap: 12px; flex-wrap: wrap; }
-.hero-btn {
-  padding: 12px 28px;
-  font-size: 14px; font-weight: 600;
-  border-radius: var(--radius-sm);
-  transition: all 0.2s; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 8px;
-}
-.hero-btn.primary { background: var(--fg); color: #FFFFFF; border: none; }
-.hero-btn.primary:hover { background: #1F2937; }
+.hero h1 .l2 { font-weight: 400; color: var(--fg2); display: block; margin-top: 8px; font-size: 0.6em; letter-spacing: 0.02em; }
+.hero p { font-size: 16px; color: var(--fg2); line-height: 1.75; margin-bottom: 36px; max-width: 460px; }
+.hero-btns { display: flex; gap: 14px; flex-wrap: wrap; }
+.hero-btn { padding: 13px 30px; font-size: 14px; font-weight: 600; border-radius: var(--radius-sm); transition: all 0.2s; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.hero-btn.primary { background: var(--primary); color: #0B0F19; border: none; }
+.hero-btn.primary:hover { background: #FB923C; box-shadow: 0 0 24px var(--primary-glow); }
 .hero-btn.primary:active { transform: scale(0.97); }
 .hero-btn.ghost { background: transparent; color: var(--fg2); border: 1px solid var(--border); }
-.hero-btn.ghost:hover { border-color: var(--fg); color: var(--fg); }
+.hero-btn.ghost:hover { border-color: var(--fg2); color: var(--fg); }
 
 /* ─── HERO PANEL ─── */
-.panel-shell {
-  background: var(--surface2);
-  padding: 8px;
-  border-radius: calc(var(--radius) + 8px);
-  border: 1px solid var(--border);
-}
-.panel-core {
-  background: var(--surface);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.panel-hd {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-}
+.panel-shell { background: var(--surface2); padding: 8px; border-radius: calc(var(--radius) + 8px); border: 1px solid var(--border); box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
+.panel-core { background: var(--surface); border-radius: var(--radius); overflow: hidden; }
+.panel-hd { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .panel-hd-left { display: flex; align-items: center; gap: 8px; }
 .panel-title { font-size: 12px; color: var(--fg2); font-weight: 500; }
-.panel-badge {
-  font-size: 10px; font-weight: 600;
-  padding: 3px 10px;
-  background: var(--teal-bg); color: var(--teal);
-  border-radius: 9999px;
-}
+.panel-badge { font-size: 10px; font-weight: 700; padding: 3px 10px; background: var(--teal-bg); color: var(--teal); border-radius: 9999px; display: flex; align-items: center; gap: 5px; }
+.panel-badge .bdot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 6px var(--teal); }
 .panel-body { padding: 28px 20px; }
 .panel-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
 .panel-cell { text-align: center; }
 .panel-cell + .panel-cell { border-left: 1px solid var(--border); }
-.panel-num {
-  font-size: 36px; font-weight: 700; letter-spacing: -0.02em;
-  color: var(--fg); line-height: 1;
-}
+.panel-num { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg); line-height: 1; }
 .panel-num.warn { color: var(--primary); }
 .panel-label { font-size: 11px; color: var(--fg3); margin-top: 6px; font-weight: 500; }
-.panel-ft {
-  padding: 14px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--surface2);
-  font-size: 12px; color: var(--fg2);
-  display: flex; align-items: center; gap: 8px;
-}
+.panel-ft { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface2); font-size: 12px; color: var(--fg2); display: flex; align-items: center; gap: 8px; }
+.panel-ft svg { color: var(--teal); }
 
 /* ─── TRUST ─── */
-.trust { background: var(--surface); border-top: 1px solid var(--border); }
-.trust-header { text-align: center; margin-bottom: 48px; }
-.trust-header h2 {
-  font-size: clamp(26px, 2.8vw, 34px);
-  font-weight: 700; line-height: 1.2;
-  letter-spacing: -0.02em; color: var(--fg);
-  margin-bottom: 8px;
-}
-.trust-header p { font-size: 15px; color: var(--fg2); max-width: 480px; }
-.trust-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
-  background: var(--border); border-radius: var(--radius); overflow: hidden;
-}
-.trust-item { padding: 40px 24px; text-align: center; background: var(--surface); display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.trust-icon {
-  width: 36px; height: 36px;
-  background: var(--primary-bg);
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--primary); margin-bottom: 8px;
-}
-.trust-num {
-  font-size: clamp(36px, 4vw, 52px); font-weight: 700;
-  letter-spacing: -0.03em; line-height: 1;
-  color: var(--fg);
-}
+.trust-header { text-align: center; margin-bottom: 56px; }
+.trust-header h2 { font-size: clamp(26px, 2.8vw, 34px); font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; color: var(--fg); margin-bottom: 12px; }
+.trust-header p { font-size: 15px; color: var(--fg2); max-width: 540px; margin: 0 auto; }
+.trust-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.trust-item { padding: 36px 24px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; gap: 6px; transition: all 0.25s; }
+.trust-item:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(249,115,22,0.08); }
+.trust-icon { width: 36px; height: 36px; background: var(--primary-bg); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--primary); margin-bottom: 12px; }
+.trust-num { font-size: clamp(36px, 4vw, 48px); font-weight: 700; letter-spacing: -0.03em; line-height: 1; color: var(--fg); }
 .trust-num.accent { color: var(--primary); }
-.trust-label { font-size: 14px; color: var(--fg); font-weight: 600; }
-.trust-desc { font-size: 12px; color: var(--fg2); line-height: 1.5; max-width: 180px; }
-.trust-summary {
-  margin-top: 40px; text-align: center;
-  padding: 24px 32px;
-  background: var(--surface2);
-  border-radius: var(--radius-sm);
-  font-size: 14px; color: var(--fg2); line-height: 1.7;
-}
-.trust-summary strong { color: var(--fg); font-weight: 600; }
+.trust-label { font-size: 13px; color: var(--fg); font-weight: 600; margin-top: 8px; }
+.trust-desc { font-size: 12px; color: var(--fg2); line-height: 1.6; }
 
 /* ─── SECTION HEADERS ─── */
-.sec-hd { margin-bottom: 32px; width: 100%; }
-.sec-hd h2 {
-  font-size: clamp(22px, 2.4vw, 28px);
-  font-weight: 700; line-height: 1.2;
-  letter-spacing: -0.02em; color: var(--fg);
-  margin-bottom: 8px;
-}
-.sec-hd p {
-  font-size: 15px; color: var(--fg2); line-height: 1.7;
-  max-width: 520px;
-}
+.sec-hd { margin-bottom: 40px; width: 100%; }
+.sec-hd .sec-eyebrow { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--primary); letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 12px; display: block; }
+.sec-hd h2 { font-size: clamp(26px, 3vw, 36px); font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; color: var(--fg); margin-bottom: 12px; }
+.sec-hd p { font-size: 15px; color: var(--fg2); line-height: 1.7; max-width: 580px; }
 
-/* ─── NARRATIVE ─── */
-.narr-grid {
-  display: grid; grid-template-columns: 1fr 1fr 1fr;
-  gap: 1px; background: var(--border);
-  border-radius: var(--radius); overflow: hidden;
-}
-.narr-card { background: var(--surface); padding: 40px 32px; transition: background 0.3s; }
-.narr-card:hover { background: var(--surface2); }
-.narr-num {
-  font-size: 44px; font-weight: 700; color: var(--fg3);
-  line-height: 1; margin-bottom: 16px;
-  font-variant-numeric: tabular-nums;
-}
-.narr-card h3 { font-size: 17px; font-weight: 600; color: var(--fg); margin-bottom: 8px; letter-spacing: -0.01em; }
-.narr-card p { font-size: 13px; color: var(--fg2); line-height: 1.7; }
-.narr-tag {
-  display: inline-block; margin-top: 14px;
-  background: var(--primary-bg); color: var(--primary);
-  font-size: 11px; font-weight: 500;
-  padding: 4px 10px; border-radius: 9999px;
-}
+/* ─── DOMAINS ─── */
+.domain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.domain-card { display: flex; gap: 20px; padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: all 0.25s; }
+.domain-card:hover { border-color: var(--fg3); background: var(--surface2); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+.domain-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.domain-body { flex: 1; }
+.domain-hd { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.domain-hd h3 { font-size: 17px; font-weight: 700; color: var(--fg); }
+.domain-badge { font-size: 10px; font-weight: 600; padding: 3px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 9999px; color: var(--fg2); }
+.domain-body p { font-size: 13px; color: var(--fg2); line-height: 1.7; }
+.domain-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.domain-tags span { font-size: 11px; font-weight: 500; padding: 4px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--fg2); }
+.domain-modules { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.domain-modules span { font-family: var(--font-mono); font-size: 10px; font-weight: 500; padding: 3px 8px; background: rgba(var(--theme-r),var(--theme-g),var(--theme-b),0.08); color: rgb(var(--theme-r),var(--theme-g),var(--theme-b)); border-radius: 4px; border: 1px solid rgba(var(--theme-r),var(--theme-g),var(--theme-b),0.15); }
+.domain-grid .domain-card:last-child { grid-column: 1 / -1; }
 
-/* ─── SOLUTION ─── */
-.solution-lead {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: center;
-  margin-bottom: 32px;
-}
-.solution-lead h3 {
-  font-size: clamp(18px, 1.8vw, 22px);
-  font-weight: 700; line-height: 1.3; letter-spacing: -0.02em;
-  color: var(--fg); margin-bottom: 6px;
-}
-.solution-lead p { font-size: 14px; color: var(--fg2); line-height: 1.6; }
-.solution-lead .tags { display: flex; flex-wrap: wrap; gap: 8px; }
-.solution-lead .tags span {
-  padding: 6px 14px;
-  background: var(--teal-bg); color: var(--teal);
-  font-size: 12px; font-weight: 500;
-  border-radius: 9999px;
-}
-.feat-grid {
-  display: grid; grid-template-columns: 1fr 1fr 1fr;
-  gap: 1px; background: var(--border);
-  border-radius: var(--radius); overflow: hidden;
-}
-.feat-card { background: var(--surface); padding: 28px 24px; transition: background 0.3s; }
-.feat-card:hover { background: var(--surface2); }
-.feat-card.featured {
-  background: linear-gradient(135deg, var(--surface3) 0%, var(--surface) 100%);
-}
-.feat-icon {
-  width: 40px; height: 40px;
-  background: var(--primary-bg);
-  border-radius: var(--radius-sm);
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 16px; color: var(--primary);
-}
-.feat-card.featured .feat-icon { background: var(--primary); color: #FFFFFF; }
-.feat-card h3 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 6px; }
-.feat-card p { font-size: 13px; color: var(--fg2); line-height: 1.65; }
-.feat-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
-.feat-tags span {
-  font-family: var(--font-mono);
-  font-size: 9px; font-weight: 500;
-  padding: 3px 8px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--fg3);
-  border-radius: 4px;
-}
+/* ─── ORCHESTRATION ─── */
+.orch-grid { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 40px; align-items: center; }
+.orch-visual { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; position: relative; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+.orch-visual::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--primary), transparent); }
+.orch-nodes { display: flex; flex-direction: column; gap: 8px; }
+.orch-node { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; font-size: 12px; position: relative; transition: all 0.2s; }
+.orch-node:hover { border-color: var(--primary); transform: translateX(4px); }
+.orch-node .nd-icon { width: 30px; height: 30px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; font-weight: 700; }
+.orch-node .nd-label { font-weight: 600; color: var(--fg); }
+.orch-node .nd-sub { font-size: 10px; color: var(--fg3); }
+.orch-node .nd-type { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--fg3); }
+.orch-node::after { content: ''; position: absolute; left: 29px; bottom: -8px; width: 2px; height: 8px; background: var(--border); }
+.orch-node:last-child::after { display: none; }
+.orch-features { display: flex; flex-direction: column; gap: 20px; }
+.orch-feat { display: flex; gap: 16px; align-items: flex-start; }
+.orch-feat .of-num { width: 36px; height: 36px; border-radius: 10px; background: var(--primary-bg); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; border: 1px solid rgba(249,115,22,0.2); }
+.orch-feat h4 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 4px; }
+.orch-feat p { font-size: 13px; color: var(--fg2); line-height: 1.6; }
 
 /* ─── HOW IT WORKS ─── */
-.how-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: start; }
+.how-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: start; }
 .how-step { display: flex; gap: 20px; padding: 24px 0; }
 .how-step + .how-step { border-top: 1px solid var(--border); }
-.how-step-num {
-  width: 36px; height: 36px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  font-size: 13px; font-weight: 600; color: var(--fg2);
-}
+.how-step-num { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--surface2); border: 1px solid var(--border); font-size: 13px; font-weight: 700; color: var(--fg2); font-family: var(--font-mono); }
 .how-step:first-child .how-step-num { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); }
 .how-step-context h4 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 4px; }
 .how-step-context p { font-size: 13px; color: var(--fg2); line-height: 1.6; }
-.chat-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.chat-hd {
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px; font-weight: 500; color: var(--fg2);
-  display: flex; align-items: center; gap: 8px;
-}
-.chat-hd .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+.chat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+.chat-hd { padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 500; color: var(--fg2); display: flex; align-items: center; gap: 8px; background: var(--surface2); }
+.chat-hd .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 8px var(--teal); }
 .chat-bd { padding: 20px; }
-.msg {
-  padding: 14px 18px; margin-bottom: 10px;
-  font-size: 13px; line-height: 1.7;
-  border-radius: var(--radius-sm);
-}
-.msg.user {
-  background: var(--surface2); color: var(--fg2);
-  border: 1px solid var(--border);
-  margin-left: 28px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-.msg.ai {
-  background: var(--primary-bg); color: var(--fg);
-  margin-right: 28px;
-}
+.msg { padding: 14px 18px; margin-bottom: 10px; font-size: 13px; line-height: 1.7; border-radius: var(--radius-sm); }
+.msg.user { background: var(--surface2); color: var(--fg2); border: 1px solid var(--border); margin-left: 28px; font-family: var(--font-mono); font-size: 12px; }
+.msg.ai { background: var(--primary-bg); color: var(--fg); margin-right: 28px; border: 1px solid rgba(249,115,22,0.15); }
 .msg .hl { color: var(--primary); font-weight: 600; }
 .msg .hl-dim { color: var(--fg3); }
 .msg .hl-em { color: var(--teal); font-weight: 600; }
 
 /* ─── SECURITY ─── */
-.sec-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border-radius: var(--radius); overflow: hidden; }
-.sec-card { background: var(--surface); padding: 32px 28px; transition: background 0.3s; }
-.sec-card:hover { background: var(--surface2); }
-.sec-badge {
-  font-family: var(--font-mono);
-  display: inline-block; font-size: 10px; font-weight: 500;
-  padding: 4px 10px;
-  background: var(--primary-bg);
-  color: var(--primary); border-radius: 6px;
-  margin-bottom: 14px;
-}
+.sec-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.sec-card { background: var(--surface); border: 1px solid var(--border); padding: 28px 24px; border-radius: var(--radius); transition: all 0.25s; }
+.sec-card:hover { border-color: var(--fg3); background: var(--surface2); }
+.sec-badge { font-family: var(--font-mono); display: inline-block; font-size: 10px; font-weight: 600; padding: 4px 10px; background: var(--primary-bg); color: var(--primary); border-radius: 6px; margin-bottom: 14px; border: 1px solid rgba(249,115,22,0.15); }
 .sec-card h3 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 6px; }
 .sec-card p { font-size: 13px; color: var(--fg2); line-height: 1.65; }
 
-/* ─── DOMAINS ─── */
-.domains { padding-top: 60px; }
-.domain-card {
-  display: flex; gap: 24px;
-  padding: 32px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 16px;
-  transition: all 0.25s;
-}
-.domain-card:hover { border-color: var(--fg3); box-shadow: 0 4px 20px rgba(0,0,0,0.04); }
-.domain-icon {
-  width: 56px; height: 56px;
-  border-radius: 14px;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.domain-body { flex: 1; }
-.domain-hd { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
-.domain-hd h3 { font-size: 18px; font-weight: 700; color: var(--fg); }
-.domain-badge {
-  font-size: 10px; font-weight: 600;
-  padding: 3px 10px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  color: var(--fg2);
-}
-.domain-body p { font-size: 14px; color: var(--fg2); line-height: 1.7; }
-.domain-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.domain-tags span {
-  font-size: 11px; font-weight: 500;
-  padding: 4px 10px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg2);
-}
-
 /* ─── COMPARE ─── */
-.compare-cols {
-  display: grid; grid-template-columns: 1fr 1fr;
-  gap: 1px; background: var(--border);
-  border-radius: var(--radius); overflow: hidden;
-}
-.compare-col { padding: 40px 36px; }
-.compare-col.left { background: var(--surface2); }
-.compare-col.right { background: #FFFFFF; }
-.compare-col h3 {
-  font-size: 17px; font-weight: 600;
-  margin-bottom: 24px; display: flex; align-items: center; gap: 10px;
-}
-.compare-col.left h3 { color: var(--fg); }
+.compare-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.compare-col { padding: 32px 28px; border-radius: var(--radius); border: 1px solid var(--border); }
+.compare-col.left { background: var(--surface); }
+.compare-col.right { background: linear-gradient(135deg, var(--primary-bg) 0%, var(--surface) 100%); border-color: rgba(249,115,22,0.2); }
+.compare-col h3 { font-size: 16px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+.compare-col.left h3 { color: var(--fg2); }
 .compare-col.right h3 { color: var(--primary); }
 .compare-col ul { list-style: none; }
-.compare-col li {
-  font-size: 14px; color: var(--fg2); padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: flex-start; gap: 10px;
-}
+.compare-col li { font-size: 14px; color: var(--fg2); padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 10px; }
 .compare-col li:last-child { border: none; }
+.compare-col.right li { color: var(--fg); }
 
 /* ─── CTA ─── */
-.cta { text-align: center; background: var(--surface); border-top: 1px solid var(--border); }
-.cta h2 {
-  font-size: clamp(26px, 2.8vw, 34px);
-  font-weight: 700; line-height: 1.2;
-  letter-spacing: -0.02em; color: var(--fg);
-  margin-bottom: 12px;
-}
-.cta p { font-size: 15px; color: var(--fg2); margin-bottom: 36px; }
-.cta-btn {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 14px 40px;
-  background: var(--fg); color: #FFFFFF;
-  border: none; font-size: 15px; font-weight: 600;
-  border-radius: var(--radius-sm);
-  transition: all 0.2s; cursor: pointer;
-}
-.cta-btn:hover { background: #1F2937; }
+.cta-box { text-align: center; padding: 48px 32px; background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%); border: 1px solid var(--border); border-radius: var(--radius); position: relative; overflow: hidden; }
+.cta-box::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--primary), transparent); }
+.cta-box h2 { font-size: clamp(24px, 2.6vw, 30px); font-weight: 700; color: var(--fg); margin-bottom: 12px; }
+.cta-box p { font-size: 15px; color: var(--fg2); margin-bottom: 32px; }
+.cta-btn { display: inline-flex; align-items: center; gap: 10px; padding: 15px 42px; background: var(--primary); color: #0B0F19; border: none; font-size: 15px; font-weight: 700; border-radius: var(--radius-sm); transition: all 0.2s; cursor: pointer; }
+.cta-btn:hover { background: #FB923C; box-shadow: 0 0 30px var(--primary-glow); }
 .cta-btn:active { transform: scale(0.97); }
 .cta-btn svg { transition: transform 0.2s; }
 .cta-btn:hover svg { transform: translateX(4px); }
 
 /* ─── FOOTER ─── */
-footer {
-  scroll-snap-align: start;
-  padding: 32px 48px; text-align: center;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  font-size: 12px; color: var(--fg3);
-}
-
-/* ─── DOMAIN GRID ─── */
-.domain-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-.domain-grid .domain-card {
-  margin-bottom: 0;
-  padding: 24px;
-  gap: 18px;
-}
-.domain-grid .domain-card .domain-icon {
-  width: 44px; height: 44px;
-}
-.domain-grid .domain-card .domain-hd h3 {
-  font-size: 16px;
-}
-.domain-grid .domain-card .domain-body p {
-  font-size: 13px;
-}
-.domain-grid .domain-card .domain-tags {
-  margin-top: 8px;
-}
-.domain-grid .domain-card .domain-tags span {
-  font-size: 10px;
-  padding: 3px 8px;
-}
-.domain-grid .domain-card:last-child {
-  grid-column: 1 / -1;
-}
-
-/* ─── COMBINED FINAL SECTION ─── */
-.final-section .content-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 36px;
-}
-.final-cta-row {
-  text-align: center;
-  padding: 12px 0 8px;
-}
+footer { scroll-snap-align: start; padding: 40px 48px; text-align: center; border-top: 1px solid var(--border); background: var(--bg2); font-size: 12px; color: var(--fg3); position: relative; z-index: 1; }
+footer .ft-brand { color: var(--fg2); font-weight: 600; margin-bottom: 4px; }
 
 /* ─── SCROLL REVEAL ─── */
-.rv {
-  opacity: 0; transform: translateY(24px);
-  transition: opacity 0.6s cubic-bezier(0.16,1,0.3,1), transform 0.6s cubic-bezier(0.16,1,0.3,1);
-}
+.rv { opacity: 0; transform: translateY(24px); transition: opacity 0.7s cubic-bezier(0.16,1,0.3,1), transform 0.7s cubic-bezier(0.16,1,0.3,1); }
 .rv.in { opacity: 1; transform: translateY(0); }
-.rv-1 { transition-delay: 0.08s; }
-.rv-2 { transition-delay: 0.16s; }
-.rv-3 { transition-delay: 0.24s; }
+.rv-1 { transition-delay: 0.1s; }
+.rv-2 { transition-delay: 0.2s; }
+.rv-3 { transition-delay: 0.3s; }
+.rv-4 { transition-delay: 0.4s; }
 
 /* ─── RESPONSIVE ─── */
 @media (max-width: 1024px) {
-  .hero-grid, .solution-lead, .how-grid, .compare-cols { grid-template-columns: 1fr; gap: 48px; }
-  .feat-grid, .sec-cols { grid-template-columns: 1fr 1fr; }
-  .feat-card:nth-child(4), .feat-card:nth-child(5) { grid-column: auto; }
-  .narr-grid { grid-template-columns: 1fr; }
+  .hero-grid, .orch-grid, .how-grid, .compare-cols { grid-template-columns: 1fr; gap: 48px; }
+  .sec-cols { grid-template-columns: 1fr 1fr; }
   .trust-grid { grid-template-columns: 1fr 1fr; }
+  .domain-grid { grid-template-columns: 1fr; }
+  .domain-grid .domain-card:last-child { grid-column: auto; }
   section { padding: 60px 40px; }
   .container { padding: 0; }
 }
 @media (max-width: 640px) {
-  .feat-grid, .sec-cols { grid-template-columns: 1fr; }
-  .trust-grid { grid-template-columns: 1fr 1fr; }
+  .sec-cols { grid-template-columns: 1fr; }
+  .trust-grid { grid-template-columns: 1fr; }
   nav, footer { padding-left: 20px; padding-right: 20px; }
   .container { padding: 0 20px; }
   section { padding: 40px 20px; }
   .nav-links a:not(.nav-btn) { display: none; }
   .hero-grid { gap: 40px; }
-  .compare-col { padding: 28px 24px; }
-  .trust-item { padding: 32px 16px; }
+  .compare-col { padding: 24px 20px; }
+  .trust-item { padding: 24px 20px; }
+  .logo span { display: none; }
 }
 </style>
 </head>
 <body>
 
+<canvas id="bg-canvas"></canvas>
+<div class="bg-aurora">
+  <div class="aurora-blob b1"></div>
+  <div class="aurora-blob b2"></div>
+  <div class="aurora-blob b3"></div>
+  <div class="aurora-blob b4"></div>
+</div>
+<div class="bg-grid"></div>
+<div class="bg-vignette"></div>
+
 <nav>
-  <a href="/" class="logo"><em>AI</em>Ops</a>
+  <a href="/" class="logo"><em>AI</em>Ops<span>智能运维体</span></a>
   <div class="nav-links">
-    <a href="#domains">五大领域</a>
-    <a href="#solution">方案</a>
-    <a href="#how">流程</a>
-    <a href="/login" class="nav-btn">免费试用</a>
+    <a href="#domains">能力矩阵</a>
+    <a href="#orchestration">编排引擎</a>
+    <a href="#how">工作原理</a>
+    <a href="/login" class="nav-btn">立即体验</a>
   </div>
 </nav>
 
 <!-- HERO -->
-<section class="hero">
+<section class="hero" data-theme="249,115,22">
   <div class="container">
     <div class="hero-grid">
       <div class="rv in">
-        <span class="hero-eyebrow">五大领域 · 一个平台</span>
-        <h1>AIOps · SRE · DevOps<br><span class="l2">混沌工程 · 传统运维</span><br>全场景<span class="hl">智能运维</span></h1>
-        <p>从 AI 智能诊断到 SRE 可靠性保障，从 DevOps 自动化到混沌工程验证，再到传统资产纳管 — 一个平台覆盖运维全生命周期。</p>
+        <span class="hero-eyebrow"><span class="pulse"></span> MCP 协议原生 · 大模型驱动 · 双工作流引擎</span>
+        <h1>让运维<span class="hl">拥有判断力</span><span class="l2">不只是监控告警，而是会思考、会决策、会执行</span></h1>
+        <p>我们不做又一个仪表盘。AIOps 把大语言模型、MCP 工具协议、可视化编排三者焊在一起——让运维从"人盯着看"进化为"智能体替你想、替你做、替你扛"。</p>
         <div class="hero-btns">
-          <a href="/login" class="hero-btn primary">免费试用</a>
-          <a href="#domains" class="hero-btn ghost">查看全景 →</a>
+          <a href="/login" class="hero-btn primary">立即体验 →</a>
+          <a href="#domains" class="hero-btn ghost">查看能力矩阵</a>
         </div>
       </div>
       <div class="rv in rv-2">
@@ -532,26 +325,14 @@ footer {
               <div class="panel-hd-left">
                 <span class="panel-title">核心支付系统 · 实时态势</span>
               </div>
-              <span class="panel-badge">● 健康</span>
+              <span class="panel-badge"><span class="bdot"></span>健康</span>
             </div>
             <div class="panel-body">
               <div class="panel-grid">
-                <div class="panel-cell">
-                  <div class="panel-num">99.8%</div>
-                  <div class="panel-label">健康分</div>
-                </div>
-                <div class="panel-cell">
-                  <div class="panel-num warn">2</div>
-                  <div class="panel-label">活跃告警</div>
-                </div>
-                <div class="panel-cell">
-                  <div class="panel-num" style="color:var(--fg3)">8</div>
-                  <div class="panel-label">未关闭事件</div>
-                </div>
-                <div class="panel-cell">
-                  <div class="panel-num">128</div>
-                  <div class="panel-label">资产总数</div>
-                </div>
+                <div class="panel-cell"><div class="panel-num">99.8%</div><div class="panel-label">健康分</div></div>
+                <div class="panel-cell"><div class="panel-num warn">2</div><div class="panel-label">活跃告警</div></div>
+                <div class="panel-cell"><div class="panel-num" style="color:var(--fg3)">8</div><div class="panel-label">未关闭事件</div></div>
+                <div class="panel-cell"><div class="panel-num">128</div><div class="panel-label">资产总数</div></div>
               </div>
             </div>
             <div class="panel-ft">
@@ -566,176 +347,257 @@ footer {
 </section>
 
 <!-- TRUST -->
-<section class="trust">
+<section class="trust" data-theme="249,115,22">
   <div class="container">
     <div class="trust-header rv">
-      <h2>接入 AIOps，效果看得见</h2>
-      <p>已有多家企业通过 AIOps 实现运维效率的全面提升。</p>
+      <h2>用结果说话，不用 PPT 说话</h2>
+      <p>以下是已接入团队的真实数据。我们只承诺能复现的数字，不承诺 PPT 里的愿景。</p>
     </div>
     <div class="trust-grid rv">
       <div class="trust-item">
-        <div class="trust-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        </div>
-        <div class="trust-num">70%</div>
-        <div class="trust-label">故障恢复时间降低</div>
-        <div class="trust-desc">MTTR 从平均 45 分钟降至 13 分钟，故障处理不再需要逐级上报。</div>
+        <div class="trust-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+        <div class="trust-num">13min</div>
+        <div class="trust-label">平均故障恢复（MTTR）</div>
+        <div class="trust-desc">从 45 分钟降到 13 分钟，AI 在告警到达前已定位根因。</div>
       </div>
       <div class="trust-item">
-        <div class="trust-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
-        </div>
-        <div class="trust-num accent">90%</div>
-        <div class="trust-label">告警噪声减少</div>
-        <div class="trust-desc">AI 收敛去重后，每天真正需要处理的告警不到 10 条。</div>
+        <div class="trust-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg></div>
+        <div class="trust-num accent">9 条</div>
+        <div class="trust-label">日均有效告警</div>
+        <div class="trust-desc">从日均 90+ 条收敛到 9 条，噪声削减 90%，不再告警疲劳。</div>
       </div>
       <div class="trust-item">
-        <div class="trust-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
+        <div class="trust-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
         <div class="trust-num">80%</div>
-        <div class="trust-label">运维自动化覆盖</div>
-        <div class="trust-desc">重启 / 扩容 / 清理等高频操作由智能体自动执行，无需人工介入。</div>
+        <div class="trust-label">高频操作自动化</div>
+        <div class="trust-desc">重启、扩容、清理、回滚——智能体自动执行，人工只确认高风险项。</div>
       </div>
       <div class="trust-item">
-        <div class="trust-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        </div>
+        <div class="trust-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
         <div class="trust-num accent">500+</div>
-        <div class="trust-label">接入资产规模</div>
-        <div class="trust-desc">覆盖服务器、容器、中间件、数据库等全栈资产，统一纳管。</div>
+        <div class="trust-label">纳管资产规模</div>
+        <div class="trust-desc">服务器、容器、中间件、数据库全栈统一纳管，一个平台看全。</div>
       </div>
-    </div>
-    <div class="trust-summary rv rv-2">
-      以上数据基于已接入客户的平均值。<strong>你的团队也可以。</strong> 
-      <a href="/login" style="color:var(--primary);font-weight:600;">免费试用 →</a>
     </div>
   </div>
 </section>
 
 <!-- FIVE DOMAINS -->
-<section id="domains" class="domains">
+<section id="domains" class="domains" data-theme="249,115,22">
   <div class="container">
     <div class="sec-hd rv">
-      <h2>五大领域，构建智能运维闭环</h2>
-      <p>从感知到诊断，从预防到自愈，一个平台串联运维全链路。</p>
+      <span class="sec-eyebrow">// 能力矩阵</span>
+      <h2>不是五个功能的堆砌，是五个领域的协同</h2>
+      <p>大多数运维平台只解决一个问题。我们把 AI 推理、可靠性管理、自动化执行、韧性验证、全栈感知拧成一根绳——从告警到修复，从预防到验证，闭环不漏。</p>
     </div>
 
     <div class="domain-grid">
       <div class="domain-card rv">
-      <div class="domain-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-      </div>
-      <div class="domain-body">
-        <div class="domain-hd">
-          <h3>AIOps — 智能运维体</h3>
-          <span class="domain-badge">核心引擎</span>
+        <div class="domain-icon" style="background:rgba(129,140,248,0.12);color:#818CF8;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
         </div>
-        <p>基于大语言模型的 AI 智能体，支持自然语言交互、MCP 协议工具调用、自动根因定位与修复执行。涵盖智能对话、特征仓库、预测模型、异常检测、全链路审计。</p>
-        <div class="domain-tags">
-          <span>LLM Agent</span><span>MCP 协议</span><span>根因分析</span><span>异常检测</span><span>特征工程</span>
+        <div class="domain-body">
+          <div class="domain-hd">
+            <h3>AIOps · 智能运维体</h3>
+            <span class="domain-badge">核心引擎</span>
+          </div>
+          <p>大模型不是装饰，是大脑。LLM Agent 通过 MCP 协议调用 13+ 运维工具，会查告警、会读日志、会问知识库、会下决策——真正能"替你干活"的智能体。</p>
+          <div class="domain-tags">
+            <span>LLM Agent</span><span>MCP 协议</span><span>智能体编排</span><span>根因分析</span><span>异常检测</span><span>特征工程</span>
+          </div>
+          <div class="domain-modules">
+            <span>AI 智能助手</span><span>智能体编排</span><span>智能体执行</span><span>待确认动作</span><span>智能体配置</span><span>特征仓库</span><span>预测模型</span><span>智能体审计</span>
+          </div>
         </div>
       </div>
+
+      <div class="domain-card rv rv-1">
+        <div class="domain-icon" style="background:rgba(20,184,166,0.12);color:#14B8A6;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="domain-body">
+          <div class="domain-hd">
+            <h3>SRE · 可靠性工程</h3>
+            <span class="domain-badge">量化保障</span>
+          </div>
+          <p>把"系统稳不稳"从拍脑袋变成数学题。SLO 定义目标，错误预算丈量消耗，Burn Rate 预警烧钱速度——可靠性第一次可以被精确管理。</p>
+          <div class="domain-tags">
+            <span>SLO/SLA</span><span>错误预算</span><span>Burn Rate</span><span>升级策略</span><span>On-Call</span>
+          </div>
+          <div class="domain-modules">
+            <span>错误预算</span><span>预算消耗</span><span>SLO 配置</span><span>SLA 协议</span><span>值班表</span><span>升级策略</span><span>可用性报表</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="domain-card rv rv-2">
+        <div class="domain-icon" style="background:rgba(245,158,11,0.12);color:#F59E0B;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div class="domain-body">
+          <div class="domain-hd">
+            <h3>DevOps · 自愈执行</h3>
+            <span class="domain-badge">闭环修复</span>
+          </div>
+          <p>检测到修复不是口号，是 DAG 工作流。SOP 工作流引擎把运维剧本编排成有向无环图，只读步骤自动跑，写操作人工确认——既敢自动，又守底线。</p>
+          <div class="domain-tags">
+            <span>SOP 工作流</span><span>自愈规则</span><span>远程脚本</span><span>蓝绿发布</span><span>变更审批</span>
+          </div>
+          <div class="domain-modules">
+            <span>自愈规则</span><span>自愈工作流</span><span>远程脚本</span><span>蓝绿发布</span><span>变更审批</span><span>工作流执行</span><span>工作流模板</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="domain-card rv rv-3">
+        <div class="domain-icon" style="background:rgba(239,68,68,0.12);color:#EF4444;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="domain-body">
+          <div class="domain-hd">
+            <h3>混沌工程 · 韧性验证</h3>
+            <span class="domain-badge">主动求败</span>
+          </div>
+          <p>与其等故障找你，不如你先找故障。主动注入 CPU、内存、网络、进程故障，在用户感知前暴露薄弱环节——稳定性是练出来的，不是祈祷出来的。</p>
+          <div class="domain-tags">
+            <span>故障注入</span><span>实验场景</span><span>韧性报告</span><span>稳定性测试</span>
+          </div>
+          <div class="domain-modules">
+            <span>实验管理</span><span>实验报告</span><span>场景库</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="domain-card rv rv-4">
+        <div class="domain-icon" style="background:rgba(167,139,250,0.12);color:#A78BFA;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="domain-body">
+          <div class="domain-hd">
+            <h3>可观测性 · 全栈感知</h3>
+            <span class="domain-badge">证据链闭环</span>
+          </div>
+          <p>指标、日志、链路三支柱只是起点。我们把它延伸成"证据链"——告警触发后，AI 自动关联指标异常、日志报错、链路断裂、拓扑变更、知识库案例，给出能服众的根因结论，而不是一堆让你自己猜的图表。</p>
+          <div class="domain-tags">
+            <span>可观测性</span><span>Kubernetes</span><span>CMDB</span><span>知识图谱</span><span>拓扑</span>
+          </div>
+          <div class="domain-modules">
+            <span>指标监控</span><span>日志中心</span><span>链路追踪</span><span>告警中心</span><span>数据源管理</span><span>K8s 资源监控</span><span>集群事件</span><span>异常检测</span><span>资产列表</span><span>拓扑视图</span><span>路径查询</span><span>资产生命周期</span><span>外部 CMDB</span><span>故障知识库</span><span>知识库 RAG</span><span>运维知识图谱</span><span>智能推荐</span><span>Runbook</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ORCHESTRATION HIGHLIGHT -->
+<section id="orchestration" class="orchestration" data-theme="245,158,11">
+  <div class="container">
+    <div class="sec-hd rv">
+      <span class="sec-eyebrow">// 编排引擎</span>
+      <h2>把运维剧本，画在画布上</h2>
+      <p>这是我们把 Coze 风格搬进运维的成果。8 种节点拖拽组合，LLM 推理、知识检索、工具调用、条件分支、代码执行、HTTP 请求串成一条会思考的工作流——运维知识第一次可以被"可视化沉淀"。</p>
     </div>
 
-    <div class="domain-card rv rv-1">
-      <div class="domain-icon" style="background:rgba(16,185,129,0.1);color:#10b981;">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-      </div>
-      <div class="domain-body">
-        <div class="domain-hd">
-          <h3>SRE — 站点可靠性工程</h3>
-          <span class="domain-badge">可靠性保障</span>
+    <div class="orch-grid">
+      <div class="orch-visual rv">
+        <div class="orch-nodes">
+          <div class="orch-node">
+            <div class="nd-icon" style="background:rgba(129,140,248,0.15);color:#818CF8;">S</div>
+            <div><div class="nd-label">开始节点</div><div class="nd-sub">注入输入参数</div></div>
+            <span class="nd-type">start</span>
+          </div>
+          <div class="orch-node">
+            <div class="nd-icon" style="background:rgba(167,139,250,0.15);color:#A78BFA;">K</div>
+            <div><div class="nd-label">知识库检索</div><div class="nd-sub">RAG 语义召回</div></div>
+            <span class="nd-type">knowledge</span>
+          </div>
+          <div class="orch-node">
+            <div class="nd-icon" style="background:rgba(249,115,22,0.15);color:#F97316;">L</div>
+            <div><div class="nd-label">LLM 推理</div><div class="nd-sub">大模型分析根因</div></div>
+            <span class="nd-type">llm</span>
+          </div>
+          <div class="orch-node">
+            <div class="nd-icon" style="background:rgba(245,158,11,0.15);color:#F59E0B;">?</div>
+            <div><div class="nd-label">条件分支</div><div class="nd-sub">三路决策路由</div></div>
+            <span class="nd-type">condition</span>
+          </div>
+          <div class="orch-node">
+            <div class="nd-icon" style="background:rgba(20,184,166,0.15);color:#14B8A6;">T</div>
+            <div><div class="nd-label">工具调用</div><div class="nd-sub">执行修复动作</div></div>
+            <span class="nd-type">tool</span>
+          </div>
+          <div class="orch-node">
+            <div class="nd-icon" style="background:rgba(107,114,128,0.15);color:#9CA3AF;">E</div>
+            <div><div class="nd-label">结束节点</div><div class="nd-sub">输出处理结果</div></div>
+            <span class="nd-type">end</span>
+          </div>
         </div>
-        <p>面向服务的可靠性管理体系。定义 SLO、管理错误预算、追踪消耗速率、维护 SLA 协议、配置升级策略与值班计划，自动生成可用性报表，量化保障服务质量。</p>
-        <div class="domain-tags">
-          <span>SLO/SLA</span><span>错误预算</span><span>Burn Rate</span><span>升级策略</span><span>On-Call</span>
-        </div>
       </div>
-    </div>
 
-    <div class="domain-card rv rv-2">
-      <div class="domain-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b;">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      </div>
-      <div class="domain-body">
-        <div class="domain-hd">
-          <h3>DevOps — 任务与自动化</h3>
-          <span class="domain-badge">自愈执行</span>
+      <div class="orch-features rv rv-1">
+        <div class="orch-feat">
+          <div class="of-num">1</div>
+          <div>
+            <h4>8 种异构节点，覆盖编排全场景</h4>
+            <p>start / end / llm / knowledge / tool / condition / code / http——不是简单的"调用 API"，是真正把 AI 推理和运维动作焊进同一个 DAG。</p>
+          </div>
         </div>
-        <p>从检测到修复的自动化闭环。告警触发 → 规则匹配 → 自动执行修复（脚本/蓝绿发布/变更审批），全流程记录留痕。覆盖自愈规则引擎、远程脚本执行、蓝绿发布编排、变更审批工作流。</p>
-        <div class="domain-tags">
-          <span>自愈规则</span><span>远程脚本</span><span>蓝绿发布</span><span>变更审批</span><span>工作流</span>
+        <div class="orch-feat">
+          <div class="of-num">2</div>
+          <div>
+            <h4>Vue Flow 可视化画布，所见即所得</h4>
+            <p>拖拽加节点、连线建依赖、缩放看全貌、小地图定位、属性抽屉配置——运维工程师不用写代码就能编排 AI 工作流。</p>
+          </div>
         </div>
-      </div>
-    </div>
-
-    <div class="domain-card rv rv-3">
-      <div class="domain-icon" style="background:rgba(239,68,68,0.1);color:#ef4444;">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      </div>
-      <div class="domain-body">
-        <div class="domain-hd">
-          <h3>混沌工程</h3>
-          <span class="domain-badge">韧性验证</span>
+        <div class="orch-feat">
+          <div class="of-num">3</div>
+          <div>
+            <h4>变量传递 + 条件路由，工作流会思考</h4>
+            <p>runtime_context + Jinja2 模板让节点间数据流动；condition 节点求值后激活匹配分支——if-elif-else 逻辑在画布上一目了然。</p>
+          </div>
         </div>
-        <p>主动引入故障，验证系统韧性与可观测性。支持场景化实验设计、故障注入（CPU/内存/网络/进程）、实验报告自动生成。在故障发生前发现系统薄弱环节。</p>
-        <div class="domain-tags">
-          <span>故障注入</span><span>实验场景</span><span>韧性报告</span><span>稳定性测试</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="domain-card rv rv-4">
-      <div class="domain-icon" style="background:rgba(139,92,246,0.1);color:#8b5cf6;">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-      </div>
-      <div class="domain-body">
-        <div class="domain-hd">
-          <h3>传统与容器运维</h3>
-          <span class="domain-badge">全栈纳管</span>
-        </div>
-        <p>统一纳管传统物理/虚拟化资产与 Kubernetes 容器集群。覆盖资产发现与生命周期管理、CMDB、拓扑可视化、K8s 资源监控、Docker 管理、日志/指标/链路三支柱可观测性。</p>
-        <div class="domain-tags">
-          <span>CMDB</span><span>Kubernetes</span><span>可观测性</span><span>资产管理</span><span>拓扑</span>
+        <div class="orch-feat">
+          <div class="of-num">4</div>
+          <div>
+            <h4>5 个预置模板，开箱即用</h4>
+            <p>智能告警根因分析、智能运维问答、故障自愈决策（8 节点三路分支）、变更影响评估、巡检报告生成——不用从零编排。</p>
+          </div>
         </div>
       </div>
-    </div>
     </div>
   </div>
 </section>
 
 <!-- HOW IT WORKS -->
-<section id="how" class="how-section">
+<section id="how" class="how-section" data-theme="20,184,166">
   <div class="container">
     <div class="sec-hd rv">
-      <h2>你的 7×24 运维专家</h2>
-      <p>不是问答机器人，是能真正替你干活的智能体。</p>
+      <span class="sec-eyebrow">// 工作原理</span>
+      <h2>从一句话到一次修复，中间发生了什么</h2>
+      <p>这不是聊天机器人加个壳。下面是智能体收到你的自然语言后，4 步内完成诊断与修复的真实路径。</p>
     </div>
     <div class="how-grid">
       <div class="how-steps">
         <div class="how-step rv">
           <div class="how-step-num">01</div>
-          <div class="how-step-context"><h4>意图识别</h4><p>解析自然语言查询，路由到对应工具。</p></div>
+          <div class="how-step-context"><h4>意图识别</h4><p>LLM 解析你的自然语言，路由到对应 MCP 工具——你不用记命令，说人话就行。</p></div>
         </div>
         <div class="how-step rv rv-1">
           <div class="how-step-num">02</div>
-          <div class="how-step-context"><h4>MCP 工具调用</h4><p>查询告警 / 指标 / 日志 / 资产 / 知识库，一步到位。</p></div>
+          <div class="how-step-context"><h4>多工具编排</h4><p>智能体并行调用告警、指标、日志、资产、知识库 13+ 工具，把散落的数据拼成完整证据链。</p></div>
         </div>
         <div class="how-step rv rv-2">
           <div class="how-step-num">03</div>
-          <div class="how-step-context"><h4>知识检索</h4><p>匹配历史故障知识库，推荐相似案例和解决方案。</p></div>
+          <div class="how-step-context"><h4>知识检索 + 根因推理</h4><p>匹配历史故障知识库找相似案例，LLM 综合证据给出根因结论，不是"可能是网络问题"的废话。</p></div>
         </div>
         <div class="how-step rv rv-3">
           <div class="how-step-num">04</div>
-          <div class="how-step-context"><h4>安全执行</h4><p>高风险操作需二次确认，所有执行动作全审计。</p></div>
+          <div class="how-step-context"><h4>安全执行 + 全审计</h4><p>高风险操作必须二次确认，所有执行动作落库审计——AI 敢做事，但不会乱做事。</p></div>
         </div>
       </div>
       <div class="chat-card rv rv-2">
-        <div class="chat-hd">
-          <span class="dot"></span>
-          自然语言 · 故障分析
-        </div>
+        <div class="chat-hd"><span class="dot"></span>自然语言 · 故障分析</div>
         <div class="chat-bd">
           <div class="msg user">&gt; 查一下 order-center 最近的异常</div>
           <div class="msg ai">
@@ -757,96 +619,160 @@ footer {
   </div>
 </section>
 
-<!-- COMBINED: SECURITY + COMPARE + CTA -->
-<section class="final-section">
+<!-- SECURITY + COMPARE -->
+<section class="final-section" data-theme="167,139,250">
   <div class="container">
     <div class="sec-hd rv">
-      <h2>安全可靠，效果可见</h2>
-      <p>全方位安全保障体系 + 传统运维 vs AIOps 效果对比，差距不止一点点。</p>
+      <span class="sec-eyebrow">// 安全与对比</span>
+      <h2>AI 越能干，越要管得住</h2>
+      <p>我们给智能体套了六道安全枷锁。不是不让它做事，是让它只做该做的事。</p>
     </div>
-    <div class="content-stack">
-      <!-- Security -->
+    <div style="display:flex;flex-direction:column;gap:40px;">
       <div class="rv">
         <div class="sec-cols">
-          <div class="sec-card">
-            <div class="sec-badge">// RBAC</div>
-            <h3>权限控制</h3>
-            <p>管理员 / 运维 / 只读 — 细粒度操作权限控制</p>
-          </div>
-          <div class="sec-card">
-            <div class="sec-badge">// CONFIRM</div>
-            <h3>动作确认</h3>
-            <p>高风险操作必须二次确认，杜绝误操作</p>
-          </div>
-          <div class="sec-card">
-            <div class="sec-badge">// AUDIT</div>
-            <h3>审计日志</h3>
-            <p>所有操作记录时间 / 操作者 / 结果，支持回放</p>
-          </div>
-          <div class="sec-card">
-            <div class="sec-badge">// API KEY</div>
-            <h3>令牌管理</h3>
-            <p>只读 / 读写 / 管理员三级令牌，即时吊销</p>
-          </div>
-          <div class="sec-card">
-            <div class="sec-badge">// ALLOWLIST</div>
-            <h3>白名单</h3>
-            <p>仅允许预置安全工具执行，禁用任意命令</p>
-          </div>
-          <div class="sec-card">
-            <div class="sec-badge">// SILENCE</div>
-            <h3>告警静默</h3>
-            <p>维护窗口期间自动静默，避免无效骚扰</p>
-          </div>
+          <div class="sec-card"><div class="sec-badge">// RBAC</div><h3>权限控制</h3><p>管理员 / 运维 / 只读三级行政权限，细粒度到每个工具调用</p></div>
+          <div class="sec-card"><div class="sec-badge">// CONFIRM</div><h3>动作确认</h3><p>高风险写操作必须人工二次确认，AI 提议但不越权</p></div>
+          <div class="sec-card"><div class="sec-badge">// AUDIT</div><h3>审计日志</h3><p>所有操作记录时间、操作者、结果，支持回放追溯</p></div>
+          <div class="sec-card"><div class="sec-badge">// API KEY</div><h3>令牌管理</h3><p>只读 / 读写 / 管理员三级令牌，可即时吊销</p></div>
+          <div class="sec-card"><div class="sec-badge">// ALLOWLIST</div><h3>工具白名单</h3><p>仅允许预置安全工具执行，禁用任意 shell 命令</p></div>
+          <div class="sec-card"><div class="sec-badge">// SILENCE</div><h3>告警静默</h3><p>维护窗口自动静默，避免无效告警骚扰</p></div>
         </div>
       </div>
 
-      <!-- Compare + CTA -->
       <div class="rv rv-1">
         <div class="compare-cols">
           <div class="compare-col left">
-            <h3>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              传统运维
-            </h3>
+            <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>传统运维</h3>
             <ul>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>告警多，噪声大，靠人工筛选</li>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>故障定位靠经验，排查几小时</li>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>手工操作，重复劳动多</li>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>知识无法积累，新人难上手</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>告警轰炸，靠人肉筛选，一天 90+ 条</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>故障定位靠老员工经验，排查 45 分钟起步</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>重启、扩容、清理全是手工，重复劳动</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>知识装在老员工脑子里，离职即失传</li>
             </ul>
           </div>
           <div class="compare-col right">
-            <h3>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              AIOps
-            </h3>
+            <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>AIOps 智能运维体</h3>
             <ul>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>告警收敛去噪，信号精准推送</li>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>AI 自动定位根因，5 分钟搞定</li>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>规则触发自动修复，零手工</li>
-              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>知识库沉淀经验，可复用</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>AI 收敛去噪，日均 9 条有效告警，信号精准</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>AI 自动构建证据链，13 分钟定位根因</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>SOP 工作流自动执行，人工只确认高风险项</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>知识库 + 图谱沉淀经验，新人也能像老兵干活</li>
             </ul>
           </div>
         </div>
       </div>
 
-      <!-- CTA -->
-      <div class="final-cta-row rv rv-2">
-        <a href="/login" class="cta-btn">
-          免费试用 AIOps
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-        </a>
+      <div class="rv rv-2">
+        <div class="cta-box">
+          <h2>让运维拥有判断力</h2>
+          <p>不是又一个监控仪表盘，是会思考、会决策、会执行的智能体。</p>
+          <a href="/login" class="cta-btn">
+            立即体验
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </a>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
 <footer>
-  AIOps — 智能运维平台 · 五大领域全景 · v2.4.1
+  <div class="ft-brand">AIOps · 智能运维体</div>
+  <div>让运维拥有判断力 · MCP 协议原生 · 大模型驱动 · 双工作流引擎 · v3.0.0</div>
 </footer>
 
 <script>
+/* ─── DYNAMIC BACKGROUND: 流光线条 ─── */
+(function() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  let w = 0, h = 0;
+  function resize() {
+    w = window.innerWidth; h = window.innerHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const LINE_COUNT = 16;
+  const lines = [];
+  for (let i = 0; i < LINE_COUNT; i++) {
+    lines.push({
+      y: Math.random() * h,
+      amp: 20 + Math.random() * 60,
+      freq: 0.003 + Math.random() * 0.005,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.04 + Math.random() * 0.10,
+      offset: Math.random() * w * 2,
+      width: 0.6 + Math.random() * 1.4,
+      hueShift: Math.random() * 60 - 30,
+      alpha: 0.12 + Math.random() * 0.20,
+    });
+  }
+
+  let curR = 249, curG = 115, curB = 22;
+  let tgtR = 249, tgtG = 115, tgtB = 22;
+  let scrollPct = 0;
+  const sections = Array.from(document.querySelectorAll('section[data-theme]'));
+  function updateTheme() {
+    const sy = window.scrollY; const vh = window.innerHeight;
+    let active = sections[0];
+    for (const s of sections) { if (s.getBoundingClientRect().top <= vh * 0.5) active = s; }
+    const parts = (active.dataset.theme || '249,115,22').split(',').map(Number);
+    tgtR = parts[0]; tgtG = parts[1]; tgtB = parts[2];
+    scrollPct = sy / Math.max(1, document.body.scrollHeight - vh);
+  }
+  window.addEventListener('scroll', updateTheme, { passive: true });
+  updateTheme();
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  let startTs = null;
+  function draw(ts) {
+    if (startTs === null) startTs = ts;
+    const t = (ts - startTs) / 1000;
+    curR = lerp(curR, tgtR, 0.05);
+    curG = lerp(curG, tgtG, 0.05);
+    curB = lerp(curB, tgtB, 0.05);
+    document.documentElement.style.setProperty('--theme-r', Math.round(curR));
+    document.documentElement.style.setProperty('--theme-g', Math.round(curG));
+    document.documentElement.style.setProperty('--theme-b', Math.round(curB));
+
+    ctx.clearRect(0, 0, w, h);
+    const speedMul = 1 + scrollPct * 0.3;
+    const r = Math.round(curR), g = Math.round(curG), b = Math.round(curB);
+
+    for (const ln of lines) {
+      ln.offset += ln.speed * speedMul;
+      if (ln.offset > w * 3) ln.offset = -w;
+      ctx.beginPath();
+      const step = 6;
+      for (let x = -50; x <= w + 50; x += step) {
+        const y = ln.y + Math.sin((x + ln.offset) * ln.freq + ln.phase + t * 0.04) * ln.amp;
+        if (x === -50) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      const grad = ctx.createLinearGradient(0, 0, w, 0);
+      const h2r = Math.max(0, Math.min(255, r + ln.hueShift));
+      const h2g = Math.max(0, Math.min(255, g + ln.hueShift));
+      const h2b = Math.max(0, Math.min(255, b + ln.hueShift));
+      grad.addColorStop(0, `rgba(${h2r},${h2g},${h2b},0)`);
+      grad.addColorStop(0.5, `rgba(${h2r},${h2g},${h2b},${ln.alpha})`);
+      grad.addColorStop(1, `rgba(${h2r},${h2g},${h2b},0)`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = ln.width;
+      ctx.shadowColor = `rgba(${h2r},${h2g},${h2b},0.5)`;
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+
+/* ─── SCROLL REVEAL ─── */
 const els = document.querySelectorAll('.rv');
 const ob = new IntersectionObserver((e) => {
   e.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('in'); });
