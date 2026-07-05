@@ -1,3 +1,10 @@
+### 2026-07-05: 项目更新推送到 GitHub——安全排除敏感文件 + LFS 推送
+- **提交**: fd5fe35, 40 文件 +2870/-453, 推送到 origin/main (0010f94..fd5fe35). LFS 上传 db/aiops.db 5.8MB. 涵盖混沌工程SSH真实故障注入/K8s拓扑力导向图/链路追踪端到端验证/日志空值防御/容器K8s菜单重排/功能测试脚本
+- **安全排除(硬性)**: ①`功能测试/测试资源信息.txt` 含3台服务器root密码(服务器1/2 root/123456, 服务器3 root/A892wYxn) → `git rm --cached` 从仓库移除 + .gitignore; ②`功能测试/reverse_tunnel.py:11` 硬编码 `PWD="A892wYxn"` → .gitignore 排除; ③`_fix_k8s_data.py` 一次性DB修复脚本 → .gitignore `/_fix_*.py`
+- **推送障碍**: 首次 push 失败"Failed to connect to github.com port 443 via 127.0.0.1"(git 代理 127.0.0.1:7897), curl 同代理测试 github 200(2.6s) 证明代理通, 重试 push 成功(首次隧道建立超时)
+- **遗留安全风险(待爸爸处理)**: ①origin remote URL 含 GitHub PAT token 明文(`github_pat_11ARBYDO...@github.com`), 建议改用 git credential manager; ②历史提交中仍有旧版 `功能测试/测试资源信息.txt` 含服务器1/2密码, 如需彻底清除需 BFG Repo-Cleaner 或 git filter-repo
+- **专业名词**: 凭证泄漏(Credential Leakage)——密钥/密码提交到版本库造成安全风险, 公开仓库尤为严重; Git LFS(Large File Storage)——大文件外部托管, 5.8MB db 通过 LFS 推送避免膨胀仓库; 忽略已追踪文件(Ignoring Tracked Files)——.gitignore 对已追踪文件无效, 需 `git rm --cached` 从索引移除后才生效; 代理超时(Proxy Timeout)——首次隧道建立耗时超 git 默认超时, 重试可成功
+
 ### 2026-07-05: 调试结束收尾——demo 清理 + 关机
 - **清理完成**: 服务器3 demo 进程全部杀掉(3 个 Flask 微服务), 反向 SSH 隧道已断开(本地 reverse_tunnel.py PID 35096 已杀, 服务器3 18000 端口已释放)
 - **保留运行**: 服务器3 AIOps 后端(uvicorn PID 8281, 8000 端口)保持运行, 明天可继续用
