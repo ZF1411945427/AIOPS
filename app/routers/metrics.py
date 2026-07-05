@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Request, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, text, distinct
 from app.template_utils import get_templates
 
@@ -97,25 +97,3 @@ def metrics_names(db: Session = Depends(get_db)):
     return JSONResponse(sorted([r[0] for r in rows]))
 
 
-@router.get("", response_class=HTMLResponse)
-def metrics_page(request: Request, asset_id: int = 0, db: Session = Depends(get_db)):
-    assets = asset_service.list_assets(db)
-    names = metric_service.get_metric_names(db)
-    cat_map = _categorize(names, {})
-
-    # Build category info
-    categories_info = []
-    for cat in CATEGORIES:
-        m_names = cat_map.get(cat["key"], [])
-        if m_names:
-            categories_info.append({**cat, "names": m_names, "has_data": False})
-    if "other" in cat_map and cat_map["other"]:
-        categories_info.append({"key": "other", "label": "其他", "icon": "📊", "names": cat_map["other"], "has_data": False})
-
-    return templates.TemplateResponse("metrics.html", {
-        "request": request,
-        "assets": assets,
-        "metric_names": names,
-        "selected_asset": asset_id,
-        "categories": categories_info,
-    })

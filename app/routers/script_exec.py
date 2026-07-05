@@ -2,7 +2,7 @@ import subprocess
 import paramiko
 import json
 from fastapi import APIRouter, Depends, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import DataSource, ScriptTask
@@ -12,29 +12,57 @@ router = APIRouter(prefix="/script", tags=["script"])
 templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def script_page(request: Request, db: Session = Depends(get_db)):
+def _target_to_dict(t) -> dict:
+    cfg = parse_json_config(t.auth_config)
+    return {
+        "id": t.id,
+        "name": t.name or "",
+        "type": t.type or "",
+        "endpoint": t.endpoint or "",
+        "host": cfg.get("host") or t.endpoint or t.name,
+        "enabled": bool(t.enabled),
+    }
+
+
+def _script_task_to_dict(s) -> dict:
+    return {
+        "id": s.id,
+        "target_name": s.target_name or "",
+        "script_content": s.script_content or "",
+        "output": s.output or "",
+        "error": s.error or "",
+        "exit_code": s.exit_code if s.exit_code is not None else 0,
+        "created_at": s.created_at.strftime("%Y-%m-%d %H:%M:%S") if s.created_at else None,
+    }
+
+
+@router.get("/api/targets")
+def api_script_targets(db: Session = Depends(get_db)):
+    """远程脚本目标主机列表 JSON API."""
     targets = db.query(DataSource).filter(DataSource.type.in_(["ssh", "host", "linux"])).all()
+    return JSONResponse({"targets": [_target_to_dict(t) for t in targets], "total": len(targets)})
+
+
+@router.get("/api/history")
+def api_script_history(db: Session = Depends(get_db)):
+    """远程脚本执行历史 JSON API."""
     history = db.query(ScriptTask).order_by(ScriptTask.id.desc()).limit(50).all()
-    return templates.TemplateResponse("script.html", {
-        "request": request, "targets": targets, "history": history,
-    })
+    return JSONResponse({"history": [_script_task_to_dict(s) for s in history], "total": len(history)})
 
 
-@router.post("/execute")
-def execute_script(
-    request: Request,
+@router.post("/api/execute")
+def api_script_execute(
     target_id: int = Form(...),
     script_content: str = Form(...),
     timeout: int = Form(30),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
+    """执行远程脚本 JSON API."""
     target = db.query(DataSource).filter(DataSource.id == target_id).first()
     if not target:
-        raise HTTPException(404, "Target not found")
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     cfg = parse_json_config(target.auth_config)
-    host = target.api_url or cfg.get("host") or target.name
+    host = target.endpoint or cfg.get("host") or target.name
     port = cfg.get("port", 22)
     username = cfg.get("username", "root")
     password = cfg.get("password")
@@ -65,8 +93,8 @@ def execute_script(
             else:
                 client.connect(host, port=port, username=username, password=password, timeout=timeout)
             stdin, stdout, stderr = client.exec_command(script_content, timeout=timeout)
-            output = stdout.read().decode()
-            error = stderr.read().decode()
+            output = stdout.read().decode(errors="ignore")
+            error = stderr.read().decode(errors="ignore")
             client.close()
         except Exception as e:
             error = str(e)
@@ -76,14 +104,14 @@ def execute_script(
         script_content=script_content,
         output=output[:5000],
         error=error[:2000],
-        exit_code=0 if not error else -1,
-    )
+        exit_code=0 if not error else -1)
     db.add(task)
     db.commit()
-
-    history = db.query(ScriptTask).order_by(ScriptTask.id.desc()).limit(50).all()
-    targets = db.query(DataSource).filter(DataSource.type.in_(["ssh", "host", "linux"])).all()
-    return templates.TemplateResponse("script.html", {
-        "request": request, "targets": targets, "history": history,
-        "last_output": output[:2000], "last_error": error[:1000],
+    db.refresh(task)
+    return JSONResponse({
+        "ok": True,
+        "task_id": task.id,
+        "output": output[:2000],
+        "error": error[:1000],
+        "exit_code": task.exit_code,
     })

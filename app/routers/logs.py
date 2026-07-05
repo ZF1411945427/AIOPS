@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Request, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -12,41 +12,40 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def log_viewer(
-    request: Request,
+# ─── JSON API（供 Vue 前端调用，保留 HTML 路由作 fallback）───
+
+@router.get("/api/sources")
+def api_log_sources(db: Session = Depends(get_db)):
+    """返回 ES 类型数据源列表."""
+    sources = db.query(DataSource).filter(DataSource.type == "elasticsearch").all()
+    return JSONResponse([{
+        "id": s.id, "name": s.name, "endpoint": s.endpoint or "",
+        "enabled": bool(s.enabled),
+    } for s in sources])
+
+
+@router.get("/api/search")
+def api_log_search(
     source_id: int = 0,
     query: str = "*",
     time_range: str = "1h",
     page: int = 1,
     size: int = 50,
-    db: Session = Depends(get_db),
-):
-    sources = db.query(DataSource).filter(DataSource.type == "elasticsearch").all()
-    logs = []
-    total = 0
-    error = None
-    selected_source = None
-
-    if source_id > 0:
-        selected_source = db.query(DataSource).filter(DataSource.id == source_id).first()
-        if selected_source:
-            try:
-                logs, total, error = _query_elasticsearch(selected_source, query, time_range, page, size)
-            except Exception as e:
-                error = str(e)
-
-    return templates.TemplateResponse("logs.html", {
-        "request": request,
-        "sources": sources,
-        "selected_source_id": source_id,
-        "query": query,
-        "time_range": time_range,
-        "page": page,
-        "size": size,
-        "logs": logs,
-        "total": total,
-        "error": error,
+    db: Session = Depends(get_db)):
+    """日志搜索 JSON API."""
+    if source_id <= 0:
+        return JSONResponse({"logs": [], "total": 0, "page": page, "size": size, "error": None, "total_pages": 1})
+    source = db.query(DataSource).filter(DataSource.id == source_id).first()
+    if not source:
+        return JSONResponse({"logs": [], "total": 0, "page": page, "size": size, "error": "数据源不存在", "total_pages": 1})
+    try:
+        logs, total, error = _query_elasticsearch(source, query, time_range, page, size)
+    except Exception as e:
+        logs, total, error = [], 0, str(e)
+    total_pages = (total + size - 1) // size if total > 0 else 1
+    return JSONResponse({
+        "logs": logs, "total": total, "page": page, "size": size,
+        "error": error, "total_pages": total_pages,
     })
 
 

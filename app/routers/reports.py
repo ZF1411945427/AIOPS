@@ -1,38 +1,53 @@
+import json
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from app.template_utils import get_templates
+from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services import report_service
-from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/reports", tags=["reports"])
-templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def report_list(request: Request, db: Session = Depends(get_db)):
+@router.get("/api/list")
+def api_report_list(db: Session = Depends(get_db)):
     reports = report_service.list_reports(db)
-    return templates.TemplateResponse("reports.html", {
-        "request": request, "reports": reports,
-    })
+    return {
+        "reports": [
+            {
+                "id": r.id, "title": r.title, "type": r.type,
+                "period_start": r.period_start.isoformat() if r.period_start else None,
+                "period_end": r.period_end.isoformat() if r.period_end else None,
+                "summary": r.summary, "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in reports
+        ],
+        "count": len(reports),
+    }
 
 
-@router.get("/{report_id}", response_class=HTMLResponse)
-def report_detail(report_id: int, request: Request, db: Session = Depends(get_db)):
+@router.get("/api/{report_id}")
+def api_report_detail(report_id: int, db: Session = Depends(get_db)):
     report = report_service.get_report(db, report_id)
     if not report:
-        return RedirectResponse("/reports", status_code=303)
-    return templates.TemplateResponse("report_detail.html", {
-        "request": request, "report": report,
-    })
+        return {"status": "error", "message": "报表不存在"}
+    data = {}
+    if report.data:
+        try:
+            data = json.loads(report.data)
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+    return {
+        "id": report.id, "title": report.title, "type": report.type,
+        "period_start": report.period_start.isoformat() if report.period_start else None,
+        "period_end": report.period_end.isoformat() if report.period_end else None,
+        "summary": report.summary, "data": data,
+        "created_at": report.created_at.isoformat() if report.created_at else None,
+    }
 
 
-@router.post("/generate/{report_type}")
-def report_generate(report_type: str, db: Session = Depends(get_db)):
+@router.post("/api/generate/{report_type}")
+def api_report_generate(report_type: str, db: Session = Depends(get_db)):
     if report_type not in ("daily", "weekly", "monthly"):
         report_type = "daily"
-    report_service.generate_report(db, report_type)
-    return RedirectResponse("/reports", status_code=303)
-
-
+    report = report_service.generate_report(db, report_type)
+    return {"status": "ok", "id": report.id, "title": report.title}

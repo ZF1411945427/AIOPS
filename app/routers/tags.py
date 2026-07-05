@@ -1,36 +1,49 @@
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
 from app.models import Asset
-from app.template_utils import get_templates
 
 router = APIRouter(prefix="/tags", tags=["tags"])
-templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def tag_list(request: Request, tag: str = "", db: Session = Depends(get_db)):
+@router.get("/api/cloud")
+def api_tag_cloud(db: Session = Depends(get_db)):
     all_assets = db.query(Asset).all()
     tag_map = {}
     for a in all_assets:
         tags = [t.strip() for t in (a.tags or "").split(",") if t.strip()]
         for t in tags:
-            if t not in tag_map:
-                tag_map[t] = []
-            tag_map[t].append(a)
-    if tag:
-        tagged_assets = tag_map.get(tag, [])
-    else:
-        tagged_assets = []
-    return templates.TemplateResponse("tags.html", {
-        "request": request, "tag_map": tag_map, "current_tag": tag, "tagged_assets": tagged_assets,
-    })
+            tag_map[t] = tag_map.get(t, 0) + 1
+    return {"tags": [{"name": k, "count": v} for k, v in sorted(tag_map.items(), key=lambda x: -x[1])]}
 
 
-@router.post("/assign")
-def assign_tag(asset_id: int = Form(...), tag: str = Form(...), db: Session = Depends(get_db)):
+@router.get("/api/assets")
+def api_tagged_assets(tag: str = "", db: Session = Depends(get_db)):
+    all_assets = db.query(Asset).all()
+    result = []
+    for a in all_assets:
+        tags = [t.strip() for t in (a.tags or "").split(",") if t.strip()]
+        if tag and tag not in tags:
+            continue
+        result.append({
+            "id": a.id, "name": a.name, "ip": a.ip, "ci_type": a.ci_type, "tags": tags,
+        })
+    return {"assets": result, "count": len(result)}
+
+
+@router.get("/api/all-assets")
+def api_all_assets(db: Session = Depends(get_db)):
+    assets = db.query(Asset).order_by(Asset.name).all()
+    return {"assets": [{"id": a.id, "name": a.name, "ip": a.ip, "tags": a.tags or ""} for a in assets]}
+
+
+@router.post("/api/assign")
+def api_tag_assign(payload: dict = Body(...), db: Session = Depends(get_db)):
+    asset_id = int(payload.get("asset_id", 0) or 0)
+    tag = payload.get("tag", "").strip()
+    if not tag or asset_id <= 0:
+        return {"status": "error", "message": "参数错误"}
     asset = db.query(Asset).filter(Asset.id == asset_id).first()
     if asset:
         existing = [t.strip() for t in (asset.tags or "").split(",") if t.strip()]
@@ -38,15 +51,17 @@ def assign_tag(asset_id: int = Form(...), tag: str = Form(...), db: Session = De
             existing.append(tag)
             asset.tags = ",".join(existing)
             db.commit()
-    return RedirectResponse(f"/tags?tag={tag}", status_code=303)
+    return {"status": "ok"}
 
 
-@router.post("/remove")
-def remove_tag(asset_id: int = Form(...), tag: str = Form(...), db: Session = Depends(get_db)):
+@router.post("/api/remove")
+def api_tag_remove(payload: dict = Body(...), db: Session = Depends(get_db)):
+    asset_id = int(payload.get("asset_id", 0) or 0)
+    tag = payload.get("tag", "").strip()
     asset = db.query(Asset).filter(Asset.id == asset_id).first()
     if asset:
         existing = [t.strip() for t in (asset.tags or "").split(",") if t.strip()]
         existing = [t for t in existing if t != tag]
         asset.tags = ",".join(existing)
         db.commit()
-    return RedirectResponse(f"/tags?tag={tag}", status_code=303)
+    return {"status": "ok"}

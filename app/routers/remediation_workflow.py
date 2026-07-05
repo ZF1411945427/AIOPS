@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import RemediationWorkflow, RemediationLog, Alert
@@ -12,32 +12,58 @@ router = APIRouter(prefix="/remediation-workflows", tags=["remediation_workflows
 templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def list_workflows(request: Request, db: Session = Depends(get_db)):
+def _run_step(action_type: str, target: str):
+    """执行修复步骤 — 调用真实修复服务，不使用 random 模拟"""
+    from app.services.remediation_service import execute_action
+    return execute_action(action_type, {}, target)
+
+
+# ─── JSON API（供 Vue 前端调用，保留 HTML 路由作 fallback）───
+
+def _workflow_to_dict(w) -> dict:
+    steps = json.loads(w.steps) if isinstance(w.steps, str) else (w.steps or [])
+    return {
+        "id": w.id,
+        "name": w.name or "",
+        "rule_id": w.rule_id,
+        "steps": steps if isinstance(steps, list) else [],
+        "enabled": bool(w.enabled),
+        "created_at": w.created_at.strftime("%Y-%m-%d %H:%M:%S") if w.created_at else None,
+    }
+
+
+def _wf_log_to_dict(lg) -> dict:
+    return {
+        "id": lg.id,
+        "remediation_id": lg.remediation_id,
+        "alert_id": lg.alert_id,
+        "action_type": lg.action_type or "",
+        "target": lg.target or "",
+        "success": bool(lg.success),
+        "output": lg.output or "",
+        "created_at": lg.created_at.strftime("%Y-%m-%d %H:%M:%S") if lg.created_at else None,
+    }
+
+
+@router.get("/api/list")
+def api_workflow_list(db: Session = Depends(get_db)):
+    """自愈工作流列表 JSON API."""
     workflows = db.query(RemediationWorkflow).order_by(RemediationWorkflow.id.desc()).all()
-    for w in workflows:
-        w.steps_list = json.loads(w.steps) if isinstance(w.steps, str) else w.steps or []
     logs = get_remediation_logs(db)
-    return templates.TemplateResponse("remediation_workflows.html", {
-        "request": request, "workflows": workflows, "logs": logs,
+    return JSONResponse({
+        "workflows": [_workflow_to_dict(w) for w in workflows],
+        "logs": [_wf_log_to_dict(l) for l in logs],
+        "total": len(workflows),
     })
 
 
-@router.get("/new", response_class=HTMLResponse)
-def new_workflow(request: Request):
-    return templates.TemplateResponse("remediation_workflow_form.html", {
-        "request": request, "wf": None,
-    })
-
-
-@router.post("/new")
-def create_workflow(
-    request: Request,
+@router.post("/api/create")
+def api_workflow_create(
     name: str = Form(...),
     steps: str = Form("[]"),
     rule_id: int = Form(0),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
+    """创建自愈工作流 JSON API."""
     try:
         steps_list = json.loads(steps)
     except Exception:
@@ -46,38 +72,44 @@ def create_workflow(
         name=name,
         rule_id=rule_id if rule_id else None,
         steps=json.dumps(steps_list, ensure_ascii=False),
-        enabled=True,
-    )
+        enabled=True)
     db.add(wf)
     db.commit()
-    return RedirectResponse("/remediation-workflows", status_code=303)
+    db.refresh(wf)
+    return JSONResponse({"ok": True, "id": wf.id})
 
 
-@router.post("/{wf_id}/toggle")
-def toggle_workflow(wf_id: int, db: Session = Depends(get_db)):
-    wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
-    if wf:
-        wf.enabled = not wf.enabled
-        db.commit()
-    return RedirectResponse("/remediation-workflows", status_code=303)
-
-
-@router.post("/{wf_id}/delete")
-def delete_workflow(wf_id: int, db: Session = Depends(get_db)):
-    wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
-    if wf:
-        db.delete(wf)
-        db.commit()
-    return RedirectResponse("/remediation-workflows", status_code=303)
-
-
-@router.post("/{wf_id}/run")
-def run_workflow(wf_id: int, db: Session = Depends(get_db)):
+@router.post("/api/{wf_id}/toggle")
+def api_workflow_toggle(wf_id: int, db: Session = Depends(get_db)):
+    """启用/禁用自愈工作流 JSON API."""
     wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
     if not wf:
-        return RedirectResponse("/remediation-workflows", status_code=303)
-    steps = json.loads(wf.steps) if isinstance(wf.steps, str) else wf.steps or []
+        return JSONResponse({"error": "not found"}, status_code=404)
+    wf.enabled = not wf.enabled
+    db.commit()
+    return JSONResponse({"ok": True, "enabled": bool(wf.enabled)})
+
+
+@router.post("/api/{wf_id}/delete")
+def api_workflow_delete(wf_id: int, db: Session = Depends(get_db)):
+    """删除自愈工作流 JSON API."""
+    wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
+    if not wf:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    db.delete(wf)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/{wf_id}/run")
+def api_workflow_run(wf_id: int, db: Session = Depends(get_db)):
+    """运行自愈工作流 JSON API."""
+    wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
+    if not wf:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    steps = json.loads(wf.steps) if isinstance(wf.steps, str) else (wf.steps or [])
     alerts = db.query(Alert).filter(Alert.status == "triggered").order_by(Alert.created_at.desc()).limit(3).all()
+    ran = 0
     for alert in alerts:
         for step_idx, step in enumerate(steps):
             action_type = step.get("action", "restart") if isinstance(step, dict) else step
@@ -89,17 +121,11 @@ def run_workflow(wf_id: int, db: Session = Depends(get_db)):
                 action_type=action_type,
                 target=target,
                 success=success,
-                output=f"[Step {step_idx+1}/{len(steps)}] {output}",
-            )
+                output=f"[Step {step_idx+1}/{len(steps)}] {output}")
             db.add(log)
             if not success:
                 break
         alert.status = "acknowledged"
+        ran += 1
     db.commit()
-    return RedirectResponse("/remediation-workflows", status_code=303)
-
-
-def _run_step(action_type: str, target: str):
-    """执行修复步骤 — 调用真实修复服务，不使用 random 模拟"""
-    from app.services.remediation_service import execute_action
-    return execute_action(action_type, {}, target)
+    return JSONResponse({"ok": True, "ran": ran})

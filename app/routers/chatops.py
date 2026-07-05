@@ -1,7 +1,7 @@
 import shlex
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Alert, AlertRule, Asset, ChangeRequest, Report, MetricRecord, K8sEvent
@@ -9,11 +9,6 @@ from app.template_utils import get_templates
 
 router = APIRouter(prefix="/chatops", tags=["chatops"])
 templates = get_templates()
-
-
-@router.get("", response_class=HTMLResponse)
-def chatops_page(request: Request):
-    return templates.TemplateResponse("chatops.html", {"request": request})
 
 
 def cmd_alerts(args, db: Session, user_id: int):
@@ -119,8 +114,7 @@ COMMANDS = {
 def chatops_command(
     request: Request,
     text: str = Form(...),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
     user_id = request.session.get("user_id")
     text = text.strip()
     if not text.startswith("/"):

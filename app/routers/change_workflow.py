@@ -1,6 +1,6 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ChangeRequest, ChangeTask, User
@@ -10,24 +10,62 @@ router = APIRouter(prefix="/change-workflow", tags=["change_workflow"])
 templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def change_list(request: Request, db: Session = Depends(get_db)):
+def _change_to_dict(c, users: dict) -> dict:
+    requester = users.get(c.requester_id)
+    reviewer = users.get(c.reviewer_id)
+    return {
+        "id": c.id,
+        "title": c.title or "",
+        "description": c.description or "",
+        "ci_type": c.ci_type or "",
+        "asset_id": c.asset_id,
+        "change_type": c.change_type or "normal",
+        "priority": c.priority or "medium",
+        "status": c.status or "draft",
+        "risk_level": c.risk_level or "low",
+        "planned_start": c.planned_start.strftime("%Y-%m-%d %H:%M") if c.planned_start else None,
+        "planned_end": c.planned_end.strftime("%Y-%m-%d %H:%M") if c.planned_end else None,
+        "requester_id": c.requester_id,
+        "requester_name": requester.username if requester else "",
+        "reviewer_id": c.reviewer_id,
+        "reviewer_name": reviewer.username if reviewer else "",
+        "review_comment": c.review_comment or "",
+        "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else None,
+        "updated_at": c.updated_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(c, "updated_at", None) else None,
+    }
+
+
+def _task_to_dict(t, users: dict) -> dict:
+    executor = users.get(t.executed_by)
+    return {
+        "id": t.id,
+        "change_id": t.change_id,
+        "step_order": t.step_order or 0,
+        "description": t.description or "",
+        "command": t.command or "",
+        "status": t.status or "pending",
+        "result": t.result or "",
+        "executed_by": t.executed_by,
+        "executor_name": executor.username if executor else "",
+        "executed_at": t.executed_at.strftime("%Y-%m-%d %H:%M:%S") if t.executed_at else None,
+        "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else None,
+    }
+
+
+@router.get("/api/list")
+def api_change_list(db: Session = Depends(get_db)):
+    """变更审批列表 JSON API."""
     changes = db.query(ChangeRequest).order_by(ChangeRequest.created_at.desc()).all()
     users = {u.id: u for u in db.query(User).all()}
-    return templates.TemplateResponse("change_workflow.html", {
-        "request": request, "changes": changes, "users": users,
+    return JSONResponse({
+        "changes": [_change_to_dict(c, users) for c in changes],
+        "users": [{"id": u.id, "username": u.username} for u in users.values()],
+        "total": len(changes),
     })
 
 
-@router.get("/new", response_class=HTMLResponse)
-def change_new_form(request: Request):
-    return templates.TemplateResponse("change_workflow_form.html", {
-        "request": request, "change": None,
-    })
-
-
-@router.post("/new")
-def change_new(
+@router.post("/api/create")
+def api_change_create(
     request: Request,
     title: str = Form(...),
     description: str = Form(""),
@@ -38,8 +76,8 @@ def change_new(
     risk_level: str = Form("low"),
     planned_start: str = Form(""),
     planned_end: str = Form(""),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
+    """创建变更 JSON API."""
     user_id = request.session.get("user_id")
     c = ChangeRequest(
         title=title, description=description, ci_type=ci_type,
@@ -47,122 +85,144 @@ def change_new(
         change_type=change_type, priority=priority, risk_level=risk_level,
         requester_id=user_id,
         planned_start=datetime.fromisoformat(planned_start) if planned_start else None,
-        planned_end=datetime.fromisoformat(planned_end) if planned_end else None,
-    )
+        planned_end=datetime.fromisoformat(planned_end) if planned_end else None)
     db.add(c)
     db.commit()
-    return RedirectResponse(f"/change-workflow/{c.id}", status_code=303)
+    db.refresh(c)
+    return JSONResponse({"ok": True, "id": c.id})
 
 
-@router.get("/{change_id}", response_class=HTMLResponse)
-def change_detail(change_id: int, request: Request, db: Session = Depends(get_db)):
+@router.get("/api/{change_id}")
+def api_change_detail(change_id: int, db: Session = Depends(get_db)):
+    """变更详情 JSON API."""
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
     if not c:
-        return RedirectResponse("/change-workflow", status_code=303)
+        return JSONResponse({"error": "not found"}, status_code=404)
     tasks = db.query(ChangeTask).filter(ChangeTask.change_id == change_id).order_by(ChangeTask.step_order).all()
     users = {u.id: u for u in db.query(User).all()}
-    return templates.TemplateResponse("change_workflow_detail.html", {
-        "request": request, "change": c, "tasks": tasks, "users": users,
+    return JSONResponse({
+        "change": _change_to_dict(c, users),
+        "tasks": [_task_to_dict(t, users) for t in tasks],
+        "users": [{"id": u.id, "username": u.username} for u in users.values()],
     })
 
 
-@router.post("/{change_id}/submit")
-def change_submit(change_id: int, request: Request, db: Session = Depends(get_db)):
+@router.post("/api/{change_id}/submit")
+def api_change_submit(change_id: int, db: Session = Depends(get_db)):
+    """提交审批 JSON API."""
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
-    if c and c.status == "draft":
+    if not c:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if c.status == "draft":
         c.status = "pending_approval"
         db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    return JSONResponse({"ok": True, "status": c.status})
 
 
-@router.post("/{change_id}/approve")
-def change_approve(
-    change_id: int,
-    request: Request,
+@router.post("/api/{change_id}/approve")
+def api_change_approve(
+    change_id: int, request: Request,
     review_comment: str = Form(""),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
+    """审批通过 JSON API."""
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
-    if c and c.status == "pending_approval":
+    if not c:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if c.status == "pending_approval":
         c.status = "approved"
         c.reviewer_id = request.session.get("user_id")
         c.review_comment = review_comment
         db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    return JSONResponse({"ok": True, "status": c.status})
 
 
-@router.post("/{change_id}/reject")
-def change_reject(
-    change_id: int,
-    request: Request,
+@router.post("/api/{change_id}/reject")
+def api_change_reject(
+    change_id: int, request: Request,
     review_comment: str = Form(""),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
+    """审批驳回 JSON API."""
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
-    if c and c.status == "pending_approval":
+    if not c:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if c.status == "pending_approval":
         c.status = "rejected"
         c.reviewer_id = request.session.get("user_id")
         c.review_comment = review_comment
         db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    return JSONResponse({"ok": True, "status": c.status})
 
 
-@router.post("/{change_id}/start")
-def change_start(change_id: int, request: Request, db: Session = Depends(get_db)):
+@router.post("/api/{change_id}/start")
+def api_change_start(change_id: int, db: Session = Depends(get_db)):
+    """开始执行 JSON API."""
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
-    if c and c.status in ("approved", "in_progress"):
+    if not c:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if c.status in ("approved", "in_progress"):
         c.status = "in_progress"
         db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    return JSONResponse({"ok": True, "status": c.status})
 
 
-@router.post("/{change_id}/complete")
-def change_complete(change_id: int, request: Request, db: Session = Depends(get_db)):
+@router.post("/api/{change_id}/complete")
+def api_change_complete(change_id: int, db: Session = Depends(get_db)):
+    """完成变更 JSON API."""
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
-    if c and c.status == "in_progress":
+    if not c:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if c.status == "in_progress":
         c.status = "completed"
         db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    return JSONResponse({"ok": True, "status": c.status})
 
 
-@router.post("/{change_id}/rollback")
-def change_rollback(change_id: int, request: Request, db: Session = Depends(get_db)):
+@router.post("/api/{change_id}/rollback")
+def api_change_rollback(change_id: int, db: Session = Depends(get_db)):
+    """回滚变更 JSON API."""
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
-    if c and c.status in ("approved", "in_progress"):
+    if not c:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if c.status in ("approved", "in_progress"):
         c.status = "rolled_back"
         db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    return JSONResponse({"ok": True, "status": c.status})
 
 
-@router.post("/{change_id}/tasks/new")
-def task_new(
+@router.post("/api/{change_id}/tasks/new")
+def api_task_new(
     change_id: int,
-    request: Request,
     description: str = Form(...),
     command: str = Form(""),
     step_order: int = Form(0),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
+    """新增执行步骤 JSON API."""
     t = ChangeTask(change_id=change_id, description=description, command=command, step_order=step_order)
     db.add(t)
     db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    db.refresh(t)
+    return JSONResponse({"ok": True, "id": t.id})
 
 
-@router.post("/{change_id}/tasks/{task_id}/status")
-def task_update_status(
+@router.post("/api/{change_id}/tasks/{task_id}/status")
+def api_task_update_status(
     change_id: int, task_id: int,
     request: Request,
     status: str = Form(...),
     result: str = Form(""),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
+    """更新执行步骤状态 JSON API."""
     t = db.query(ChangeTask).filter(ChangeTask.id == task_id, ChangeTask.change_id == change_id).first()
-    if t:
-        t.status = status
-        t.result = result
-        t.executed_by = request.session.get("user_id")
-        if status in ("completed", "failed"):
-            t.executed_at = datetime.now()
-        db.commit()
-    return RedirectResponse(f"/change-workflow/{change_id}", status_code=303)
+    if not t:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    t.status = status
+    t.result = result
+    t.executed_by = request.session.get("user_id")
+    if status in ("completed", "failed"):
+        t.executed_at = datetime.now()
+    db.commit()
+    return JSONResponse({"ok": True, "status": t.status})
+
+
+# ─── HTML 路由（fallback）───
+

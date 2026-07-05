@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import BlueGreenDeploy, DataSource, Asset
@@ -9,43 +9,64 @@ router = APIRouter(prefix="/blue-green", tags=["blue-green"])
 templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def blue_green_page(request: Request, db: Session = Depends(get_db)):
+def _deploy_to_dict(d) -> dict:
+    return {
+        "id": d.id,
+        "name": d.name or "",
+        "namespace": d.namespace or "default",
+        "active_label": d.active_label or "blue",
+        "standby_label": d.standby_label or "green",
+        "active_replicas": d.active_replicas or 3,
+        "standby_replicas": d.standby_replicas or 3,
+        "status": d.status or "active",
+        "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else None,
+    }
+
+
+@router.get("/api/list")
+def api_deploy_list(db: Session = Depends(get_db)):
+    """蓝绿发布列表 JSON API."""
     deploys = db.query(BlueGreenDeploy).all()
     clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
-    return templates.TemplateResponse("blue_green.html", {
-        "request": request, "deploys": deploys, "clusters": clusters,
+    return JSONResponse({
+        "deploys": [_deploy_to_dict(d) for d in deploys],
+        "clusters": [{"id": c.id, "name": c.name} for c in clusters],
+        "total": len(deploys),
     })
 
 
-@router.post("/create")
-def create_deploy(
-    request: Request, name: str = Form(...), namespace: str = Form("default"),
-    cluster: str = Form(""), active_label: str = Form("blue"),
-    standby_label: str = Form("green"), active_replicas: int = Form(3),
-    standby_replicas: int = Form(3), db: Session = Depends(get_db),
-):
+@router.post("/api/create")
+def api_deploy_create(
+    name: str = Form(...),
+    namespace: str = Form("default"),
+    cluster: str = Form(""),
+    active_label: str = Form("blue"),
+    standby_label: str = Form("green"),
+    active_replicas: int = Form(3),
+    standby_replicas: int = Form(3),
+    db: Session = Depends(get_db)):
+    """创建蓝绿发布 JSON API."""
     d = BlueGreenDeploy(
         name=name, namespace=namespace, active_label=active_label,
         standby_label=standby_label, active_replicas=active_replicas,
-        standby_replicas=standby_replicas,
-    )
+        standby_replicas=standby_replicas)
     db.add(d)
     db.commit()
+    db.refresh(d)
+    k8s_msg = ""
     if cluster:
         try:
             from kubernetes import config, client
             ds = db.query(DataSource).filter(DataSource.name == cluster).first()
             if ds:
                 cfg = ds.auth_config
-                import json
-                cfg_d = json.loads(cfg) if isinstance(cfg, str) else cfg or {}
+                import json as _json
+                cfg_d = _json.loads(cfg) if isinstance(cfg, str) else cfg or {}
                 if cfg_d.get("in_cluster"):
                     config.load_incluster_config()
                 else:
                     config.load_kube_config()
             apps_v1 = client.AppsV1Api()
-            # Create blue deployment
             blue_body = {
                 "apiVersion": "apps/v1", "kind": "Deployment",
                 "metadata": {"name": f"{name}-{active_label}", "namespace": namespace,
@@ -60,7 +81,6 @@ def create_deploy(
                 },
             }
             apps_v1.create_namespaced_deployment(namespace=namespace, body=blue_body)
-            # Create green deployment
             green_body = dict(blue_body)
             green_body["metadata"]["name"] = f"{name}-{standby_label}"
             green_body["metadata"]["labels"]["version"] = standby_label
@@ -69,31 +89,30 @@ def create_deploy(
             green_body["spec"]["replicas"] = standby_replicas
             apps_v1.create_namespaced_deployment(namespace=namespace, body=green_body)
         except Exception as e:
-            return PlainTextResponse(f"Created config but K8s deploy error: {e}", 200)
-    return RedirectResponse("/blue-green", status_code=303)
+            k8s_msg = f"K8s deploy error: {e}"
+    return JSONResponse({"ok": True, "id": d.id, "k8s_msg": k8s_msg})
 
 
-@router.post("/switch/{did}")
-def switch_deploy(did: int, db: Session = Depends(get_db)):
+@router.post("/api/{did}/switch")
+def api_deploy_switch(did: int, db: Session = Depends(get_db)):
+    """切换蓝绿 JSON API."""
     d = db.query(BlueGreenDeploy).filter(BlueGreenDeploy.id == did).first()
     if not d:
-        return PlainTextResponse("Not found", 404)
+        return JSONResponse({"error": "not found"}, status_code=404)
     d.active_label, d.standby_label = d.standby_label, d.active_label
     d.active_replicas, d.standby_replicas = d.standby_replicas, d.active_replicas
     db.commit()
+    k8s_msg = ""
     try:
         from kubernetes import config, client
         config.load_kube_config()
         apps_v1 = client.AppsV1Api()
-        # Scale up new active, scale down new standby
         apps_v1.patch_namespaced_deployment_scale(
             name=f"{d.name}-{d.active_label}", namespace=d.namespace,
-            body={"spec": {"replicas": d.active_replicas}},
-        )
+            body={"spec": {"replicas": d.active_replicas}})
         apps_v1.patch_namespaced_deployment_scale(
             name=f"{d.name}-{d.standby_label}", namespace=d.namespace,
-            body={"spec": {"replicas": d.standby_replicas}},
-        )
-    except Exception:
-        pass
-    return RedirectResponse("/blue-green", status_code=303)
+            body={"spec": {"replicas": d.standby_replicas}})
+    except Exception as e:
+        k8s_msg = str(e)
+    return JSONResponse({"ok": True, "active_label": d.active_label, "k8s_msg": k8s_msg})

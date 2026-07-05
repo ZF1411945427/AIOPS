@@ -16,8 +16,7 @@ def list_traces(
     keyword: str = Query(""), status: str = Query(""),
     min_dur: float = Query(0), max_dur: float = Query(0),
     limit: int = Query(50), offset: int = Query(0),
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
     """查询调用链列表 — 从真实 Span 数据查询，不再生成随机种子数据"""
     # 聚合每个 trace_id 的统计信息
     subq = db.query(
@@ -25,8 +24,7 @@ def list_traces(
         func.count(Span.id).label("span_count"),
         func.sum(Span.duration_ms).label("total_dur"),
         func.min(Span.start_time).label("root_time"),
-        func.max(Span.status).label("worst_status"),
-    ).group_by(Span.trace_id)
+        func.max(Span.status).label("worst_status")).group_by(Span.trace_id)
 
     # 过滤
     if service:

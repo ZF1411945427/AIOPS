@@ -1,3 +1,300 @@
+### 2026-07-05: Jinja2→Vue 改造收尾——修复 K8s/容器 15 页空白 bug + 彻底清理 114 模板/182 HTML 路由
+- **需求**: 爸爸要求检查 Jinja2→Vue 改造是否全覆盖，容器和 K8s 子菜单页面打开全空白，彻底清理 Jinja2 老旧无用代码
+- **核心 Bug 发现与修复（K8s/容器 15 页全白）**:
+  - **根因**: `AppLayout.vue:handleMenuSelect` 用 `pathKey = item.path.replace(/^\//, '')` 作为 `activeView`，但 v-else-if 条件用 menu **key**。K8s/容器菜单 path（`/k8s/overview`）和 key（`k8s-overview`）不一致 → activeView 不匹配任何 v-else-if → 页面空白
+  - **影响范围**: K8s 13 页 + Docker 2 页全白，另外 asset-list/topology-path/openapi/kb-list/kb-documents/kb-graph 也受影响（path≠key）
+  - **修复**: `activeView` 改用 menu `key`（非 pathKey），统一 11 个 v-else-if 从 path 派生值改为 key（agent-audit→audit, trace-view→traces, trace-agent-guide→discovery, metrics-view→metrics, incidents→incident, events/stats→event-stats, remediation-workflows→remediation-workflow, script→script-exec, agent/pending→pending-actions, ai/providers→ai-providers, es-integration→integration），VUE_PAGES Set 同步更新
+  - **验证**: npm run build 成功(13.8s)，66 个 API 全 200，66 菜单全 type=vue 0 iframe
+- **Jinja2 彻底清理**:
+  - **模板删除**: 119 个 → 5 个（保留 base.html 骨架 + container_pod_logs.html + container_terminal.html + product_intro.html + product_overview.html）
+  - **base.html 精简**: 405 行（侧边栏+标签页+JS）→ 20 行最小骨架（仅 CSS + content block + scripts block），删除全部死链接侧边栏
+  - **HTML 路由清理**: 用 AST 脚本批量删除返回 TemplateResponse 的函数（94 个）+ Form POST 重定向函数（88 个），共 182 个 HTML 路由删除
+  - **无用 import 清理**: 80 个文件清理 TemplateResponse/RedirectResponse/Form/HTMLResponse/PlainTextResponse 等不再使用的 import，修复 29 个空 import 行语法错误
+  - **保留的路由**: ① auth（/login Vue SPA + /logout + /product + /product/overview）② containers 的 pod 日志/终端 HTML 页面（Vue 通过 window.open 访问）③ 所有 /api/* JSON 路由 ④ WebSocket 路由（/ws/pod/*/logs, /ws/pod/*/terminal）
+  - **containers.py 特殊处理**: 删除 9 个 HTML 概览/列表/详情路由 + 8 个 Form POST 部署操作路由，保留 2 个 WS 路由 + 2 个 pod 日志/终端 HTML 路由 + topology/graph JSON + 所有 /api/* JSON 路由
+  - **py_compile**: 83 个路由文件全 PASS
+- **关键发现/坑**:
+  - TemplateResponse 不是从 fastapi.responses 导入的，是 Jinja2Templates 对象的方法（templates.TemplateResponse），误加 import 会 ImportError
+  - AST 脚本批量删除函数时需精确匹配函数名（KEEP_FUNCS set），containers.py 的 pod_terminal_page/pod_logs_page 首次被误删后手动恢复
+  - path vs key 不一致是 Jinja2→Vue 迁移的系统性隐患：menu_config.json 的 path 是后端路由路径，key 是前端视图标识，两者命名规则不同（path 用斜杠如 k8s/overview，key 用连字符如 k8s-overview），handleMenuSelect 必须用 key 而非 path
+- **专业名词**: 路由标识符不一致(Route Identifier Mismatch)——menu path 与 component key 命名规则不同导致渲染失败; AST 批量重构(AST-based Bulk Refactoring)——用 Python ast 模块解析语法树精准定位删除目标函数; 死代码消除(Dead Code Elimination)——删除 114 模板 + 182 HTML 路由 + 无用 import; 空路由占位(Empty Router Stub)——notification_templates/report_schedules 清理后保留空 router 供 main.py import; 绞杀者模式收尾(Strangler Fig Finalization)——HTML fallback 全部删除，Vue 全量接管
+
+
+
+- **需求**: 爸爸要求清理路由文件中的 HTML 路由（返回 TemplateResponse 的函数 + Form POST 返回 RedirectResponse 的函数），保留 API 路由（返回 JSONResponse/dict）和 WebSocket 路由，不再保留 HTML fallback
+- **处理13个文件**（py_compile 全 PASS）:
+  - **agent_chat.py**: 删3个HTML(chat_page/chat_session_page返回TemplateResponse + pending_list返回TemplateResponse + delete_session返回RedirectResponse)，保留9个API(sessions/history/send/session-delete/pending-confirm/pending-status/pending-cancel/invocations/api-pending)
+  - **ai_providers.py**: 删8个HTML(list_providers/create_provider_form/create_provider/edit_provider_form/edit_provider/toggle_provider/delete_provider/create_config_form/edit_config_form/edit_config)，保留8个API(test_provider+api/providers CRUD+api/configs CRUD)
+  - **feature_store.py**: 删3个HTML(feature_store_page/add_feature/query_feature)，保留3个API(api/list+api/add+api/query)
+  - **prediction_models.py**: 删4个HTML(model_list/model_new/model_toggle/model_delete)，保留4个API(api/list+api/create+api/toggle+api/delete)
+  - **users.py**: 删3个HTML(user_list/create_user/delete_user)，保留2个API+2个helper(api/list+api/create+api/delete + hash_password/require_admin)
+  - **notifications.py**: 删3个HTML(notification_page/create_channel/delete_channel)，保留5个API+1个helper(api/recent+api/channels+api/channels-create+api/channels-delete+api/logs + _relative_time)
+  - **notification_templates.py**: 全4个函数都是HTML(list_templates/new_template/create_template/delete_template)，无API，清理后仅保留空router(供main.py import)
+  - **settings.py**: 删2个HTML(settings_page/settings_update)，保留2个API(api/list+api/update)
+  - **es_integration.py**: 删2个HTML(es_config_page/sync_events_to_es)，保留2个API(api/list+api/sync-events)
+  - **tags.py**: 删3个HTML(tag_list/assign_tag/remove_tag)，保留5个API(api/cloud+api/assets+api/all-assets+api/assign+api/remove)
+  - **ext_cmdb.py**: 删4个HTML(ext_cmdb_page/create_config/toggle_config/sync_cmdb)，保留5个API(api/list+api/create+api/toggle+api/delete+api/sync)
+  - **reports.py**: 删3个HTML(report_list/report_detail/report_generate)，保留3个API(api/list+api/{id}+api/generate)
+  - **report_schedules.py**: 全4个函数都是HTML(schedule_list/schedule_new/schedule_toggle/schedule_delete)，无API，清理后仅保留空router
+- **import 清理**: 每个文件删除后移除不再使用的 templates/TemplateResponse/RedirectResponse/Form/get_templates/templates变量 + HTMLResponse/PlainTextResponse(HTML路由专用)，保留 Body/Request/datetime/json/func/case/models 等仍用或非规则范围的 import
+- **关键决策**:
+  - **RedirectResponse 无 Form 参数也删**: toggle_provider/delete_provider/model_toggle/model_delete/delete_session/delete_channel/schedule_toggle/schedule_delete 等函数无 Form 参数但返回 RedirectResponse(303)，属 HTML POST 路由(PRG模式)，统一删除
+  - **空router保留**: notification_templates.py 和 report_schedules.py 全部函数都是HTML无API，清理后仅保留 `router = APIRouter(...)` 让 main.py import 不报错(规则7不改main.py)
+  - **helper函数保留**: users.py 的 hash_password/require_admin、notifications.py 的 _relative_time 被API路由调用，按规则5保留
+  - **WebSocket无影响**: 这13个文件无 WebSocket 路由(WS在containers.py等未处理文件中)
+- **验证**: 13个文件 py_compile 全 PASS。LSP 报错均为既有 SQLAlchemy Column 类型误报(Column[bool]/Column[datetime] __bool__ 返回 NoReturn)，与本次改动无关，运行时正常
+- **专业名词**: PRG模式(Post/Redirect/Get)——传统服务端表单处理范式，POST后303重定向避免重复提交，本次删除的 RedirectResponse 路由均属此类; 死代码清除(Dead Code Elimination)——删除不再使用的 HTML 路由及关联 import(templates/TemplateResponse/RedirectResponse/Form); 空路由占位(Empty Router Stub)——无API的文件保留空 APIRouter 供依赖注入框架加载; 绞杀者模式收尾(Strangler Fig Finalization)——前期保留HTML路由作fallback，Vue全量就绪后删除HTML路由完成迁移
+
+### 2026-07-05: Jinja2→Vue 改造批次4——25个页面全量迁移（K8s+容器+知识管理+资产+开放接口），后端API化59接口，iframe归零【总汇总】
+- **需求**: 爸爸要求继续批次4迁移，目标后续全部删掉Jinja2，页面保持正常，按最佳方案执行不询问
+- **本批次范围(25页)**: K8s资源9(statefulsets/daemonsets/services/ingresses/configmaps/secrets/hpas/pvcs/pvs)+K8s概览+K8s监控+容器6(K8s拓扑/Pod/Deployment/Docker概览/Docker列表)+知识管理5(故障知识库/RAG文档/知识图谱/智能推荐/Runbook)+其他5(拓扑视图/路径查询/资产生命周期/开放接口)
+- **与批次2/3关键区别**: 批次2/3后端已全部API化,本次25个菜单中22个仍是PRG表单模式,需先做"API化"再做"Vue化"两步走,工作量远大于前几批
+- **本批次实际完成(4后端agent+4前端agent并行,共8个general agent)**:
+  - **后端API化(4 agent并行,改不同路由文件无冲突,约59个新API)**:
+    - k8s_resources.py + k8s_monitor.py: 16个API(9资源列表+overview+configmap CRUD+HPA CRUD+monitor)
+    - containers.py: 13个API(overview/docker/pods/deployments+5个部署操作+create),保留WS端点(日志/终端)不动
+    - 知识管理5文件(knowledge/knowledge_documents/knowledge_graph/runbooks/smart_recommend): 22个API(CRUD+graph+recommend+upload)
+    - 其他4文件(lifecycle/topology/topology_path/api_v1): 8个API(状态机流转+关系CRUD+BFS路径+文档元数据)
+    - 全部py_compile PASS,保留HTML路由作fallback,复用现有helper
+    - 关键发现: topology_path.py现有HTML路由有字段名bug(source_id应为parent_id),新API用正确字段; lifecycle后端返回lifecycle_status非current_status,前端已适配
+  - **前端Vue页面(4 agent并行,17个Vue文件服务25菜单)**:
+    - K8s: K8sResourceListView(通用,Props驱动9种资源,resource-type prop)+K8sOverviewView+K8sMonitorView(ECharts时序图)
+    - 容器: ContainerTopologyView(ECharts力导向图)+K8sPodsView+K8sDeploymentsView(5部署操作)+DockerOverviewView+DockerListView
+    - 知识: KnowledgeView(CRUD)+KnowledgeDocumentsView(RAG+上传)+KnowledgeGraphView(ECharts)+SmartRecommendView+RunbooksView(CRUD)
+    - 其他: LifecycleView(状态机)+TopologyView(ECharts)+TopologyPathView(ECharts BFS)+OpenApiView(文档)
+  - **AppLayout.vue统一注册**: 17个import+25个v-else-if(K8sResourceListView 9个传不同resource-type)+VUE_PAGES Set加25个key
+  - **menu_config.json**: 25个菜单 type iframe→vue(replaceAll一次替换,零iframe残留)
+  - **构建**: npm run build 一次成功(13.86s),仅警告无错误
+  - **后端重启**: powershell杀python→确认8000端口释放→Start-Process Hidden启动独立进程,HTTP 200
+- **三遍自检全PASS**:
+  - ①API: 24个GET JSON接口全200,返回keys正确
+  - ②HTML fallback: 25个HTML路由全200 fallback正常(绞杀者模式保留降级路径)
+  - ③操作: Knowledge create+delete(id=11)/Runbook create+delete(id=4)/Lifecycle transition(asset 44→active)/Topology relation create+delete(id=27)/Topology path find(length=1 path=[44,4])/K8s configmap+HPA(集群不可用合理跳过). 全部CRUD链路通. 测试数据已清理
+- **进度**: iframe 25→0(全部清零!), vue 41→66. Jinja2菜单全量Vue化完成, 仅剩HTML路由作fallback待后续删除
+- **遗留**: Pod日志/终端仍用window.open跳原HTML页面(WS端点保留),属绞杀者模式渐进迁移; K8s相关API在demo环境因K8s数据源假地址返回空items(error字段),真实集群接入后自动有数据
+- **专业名词**: PRG模式(Post/Redirect/Get)——传统服务端表单处理范式,POST后303重定向避免重复提交,本批22个菜单需拆为POST JSON→返回JSON; API化(API-fication)——把返回HTML路由改造为返回JSON,数据与视图解耦; Props驱动组件(Props-Driven Component)——同一组件接收prop动态渲染不同资源,K8sResourceListView用resource-type prop服务9种K8s资源; 绞杀者模式(Strangler Fig Pattern)——保留HTML路由作fallback,Vue页面逐个替换,本次后iframe归零; 状态机校验(State Machine Validation)——lifecycle transition API按ALLOWED_TRANSITIONS字典校验流转合法性; 力导向图(Force-Directed Graph)——ECharts基于物理模拟(斥力/引力)的节点关系图布局,用于拓扑/知识图谱; BFS最短路径(Breadth-First Search)——广度优先搜索找两节点间最少跳数路径; 字段名漂移(Field Name Drift)——同一模型在不同代码用不同字段名(parent_id vs source_id),运行时才暴露
+
+
+### 2026-07-05: Jinja2→Vue 改造批次4——容器6菜单前端 Vue 页面创建（5个组件）
+- **需求**: 爸爸要求做批次4容器页面 Vue 改造，后端 API 已就绪，只创建 Vue 文件到 frontend/src/views/，不改 AppLayout.vue/menu_config.json（爸爸统一注册）
+- **本批次范围(5个Vue文件, 服务6菜单)**:
+  - `ContainerTopologyView.vue`(组件名 ContainerTopologyView, key=k8s-topology): K8s资源拓扑力导向图, ECharts graph, 顶部7统计卡(集群/节点/命名空间/Deployment/Pod/Service/异常), 节点按ci_type着色(cluster#6366f1/pod#14b8a6等10色), 异常节点红边框+阴影, 边按关系着色(owns#6366f1/scheduled_on#10b981/selects#f59e0b), 右侧图例(节点类型+关系类型), 点击节点弹详情面板(attrs全字段), 工具栏放大/缩小/重置(用series.zoom编程式缩放)
+  - `K8sPodsView.vue`(组件名 K8sPodsView, key=k8s-pods): Pod列表+详情, 集群下拉+命名空间筛选, 表格(name/namespace/cluster/phase彩色badge/node/pod_ip/restarts/status), phase badge 5色(Running绿/Pending黄/Failed红/Succeeded蓝/Unknown灰), 点击行弹详情dialog(完整attrs+异常事件K8sEvent列表), 日志/终端按钮window.open原HTML页面(/containers/pod/{id}/logs, /containers/pod/{id}/terminal), 不用ECharts
+  - `K8sDeploymentsView.vue`(组件名 K8sDeploymentsView, key=k8s-deployments): Deployment列表+管理, 集群/命名空间筛选, 表格(name/namespace/cluster/replicas/ready/strategy/image/status), 点击行打开管理dialog(详情+5操作按钮), 5操作: 重新部署(ElMessageBox确认)/扩缩容(弹窗输入replicas)/金丝雀(弹窗输入canary_replicas)/提升金丝雀(危险确认)/回滚(弹窗输入revision,0=重新部署), 顶部创建Deployment按钮(弹窗表单cluster/namespace/name/image/replicas/container_port/cpu_request/limit/mem_request/limit), 不用ECharts
+  - `DockerOverviewView.vue`(组件名 DockerOverviewView, key=docker-overview): Docker概览, 4汇总卡(总数/运行中/已停止/主机数)渐变色, 主机分布panel(running绿/stopped红双色条+运行率), 热门镜像Top5(渐变进度条), 最近创建容器表格(容器名/主机/镜像/状态彩色badge/端口/创建时间), 空态友好提示, 不用ECharts
+  - `DockerListView.vue`(组件名 DockerListView, key=docker-list): Docker容器列表+详情, 搜索/主机下拉/状态筛选, 表格(name/host/image/state彩色badge/ports/created_at), 点击行弹详情dialog(8字段+完整attrs), 不用ECharts
+- **风格遵循**: 参考 TagsView.vue, Vue3 `<script setup>` + ref/onMounted + 自定义CSS(panel/btn/table/badge/modal类) + ElMessage, HTTP用 `import request from '@/api/request'`(返回已是response.data), 可视化用 `import * as echarts from 'echarts'`, 不加注释, Element Plus用 ElMessage/ElMessageBox
+- **关键决策/技术点**:
+  - **ECharts力导向图编程式缩放**: 维护zoomLevel变量, 放大×1.2/缩小×0.8/重置=1, 通过 `chart.setOption({series:[{zoom:zoomLevel}]})` 更新(配合roam:true), 比dispatchAction更可控; 重置还加center居中
+  - **节点详情面板**: chart.on('click', params=>{ if(params.dataType==='node') selectedNode=params.data.value }), 节点data存value=原始node对象(含attrs), 点击后右侧栏显示attrs全字段key-value
+  - **异常标记**: node.abnormal(后端按pod phase非Running或status offline判定)→itemStyle.borderColor=#ef4444 + borderWidth:3 + shadowBlur:12红光晕
+  - **日志/终端兼容**: Vue页面只用window.open链接到原HTML页面(/containers/pod/{id}/logs, /terminal), WebSocket端点保留后端, 不在Vue内重写WebSocket, 绞杀者模式渐进迁移
+  - **操作确认**: 重新部署/提升金丝雀用ElMessageBox.confirm(高危二次确认), 扩缩容/金丝雀/回滚用独立弹窗表单输入参数后直接POST, POST后loadDeployments刷新列表
+  - **字段兼容**: pod/deployment的replicas/ready/phase/pod_ip/node等从attrs取, 用 `attrs?.replicas ?? '-'` 空值兜底, 因后端attrs内容取决于采集数据
+- **验证**: 5文件LSP无报错(其他文件SQLAlchemy误报无关), 未构建前端(按要求只创建Vue文件), 爸爸后续统一注册AppLayout+menu_config+构建
+- **专业名词**: 力导向图(Force-directed Graph)——基于斥力/引力物理模拟的图布局, ECharts series.graph layout:'force' repulsion斥力/edgeLength边长/gravity引力; 编程式缩放(Programmatic Zoom)——通过setOption修改series.zoom而非依赖鼠标滚轮roam; 绞杀者模式(Strangler Fig Pattern)——日志/终端仍用原HTML页面, Vue只做列表/详情, 逐步替换; 危险操作二次确认(Destructive Action Confirmation)——提升金丝雀会替换主版本删除canary, 用ElMessageBox.confirm阻止误操作; 空值兜底(Null-safe Access)——attrs?.field ?? '-' 兼容采集数据可能缺失字段
+
+### 2026-07-05: Jinja2→Vue 改造批次4——知识管理 5 个 Vue 组件创建（KnowledgeView/KnowledgeDocumentsView/KnowledgeGraphView/SmartRecommendView/RunbooksView）
+- **需求**: 爸爸要求批次4，为知识管理相关页面创建 Vue 前端组件，后端 API 已全部就绪（/knowledge/api/* /knowledge/documents/api/* /knowledge/graph/api/graph /smart-recommend/api/recommend /runbooks/api/*）。只创建 Vue 文件，不改 AppLayout.vue/menu_config.json
+- **本批次范围(5个Vue文件)**:
+  - `KnowledgeView.vue`(故障知识库CRUD): 搜索+标签过滤+刷新 + 列表表格(title/severity彩色badge/tags/操作) + 新建/编辑dialog(title/symptom/root_cause/solution多行/tags/severity下拉) + 详情dialog + 删除确认. activeView key=kb-list. API:/knowledge/api/*
+  - `KnowledgeDocumentsView.vue`(RAG文档管理): 顶部3统计卡(文档数/已索引/切片数) + RAG语义检索区(输入框+实时检索+相似度%+元数据badge) + 上传区(拖拽/点击 md/txt/pdf/docx) + 手动创建dialog + 文档列表表格(title/source/status彩色badge/切片数/操作:查看/重建索引/删除) + 文档详情dialog(内容预览+切片列表). activeView key=kb-documents. API:/knowledge/documents/api/* + /knowledge/documents/search. 上传用FormData+multipart/form-data
+  - `KnowledgeGraphView.vue`(运维知识图谱): ECharts力导向图(graph类型,force布局,节点按类型着色,边显示关系) + 顶部统计(节点数/边数) + 点击节点弹详情 + 图例. activeView key=kb-graph. API:GET /knowledge/graph/api/graph. ECharts用法:echarts.init+setOption+onBeforeUnmount dispose+window resize
+  - `SmartRecommendView.vue`(智能推荐): 告警ID输入框+limit+查询按钮 + 告警信息卡(展示alert详情) + 推荐列表(每条:知识库标题+相似度%+linked标记+症状/根因/解决方案) + 空态/无推荐提示. activeView key=smart-recommend. API:GET /smart-recommend/api/recommend?alert_id=&limit=
+  - `RunbooksView.vue`(Runbook CRUD): 分类筛选下拉+搜索+刷新 + 列表表格(title/category/更新时间/操作) + 新建/编辑dialog(title/category/content多行/steps每行一步) + 详情dialog(展示全部+steps有序列表) + 删除确认. activeView key=runbooks. API:/runbooks/api/*
+- **风格遵循**: 全部参考 TagsView.vue 风格——Vue 3 `<script setup>` + 自定义CSS(变量var(--accent)/panel/table/badge/modal) + ElMessage/ElMessageBox + import request from '@/api/request'(response.data已解包)
+- **关键决策**:
+  - KnowledgeView 编辑时未在 form 中存 id，用 editingId 单独存；KnowledgeDocumentsView 上传用 FormData+headers multipart/form-data，拖拽 dragOver 状态切换样式
+  - KnowledgeGraphView ECharts 节点 id 统一 String() 转换避免数字/字符串匹配问题，边 source/target 兼容 source/from/source_id 三种字段名，节点点击 chart.on('click')弹详情，window resize 监听加 onBeforeUnmount 清理
+  - SmartRecommendView 相似度展示兼容 r.score/r.similarity 两种字段，alert 字段兼容 metric/name、current_value/value
+  - RunbooksView steps 兼容数组(join \n)和字符串(按行split)，categories 来自后端 data.categories 渲染下拉+datalist
+  - 删除确认统一 ElMessageBox.confirm，捕获 cancel 不报错（判断 e!=='cancel' && e?.message!=='cancel'）
+- **未做(待后续)**: ①未改 AppLayout.vue 注册5组件(爸爸统一注册); ②未改 menu_config.json type; ③未构建前端; ④未启动后端自检
+- **验证**: 5文件 LSP 零报错（既有 Python 文件 SQLAlchemy Column 误报与本次无关）
+- **专业名词**: 力导向图(Force-directed Graph)——ECharts graph layout=force 按斥力/引力自动布局节点; 语义检索(Semantic Search)——RAG 基于向量相似度匹配而非关键词; 多部分表单数据(Multipart Form Data)——FormData 上传文件+元数据混合编码; 数据兜底字段兼容(Field Fallback)——同一概念后端可能返回不同字段名，前端用 ?? 兼容多种; 组件生命周期清理(Component Lifecycle Cleanup)——onBeforeUnmount 释放 ECharts 实例避免内存泄漏
+
+### 2026-07-05: Jinja2→Vue 改造批次4——独立页面 4 个 Vue 组件创建（LifecycleView/TopologyView/TopologyPathView/OpenApiView）
+- **需求**: 爸爸要求批次4，为其余独立页面创建 Vue 前端组件，后端 API 已全部就绪。只创建 Vue 文件到 frontend/src/views/，不改 AppLayout.vue/menu_config.json（爸爸统一注册）
+- **本批次范围(4个Vue文件)**:
+  - `frontend/src/views/LifecycleView.vue`: 资产生命周期管理, activeView key=`lifecycle`, 不用 ECharts
+  - `frontend/src/views/TopologyView.vue`: 拓扑视图, activeView key=`topology`, 用 ECharts 力导向图
+  - `frontend/src/views/TopologyPathView.vue`: 路径查询, activeView key=`topology-path`, 用 ECharts 路径可视化
+  - `frontend/src/views/OpenApiView.vue`: 开放接口文档, activeView key=`openapi`, 不用 ECharts
+- **关键设计决策**:
+  - **LifecycleView 状态机**: states=['provisioning','active','maintenance','retired'], 顶部状态流转图(provisioning灰→active绿→maintenance橙→retired灰), lifecycle_status 字段彩色 badge(lc-* class), 流转用 ElMessageBox.confirm 二次确认, history dialog 时间线展示(tl-item border-left+tl-dot 彩色)
+  - **字段注意**: 后端 /lifecycle/api/list 返回字段是 `lifecycle_status`(非任务描述的 current_status), `allowed_transitions` 是当前可流转状态数组, transition POST body={to_status, comment}
+  - **TopologyView ECharts graph**: force 力导向布局, 节点按 ci_type 着色(host/server蓝/service绿/database橙/middleware紫/network青), 异常节点(offline/error/critical)红边框 borderWidth:3, click 事件选中节点弹右侧详情面板, categories 用 legend, edgeSymbol arrow, roam+draggable
+  - **TopologyView 关系 CRUD**: 新增 dialog(source_id/target_id/relation_type 三字段, 下拉选节点), 删除 ElMessageBox 确认, 关系列表表格(source→target/relation_type/删除), 统计卡(节点/关系/异常数)
+  - **TopologyPathView 路径可视化**: BFS 最短路径, 路径列表用 path-node+path-edge 垂直展示(序号圆+名称+badge+IP), 每跳 edge 显示 relation_type, ECharts 路径图(起绿/终红/中蓝 borderWidth:3, edge label 显示 relation_type), 空态/无路径/查询中三态
+  - **OpenApiView 接口文档**: 顶部 info-grid 4 项(Base URL/认证/请求头/权限), 接口列表可展开(method 彩色 badge GET绿/POST紫/PUT橙/DELETE红), 展开显示 params 表+请求/响应 JSON 示例(深色 code-block), Token 表格(id/name/权限 badge/状态/最近使用/创建时间), 代码示例区 curl 命令+复制按钮(navigator.clipboard.writeText)
+  - **API 调用**: request.get('/lifecycle/api/list'), request.post('/lifecycle/api/transition/{id}', {to_status, comment}), request.get('/lifecycle/api/history/{id}'), request.get('/topology/api/list'), request.post('/topology/api/relations/create'), request.post('/topology/api/relations/{id}/delete'), request.post('/topology/api/path/find', {source_id, target_id}), request.get('/api/v1/api/docs')
+- **代码风格遵循**: Vue 3 `<script setup>` + 自定义 CSS panel/table/btn/modal/badge/stat-card(参考 TagsView), ElMessage/ElMessageBox 提示, request 拦截器已处理 response.data, ECharts onBeforeUnmount dispose + window resize, 无注释(项目规范)
+- **未做(待爸爸统一)**: ①AppLayout.vue 注册 4 个组件(import+v-else-if) ②menu_config.json 对应菜单 type iframe→vue ③npm run build 构建 ④后端重启自检
+- **LSP 噪音说明**: 创建 Vue 文件时 LSP 报 agent_service.py/models.py/change_workflow.py/knowledge_graph_service.py 等 SQLAlchemy Column 类型误报, 均为既有后端误报非本次新增, Vue 文件本身无报错
+- **专业名词**: 状态机可视化(State Machine Visualization)——用彩色标签+箭头展示状态流转规则; 力导向图(Force-Directed Graph)——ECharts graph+force 布局自动分布节点; BFS 最短路径(Breadth-First Search Shortest Path)——广度优先搜索找两节点间最少跳数路径; Bearer Token 认证(Bearer Token Authentication)——HTTP 头携带令牌的鉴权方式; 接口可展开手风琴(Accordion Endpoint)——点击展开/收起接口详情, 一次只开一个
+
+### 2026-07-05: Jinja2→Vue 改造批次4——K8s 前端 3 个 Vue 组件创建（K8sResourceListView/K8sOverviewView/K8sMonitorView）
+- **需求**: 爸爸要求批次4，为 K8s 相关页面创建 Vue 前端组件，后端 API 已就绪（/k8s/api/* + /k8s-monitor/api/list）。只创建 Vue 文件，不改 AppLayout.vue/menu_config.json/main.js（爸爸统一注册）
+- **本批次范围(3个Vue文件, 服务11个菜单)**:
+  - `frontend/src/views/K8sResourceListView.vue`: 通用 K8s 资源列表组件, 接收 `resourceType` prop(statefulsets/daemonsets/services/ingresses/configmaps/secrets/hpas/pvcs/pvs), 服务 9 个菜单
+  - `frontend/src/views/K8sOverviewView.vue`: K8s 集群概览(汇总卡+集群卡片+进度条), 服务 1 个菜单(k8s-overview)
+  - `frontend/src/views/K8sMonitorView.vue`: K8s 监控(ECharts 时序图), 服务 1 个菜单(k8s-monitor)
+- **关键设计决策**:
+  - **通用列表组件 props 化**: K8sResourceListView 用 `defineProps({resourceType})` 接收资源类型, 内置 TITLE_MAP/COLUMN_MAP 映射表驱动 9 种资源动态列, ConfigMap 行可点开详情 dialog 编辑键值对(支持增删行), HPA 行有编辑/删除操作+顶部创建按钮(3字段表单), 用 watch(resourceType) 切换资源类型时重新加载
+  - **列渲染类型化**: COLUMN_MAP 每列支持 render 字段(text/badge/list/lines/count), status 字段用 badge(Bound=green/Pending=yellow), data_keys/rules 用 tag-mini 列表, rules/tls 用 pre-line 换行展示
+  - **ConfigMap 详情编辑**: dialog 展示 data 键值对, 每行 key 输入框+value textarea, 可动态增删行, 保存 POST {data:{...}} 到 /api/configmaps/{cluster}/{ns}/{name}/update
+  - **HPA CRUD**: 创建 dialog(cluster/namespace/name/target/min/max/cpu_percent 7字段) → POST /api/hpas/create; 编辑 dialog(min/max/cpu_percent 3字段) → POST /api/hpas/{cluster}/{ns}/{name}/update; 删除 ElMessageBox 确认 → POST /api/hpas/{cluster}/{ns}/{name}/delete
+  - **概览渐变统计卡**: 6 张统计卡用 6 种渐变色(blue/green/purple/orange/cyan/pink), 集群卡片含状态指示灯(online绿/error红/unknown灰)+endpoint+采集时间+5 mini-stat+2 进度条(节点健康率/Pod运行率, 颜色按率值分段 ≥90绿/≥60橙/否则红)
+  - **ECharts 时序图**: K8sMonitorView 用 3 个 echarts.init line chart(CPU/内存/重启), buildLineOption 复用(渐变 areaStyle+tooltip+grid), onBeforeUnmount dispose, window resize 自适应, 空数据覆盖 chart-empty 提示
+  - **API 调用**: request.get('/k8s/api/'+resourceType, {params:{cluster,namespace}}), request.get('/k8s/api/overview'), request.get('/k8s-monitor/api/list', {params:{cluster,hours}})
+- **代码风格遵循**: Vue 3 `<script setup>` + 自定义 CSS panel/table/btn/modal/badge/stat-card(参考 TagsView/AlertsView), ElMessage/ElMessageBox 提示, request 拦截器已处理 response.data, 无注释(项目规范)
+- **未做(待爸爸统一)**: ①AppLayout.vue 注册 3 个组件(import+v-else-if+resource-type prop 传参) ②menu_config.json 11 个菜单 type iframe→vue ③npm run build 构建 ④后端重启自检
+- **LSP 噪音说明**: 创建 Vue 文件时 LSP 报 agent_service.py/models.py/change_workflow.py 等 SQLAlchemy Column 类型误报, 均为既有后端误报非本次新增, Vue 文件本身无报错
+- **专业名词**: Props 驱动组件(Props-Driven Component)——同一组件接收 prop 动态渲染不同资源, 减少重复代码; 配置映射表(Config Map Table)——TITLE_MAP/COLUMN_MAP 用数据结构驱动 UI 渲染, 避免 v-if 分支爆炸; 渐变统计卡(Gradient Stat Card)——CSS linear-gradient 营造视觉层级; 时序折线图(Time Series Line Chart)——ECharts line+areaStyle 展示指标随时间变化趋势; dispose 生命周期管理(Dispose Lifecycle Management)——组件卸载时释放 ECharts 实例避免内存泄漏
+
+
+- **需求**: 爸爸要求批次4，为容器相关页面新增后端 /api/* JSON 接口供 Vue 前端调用，保留所有现有 HTML 路由作 fallback
+- **改造文件**: app/routers/containers.py（prefix=/containers），仅新增不删除
+- **新增 13 个 API**:
+  - GET /api/overview — Docker 容器概览（summary/host_stats/top_images/recent_containers，复用 container_overview 聚合逻辑）
+  - GET /api/docker — Docker 容器列表（search/host/status 过滤，复用 docker_container_list）
+  - GET /api/docker/{asset_id} — Docker 容器详情
+  - GET /api/pods — Pod 列表（cluster/namespace 过滤，复用 pod_list）
+  - GET /api/pod/{asset_id} — Pod 详情（含 anomalies K8sEvent 列表）
+  - GET /api/deployments — Deployment 列表
+  - GET /api/deploy/{asset_id}/manage — Deployment 管理详情
+  - POST /api/deploy/create — 创建 Deployment（Body JSON: cluster/namespace/name/image/replicas/container_port/cpu_request/mem_request/cpu_limit/mem_limit）
+  - POST /api/deploy/{id}/rollout — 重新部署（Body: 可选 image）
+  - POST /api/deploy/{id}/scale — 扩缩容（Body: {replicas}）
+  - POST /api/deploy/{id}/canary — 金丝雀（Body: {canary_replicas}）
+  - POST /api/deploy/{id}/promote — 提升金丝雀
+  - POST /api/deploy/{id}/rollback — 回滚（Body: {revision}）
+- **关键决策**:
+  - POST 操作用 Body(dict) 接收 JSON body（Vue 前端 axios.post 统一发 JSON），区别于现有 HTML 路由的 Form；GET 用 query 参数
+  - 新增 5 个序列化 helper: _event_to_dict/_container_to_dict/_pod_to_dict/_deployment_to_dict/_cluster_to_dict，datetime 用 isoformat() 序列化
+  - cluster 的 last_scrape 用 last_checked 字段（Asset 模型无 updated_at，现有 HTML 路由用 c.updated_at 是潜在 bug，API 用 last_checked 更健壮）
+  - 路由顺序: /api/deploy/create（静态3段）在 /api/deploy/{id}/*（4段）之前注册，避免路径参数误匹配
+  - 保留所有现有 HTML 路由 + 2 个 WebSocket（/ws/pod/{id}/logs、/ws/pod/{id}/terminal）+ /topology/graph JSON 接口不动
+  - 错误统一 JSONResponse({"error": str(e)}, status_code=500)，POST 操作返回 {ok: true/false, message/error, ...}
+- **验证**: py_compile PASS（LSP 报错均为既有 SQLAlchemy ColumnElement/k8s client 动态类型误报，运行时正常）
+- **专业名词**: API化(API-fication)——HTML 路由改造为 JSON 接口; 序列化助手(Serialization Helper)——ORM 对象转 dict 以便 JSONResponse; 路径参数误匹配(Path Parameter Shadowing)——动态 {id} 路由可能拦截静态路径，静态路径先注册规避; Body 解析(Body Parsing)——FastAPI Body(dict) 接收 JSON body 区别于 Form 的 urlencoded
+
+### 2026-07-05: Jinja2→Vue 改造批次4——知识管理5路由后端 API 化（knowledge/knowledge_documents/knowledge_graph/runbooks/smart_recommend）
+- **需求**: 爸爸要求做批次4，为知识管理相关5个路由文件新增 `/api/*` JSON 接口供 Vue 前端调用，保留现有 HTML 路由作 fallback。只做后端，不改前端
+- **本批次范围(5文件, 22个API)**: knowledge.py / knowledge_documents.py / knowledge_graph.py / runbooks.py / smart_recommend.py
+- **新增 API 清单**:
+  - **knowledge.py** (prefix=/knowledge): GET /api/list(search/tags过滤) / GET /api/{kb_id} / POST /api/create(JSON body) / POST /api/{id}/update / POST /api/{id}/delete — 复用 knowledge_service CRUD
+  - **knowledge_documents.py** (prefix=/knowledge/documents): GET /api/list(含统计total_docs/indexed_count/total_chunks) / GET /api/{doc_id}(含chunks) / POST /api/create / POST /api/upload(multipart UploadFile) / POST /api/{id}/reindex / POST /api/{id}/delete — 复用 rag_service；**保留现有 /search JSON 接口未动**
+  - **knowledge_graph.py** (prefix=/knowledge/graph): GET /api/graph(返回nodes/edges/node_count/edge_count) — 复用 knowledge_graph_service.get_dependency_graph
+  - **runbooks.py** (prefix=/runbooks): GET /api/list(category过滤+categories列表) / GET /api/{id} / POST /api/create / POST /api/{id}/update / POST /api/{id}/delete — 直接查 Runbook 模型
+  - **smart_recommend.py** (prefix=/smart-recommend): GET /api/recommend?alert_id=&limit= — 复用 recommend_kb_for_alert，返回 {alert_id, alert, recommendations:[{kb,linked,score}], count}
+- **关键决策**:
+  - POST create/update 用 `payload: dict = Body(...)` 接 JSON body(沿用批次2/3 ext_cmdb/users 模式)，非 Form(HTML路由仍用Form)
+  - upload API 用 `UploadFile = File(...)` + `Form(...)` 接 multipart，复用现有 _ALLOWED_EXT/_MAX_FILE_SIZE/_UPLOAD_DIR/parse_document/index_document 全套逻辑
+  - 序列化用 `_xxx_to_dict` helper 函数(参考 alerts.py `_alert_to_dict`)，datetime 统一 strftime "%Y-%m-%d %H:%M:%S"
+  - 错误统一 `JSONResponse({"error": str(e)}, status_code=500)`，列表失败兜底 `{"items": []}`，CRUD 返回 `{ok: true/false, id, item/error}`
+  - 路由顺序: /api/* 路径首段为字面量 "api"，与 /{id}: int 单段路由不冲突(段数不同)，安全追加在文件末尾，未动现有 HTML 路由顺序
+- **未改 main.py**: knowledge 与 knowledge_documents 共用 /knowledge 前缀区域，注册顺序在 main.py 已处理，按要求不动
+- **验证**: py_compile 5文件全 PASS(ALL PASS)
+- **LSP 噪音说明**: pyright 对 SQLAlchemy Column 类型报"Invalid conditional operand"/"Cannot assign to attribute"等，均为既有误报(存在于保留的 HTML 路由中，非本次新增)，py_compile 不受影响
+- **进度**: 本次仅后端 API 化，前端 Vue 页面+菜单 type 切换待后续批次
+- **专业名词**: API化(API-fication)——TemplateResponse→JSONResponse，复用查询逻辑只改返回格式; 绞杀者模式(Strangler Fig Pattern)——保留 HTML 路由作 fallback 降级; 序列化辅助函数(Serialization Helper)——_xxx_to_dict 把 SQLAlchemy ORM 对象转 JSON-safe dict; 多部分表单数据(Multipart Form Data)——upload 用 UploadFile+Form 混合接收文件与元数据
+
+### 2026-07-05: Jinja2→Vue 改造批次4——K8s 资源+监控页面后端 API 化（k8s_resources.py + k8s_monitor.py）
+- **需求**: 爸爸要求做批次4，为 K8s 相关页面新增后端 `/api/*` JSON 接口（API化），供后续 Vue 前端调用。只做后端，不改前端
+- **本批次范围(2文件)**: k8s_resources.py(prefix=/k8s) / k8s_monitor.py(prefix=/k8s-monitor)
+- **保留所有现有 HTML 路由**作 fallback，复用现有 helper（_get_k8s_client/_get_k8s_ds/_add_cluster_info），只改返回格式
+- **新增 API 清单(完整路径, 16个接口)**:
+  - `k8s_resources.py`(prefix=/k8s): GET /k8s/api/overview(多集群概览汇总) / GET /k8s/api/statefulsets / GET /k8s/api/daemonsets / GET /k8s/api/services / GET /k8s/api/ingresses / GET /k8s/api/configmaps / GET /k8s/api/secrets / GET /k8s/api/hpas / GET /k8s/api/pvcs / GET /k8s/api/pvs / GET /k8s/api/configmaps/{cluster}/{namespace}/{name}(ConfigMap详情) / POST /k8s/api/configmaps/{cluster}/{namespace}/{name}/update(body {data:{...}}) / POST /k8s/api/hpas/create(body {cluster,namespace,name,target,min_replicas,max_replicas,cpu_percent}) / POST /k8s/api/hpas/{cluster}/{namespace}/{name}/update / POST /k8s/api/hpas/{cluster}/{namespace}/{name}/delete
+  - `k8s_monitor.py`(prefix=/k8s-monitor): GET /k8s-monitor/api/list(节点/Pod/Deployment统计 + CPU/内存/重启时序图数据)
+- **关键决策/问题**:
+  - **RedirectResponse 修复**: 原 k8s_resources.py 用了 RedirectResponse 但未 import(潜在 NameError), 顺手在 import 行加了 RedirectResponse, 不改路由逻辑只补 import, 修复现有 HTML POST 路由(configmap_update/hpa_create/hpa_delete/hpa_update)
+  - **datetime 序列化**: ds.last_scrape 是 datetime 对象, JSONResponse 无法直接序列化, 统一用 `str(ds.last_scrape) if ds.last_scrape else None` 转字符串
+  - **HPA API 字段映射**: 现有 HTML 用 form 字段 target_kind/target_name/cpu_target, 新增 API 按任务要求用 JSON body 字段 target/cpu_percent, target_kind 固定 "Deployment"
+  - **clusters 列表返回**: 所有列表 API 返回 clusters 数组({name,endpoint,status})供前端渲染集群下拉选择器
+  - **错误处理分层**: 列表 API 返回 200 + error 字段(K8s 查询失败时仍返回结构化 JSON, 前端可优雅展示); CRUD API 返回 {ok:true/false,...}; 意外异常返回 500
+- **代码风格遵循**: `JSONResponse({...})`, 错误 `JSONResponse({"error": str(e)}, status_code=500)`, 列表返回 `{items:[...], cluster, namespace, clusters:[...], error}`, CRUD 返回 `{ok:true/false, ...}`, 用 `payload: dict = Body(...)` 接收 JSON body, 不加注释
+- **验证**: `python -m py_compile app/routers/k8s_resources.py app/routers/k8s_monitor.py` → ALL PASS
+- **未做(待后续)**: ①前端 Vue 页面未改(本批次纯后端); ②未启动后端做 HTTP 自检(任务只要求 py_compile); ③main.py 未改(路由已注册, 新增接口自动生效)
+- **专业名词**: API化(API-fication)——把返回HTML的路由改造为返回JSON; 时序数据(Time Series Data)——监控指标按时间戳排列的数据点序列, node_series/pod_series 用 defaultdict(list) 按指标名分组; 集群汇总(Cluster Aggregation)——overview API 遍历所有 K8s 数据源, 聚合 nodes/pods/deployments 统计, 跳过 error 状态数据源避免超时; HPA(Horizontal Pod Autoscaler)——K8s 水平 Pod 自动扩缩容, 按 CPU 利用率自动调整副本数
+
+
+- **需求**: 爸爸要求做批次4，为其余几个独立页面新增后端 `/api/*` JSON 接口（API化），供后续 Vue 前端调用。只做后端，不改前端
+- **本批次范围(4文件)**: lifecycle.py / topology.py / topology_path.py / api_v1.py
+- **保留所有现有 HTML 路由**作 fallback，复用现有数据查询逻辑，只改返回格式
+- **新增 API 清单(完整路径)**:
+  - `lifecycle.py`(prefix=/lifecycle): GET /lifecycle/api/list(资产生命周期列表,含当前状态+生命周期阶段+allowed_transitions) / GET /lifecycle/api/history/{asset_id}(生命周期历史) / POST /lifecycle/api/transition/{asset_id}(状态流转, body {to_status}, 校验 ALLOWED_TRANSITIONS, 非法流转返回400+allowed列表)
+  - `topology.py`(prefix=/topology): GET /topology/api/list(拓扑数据,返回{nodes,edges,relations,trees}) / POST /topology/api/relations/create(body {source_id,target_id,relation_type}) / POST /topology/api/relations/{id}/delete
+  - `topology_path.py`(prefix=/topology): POST /topology/api/path/find(路径查找, body {source_id,target_id}, 复用 bfs_path, 返回 {ok,path,nodes,edges,length})
+  - `api_v1.py`(prefix=/api/v1): GET /api/v1/api/docs(文档元数据JSON: 接口清单/认证方式/示例/tokens列表, 供 Vue 文档页渲染)
+- **关键决策/问题**:
+  - **AssetRelation 字段名坑(重要发现)**: models.py 中 AssetRelation 只有 `id/parent_id/child_id/relation_type`, **没有** `source_id/target_id/relation`。但 topology_path.py 现有 HTML 路由 `path_find` 用了 `r.source_id`/`r.target_id`/`rel.relation`(line 53/71-78/84), 运行时会 AttributeError。按任务约束"保留现有 HTML 路由"未动此 bug, 仅在新增 `/api/path/find` 中用正确字段 `parent_id/child_id/relation_type`。此 HTML bug 待后续修复
+  - **prefix 冲突避让**: topology.py 和 topology_path.py 都用 prefix=/topology, 新增 API 路径不冲突(topology 加 /api/list + /api/relations/*, topology_path 只加 /api/path/find)
+  - **api_v1.py 路径设计**: 现有 HTML 是 GET /docs, 新增 JSON 用 GET /api/docs(相对 prefix), 完整 /api/v1/api/docs, 避免与 HTML /docs 冲突
+  - **transition API 入参差异**: 现有 HTML transition 用 Form 字段 `new_status`, 新增 API 按任务要求用 JSON body 字段 `to_status`, 并返回结构化错误(allowed 列表)便于前端提示
+  - **拓扑 list 双字段冗余**: 返回同时含 `edges` 和 `relations`(同内容), 兼容前端可能用的任一字段名
+- **代码风格遵循**: `JSONResponse({...})`, 错误 `JSONResponse({"error": str(e)}, status_code=500)`, 列表返回 `{items:[...], error}`, CRUD 返回 `{ok:true/false, ...}`, 用 `payload: dict = Body(...)` 接收 JSON body, 不加注释
+- **验证**: `python -m py_compile app/routers/lifecycle.py app/routers/topology.py app/routers/topology_path.py app/routers/api_v1.py` → ALL PASS
+- **未做(待后续)**: ①前端 Vue 页面未改(本批次纯后端); ②topology_path.py HTML 路由的 source_id bug 未修(超出本批次约束); ③未启动后端做 HTTP 自检(任务只要求 py_compile)
+- **专业名词**: API化(API-fication)——把返回HTML的路由改造为返回JSON; 状态机校验(State Machine Validation)——transition API 校验 ALLOWED_TRANSITIONS 字典, 非法流转拒绝并返回允许的目标状态列表; 字段名漂移(Field Name Drift)——同一模型在不同代码中用了不同字段名(parent_id vs source_id), 运行时才暴露 AttributeError; BFS最短路径(Breadth-First Search Shortest Path)——广度优先遍历无权图找最短路径, topology_path 用 deque 实现
+
+### 2026-07-05: Jinja2→Vue 改造批次3——11个页面迁移（系统管理+AIOps+资产+运维报表）
+- **需求**: 爸爸要求继续批次3迁移，完成11个页面的 Jinja2→Vue 改造，按最佳方案执行不询问
+- **本批次范围(11页)**: pending-actions(待确认动作)/ai-providers(智能体配置)/feature-store(特征仓库)/prediction-models(预测模型)/users(用户权限)/notifications(通知管理)/settings(系统配置)/es-integration(集成管理)/tags(标签管理)/ext-cmdb(外部CMDB)/reports(运维报表)
+- **开工即省力(沿用批次2模式)**: ①后端11个路由文件**已全部API化**(每都有`/api/*`JSON接口, 非本次新建); ②前端11个Vue页面**已全部存在**(非本次新建); ③AppLayout.vue**已注册11个**(import+v-else-if+VUE_PAGES Set, 非本次新建); ④本次仅需改 menu_config.json 的 type iframe→vue + 构建前端 + 重启 + 自检
+- **本次实际完成**:
+  - **menu_config.json**: 11个菜单 type iframe→vue(reports/pending-actions/ai-providers/feature-store/prediction-models/tags/ext-cmdb/users/notifications/settings/integration). 注意 es-integration 的菜单 key 是 "integration" 但 path 是 "/es-integration"
+  - **构建**: `cd frontend && npm run build` 一次成功(13.41s), 仅警告无错误(@vueuse/core PURE 注释/动态+静态 import 冲突/chunk>900kB), 无需修复
+  - **后端重启**: 按AGENTS.md三步(powershell杀python→确认8000端口释放→start新窗口). 关键: opencode bash 工具直接 `python run.py` 会随会话超时终止, 改用 `powershell Start-Process -WindowStyle Hidden` 启动独立进程(PID 21588)更稳, 不会因 bash 会话超时被杀
+- **关键发现(路由前缀坑)**: ai_providers.py 的 router prefix 是 `/ai` 而非 `/ai/providers`, 所以 API 实际路径是 `/ai/api/providers` 而非 `/ai/providers/api/providers`. menu_config 的 path `/ai/providers` 只是页面路径, API 路径要看 router prefix + 装饰器路径. 自检首测用错路径 404, 修正后 200
+- **三遍自检全PASS**:
+  - ①API: 11个JSON接口全200(/agent/api/pending /prediction-models/api/list /users/api/list /es-integration/api/list /ext-cmdb/api/list /reports/api/list /ai/api/providers /feature-store/api/list /notifications/api/channels /settings/api/list /tags/api/cloud)
+  - ②菜单+fallback: 11个菜单全type=vue(共41个vue/25个iframe) + 11个HTML路由全200 fallback正常
+  - ③操作: 用户创建(已存在报错说明API正常)+删除id=5 ok / 预测模型toggle id=5 enabled=False ok / 外部CMDB创建id=4+删除 ok / settings list 返回configs键. 全部 CRUD 链路通
+- **进度修正(2026-07-05核对menu_config.json实统计)**: 总菜单53个, vue=41, iframe=10. 子agent首报"iframe 36→25/total 66"有误, 实际为 iframe 25→10, vue 41. 剩余 iframe 10 个待后续批次: k8s-monitor/topology/topology-path(复杂可视化最后攻坚) + kb-list/kb-documents/kb-graph/smart-recommend/runbooks/lifecycle/openapi(知识管理+资产+开放接口)
+- **专业名词**: 路由前缀(Route Prefix)——FastAPI APIRouter 的 prefix 决定完整路径, 装饰器路径是相对前缀的; 独立进程(Detached Process)——Start-Process 启动的进程独立于父会话, 不会随 shell 超时终止; 绞杀者模式(Strangler Fig Pattern)——渐进式迁移, 保留旧路由作 fallback, 新页面逐个替换, 本批次后 Vue 占比 41/53=77%; 回退路径(Fallback Route)——HTML 路由保留作降级, Vue 构建失败或页面异常时仍可访问原 Jinja2 页面
+
+
+### 2026-07-05: Jinja2→Vue 改造批次2——事件中心4页+任务中心5页共9个页面迁移
+- **需求**: 爸爸要求继续批次2迁移，目标后续全部删掉Jinja2，页面保持正常，按最佳方案执行不询问
+- **本批次范围**: 事件中心4(集群事件/事件统计/事件源配置/异常检测) + 任务中心5(自愈规则/自愈工作流/远程脚本/蓝绿发布/变更审批)
+- **重大发现(开工即省力)**: ①后端9个路由文件**已全部API化**(每个都有`/api/*`JSON接口段落, 非本次新建); ②前端9个Vue页面中**6个已存在**(IncidentsView/EventStatsView/EventSourcesView/AnomalyView/RemediationView/RemediationWorkflowView, 非本次新建); ③仅缺3个Vue页面(ScriptExecView/BlueGreenView/ChangeWorkflowView) + AppLayout注册 + menu_config改type
+- **本次实际完成**:
+  - **新建3个Vue页面**:
+    - `ScriptExecView.vue`: 目标主机下拉(SSH数据源) + 脚本textarea + 超时 + 执行 + STDOUT/STDERR深色pre展示 + 历史记录可展开查看
+    - `BlueGreenView.vue`: 创建表单(名称/命名空间/集群/蓝绿标签/副本) + 部署组卡片(活跃/备用badge+切换按钮) + ElMessageBox切换确认
+    - `ChangeWorkflowView.vue`: 列表表格 + 新建Dialog + 详情Dialog(状态横幅+6字段详情+描述/审批意见+状态流转按钮按status条件渲染+步骤列表+添加步骤+步骤状态select更新) — 最复杂, 完整状态机 草稿→待审批→已批准→进行中→完成/回滚
+  - **AppLayout.vue 注册9个**: 9个import + 9个v-else-if分支 + VUE_PAGES Set加9个key(incidents/events/stats/event-sources/anomaly/remediation/remediation-workflows/script/blue-green/change-workflow)
+  - **menu_config.json**: 9个菜单 type iframe→vue
+- **构建坑修复**: ChangeWorkflowView首版用`v-model="taskUpdates[t.id]?.status"`可选链赋值, Vite构建报错"left-hand side must be variable or property access", 改为`:value="t.status" @change="updateTaskStatus(t.id, $event.target.value)"`+移除taskUpdates reactive对象修复
+- **后端重启**: 旧进程无API路由(HTML 200但API 404), 按AGENTS.md三步强制重启(powershell杀python→确认端口释放→start新窗口python run.py), 重启后API全200
+- **三遍自检全PASS**:
+  - ①API: 11个JSON接口全200(incidents/events-list/events-stats/event-sources/anomaly/remediation/remediation-workflows/script-targets/script-history/blue-green/change-workflow), 返回keys正确
+  - ②菜单+fallback: 9个菜单全type=vue + 9个HTML路由全200 fallback正常
+  - ③操作: 异常检测创建(id=4)+删除(ok=True) / 事件源创建(id=4)+启停切换 / 变更审批全状态机(创建id=61→提交pending_approval→审批approved→开始in_progress→完成completed) / 蓝绿创建(id=3) / 自愈规则创建(id=6)+删除(ok=True) / 变更详情(tasks=0)
+- **进度**: iframe 45→36, vue 21→30, 剩余 iframe 36 个待后续批次
+- **专业名词**: 可选链赋值(Optional Chaining Assignment)——JS不支持`a?.b = c`赋值, v-model不能用可选链; 状态机(State Machine)——变更审批7状态有限自动机, 每状态仅允许特定流转; 条件渲染(Conditional Rendering)——按status显隐按钮, 草稿仅显示"提交审批", 待审批显示"通过/驳回", 进行中显示"完成/回滚"
+
+
+- **需求**: 爸爸要求把 Jinja2 模板全部改成 Vue 避免后续问题。调研后评估为 119 模板/74.5人天大工程，分批推进
+- **决策(3问3答)**: ①全改但分多次会话 ②保留HTML路由作fallback ③复杂页(拓扑/终端/图谱)最后攻坚
+- **本批次范围**: 4个核心高频页面——告警中心/资产列表/数据源管理/日志中心
+- **后端改造(保留HTML路由, 新增JSON API)**:
+  - `alerts.py`: 新增 /api/list /api/batch-acknowledge /api/batch-resolve /api/check /api/{id}/acknowledge /api/{id}/resolve, 注意路由顺序 /api/* 必须在 /{alert_id} 之前否则 int 拦截 422
+  - `assets.py`: 扩展 /api/list(加搜索/ci_type过滤/完整字段) + 新增 /api/ci-types /api/{id}/delete
+  - `datasources.py`: 新增 /api/list /api/{id}/toggle /api/{id}/test /api/{id}/delete
+  - `logs.py`: 新增 /api/sources /api/search(ES查询JSON化)
+- **前端新建(4个Vue页面, Element Plus风格)**:
+  - `AlertsView.vue`: 6统计卡(全部/待处理/已确认/已解决/已收敛/已抑制) + 筛选 + 表格 + 分页 + 批量确认/解决 + ElMessageBox二次确认
+  - `AssetsView.vue`: 搜索(防抖300ms) + CI类型筛选 + 表格 + 删除确认 + 新增/编辑跳原页面
+  - `DatasourcesView.vue`: 表格 + 启停/测试/删除 + 新增跳原页面
+  - `LogsView.vue`: ES数据源选择 + 查询 + 时间范围 + 日志列表(级别彩色badge) + 分页
+- **AppLayout.vue 注册**: 4个 v-else-if 分支 + 4个 import + VUE_PAGES Set 加 4 个 key(alerts/asset-list/datasources/logs)
+- **menu_config.json**: 4个菜单 type iframe→vue
+- **三遍自检**: ①6个API全200(alerts/api/list返回6keys/assets/api/list 46条/ci-types 13个/datasources 3keys/logs sources 1个) ②菜单4个全改vue+HTML fallback全200 ③操作功能全通(check new_alerts=0/batch ack 31条/batch resolve 31条/ds test ok)
+- **进度**: iframe 49→45, vue 17→21, 剩余 iframe 45 个待后续批次
+- **专业名词**: API化(API-fication)把返回HTML路由改造为返回JSON; Strangler Fig Pattern绞杀者模式渐进式迁移; 防抖(debounce)搜索输入延迟触发避免频繁请求; 路由顺序(Route Order)FastAPI按注册顺序匹配,int参数会拦截字符串路径
+
 ### 2026-07-05: AI 助手知识库 RAG 化 Phase 1 落地——文档上传/TF-IDF 向量化/语义检索/MCP 工具
 - **需求**: 爸爸要求按 AIOPS系统架构设计.md 第十章 Phase 1 开始实施知识库 RAG 化，做完自己检查两遍逻辑性/可用性/界面美化
 - **技术方案调整(零新依赖)**: requirements.txt 无 sentence-transformers/langchain/pypdf/python-docx，改用现有 numpy 实现 TF-IDF 本地向量化，不依赖外部库。文档解析 md/txt 原生、pdf/docx 可选安装(pypdf/python-docx, try/except 降级)。切片自研 chunk_text(500字符+100重叠, 按段落边界)。Embedding 双模式预留: 当前 TF-IDF, Phase 5 升级 LLM Provider 的 /embeddings API

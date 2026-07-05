@@ -1,52 +1,68 @@
 import json
 import requests
 from datetime import datetime
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ExtCmdbConfig, Asset
-from app.template_utils import get_templates, parse_json_config
+from app.template_utils import parse_json_config
 
 router = APIRouter(prefix="/ext-cmdb", tags=["ext-cmdb"])
-templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def ext_cmdb_page(request: Request, db: Session = Depends(get_db)):
-    configs = db.query(ExtCmdbConfig).all()
-    return templates.TemplateResponse("ext_cmdb.html", {
-        "request": request, "configs": configs,
-    })
+@router.get("/api/list")
+def api_cmdb_list(db: Session = Depends(get_db)):
+    configs = db.query(ExtCmdbConfig).order_by(ExtCmdbConfig.id.desc()).all()
+    return {
+        "configs": [
+            {
+                "id": c.id, "name": c.name, "cmdb_type": c.cmdb_type,
+                "api_url": c.api_url, "sync_interval": c.sync_interval,
+                "last_sync": c.last_sync.isoformat() if c.last_sync else None,
+                "enabled": c.enabled,
+            }
+            for c in configs
+        ],
+        "count": len(configs),
+    }
 
 
-@router.post("/create")
-def create_config(
-    request: Request, name: str = Form(...), cmdb_type: str = Form("generic"),
-    api_url: str = Form(...), auth_json: str = Form("{}"),
-    sync_interval: int = Form(60), db: Session = Depends(get_db),
-):
-    cfg = ExtCmdbConfig(name=name, cmdb_type=cmdb_type, api_url=api_url,
-                         auth_config=auth_json, sync_interval=sync_interval)
+@router.post("/api/create")
+def api_cmdb_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    cfg = ExtCmdbConfig(
+        name=payload.get("name", ""), cmdb_type=payload.get("cmdb_type", "generic"),
+        api_url=payload.get("api_url", ""),
+        auth_config=payload.get("auth_json", "{}") or "{}",
+        sync_interval=payload.get("sync_interval", 60))
     db.add(cfg)
     db.commit()
-    return RedirectResponse("/ext-cmdb", status_code=303)
+    db.refresh(cfg)
+    return {"status": "ok", "id": cfg.id}
 
 
-@router.post("/toggle/{cfg_id}")
-def toggle_config(cfg_id: int, db: Session = Depends(get_db)):
+@router.post("/api/{cfg_id}/toggle")
+def api_cmdb_toggle(cfg_id: int, db: Session = Depends(get_db)):
     cfg = db.query(ExtCmdbConfig).filter(ExtCmdbConfig.id == cfg_id).first()
     if cfg:
         cfg.enabled = not cfg.enabled
         db.commit()
-    return RedirectResponse("/ext-cmdb", status_code=303)
+    return {"status": "ok", "enabled": cfg.enabled if cfg else None}
 
 
-@router.post("/sync/{cfg_id}")
-def sync_cmdb(cfg_id: int, db: Session = Depends(get_db)):
+@router.delete("/api/{cfg_id}/delete")
+def api_cmdb_delete(cfg_id: int, db: Session = Depends(get_db)):
+    cfg = db.query(ExtCmdbConfig).filter(ExtCmdbConfig.id == cfg_id).first()
+    if cfg:
+        db.delete(cfg)
+        db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/api/{cfg_id}/sync")
+def api_cmdb_sync(cfg_id: int, db: Session = Depends(get_db)):
     cfg = db.query(ExtCmdbConfig).filter(ExtCmdbConfig.id == cfg_id).first()
     if not cfg:
-        return PlainTextResponse("Config not found", 404)
+        return {"status": "error", "message": "配置不存在"}
     try:
         auth = parse_json_config(cfg.auth_config)
         headers = {}
@@ -71,6 +87,6 @@ def sync_cmdb(cfg_id: int, db: Session = Depends(get_db)):
         db.commit()
         cfg.last_sync = datetime.now()
         db.commit()
-        return PlainTextResponse(f"Synced {count} new assets", 200)
+        return {"status": "ok", "synced": count}
     except Exception as e:
-        return PlainTextResponse(f"Sync error: {e}", 500)
+        return {"status": "error", "message": f"同步失败: {e}"}

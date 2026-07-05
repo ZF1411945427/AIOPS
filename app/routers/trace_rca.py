@@ -1,7 +1,6 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.database import get_db
@@ -114,26 +113,3 @@ def analyze_trace_rca(spans: list) -> dict:
     }
 
 
-@router.get("", response_class=HTMLResponse)
-def trace_rca_page(request: Request, db: Session = Depends(get_db)):
-    trace_ids = [r[0] for r in db.query(Span.trace_id).distinct().order_by(desc(Span.trace_id)).limit(100).all()]
-    return templates.TemplateResponse("trace_rca.html", {
-        "request": request, "trace_ids": trace_ids, "result": None,
-    })
-
-
-@router.post("/analyze", response_class=HTMLResponse)
-def trace_rca_analyze(
-    request: Request, trace_id: str = Form(...), db: Session = Depends(get_db),
-):
-    spans = db.query(Span).filter(Span.trace_id == trace_id).order_by(Span.start_time).all()
-    if not spans:
-        trace_ids = [r[0] for r in db.query(Span.trace_id).distinct().order_by(desc(Span.trace_id)).limit(100).all()]
-        return templates.TemplateResponse("trace_rca.html", {
-            "request": request, "trace_ids": trace_ids, "error": "Trace not found",
-        })
-    result = analyze_trace_rca(spans)
-    trace_ids = [r[0] for r in db.query(Span.trace_id).distinct().order_by(desc(Span.trace_id)).limit(100).all()]
-    return templates.TemplateResponse("trace_rca.html", {
-        "request": request, "trace_ids": trace_ids, "result": result, "trace_id": trace_id,
-    })
