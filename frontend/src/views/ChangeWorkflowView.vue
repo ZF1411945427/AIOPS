@@ -1,0 +1,410 @@
+<template>
+  <div class="cw-page">
+    <div class="page-header">
+      <h1>变更审批</h1>
+      <p>变更工单全流程：草稿 → 待审批 → 已批准 → 进行中 → 完成/回滚 · 共 {{ total }} 条</p>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn btn-primary" @click="openCreate">+ 新建变更</button>
+      <button class="btn" @click="loadChanges">刷新</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-body">
+        <div v-if="loading" class="loading-state">加载中...</div>
+        <table v-else-if="changes.length" class="table">
+          <thead>
+            <tr>
+              <th>ID</th><th>标题</th><th>状态</th><th>类型</th>
+              <th>优先级</th><th>风险</th><th>申请人</th><th>时间</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in changes" :key="c.id">
+              <td>{{ c.id }}</td>
+              <td class="title-cell" @click="showDetail(c.id)">{{ c.title }}</td>
+              <td><span class="badge" :class="statusClass(c.status)">{{ statusLabel(c.status) }}</span></td>
+              <td>{{ c.change_type }}</td>
+              <td><span class="badge" :class="priorityClass(c.priority)">{{ c.priority }}</span></td>
+              <td><span class="badge" :class="riskClass(c.risk_level)">{{ c.risk_level }}</span></td>
+              <td>{{ c.requester_name || '-' }}</td>
+              <td class="text-sm">{{ formatTime(c.created_at) }}</td>
+              <td>
+                <button class="btn btn-sm" @click="showDetail(c.id)">详情</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="empty-state">
+          <div style="font-size:32px;margin-bottom:8px;">📝</div>
+          <div>暂无变更工单，点击"新建变更"创建</div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="createVisible" class="modal-overlay" @click.self="createVisible = false">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>新建变更</h3>
+          <button class="modal-close" @click="createVisible = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>标题</label>
+            <input v-model="form.title" placeholder="如：数据库迁移" />
+          </div>
+          <div class="form-group">
+            <label>描述</label>
+            <textarea v-model="form.description" rows="3" placeholder="变更详细说明"></textarea>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>类型</label>
+              <select v-model="form.change_type">
+                <option value="normal">正常变更</option>
+                <option value="emergency">紧急变更</option>
+                <option value="standard">标准变更</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>优先级</label>
+              <select v-model="form.priority">
+                <option value="low">低</option>
+                <option value="medium">中</option>
+                <option value="high">高</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>风险等级</label>
+              <select v-model="form.risk_level">
+                <option value="low">低</option>
+                <option value="medium">中</option>
+                <option value="high">高</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>CI 类型</label>
+              <input v-model="form.ci_type" placeholder="如：database" />
+            </div>
+            <div class="form-group">
+              <label>计划开始</label>
+              <input v-model="form.planned_start" type="datetime-local" />
+            </div>
+            <div class="form-group">
+              <label>计划结束</label>
+              <input v-model="form.planned_end" type="datetime-local" />
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn" @click="createVisible = false">取消</button>
+            <button class="btn btn-primary" @click="createChange" :disabled="creating">{{ creating ? '创建中...' : '创建' }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="detailVisible" class="modal-overlay" @click.self="detailVisible = false">
+      <div class="modal-box large">
+        <div class="modal-header">
+          <h3>变更 #{{ detail?.id }} · {{ detail?.title }}</h3>
+          <button class="modal-close" @click="detailVisible = false">×</button>
+        </div>
+        <div v-if="detail" class="modal-body">
+          <div class="status-banner" :class="detail.status">
+            <span class="status-label">当前状态：</span>
+            <span class="badge lg" :class="statusClass(detail.status)">{{ statusLabel(detail.status) }}</span>
+            <span class="status-meta">{{ detail.change_type }} / {{ detail.priority }} / {{ detail.risk_level }}</span>
+          </div>
+
+          <div class="detail-grid">
+            <div class="detail-item"><span class="detail-label">申请人</span><span class="detail-value">{{ detail.requester_name || '-' }}</span></div>
+            <div class="detail-item"><span class="detail-label">审批人</span><span class="detail-value">{{ detail.reviewer_name || '-' }}</span></div>
+            <div class="detail-item"><span class="detail-label">CI 类型</span><span class="detail-value">{{ detail.ci_type || '-' }}</span></div>
+            <div class="detail-item"><span class="detail-label">资产 ID</span><span class="detail-value">{{ detail.asset_id || '-' }}</span></div>
+            <div class="detail-item"><span class="detail-label">计划开始</span><span class="detail-value">{{ detail.planned_start || '-' }}</span></div>
+            <div class="detail-item"><span class="detail-label">计划结束</span><span class="detail-value">{{ detail.planned_end || '-' }}</span></div>
+          </div>
+
+          <div v-if="detail.description" class="desc-block">
+            <div class="detail-label">描述</div>
+            <p class="desc-text">{{ detail.description }}</p>
+          </div>
+
+          <div v-if="detail.review_comment" class="desc-block">
+            <div class="detail-label">审批意见</div>
+            <p class="desc-text muted">{{ detail.review_comment }}</p>
+          </div>
+
+          <div class="action-bar">
+            <button v-if="detail.status === 'draft'" class="btn btn-primary" @click="doAction('submit')">提交审批</button>
+            <template v-if="detail.status === 'pending_approval'">
+              <input v-model="reviewComment" placeholder="审批意见" class="comment-input" />
+              <button class="btn btn-success" @click="doAction('approve')">通过</button>
+              <button class="btn btn-danger" @click="doAction('reject')">驳回</button>
+            </template>
+            <button v-if="detail.status === 'approved'" class="btn btn-info" @click="doAction('start')">开始执行</button>
+            <button v-if="detail.status === 'in_progress'" class="btn btn-success" @click="doAction('complete')">完成</button>
+            <button v-if="['approved','in_progress'].includes(detail.status)" class="btn btn-warning" @click="doAction('rollback')">回滚</button>
+          </div>
+
+          <h4 class="sub-title">执行步骤 ({{ tasks.length }})</h4>
+
+          <div v-if="detail.status === 'in_progress'" class="task-add-row">
+            <input v-model="newTask.description" placeholder="步骤描述" />
+            <input v-model="newTask.command" placeholder="执行命令(可选)" class="cmd-input" />
+            <input v-model.number="newTask.step_order" type="number" min="1" class="order-input" />
+            <button class="btn btn-sm btn-primary" @click="addTask">添加</button>
+          </div>
+
+          <div class="task-list">
+            <div v-for="t in tasks" :key="t.id" class="task-card">
+              <div class="task-main">
+                <span class="task-order">#{{ t.step_order }}</span>
+                <span class="task-desc">{{ t.description }}</span>
+                <code v-if="t.command" class="task-cmd">{{ t.command }}</code>
+                <span class="badge" :class="taskStatusClass(t.status)">{{ t.status }}</span>
+              </div>
+              <div v-if="t.result" class="task-result text-sm">结果: {{ t.result }}</div>
+              <div v-if="detail.status === 'in_progress'" class="task-update-row">
+                <select :value="t.status" @change="updateTaskStatus(t.id, $event.target.value)">
+                  <option value="pending">pending</option>
+                  <option value="in_progress">in_progress</option>
+                  <option value="completed">completed</option>
+                  <option value="failed">failed</option>
+                  <option value="skipped">skipped</option>
+                </select>
+              </div>
+            </div>
+            <div v-if="!tasks.length" class="empty-state small">暂无执行步骤</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import request from '@/api/request'
+
+const loading = ref(false)
+const changes = ref([])
+const total = ref(0)
+const createVisible = ref(false)
+const creating = ref(false)
+const detailVisible = ref(false)
+const detail = ref(null)
+const tasks = ref([])
+const reviewComment = ref('')
+const newTask = reactive({ description: '', command: '', step_order: 1 })
+const form = reactive({
+  title: '', description: '', ci_type: '', change_type: 'normal',
+  priority: 'medium', risk_level: 'low', planned_start: '', planned_end: '',
+})
+
+async function loadChanges() {
+  loading.value = true
+  try {
+    const data = await request.get('/change-workflow/api/list')
+    changes.value = data.changes || []
+    total.value = data.total || 0
+  } catch (e) {
+    ElMessage.error('加载失败: ' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+function openCreate() {
+  Object.assign(form, { title: '', description: '', ci_type: '', change_type: 'normal', priority: 'medium', risk_level: 'low', planned_start: '', planned_end: '' })
+  createVisible.value = true
+}
+
+async function createChange() {
+  if (!form.title) { ElMessage.warning('请填写标题'); return }
+  creating.value = true
+  try {
+    const fd = new FormData()
+    fd.append('title', form.title)
+    fd.append('description', form.description)
+    fd.append('ci_type', form.ci_type)
+    fd.append('asset_id', 0)
+    fd.append('change_type', form.change_type)
+    fd.append('priority', form.priority)
+    fd.append('risk_level', form.risk_level)
+    fd.append('planned_start', form.planned_start)
+    fd.append('planned_end', form.planned_end)
+    const data = await request.post('/change-workflow/api/create', fd)
+    ElMessage.success('创建成功')
+    createVisible.value = false
+    loadChanges()
+    showDetail(data.id)
+  } catch (e) {
+    ElMessage.error('创建失败: ' + e.message)
+  } finally {
+    creating.value = false
+  }
+}
+
+async function showDetail(id) {
+  reviewComment.value = ''
+  try {
+    const data = await request.get(`/change-workflow/api/${id}`)
+    detail.value = data.change
+    tasks.value = data.tasks || []
+    detailVisible.value = true
+  } catch (e) {
+    ElMessage.error('加载详情失败: ' + e.message)
+  }
+}
+
+async function doAction(action) {
+  if (!detail.value) return
+  const actionLabels = { submit: '提交审批', approve: '审批通过', reject: '驳回', start: '开始执行', complete: '完成', rollback: '回滚' }
+  try {
+    await ElMessageBox.confirm(`确认${actionLabels[action]}？`, '操作确认')
+    const fd = new FormData()
+    if (action === 'approve' || action === 'reject') fd.append('review_comment', reviewComment.value)
+    const data = await request.post(`/change-workflow/api/${detail.value.id}/${action}`, fd)
+    ElMessage.success(`${actionLabels[action]}成功，状态: ${statusLabel(data.status)}`)
+    showDetail(detail.value.id)
+    loadChanges()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('操作失败: ' + (e.message || e))
+  }
+}
+
+async function addTask() {
+  if (!newTask.description) { ElMessage.warning('请填写步骤描述'); return }
+  try {
+    const fd = new FormData()
+    fd.append('description', newTask.description)
+    fd.append('command', newTask.command)
+    fd.append('step_order', newTask.step_order || tasks.value.length + 1)
+    await request.post(`/change-workflow/api/${detail.value.id}/tasks/new`, fd)
+    ElMessage.success('步骤已添加')
+    Object.assign(newTask, { description: '', command: '', step_order: tasks.value.length + 2 })
+    showDetail(detail.value.id)
+  } catch (e) {
+    ElMessage.error('添加失败: ' + e.message)
+  }
+}
+
+async function updateTaskStatus(taskId, newStatus) {
+  try {
+    const fd = new FormData()
+    fd.append('status', newStatus)
+    fd.append('result', '')
+    await request.post(`/change-workflow/api/${detail.value.id}/tasks/${taskId}/status`, fd)
+    ElMessage.success('状态已更新')
+    showDetail(detail.value.id)
+  } catch (e) {
+    ElMessage.error('更新失败: ' + e.message)
+  }
+}
+
+function statusLabel(s) {
+  const m = { draft: '草稿', pending_approval: '待审批', approved: '已批准', rejected: '已驳回', in_progress: '进行中', completed: '已完成', rolled_back: '已回滚' }
+  return m[s] || s
+}
+function statusClass(s) {
+  const m = { draft: 'info', pending_approval: 'warning', approved: 'approved', rejected: 'critical', in_progress: 'in_progress', completed: 'resolved', rolled_back: 'critical' }
+  return m[s] || 'info'
+}
+function priorityClass(p) {
+  return { low: 'info', medium: 'warning', high: 'critical' }[p] || 'info'
+}
+function riskClass(r) {
+  return { low: 'resolved', medium: 'warning', high: 'critical' }[r] || 'info'
+}
+function taskStatusClass(s) {
+  return { pending: 'info', in_progress: 'warning', completed: 'resolved', failed: 'critical', skipped: 'skipped' }[s] || 'info'
+}
+function formatTime(s) {
+  if (!s) return '-'
+  return s.substring(5, 16)
+}
+
+onMounted(loadChanges)
+</script>
+
+<style scoped>
+.cw-page { padding: 4px; }
+.page-header { margin-bottom: 16px; }
+.page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
+.page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; transition: all 0.2s; }
+.btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+.btn-primary:hover { background: var(--accent-hover, #4f46e5); }
+.btn-success { background: #22c55e; color: #fff; border-color: #22c55e; }
+.btn-danger { background: #ef4444; color: #fff; border-color: #ef4444; }
+.btn-info { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.btn-warning { background: #f59e0b; color: #fff; border-color: #f59e0b; }
+.btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+.panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.panel-body { padding: 16px 18px; }
+.table { width: 100%; border-collapse: collapse; }
+.table th { text-align: left; padding: 10px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary, #64748b); border-bottom: 1px solid var(--border-strong, rgba(0,0,0,0.12)); text-transform: uppercase; letter-spacing: 0.3px; }
+.table td { padding: 10px 12px; font-size: 0.85rem; color: var(--text, #1e293b); border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
+.table tr:hover td { background: var(--bg-hover, rgba(0,0,0,0.03)); }
+.title-cell { cursor: pointer; color: var(--accent, #6366f1); font-weight: 500; }
+.title-cell:hover { text-decoration: underline; }
+.text-sm { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
+.badge.lg { padding: 4px 12px; font-size: 0.8rem; }
+.badge.info { background: rgba(100,116,139,0.1); color: #64748b; }
+.badge.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.badge.approved { background: rgba(59,130,246,0.1); color: #3b82f6; }
+.badge.in_progress { background: rgba(99,102,241,0.1); color: #6366f1; }
+.badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
+.badge.critical { background: rgba(239,68,68,0.1); color: #ef4444; }
+.badge.skipped { background: rgba(100,116,139,0.1); color: #94a3b8; }
+.loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.empty-state.small { padding: 16px; font-size: 0.82rem; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: var(--bg-card-solid, #fff); border-radius: 12px; width: 90%; max-width: 560px; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.modal-box.large { max-width: 820px; max-height: 90vh; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); position: sticky; top: 0; background: var(--bg-card-solid, #fff); z-index: 1; }
+.modal-header h3 { margin: 0; font-size: 1.05rem; }
+.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary, #64748b); line-height: 1; }
+.modal-body { padding: 20px; }
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 0.8rem; color: var(--text-secondary, #64748b); margin-bottom: 4px; }
+.form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.85rem; box-sizing: border-box; }
+.form-group textarea { font-family: inherit; resize: vertical; }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.form-grid .form-group { margin-bottom: 0; }
+.form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.status-banner { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 8px; margin-bottom: 16px; background: var(--bg-hover, rgba(0,0,0,0.03)); flex-wrap: wrap; }
+.status-label { font-size: 0.8rem; color: var(--text-secondary, #64748b); }
+.status-meta { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
+.detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.detail-item { display: flex; flex-direction: column; gap: 4px; }
+.detail-label { font-size: 0.72rem; color: var(--text-secondary, #64748b); text-transform: uppercase; letter-spacing: 0.3px; }
+.detail-value { font-size: 0.85rem; color: var(--text, #1e293b); }
+.desc-block { margin-bottom: 14px; }
+.desc-text { margin: 4px 0 0; font-size: 0.85rem; color: var(--text, #1e293b); line-height: 1.5; }
+.desc-text.muted { color: var(--text-secondary, #64748b); }
+.action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; background: var(--bg-hover, rgba(0,0,0,0.03)); border-radius: 8px; margin-bottom: 16px; }
+.comment-input { padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; min-width: 200px; }
+.sub-title { font-size: 0.95rem; margin: 0 0 10px; color: var(--text, #1e293b); }
+.task-add-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.task-add-row input { padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; }
+.task-add-row input:first-child { flex: 1; min-width: 180px; }
+.task-add-row .cmd-input { flex: 1; min-width: 160px; }
+.task-add-row .order-input { width: 70px; }
+.task-list { display: flex; flex-direction: column; gap: 8px; }
+.task-card { border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; padding: 10px 12px; }
+.task-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.task-order { font-weight: 700; color: var(--accent, #6366f1); font-size: 0.85rem; }
+.task-desc { font-size: 0.85rem; color: var(--text, #1e293b); }
+.task-cmd { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.75rem; background: var(--bg-hover, rgba(0,0,0,0.03)); padding: 2px 6px; border-radius: 4px; color: var(--text-secondary, #64748b); }
+.task-result { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border, rgba(0,0,0,0.07)); }
+.task-update-row { margin-top: 8px; }
+.task-update-row select { padding: 4px 8px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.78rem; }
+</style>

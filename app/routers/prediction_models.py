@@ -1,52 +1,52 @@
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import PredictionModel
-from app.template_utils import get_templates
 
 router = APIRouter(prefix="/prediction-models", tags=["prediction_models"])
-templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def model_list(request: Request, db: Session = Depends(get_db)):
+@router.get("/api/list")
+def api_model_list(db: Session = Depends(get_db)):
     models = db.query(PredictionModel).order_by(PredictionModel.created_at.desc()).all()
-    return templates.TemplateResponse("prediction_models.html", {
-        "request": request, "models": models,
-    })
+    return {
+        "models": [
+            {
+                "id": m.id, "name": m.name, "metric_name": m.metric_name,
+                "asset_id": m.asset_id, "model_type": m.model_type,
+                "params": m.params, "enabled": m.enabled,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in models
+        ],
+        "count": len(models),
+    }
 
 
-@router.post("/new")
-def model_new(
-    name: str = Form(...),
-    metric_name: str = Form(...),
-    asset_id: int = Form(0),
-    model_type: str = Form("linear"),
-    params: str = Form("{}"),
-    db: Session = Depends(get_db),
-):
+@router.post("/api/create")
+def api_model_create(payload: dict = Body(...), db: Session = Depends(get_db)):
     m = PredictionModel(
-        name=name, metric_name=metric_name,
-        asset_id=asset_id if asset_id else None,
-        model_type=model_type, params=params,
-    )
+        name=payload.get("name", ""), metric_name=payload.get("metric_name", ""),
+        asset_id=payload.get("asset_id") or None,
+        model_type=payload.get("model_type", "linear"),
+        params=payload.get("params", "{}") or "{}")
     db.add(m)
     db.commit()
-    return RedirectResponse("/prediction-models", status_code=303)
+    db.refresh(m)
+    return {"status": "ok", "id": m.id}
 
 
-@router.post("/{mid}/toggle")
-def model_toggle(mid: int, db: Session = Depends(get_db)):
+@router.post("/api/{mid}/toggle")
+def api_model_toggle(mid: int, db: Session = Depends(get_db)):
     m = db.query(PredictionModel).filter(PredictionModel.id == mid).first()
     if m:
         m.enabled = not m.enabled
         db.commit()
-    return RedirectResponse("/prediction-models", status_code=303)
+    return {"status": "ok", "enabled": m.enabled if m else None}
 
 
-@router.post("/{mid}/delete")
-def model_delete(mid: int, db: Session = Depends(get_db)):
+@router.delete("/api/{mid}/delete")
+def api_model_delete(mid: int, db: Session = Depends(get_db)):
     db.query(PredictionModel).filter(PredictionModel.id == mid).delete()
     db.commit()
-    return RedirectResponse("/prediction-models", status_code=303)
+    return {"status": "ok"}

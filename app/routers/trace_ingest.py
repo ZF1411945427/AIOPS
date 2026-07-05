@@ -35,8 +35,7 @@ def pull_from_jaeger(
     db: Session = Depends(get_db),
     jaeger_url: str = Body("", embed=True),
     service: str = Body("", embed=True),
-    limit: int = Body(20, embed=True),
-):
+    limit: int = Body(20, embed=True)):
     """从 Jaeger 后端 API 主动拉取 trace 数据"""
     if not jaeger_url:
         # 尝试从数据源中找 jaeger 类型

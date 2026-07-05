@@ -1,15 +1,13 @@
 import json
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.template_utils import get_templates
 from app.models import ApiToken, MetricRecord, K8sEvent, Asset
 
 router = APIRouter(prefix="/api/v1", tags=["api_v1"])
-templates = get_templates()
 
 
 def _verify_token(authorization: str = Header("")) -> str:
@@ -38,8 +36,7 @@ def _require_permission(perm: str, perms: str):
 def push_metrics(
     data: list[dict],
     db: Session = Depends(get_db),
-    authorization: str = Header(""),
-):
+    authorization: str = Header("")):
     perms = _verify_token(authorization)
     _require_permission("write", perms)
     now = datetime.now()
@@ -70,8 +67,7 @@ def push_metrics(
             value=float(value),
             unit=item.get("unit", ""),
             labels=json.dumps(labels, ensure_ascii=False),
-            timestamp=ts,
-        )
+            timestamp=ts)
         db.add(record)
         count += 1
     db.commit()
@@ -82,8 +78,7 @@ def push_metrics(
 def push_events(
     data: list[dict],
     db: Session = Depends(get_db),
-    authorization: str = Header(""),
-):
+    authorization: str = Header("")):
     perms = _verify_token(authorization)
     _require_permission("write", perms)
     now = datetime.now()
@@ -100,8 +95,7 @@ def push_events(
             first_seen=now,
             last_seen=now,
             count=item.get("count", 1),
-            severity=item.get("severity", "info"),
-        )
+            severity=item.get("severity", "info"))
         db.add(event)
         count += 1
     db.commit()
@@ -115,8 +109,7 @@ def query_metrics(
     hours: int = 1,
     limit: int = 100,
     db: Session = Depends(get_db),
-    authorization: str = Header(""),
-):
+    authorization: str = Header("")):
     perms = _verify_token(authorization)
     _require_permission("read", perms)
     q = db.query(MetricRecord)
@@ -145,6 +138,59 @@ def query_metrics(
     } for r in records])
 
 
-@router.get("/docs", response_class=HTMLResponse)
-def api_docs(request: Request):
-    return templates.TemplateResponse("api_docs.html", {"request": request})
+@router.get("/api/docs")
+def api_docs_meta(db: Session = Depends(get_db)):
+    try:
+        endpoints = [
+            {
+                "method": "POST",
+                "path": "/api/v1/metrics",
+                "summary": "推送指标数据",
+                "auth": "Bearer Token (write)",
+                "body_example": [{"name": "cpu_usage", "value": 78.5, "asset": "web-01", "unit": "%", "labels": {"host": "web-01"}, "timestamp": "2026-07-05T10:00:00"}],
+                "response_example": {"status": "ok", "accepted": 1, "message": "1 metrics ingested"},
+            },
+            {
+                "method": "POST",
+                "path": "/api/v1/events",
+                "summary": "推送 K8s 事件",
+                "auth": "Bearer Token (write)",
+                "body_example": [{"cluster": "prod", "namespace": "default", "name": "pod-xxx", "reason": "FailedScheduling", "message": "0/3 nodes available", "severity": "warning"}],
+                "response_example": {"status": "ok", "accepted": 1, "message": "1 events ingested"},
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/query/metrics",
+                "summary": "查询指标数据",
+                "auth": "Bearer Token (read)",
+                "params": {"name": "指标名(可选)", "asset": "资产名(可选)", "hours": "回溯小时数(默认1)", "limit": "返回条数(默认100)"},
+                "response_example": [{"id": 1, "name": "cpu_usage", "value": 78.5, "unit": "%", "labels": {}, "timestamp": "2026-07-05T10:00:00", "asset_id": 1}],
+            },
+        ]
+        tokens = db.query(ApiToken).all()
+        token_list = [{
+            "id": t.id,
+            "name": t.name,
+            "permissions": t.permissions,
+            "enabled": t.enabled,
+            "last_used": t.last_used.strftime("%Y-%m-%d %H:%M:%S") if t.last_used else None,
+            "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else None,
+        } for t in tokens]
+        return JSONResponse({
+            "title": "AIOps 开放接口文档",
+            "version": "v1",
+            "base_url": "/api/v1",
+            "auth": {
+                "type": "Bearer Token",
+                "header": "Authorization: Bearer <token>",
+                "permissions": ["read", "write", "admin"],
+            },
+            "endpoints": endpoints,
+            "tokens": token_list,
+            "examples": {
+                "curl_push_metrics": 'curl -X POST http://host:8000/api/v1/metrics -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d \'[{"name":"cpu","value":80,"asset":"web-01"}]\'',
+                "curl_query_metrics": 'curl "http://host:8000/api/v1/query/metrics?name=cpu&hours=1" -H "Authorization: Bearer <token>"',
+            },
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)

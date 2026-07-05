@@ -1,6 +1,4 @@
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
-from app.template_utils import get_templates
+from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 from datetime import datetime, timedelta
@@ -10,12 +8,11 @@ from app.services import notification_service
 from app.models import Alert, Asset, Incident, PendingAction
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
-templates = get_templates()
 
 
 @router.get("/api/recent")
 def recent_notifications(db: Session = Depends(get_db)):
-    """实时聚合系统通知，供顶栏铃铛拉取。
+    """实时聚合系统通知，供顶栏铃铛拉取.
 
     数据源全部为真实数据库查询：
     - 未处理告警（status=triggered/firing，最近24h，按严重程度+时间排序取前5）
@@ -28,16 +25,13 @@ def recent_notifications(db: Session = Depends(get_db)):
     day_ago = now - timedelta(hours=24)
     notifications = []
 
-    # 1. 未处理告警（按 severity critical>warning 排序，最近24h）
     alerts = (
         db.query(Alert)
         .filter(Alert.status.in_(["triggered", "firing"]))
         .filter(Alert.created_at >= day_ago)
         .order_by(
-            # critical 优先（用 case 排序），再按时间倒序
             case((Alert.severity == "critical", 0), else_=1),
-            Alert.created_at.desc(),
-        )
+            Alert.created_at.desc())
         .limit(5)
         .all()
     )
@@ -52,7 +46,6 @@ def recent_notifications(db: Session = Depends(get_db)):
             "severity": a.severity,
         })
 
-    # 2. 未解决事件
     incidents = (
         db.query(Incident)
         .filter(~Incident.status.in_(["resolved", "closed"]))
@@ -70,7 +63,6 @@ def recent_notifications(db: Session = Depends(get_db)):
             "severity": inc.severity or "warning",
         })
 
-    # 3. 离线资产
     offline_assets = (
         db.query(Asset)
         .filter(Asset.status != "online")
@@ -87,7 +79,6 @@ def recent_notifications(db: Session = Depends(get_db)):
             "severity": "warning",
         })
 
-    # 4. 待确认AI动作
     pending = (
         db.query(PendingAction)
         .filter(PendingAction.status == PendingAction.STATUS_PENDING)
@@ -104,7 +95,6 @@ def recent_notifications(db: Session = Depends(get_db)):
             "severity": pa.risk_level or "medium",
         })
 
-    # 未读总数 = 未处理告警 + 未解决事件 + 待确认动作
     alert_count = db.query(func.count(Alert.id)).filter(
         Alert.status.in_(["triggered", "firing"])
     ).scalar() or 0
@@ -134,50 +124,49 @@ def _relative_time(dt, now):
     return f"{secs // 86400} 天前"
 
 
-@router.get("", response_class=HTMLResponse)
-def notification_page(request: Request, db: Session = Depends(get_db)):
+@router.get("/api/channels")
+def api_channels_list(db: Session = Depends(get_db)):
     channels = notification_service.get_channels(db)
-    logs = notification_service.get_notification_logs(db)
-    return templates.TemplateResponse("notifications.html", {
-        "request": request,
-        "channels": channels,
-        "logs": logs,
+    return {
+        "channels": [
+            {
+                "id": c.id, "name": c.name, "type": c.type, "config": c.config,
+                "enabled": c.enabled,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in channels
+        ],
+    }
+
+
+@router.post("/api/channels/create")
+def api_channel_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    notification_service.create_channel(db, {
+        "name": payload.get("name", ""),
+        "type": payload.get("type", "email"),
+        "config": payload.get("config", {}),
+        "enabled": True,
     })
+    return {"status": "ok"}
 
 
-@router.post("/channels/create")
-def create_channel(
-    name: str = Form(...),
-    type: str = Form(...),
-    config_host: str = Form(""),
-    config_port: int = Form(587),
-    config_user: str = Form(""),
-    config_password: str = Form(""),
-    config_recipients: str = Form(""),
-    config_url: str = Form(""),
-    config_webhook: str = Form(""),
-    db: Session = Depends(get_db),
-):
-    config = {}
-    if type == "email":
-        config = {
-            "host": config_host, "port": config_port,
-            "user": config_user, "password": config_password,
-            "recipients": config_recipients,
-        }
-    elif type == "webhook":
-        config = {"url": config_url}
-    elif type == "dingtalk":
-        config = {"webhook": config_webhook}
-    elif type == "wecom":
-        config = {"webhook": config_webhook}
-    notification_service.create_channel(db, {"name": name, "type": type, "config": config, "enabled": True})
-    return RedirectResponse("/notifications", status_code=303)
-
-
-@router.post("/channels/{channel_id}/delete")
-def delete_channel(channel_id: int, db: Session = Depends(get_db)):
+@router.delete("/api/channels/{channel_id}/delete")
+def api_channel_delete(channel_id: int, db: Session = Depends(get_db)):
     notification_service.delete_channel(db, channel_id)
-    return RedirectResponse("/notifications", status_code=303)
+    return {"status": "ok"}
 
 
+@router.get("/api/logs")
+def api_logs_list(db: Session = Depends(get_db)):
+    logs = notification_service.get_notification_logs(db)
+    return {
+        "logs": [
+            {
+                "id": lg.id, "alert_id": lg.alert_id, "channel_id": lg.channel_id,
+                "channel_type": lg.channel_type, "recipient": lg.recipient,
+                "title": lg.title, "success": lg.success, "error_message": lg.error_message,
+                "created_at": lg.created_at.isoformat() if lg.created_at else None,
+            }
+            for lg in logs
+        ],
+    }

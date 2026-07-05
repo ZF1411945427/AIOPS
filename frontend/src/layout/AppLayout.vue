@@ -141,13 +141,13 @@
         <div class="content-inner">
           <DashboardView v-if="activeView === 'dashboard'" />
           <SystemPosture v-else-if="activeView === 'system-posture'" />
-          <AgentAudit v-else-if="activeView === 'agent-audit'" />
-          <OperationAudit v-else-if="activeView === 'op-audit'" />
-          <AgentChatView v-else-if="activeView === 'agent-chat'" />
-          <MenuConfig v-else-if="activeView === 'menu-config'" />
-          <TraceView v-else-if="activeView === 'trace-view'" />
-    <TraceAgentGuide v-else-if="activeView === 'trace-agent-guide'" />
-          <MetricsView v-else-if="activeView === 'metrics-view'" />
+      <AgentAudit v-else-if="activeView === 'audit'" />
+      <OperationAudit v-else-if="activeView === 'op-audit'" />
+      <AgentChatView v-else-if="activeView === 'agent-chat'" />
+      <MenuConfig v-else-if="activeView === 'menu-config'" />
+      <TraceView v-else-if="activeView === 'traces'" />
+    <TraceAgentGuide v-else-if="activeView === 'discovery'" />
+      <MetricsView v-else-if="activeView === 'metrics'" />
           <ErrorBudgetView v-else-if="activeView === 'error-budget'" />
           <BurnRateView v-else-if="activeView === 'burn-rate'" />
           <SLOConfigView v-else-if="activeView === 'slo-config'" />
@@ -158,6 +158,55 @@
           <ChaosExperimentView v-else-if="activeView === 'chaos-experiment'" />
           <ChaosReportView v-else-if="activeView === 'chaos-report'" />
           <ChaosScenarioView v-else-if="activeView === 'chaos-scenario'" />
+          <AlertsView v-else-if="activeView === 'alerts'" />
+          <AssetsView v-else-if="activeView === 'asset-list'" />
+          <DatasourcesView v-else-if="activeView === 'datasources'" />
+          <LogsView v-else-if="activeView === 'logs'" />
+      <IncidentsView v-else-if="activeView === 'incident'" />
+      <EventStatsView v-else-if="activeView === 'event-stats'" />
+      <EventSourcesView v-else-if="activeView === 'event-sources'" />
+      <AnomalyView v-else-if="activeView === 'anomaly'" />
+      <RemediationView v-else-if="activeView === 'remediation'" />
+      <RemediationWorkflowView v-else-if="activeView === 'remediation-workflow'" />
+      <ScriptExecView v-else-if="activeView === 'script-exec'" />
+      <BlueGreenView v-else-if="activeView === 'blue-green'" />
+      <ChangeWorkflowView v-else-if="activeView === 'change-workflow'" />
+      <PendingActionsView v-else-if="activeView === 'pending-actions'" />
+      <AiProvidersView v-else-if="activeView === 'ai-providers'" />
+          <FeatureStoreView v-else-if="activeView === 'feature-store'" />
+          <PredictionModelsView v-else-if="activeView === 'prediction-models'" />
+          <UsersView v-else-if="activeView === 'users'" />
+          <NotificationsView v-else-if="activeView === 'notifications'" />
+          <SettingsView v-else-if="activeView === 'settings'" />
+          <EsIntegrationView v-else-if="activeView === 'integration'" />
+          <TagsView v-else-if="activeView === 'tags'" />
+          <ExtCmdbView v-else-if="activeView === 'ext-cmdb'" />
+          <ReportsView v-else-if="activeView === 'reports'" />
+          <K8sOverviewView v-else-if="activeView === 'k8s-overview'" />
+          <K8sMonitorView v-else-if="activeView === 'k8s-monitor'" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-statefulsets'" resource-type="statefulsets" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-daemonsets'" resource-type="daemonsets" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-services'" resource-type="services" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-ingresses'" resource-type="ingresses" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-configmaps'" resource-type="configmaps" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-secrets'" resource-type="secrets" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-hpas'" resource-type="hpas" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-pvcs'" resource-type="pvcs" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-pvs'" resource-type="pvs" />
+          <ContainerTopologyView v-else-if="activeView === 'k8s-topology'" />
+          <K8sPodsView v-else-if="activeView === 'k8s-pods'" />
+          <K8sDeploymentsView v-else-if="activeView === 'k8s-deployments'" />
+          <DockerOverviewView v-else-if="activeView === 'docker-overview'" />
+          <DockerListView v-else-if="activeView === 'docker-list'" />
+          <KnowledgeView v-else-if="activeView === 'kb-list'" />
+          <KnowledgeDocumentsView v-else-if="activeView === 'kb-documents'" />
+          <KnowledgeGraphView v-else-if="activeView === 'kb-graph'" />
+          <SmartRecommendView v-else-if="activeView === 'smart-recommend'" />
+          <RunbooksView v-else-if="activeView === 'runbooks'" />
+          <LifecycleView v-else-if="activeView === 'lifecycle'" />
+          <TopologyView v-else-if="activeView === 'topology'" />
+          <TopologyPathView v-else-if="activeView === 'topology-path'" />
+          <OpenApiView v-else-if="activeView === 'openapi'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -198,6 +247,47 @@ import AvailabilityReportView from '@/views/AvailabilityReportView.vue'
 import ChaosExperimentView from '@/views/ChaosExperimentView.vue'
 import ChaosReportView from '@/views/ChaosReportView.vue'
 import ChaosScenarioView from '@/views/ChaosScenarioView.vue'
+import AlertsView from '@/views/AlertsView.vue'
+import AssetsView from '@/views/AssetsView.vue'
+import DatasourcesView from '@/views/DatasourcesView.vue'
+import LogsView from '@/views/LogsView.vue'
+import IncidentsView from '@/views/IncidentsView.vue'
+import EventStatsView from '@/views/EventStatsView.vue'
+import EventSourcesView from '@/views/EventSourcesView.vue'
+import AnomalyView from '@/views/AnomalyView.vue'
+import RemediationView from '@/views/RemediationView.vue'
+import RemediationWorkflowView from '@/views/RemediationWorkflowView.vue'
+import ScriptExecView from '@/views/ScriptExecView.vue'
+import BlueGreenView from '@/views/BlueGreenView.vue'
+import ChangeWorkflowView from '@/views/ChangeWorkflowView.vue'
+import PendingActionsView from '@/views/PendingActionsView.vue'
+import AiProvidersView from '@/views/AiProvidersView.vue'
+import FeatureStoreView from '@/views/FeatureStoreView.vue'
+import PredictionModelsView from '@/views/PredictionModelsView.vue'
+import UsersView from '@/views/UsersView.vue'
+import NotificationsView from '@/views/NotificationsView.vue'
+import SettingsView from '@/views/SettingsView.vue'
+import EsIntegrationView from '@/views/EsIntegrationView.vue'
+import TagsView from '@/views/TagsView.vue'
+import ExtCmdbView from '@/views/ExtCmdbView.vue'
+import ReportsView from '@/views/ReportsView.vue'
+import K8sOverviewView from '@/views/K8sOverviewView.vue'
+import K8sMonitorView from '@/views/K8sMonitorView.vue'
+import K8sResourceListView from '@/views/K8sResourceListView.vue'
+import ContainerTopologyView from '@/views/ContainerTopologyView.vue'
+import K8sPodsView from '@/views/K8sPodsView.vue'
+import K8sDeploymentsView from '@/views/K8sDeploymentsView.vue'
+import DockerOverviewView from '@/views/DockerOverviewView.vue'
+import DockerListView from '@/views/DockerListView.vue'
+import KnowledgeView from '@/views/KnowledgeView.vue'
+import KnowledgeDocumentsView from '@/views/KnowledgeDocumentsView.vue'
+import KnowledgeGraphView from '@/views/KnowledgeGraphView.vue'
+import SmartRecommendView from '@/views/SmartRecommendView.vue'
+import RunbooksView from '@/views/RunbooksView.vue'
+import LifecycleView from '@/views/LifecycleView.vue'
+import TopologyView from '@/views/TopologyView.vue'
+import TopologyPathView from '@/views/TopologyPathView.vue'
+import OpenApiView from '@/views/OpenApiView.vue'
 import request from '@/api/request'
 
 const appStore = useAppStore()
@@ -236,7 +326,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'agent-audit', 'op-audit', 'menu-config', 'system-posture', 'trace-view', 'trace-agent-guide', 'metrics-view', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario'])
+const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi'])
 
 function _flattenItems(items) {
   const result = []
@@ -278,10 +368,8 @@ function handleMenuSelect(arg) {
 
   currentTitle.value = item.label
 
-  const pathKey = item.path.replace(/^\//, '')
-
-  if (item.type === 'vue' || VUE_PAGES.has(pathKey)) {
-    activeView.value = pathKey
+  if (item.type === 'vue' || VUE_PAGES.has(key)) {
+    activeView.value = key
     activePath.value = null
   } else {
     activeView.value = ''

@@ -85,3 +85,8 @@ opencode.json
 
 # ===== 知识库用户上传文件（运行时产物，禁止入库）=====
 app/static/uploads/
+
+# ===== 测试运行时产物（含 cookie/登录响应，禁止入库）=====
+AIOPSproject04cookies.txt
+AIOPSproject04login_resp.txt
+test_user.json

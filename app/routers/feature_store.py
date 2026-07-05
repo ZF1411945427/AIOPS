@@ -1,61 +1,70 @@
 import json
 from datetime import datetime
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.database import get_db
 from app.models import FeatureStoreItem, Asset
-from app.template_utils import get_templates
 
 router = APIRouter(prefix="/feature-store", tags=["feature-store"])
-templates = get_templates()
 
 
-@router.get("", response_class=HTMLResponse)
-def feature_store_page(request: Request, db: Session = Depends(get_db)):
-    features = db.query(FeatureStoreItem.feature_name).distinct().order_by(FeatureStoreItem.feature_name).all()
-    entities = db.query(FeatureStoreItem.entity_type).distinct().all()
+@router.get("/api/list")
+def api_feature_list(db: Session = Depends(get_db)):
+    features = [f[0] for f in db.query(FeatureStoreItem.feature_name).distinct().order_by(FeatureStoreItem.feature_name).all()]
+    entities = [e[0] for e in db.query(FeatureStoreItem.entity_type).distinct().all()]
     recent = db.query(FeatureStoreItem).order_by(desc(FeatureStoreItem.created_at)).limit(50).all()
-    return templates.TemplateResponse("feature_store.html", {
-        "request": request, "features": features, "entities": entities, "recent": recent, "result": None,
-    })
+    return {
+        "features": features, "entities": entities,
+        "recent": [
+            {
+                "id": r.id, "feature_name": r.feature_name, "entity_type": r.entity_type,
+                "entity_id": r.entity_id, "feature_value": r.feature_value,
+                "feature_json": r.feature_json, "source": r.source,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in recent
+        ],
+    }
 
 
-@router.post("/add")
-def add_feature(
-    request: Request, feature_name: str = Form(...),
-    entity_type: str = Form("asset"), entity_id: int = Form(0),
-    feature_value: float = Form(0.0), feature_json: str = Form("{}"),
-    source: str = Form("manual"), db: Session = Depends(get_db),
-):
+@router.post("/api/add")
+def api_feature_add(payload: dict = Body(...), db: Session = Depends(get_db)):
     item = FeatureStoreItem(
-        feature_name=feature_name, entity_type=entity_type, entity_id=entity_id,
-        feature_value=feature_value, feature_json=feature_json, source=source,
-    )
+        feature_name=payload.get("feature_name", ""),
+        entity_type=payload.get("entity_type", "asset"),
+        entity_id=int(payload.get("entity_id", 0) or 0),
+        feature_value=float(payload.get("feature_value", 0.0) or 0.0),
+        feature_json=payload.get("feature_json", "{}") or "{}",
+        source=payload.get("source", "manual"))
     db.add(item)
     db.commit()
-    return RedirectResponse("/feature-store", status_code=303)
+    db.refresh(item)
+    return {"status": "ok", "id": item.id}
 
 
-@router.post("/query", response_class=HTMLResponse)
-def query_feature(
-    request: Request, feature_name: str = Form(""),
-    entity_type: str = Form(""), entity_id: int = Form(0),
-    db: Session = Depends(get_db),
-):
+@router.post("/api/query")
+def api_feature_query(payload: dict = Body(...), db: Session = Depends(get_db)):
     q = db.query(FeatureStoreItem)
-    if feature_name:
-        q = q.filter(FeatureStoreItem.feature_name == feature_name)
-    if entity_type:
-        q = q.filter(FeatureStoreItem.entity_type == entity_type)
-    if entity_id > 0:
-        q = q.filter(FeatureStoreItem.entity_id == entity_id)
+    fn = payload.get("feature_name", "")
+    et = payload.get("entity_type", "")
+    eid = int(payload.get("entity_id", 0) or 0)
+    if fn:
+        q = q.filter(FeatureStoreItem.feature_name == fn)
+    if et:
+        q = q.filter(FeatureStoreItem.entity_type == et)
+    if eid > 0:
+        q = q.filter(FeatureStoreItem.entity_id == eid)
     items = q.order_by(desc(FeatureStoreItem.created_at)).limit(100).all()
-    features = db.query(FeatureStoreItem.feature_name).distinct().order_by(FeatureStoreItem.feature_name).all()
-    entities = db.query(FeatureStoreItem.entity_type).distinct().all()
-    recent = db.query(FeatureStoreItem).order_by(desc(FeatureStoreItem.created_at)).limit(50).all()
-    return templates.TemplateResponse("feature_store.html", {
-        "request": request, "features": features, "entities": entities,
-        "recent": recent, "result": items,
-    })
+    return {
+        "items": [
+            {
+                "id": it.id, "feature_name": it.feature_name, "entity_type": it.entity_type,
+                "entity_id": it.entity_id, "feature_value": it.feature_value,
+                "feature_json": it.feature_json, "source": it.source,
+                "created_at": it.created_at.isoformat() if it.created_at else None,
+            }
+            for it in items
+        ],
+        "count": len(items),
+    }

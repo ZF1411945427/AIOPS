@@ -2,7 +2,6 @@ import re
 from datetime import datetime, timedelta
 from collections import defaultdict
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.database import get_db
@@ -65,56 +64,3 @@ def detect_node_notready(db: Session) -> list[dict]:
     return []
 
 
-@router.get("", response_class=HTMLResponse)
-def cluster_anomaly_page(request: Request, db: Session = Depends(get_db)):
-    anomalies = db.query(ClusterAnomalyEvent).order_by(desc(ClusterAnomalyEvent.last_seen)).limit(50).all()
-    return templates.TemplateResponse("cluster_anomaly.html", {
-        "request": request, "anomalies": anomalies, "detect_result": None,
-    })
-
-
-@router.get("/detect", response_class=HTMLResponse)
-def run_detection(request: Request, db: Session = Depends(get_db)):
-    results = []
-    results.extend(detect_dns_failures(db))
-    results.extend(detect_cni_errors(db))
-    results.extend(detect_node_notready(db))
-    now = datetime.now()
-    for r in results:
-        existing = (
-            db.query(ClusterAnomalyEvent)
-            .filter(ClusterAnomalyEvent.anomaly_type == r["type"],
-                    ClusterAnomalyEvent.resolved == False)
-            .first()
-        )
-        if existing:
-            existing.count += r["count"]
-            existing.last_seen = now
-        else:
-            db.add(ClusterAnomalyEvent(
-                anomaly_type=r["type"], cluster="default",
-                message=r["message"], severity=r["severity"],
-                count=r["count"], first_seen=now, last_seen=now,
-            ))
-        db.add(Alert(
-            name=f"Cluster-{r['type']}",
-            metric=r["type"],
-            message=r["message"],
-            severity=r["severity"],
-            source="cluster_anomaly",
-            status="firing",
-        ))
-    db.commit()
-    anomalies = db.query(ClusterAnomalyEvent).order_by(desc(ClusterAnomalyEvent.last_seen)).limit(50).all()
-    return templates.TemplateResponse("cluster_anomaly.html", {
-        "request": request, "anomalies": anomalies, "detect_result": results,
-    })
-
-
-@router.get("/resolve/{aid}")
-def resolve_anomaly(aid: int, request: Request, db: Session = Depends(get_db)):
-    a = db.query(ClusterAnomalyEvent).filter(ClusterAnomalyEvent.id == aid).first()
-    if a:
-        a.resolved = True
-        db.commit()
-    return RedirectResponse("/cluster-anomaly", status_code=303)

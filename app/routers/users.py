@@ -1,15 +1,12 @@
 import hashlib
 
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
-from app.template_utils import get_templates
+from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
 
 router = APIRouter(prefix="/users", tags=["users"])
-templates = get_templates()
 
 
 def hash_password(password: str) -> str:
@@ -24,41 +21,54 @@ def require_admin(request: Request, db: Session = Depends(get_db)):
     return user
 
 
-@router.get("", response_class=HTMLResponse)
-def user_list(request: Request, db: Session = Depends(get_db)):
+@router.get("/api/list")
+def api_user_list(request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
-        return RedirectResponse("/", status_code=303)
+        return {"error": "forbidden", "users": []}
     users = db.query(User).order_by(User.id.asc()).all()
-    return templates.TemplateResponse("users.html", {"request": request, "users": users})
+    return {
+        "users": [
+            {
+                "id": u.id, "username": u.username, "role": u.role,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            }
+            for u in users
+        ],
+        "current_user_id": admin.id,
+        "count": len(users),
+    }
 
 
-@router.post("/create")
-def create_user(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    role: str = Form("operator"),
-    db: Session = Depends(get_db),
-):
+@router.post("/api/create")
+def api_user_create(payload: dict = Body(...), request: Request = None, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
-        return RedirectResponse("/", status_code=303)
+        return {"status": "error", "message": "无权限"}
+    username = payload.get("username", "").strip()
+    password = payload.get("password", "")
+    role = payload.get("role", "operator")
+    if not username or not password:
+        return {"status": "error", "message": "用户名和密码不能为空"}
+    if role not in ("admin", "operator", "viewer"):
+        role = "operator"
     existing = db.query(User).filter(User.username == username).first()
-    if not existing:
-        user = User(username=username, password_hash=hash_password(password), role=role)
-        db.add(user)
-        db.commit()
-    return RedirectResponse("/users", status_code=303)
+    if existing:
+        return {"status": "error", "message": "用户名已存在"}
+    user = User(username=username, password_hash=hash_password(password), role=role)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"status": "ok", "id": user.id}
 
 
-@router.post("/{user_id}/delete")
-def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
+@router.delete("/api/{user_id}/delete")
+def api_user_delete(user_id: int, request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
-    if not admin or user_id == admin.id:
-        return RedirectResponse("/users", status_code=303)
+    if not admin:
+        return {"status": "error", "message": "无权限"}
+    if user_id == admin.id:
+        return {"status": "error", "message": "不能删除当前登录用户"}
     db.query(User).filter(User.id == user_id).delete()
     db.commit()
-    return RedirectResponse("/users", status_code=303)
-
-
+    return {"status": "ok"}

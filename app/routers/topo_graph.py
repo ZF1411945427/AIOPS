@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Asset, AssetRelation, Alert
@@ -7,11 +7,6 @@ from app.template_utils import get_templates
 
 router = APIRouter(prefix="/topo-graph", tags=["topo_graph"])
 templates = get_templates()
-
-
-@router.get("", response_class=HTMLResponse)
-def topo_graph_page(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse("topo_graph.html", {"request": request})
 
 
 @router.get("/data")

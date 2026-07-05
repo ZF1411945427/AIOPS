@@ -318,8 +318,7 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
                 error_budget_impact=0.0, duration_seconds=0,
                 steady_state_before=json.dumps(before),
                 steady_state_after=json.dumps({"error": f"no {env_name}"}),
-                notes=f"❌ 当前无 {env_name}，{fault_type} 故障无法执行。",
-            )
+                notes=f"❌ 当前无 {env_name}，{fault_type} 故障无法执行。")
             db.add(run)
             db.commit()
             return
@@ -339,8 +338,7 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
                         error_budget_impact=0.0, duration_seconds=0,
                         steady_state_before=json.dumps(before),
                         steady_state_after=json.dumps({"error": "tc unavailable"}),
-                        notes="❌ 目标主机缺少 tc 命令且自动安装 iproute-tc 失败，网络故障无法注入。",
-                    )
+                        notes="❌ 目标主机缺少 tc 命令且自动安装 iproute-tc 失败，网络故障无法注入。")
                     db.add(run)
                     db.commit()
                     return
@@ -368,8 +366,7 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
                 error_budget_impact=0.0, duration_seconds=0,
                 steady_state_before=json.dumps(before),
                 steady_state_after=json.dumps({"error": out[:500]}),
-                notes=f"❌ 故障注入命令执行失败: {out[:300]}",
-            )
+                notes=f"❌ 故障注入命令执行失败: {out[:300]}")
             db.add(run)
             db.commit()
             return
@@ -409,8 +406,7 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
             error_budget_impact=budget_impact, duration_seconds=duration,
             steady_state_before=json.dumps({**before, "availability": round(before_avail, 2)}),
             steady_state_after=json.dumps({**after, "availability": round(after_avail, 2)}),
-            notes=notes,
-        )
+            notes=notes)
         db.add(run)
         exp.status = "completed"
         exp.result = "passed" if passed else "failed"
@@ -536,8 +532,7 @@ def create_experiment(body: ExperimentCreate, db: Session = Depends(get_db)):
         fault_type=body.fault_type,
         fault_params=body.fault_params.model_dump_json(),
         steady_state=body.steady_state.model_dump_json(),
-        status="pending",
-    )
+        status="pending")
     db.add(exp)
     db.commit()
     db.refresh(exp)
@@ -591,8 +586,7 @@ def start_experiment(exp_id: int, db: Session = Depends(get_db)):
             error_budget_impact=0.0, duration_seconds=0,
             steady_state_before=json.dumps({}),
             steady_state_after=json.dumps({"error": f"no {env_name}"}),
-            notes=f"❌ 当前无 {env_name}，{exp.fault_type} 故障无法执行。请配置真实 {env_name} 后重试，或选择 cpu/mem/disk/network 类故障。",
-        )
+            notes=f"❌ 当前无 {env_name}，{exp.fault_type} 故障无法执行。请配置真实 {env_name} 后重试，或选择 cpu/mem/disk/network 类故障。")
         db.add(run)
         db.commit()
         return {"status": "completed", "steady_state_passed": False,
@@ -607,8 +601,7 @@ def start_experiment(exp_id: int, db: Session = Depends(get_db)):
     t = threading.Thread(
         target=_inject_and_observe_async,
         args=(exp_id, asset_id, exp.fault_type, fp, duration, threshold),
-        daemon=True,
-    )
+        daemon=True)
     t.start()
 
     return {"status": "running", "asset": asset.name, "ip": asset.ip,
@@ -693,18 +686,15 @@ def get_trend(db: Session = Depends(get_db)):
 
         day_runs = db.query(ChaosRun).filter(
             ChaosRun.started_at >= day_start,
-            ChaosRun.started_at < day_end,
-        ).count()
+            ChaosRun.started_at < day_end).count()
         day_passed = db.query(ChaosRun).filter(
             ChaosRun.started_at >= day_start,
             ChaosRun.started_at < day_end,
-            ChaosRun.steady_state_passed.is_(True),
-        ).count()
+            ChaosRun.steady_state_passed.is_(True)).count()
         day_failed = db.query(ChaosRun).filter(
             ChaosRun.started_at >= day_start,
             ChaosRun.started_at < day_end,
-            ChaosRun.steady_state_passed.is_(False),
-        ).count()
+            ChaosRun.steady_state_passed.is_(False)).count()
 
         runs_data.append(day_runs)
         passed_data.append(day_passed)
@@ -729,8 +719,7 @@ def get_resilience_radar(db: Session = Depends(get_db)):
         total = db.query(ChaosRun).join(ChaosExperiment).filter(ChaosExperiment.fault_type == ft).count()
         passed = db.query(ChaosRun).join(ChaosExperiment).filter(
             ChaosExperiment.fault_type == ft,
-            ChaosRun.steady_state_passed.is_(True),
-        ).count()
+            ChaosRun.steady_state_passed.is_(True)).count()
         score = round((passed / total * 100) if total else random.uniform(60, 95), 1)
         values.append(score)
     return {"dimensions": dimensions, "values": values}
@@ -769,8 +758,7 @@ def create_scenario(body: ScenarioCreate, db: Session = Depends(get_db)):
         fault_params=body.fault_params.model_dump_json(),
         risk_level=body.risk_level,
         recommended_slo=body.recommended_slo,
-        is_builtin=False,
-    )
+        is_builtin=False)
     db.add(scenario)
     db.commit()
     db.refresh(scenario)
@@ -821,7 +809,6 @@ def seed_chaos_scenarios(db: Session):
             fault_params=json.dumps(bs["fault_params"]),
             risk_level=bs["risk_level"],
             recommended_slo=bs["recommended_slo"],
-            is_builtin=True,
-        )
+            is_builtin=True)
         db.add(s)
     db.commit()

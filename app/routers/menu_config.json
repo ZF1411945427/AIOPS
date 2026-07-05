@@ -19,7 +19,7 @@
       {
         "key": "reports",
         "label": "运维报表",
-        "type": "iframe",
+        "type": "vue",
         "path": "/reports"
       }
     ]
@@ -38,25 +38,25 @@
       {
         "key": "pending-actions",
         "label": "待确认动作",
-        "type": "iframe",
+        "type": "vue",
         "path": "/agent/pending"
       },
       {
         "key": "ai-providers",
         "label": "智能体配置",
-        "type": "iframe",
+        "type": "vue",
         "path": "/ai/providers"
       },
       {
         "key": "feature-store",
         "label": "特征仓库",
-        "type": "iframe",
+        "type": "vue",
         "path": "/feature-store"
       },
       {
         "key": "prediction-models",
         "label": "预测模型",
-        "type": "iframe",
+        "type": "vue",
         "path": "/prediction-models"
       },
       {
@@ -81,7 +81,7 @@
       {
         "key": "logs",
         "label": "日志中心",
-        "type": "iframe",
+        "type": "vue",
         "path": "/logs"
       },
       {
@@ -99,19 +99,19 @@
       {
         "key": "alerts",
         "label": "告警中心",
-        "type": "iframe",
+        "type": "vue",
         "path": "/alerts"
       },
       {
         "key": "datasources",
         "label": "数据源管理",
-        "type": "iframe",
+        "type": "vue",
         "path": "/datasources"
       },
       {
         "key": "k8s-monitor",
         "label": "K8s 资源监控",
-        "type": "iframe",
+        "type": "vue",
         "path": "/k8s-monitor"
       }
     ]
@@ -124,25 +124,25 @@
       {
         "key": "incident",
         "label": "集群事件",
-        "type": "iframe",
+        "type": "vue",
         "path": "/incidents"
       },
       {
         "key": "event-stats",
         "label": "事件统计",
-        "type": "iframe",
+        "type": "vue",
         "path": "/events/stats"
       },
       {
         "key": "event-sources",
         "label": "事件源配置",
-        "type": "iframe",
+        "type": "vue",
         "path": "/event-sources"
       },
       {
         "key": "anomaly",
         "label": "异常检测",
-        "type": "iframe",
+        "type": "vue",
         "path": "/anomaly"
       }
     ]
@@ -155,31 +155,31 @@
       {
         "key": "remediation",
         "label": "自愈规则",
-        "type": "iframe",
+        "type": "vue",
         "path": "/remediation"
       },
       {
         "key": "remediation-workflow",
         "label": "自愈工作流",
-        "type": "iframe",
+        "type": "vue",
         "path": "/remediation-workflows"
       },
       {
         "key": "script-exec",
         "label": "远程脚本",
-        "type": "iframe",
+        "type": "vue",
         "path": "/script"
       },
       {
         "key": "blue-green",
         "label": "蓝绿发布",
-        "type": "iframe",
+        "type": "vue",
         "path": "/blue-green"
       },
       {
         "key": "change-workflow",
         "label": "变更审批",
-        "type": "iframe",
+        "type": "vue",
         "path": "/change-workflow"
       }
     ]
@@ -192,37 +192,37 @@
       {
         "key": "asset-list",
         "label": "资产列表",
-        "type": "iframe",
+        "type": "vue",
         "path": "/assets"
       },
       {
         "key": "tags",
         "label": "标签管理",
-        "type": "iframe",
+        "type": "vue",
         "path": "/tags"
       },
       {
         "key": "topology",
         "label": "拓扑视图",
-        "type": "iframe",
+        "type": "vue",
         "path": "/topology"
       },
       {
         "key": "topology-path",
         "label": "路径查询",
-        "type": "iframe",
+        "type": "vue",
         "path": "/topology/path"
       },
       {
         "key": "lifecycle",
         "label": "资产生命周期",
-        "type": "iframe",
+        "type": "vue",
         "path": "/lifecycle"
       },
       {
         "key": "ext-cmdb",
         "label": "外部 CMDB",
-        "type": "iframe",
+        "type": "vue",
         "path": "/ext-cmdb"
       }
     ]
@@ -239,79 +239,79 @@
           {
             "key": "k8s-overview",
             "label": "集群概览",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/overview"
           },
           {
             "key": "k8s-topology",
             "label": "资源拓扑图",
-            "type": "iframe",
+            "type": "vue",
             "path": "/containers/topology"
           },
           {
             "key": "k8s-pods",
             "label": "Pod 容器组",
-            "type": "iframe",
+            "type": "vue",
             "path": "/containers/pods"
           },
           {
             "key": "k8s-deployments",
             "label": "Deployment 无状态应用",
-            "type": "iframe",
+            "type": "vue",
             "path": "/containers/deployments"
           },
           {
             "key": "k8s-statefulsets",
             "label": "StatefulSet 有状态应用",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/statefulsets"
           },
           {
             "key": "k8s-daemonsets",
             "label": "DaemonSet 守护进程",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/daemonsets"
           },
           {
             "key": "k8s-services",
             "label": "Service 服务",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/services"
           },
           {
             "key": "k8s-ingresses",
             "label": "Ingress 入口路由",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/ingresses"
           },
           {
             "key": "k8s-configmaps",
             "label": "ConfigMap 配置项",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/configmaps"
           },
           {
             "key": "k8s-secrets",
             "label": "Secret 密钥",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/secrets"
           },
           {
             "key": "k8s-hpas",
             "label": "HPA 弹性伸缩",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/hpas"
           },
           {
             "key": "k8s-pvcs",
             "label": "PVC 存储卷声明",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/pvcs"
           },
           {
             "key": "k8s-pvs",
             "label": "PV 存储卷",
-            "type": "iframe",
+            "type": "vue",
             "path": "/k8s/pvs"
           }
         ]
@@ -323,13 +323,13 @@
           {
             "key": "docker-overview",
             "label": "Docker 概览",
-            "type": "iframe",
+            "type": "vue",
             "path": "/containers"
           },
           {
             "key": "docker-list",
             "label": "容器列表",
-            "type": "iframe",
+            "type": "vue",
             "path": "/containers/docker"
           }
         ]
@@ -418,31 +418,31 @@
       {
         "key": "kb-list",
         "label": "故障知识库",
-        "type": "iframe",
+        "type": "vue",
         "path": "/knowledge"
       },
       {
         "key": "kb-documents",
         "label": "知识库文档 RAG",
-        "type": "iframe",
+        "type": "vue",
         "path": "/knowledge/documents"
       },
       {
         "key": "kb-graph",
         "label": "运维知识图谱",
-        "type": "iframe",
+        "type": "vue",
         "path": "/knowledge/graph"
       },
       {
         "key": "smart-recommend",
         "label": "智能推荐",
-        "type": "iframe",
+        "type": "vue",
         "path": "/smart-recommend"
       },
       {
         "key": "runbooks",
         "label": "Runbook",
-        "type": "iframe",
+        "type": "vue",
         "path": "/runbooks"
       }
     ]
@@ -455,31 +455,31 @@
       {
         "key": "users",
         "label": "用户与权限",
-        "type": "iframe",
+        "type": "vue",
         "path": "/users"
       },
       {
         "key": "notifications",
         "label": "通知管理",
-        "type": "iframe",
+        "type": "vue",
         "path": "/notifications"
       },
       {
         "key": "settings",
         "label": "系统配置",
-        "type": "iframe",
+        "type": "vue",
         "path": "/settings"
       },
       {
         "key": "openapi",
         "label": "开放接口",
-        "type": "iframe",
+        "type": "vue",
         "path": "/api/v1/docs"
       },
       {
         "key": "integration",
         "label": "集成管理",
-        "type": "iframe",
+        "type": "vue",
         "path": "/es-integration"
       }
     ]

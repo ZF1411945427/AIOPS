@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 
@@ -49,8 +49,7 @@ def dashboard_data(db: Session = Depends(get_db)):
     seven_days = datetime.utcnow() - timedelta(days=7)
     alert_rows = db.query(
         func.strftime("%Y-%m-%d", Alert.created_at).label("day"),
-        func.count(Alert.id).label("count"),
-    ).filter(Alert.created_at >= seven_days).group_by("day").order_by("day").all()
+        func.count(Alert.id).label("count")).filter(Alert.created_at >= seven_days).group_by("day").order_by("day").all()
     alert_trend = [{"date": r.day, "count": r.count} for r in alert_rows]
 
     # Recent alerts
@@ -87,31 +86,6 @@ def dashboard_data(db: Session = Depends(get_db)):
         "alert_trend": alert_trend,
         "incident_status": incident_status,
         "recent_alerts": recent_alerts,
-    })
-
-
-@router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_db)):
-    asset_count = db.query(func.count(Asset.id)).scalar() or 0
-    online_count = db.query(func.count(Asset.id)).filter(Asset.status == "online").scalar() or 0
-    alert_count = db.query(func.count(Alert.id)).filter(Alert.status.in_(["firing", "triggered"])).scalar() or 0
-    rule_count = db.query(func.count(AlertRule.id)).scalar() or 0
-    recent_alerts = db.query(Alert).order_by(Alert.created_at.desc()).limit(5).all()
-    asset_types = (
-        db.query(Asset.type, func.count(Asset.id).label("cnt"))
-        .group_by(Asset.type)
-        .all()
-    )
-    health = compute_health_score(db)
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "asset_count": asset_count,
-        "online_count": online_count,
-        "alert_count": alert_count,
-        "rule_count": rule_count,
-        "recent_alerts": recent_alerts,
-        "asset_types": asset_types,
-        "health": health,
     })
 
 

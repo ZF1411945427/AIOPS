@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/drain", tags=["drain"])
@@ -46,26 +45,3 @@ def drain_cluster(logs: list[str], similarity_threshold: float = 0.5) -> list[di
     ]
 
 
-@router.get("", response_class=HTMLResponse)
-def drain_page(request: Request):
-    return templates.TemplateResponse("drain.html", {
-        "request": request, "clusters": None,
-    })
-
-
-@router.post("/parse", response_class=HTMLResponse)
-def drain_parse(
-    request: Request,
-    log_text: str = Form(...),
-    threshold: float = Form(0.5),
-):
-    lines = [l for l in log_text.split("\n") if l.strip()]
-    if not lines:
-        return templates.TemplateResponse("drain.html", {
-            "request": request, "error": "No log lines provided",
-        })
-    clusters = drain_cluster(lines, similarity_threshold=threshold)
-    return templates.TemplateResponse("drain.html", {
-        "request": request, "clusters": clusters, "total_lines": len(lines),
-        "threshold": threshold,
-    })

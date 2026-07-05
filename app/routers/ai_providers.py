@@ -1,117 +1,14 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import AIProvider, AgentConfig
-from app.template_utils import get_templates
 from app.services.agent_service import call_llm
 
 router = APIRouter(prefix="/ai", tags=["ai"])
-templates = get_templates()
-
-
-@router.get("/providers")
-def list_providers(request: Request, db: Session = Depends(get_db)):
-    providers = db.query(AIProvider).all()
-    configs = db.query(AgentConfig).all()
-    return templates.TemplateResponse("ai_providers.html", {
-        "request": request,
-        "providers": providers,
-        "configs": configs,
-    })
-
-
-@router.get("/providers/create")
-def create_provider_form(request: Request):
-    return templates.TemplateResponse("ai_provider_form.html", {
-        "request": request,
-        "provider": None,
-    })
-
-
-@router.post("/providers/create")
-def create_provider(
-    request: Request,
-    name: str = Form(...),
-    base_url: str = Form(""),
-    default_model: str = Form(""),
-    api_key: str = Form(""),
-    temperature: float = Form(0.2),
-    max_tokens: int = Form(10000),
-    timeout_seconds: int = Form(30),
-    db: Session = Depends(get_db),
-):
-    provider = AIProvider(
-        name=name,
-        base_url=base_url,
-        default_model=default_model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout_seconds=timeout_seconds,
-    )
-    provider.set_api_key(api_key)
-    db.add(provider)
-    db.commit()
-    return RedirectResponse(url="/ai/providers", status_code=303)
-
-
-@router.get("/providers/{provider_id}/edit")
-def edit_provider_form(request: Request, provider_id: int, db: Session = Depends(get_db)):
-    provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
-    return templates.TemplateResponse("ai_provider_form.html", {
-        "request": request,
-        "provider": provider,
-    })
-
-
-@router.post("/providers/{provider_id}/edit")
-def edit_provider(
-    request: Request,
-    provider_id: int,
-    name: str = Form(...),
-    base_url: str = Form(""),
-    default_model: str = Form(""),
-    api_key: str = Form(""),
-    temperature: float = Form(0.2),
-    max_tokens: int = Form(10000),
-    timeout_seconds: int = Form(30),
-    db: Session = Depends(get_db),
-):
-    provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
-    if provider:
-        provider.name = name
-        provider.base_url = base_url
-        provider.default_model = default_model
-        provider.temperature = temperature
-        provider.max_tokens = max_tokens
-        provider.timeout_seconds = timeout_seconds
-        if api_key:
-            provider.set_api_key(api_key)
-        provider.updated_at = datetime.now()
-        db.commit()
-    return RedirectResponse(url="/ai/providers", status_code=303)
-
-
-@router.post("/providers/{provider_id}/toggle")
-def toggle_provider(provider_id: int, db: Session = Depends(get_db)):
-    provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
-    if provider:
-        provider.is_enabled = not provider.is_enabled
-        db.commit()
-    return RedirectResponse(url="/ai/providers", status_code=303)
-
-
-@router.post("/providers/{provider_id}/delete")
-def delete_provider(provider_id: int, db: Session = Depends(get_db)):
-    provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
-    if provider:
-        db.delete(provider)
-        db.commit()
-    return RedirectResponse(url="/ai/providers", status_code=303)
 
 
 @router.post("/providers/{provider_id}/test")
@@ -128,79 +25,119 @@ def test_provider(provider_id: int, db: Session = Depends(get_db)):
     return {"status": "success", "message": "连接成功"}
 
 
-@router.get("/configs/create")
-def create_config_form(request: Request, db: Session = Depends(get_db)):
-    providers = db.query(AIProvider).filter(AIProvider.is_enabled == True).all()
-    return templates.TemplateResponse("agent_config_form.html", {
-        "request": request,
-        "config": None,
-        "providers": providers,
-    })
+@router.get("/api/providers")
+def api_providers_list(db: Session = Depends(get_db)):
+    providers = db.query(AIProvider).all()
+    configs = db.query(AgentConfig).all()
+    return {
+        "providers": [
+            {
+                "id": p.id, "name": p.name, "provider_type": p.provider_type,
+                "base_url": p.base_url, "default_model": p.default_model,
+                "temperature": p.temperature, "max_tokens": p.max_tokens,
+                "timeout_seconds": p.timeout_seconds, "is_enabled": p.is_enabled,
+                "has_api_key": bool(p.api_key_encrypted),
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in providers
+        ],
+        "configs": [
+            {
+                "id": c.id, "name": c.name, "default_provider_id": c.default_provider_id,
+                "system_prompt": c.system_prompt, "welcome_message": c.welcome_message,
+                "suggested_questions": c.suggested_questions,
+                "allow_action_execution": c.allow_action_execution,
+                "require_confirmation": c.require_confirmation,
+                "max_history_messages": c.max_history_messages,
+                "is_enabled": c.is_enabled,
+            }
+            for c in configs
+        ],
+    }
 
 
-@router.post("/configs/create")
-def create_config(
-    request: Request,
-    name: str = Form("default"),
-    default_provider_id: int = Form(0),
-    system_prompt: str = Form(""),
-    welcome_message: str = Form(""),
-    suggested_questions: str = Form("[]"),
-    allow_action_execution: bool = Form(False),
-    require_confirmation: bool = Form(True),
-    max_history_messages: int = Form(12),
-    db: Session = Depends(get_db),
-):
+@router.post("/api/providers/create")
+def api_provider_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    provider = AIProvider(
+        name=payload.get("name", ""), base_url=payload.get("base_url", ""),
+        default_model=payload.get("default_model", ""),
+        temperature=float(payload.get("temperature", 0.2) or 0.2),
+        max_tokens=int(payload.get("max_tokens", 10000) or 10000),
+        timeout_seconds=int(payload.get("timeout_seconds", 30) or 30))
+    if payload.get("api_key"):
+        provider.set_api_key(payload["api_key"])
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+    return {"status": "ok", "id": provider.id}
+
+
+@router.put("/api/providers/{provider_id}/edit")
+def api_provider_edit(provider_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
+    if not provider:
+        return {"status": "error", "message": "Provider not found"}
+    provider.name = payload.get("name", provider.name)
+    provider.base_url = payload.get("base_url", provider.base_url)
+    provider.default_model = payload.get("default_model", provider.default_model)
+    provider.temperature = float(payload.get("temperature", provider.temperature) or 0.2)
+    provider.max_tokens = int(payload.get("max_tokens", provider.max_tokens) or 10000)
+    provider.timeout_seconds = int(payload.get("timeout_seconds", provider.timeout_seconds) or 30)
+    if payload.get("api_key"):
+        provider.set_api_key(payload["api_key"])
+    provider.updated_at = datetime.now()
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/api/providers/{provider_id}/toggle")
+def api_provider_toggle(provider_id: int, db: Session = Depends(get_db)):
+    provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
+    if provider:
+        provider.is_enabled = not provider.is_enabled
+        db.commit()
+    return {"status": "ok", "enabled": provider.is_enabled if provider else None}
+
+
+@router.delete("/api/providers/{provider_id}/delete")
+def api_provider_delete(provider_id: int, db: Session = Depends(get_db)):
+    provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
+    if provider:
+        db.delete(provider)
+        db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/api/configs/create")
+def api_config_create(payload: dict = Body(...), db: Session = Depends(get_db)):
     config = AgentConfig(
-        name=name,
-        default_provider_id=default_provider_id if default_provider_id else None,
-        system_prompt=system_prompt,
-        welcome_message=welcome_message,
-        suggested_questions=suggested_questions,
-        allow_action_execution=allow_action_execution,
-        require_confirmation=require_confirmation,
-        max_history_messages=max_history_messages,
-    )
+        name=payload.get("name", "default"),
+        default_provider_id=payload.get("default_provider_id") or None,
+        system_prompt=payload.get("system_prompt", ""),
+        welcome_message=payload.get("welcome_message", ""),
+        suggested_questions=payload.get("suggested_questions", "[]") or "[]",
+        allow_action_execution=bool(payload.get("allow_action_execution", False)),
+        require_confirmation=bool(payload.get("require_confirmation", True)),
+        max_history_messages=int(payload.get("max_history_messages", 12) or 12))
     db.add(config)
     db.commit()
-    return RedirectResponse(url="/ai/providers", status_code=303)
+    db.refresh(config)
+    return {"status": "ok", "id": config.id}
 
 
-@router.get("/configs/{config_id}/edit")
-def edit_config_form(request: Request, config_id: int, db: Session = Depends(get_db)):
+@router.put("/api/configs/{config_id}/edit")
+def api_config_edit(config_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
     config = db.query(AgentConfig).filter(AgentConfig.id == config_id).first()
-    providers = db.query(AIProvider).filter(AIProvider.is_enabled == True).all()
-    return templates.TemplateResponse("agent_config_form.html", {
-        "request": request,
-        "config": config,
-        "providers": providers,
-    })
-
-
-@router.post("/configs/{config_id}/edit")
-def edit_config(
-    request: Request,
-    config_id: int,
-    name: str = Form("default"),
-    default_provider_id: int = Form(0),
-    system_prompt: str = Form(""),
-    welcome_message: str = Form(""),
-    suggested_questions: str = Form("[]"),
-    allow_action_execution: bool = Form(False),
-    require_confirmation: bool = Form(True),
-    max_history_messages: int = Form(12),
-    db: Session = Depends(get_db),
-):
-    config = db.query(AgentConfig).filter(AgentConfig.id == config_id).first()
-    if config:
-        config.name = name
-        config.default_provider_id = default_provider_id if default_provider_id else None
-        config.system_prompt = system_prompt
-        config.welcome_message = welcome_message
-        config.suggested_questions = suggested_questions
-        config.allow_action_execution = allow_action_execution
-        config.require_confirmation = require_confirmation
-        config.max_history_messages = max_history_messages
-        config.updated_at = datetime.now()
-        db.commit()
-    return RedirectResponse(url="/ai/providers", status_code=303)
+    if not config:
+        return {"status": "error", "message": "Config not found"}
+    config.name = payload.get("name", config.name)
+    config.default_provider_id = payload.get("default_provider_id") or None
+    config.system_prompt = payload.get("system_prompt", config.system_prompt)
+    config.welcome_message = payload.get("welcome_message", config.welcome_message)
+    config.suggested_questions = payload.get("suggested_questions", config.suggested_questions) or "[]"
+    config.allow_action_execution = bool(payload.get("allow_action_execution", False))
+    config.require_confirmation = bool(payload.get("require_confirmation", True))
+    config.max_history_messages = int(payload.get("max_history_messages", 12) or 12)
+    config.updated_at = datetime.now()
+    db.commit()
+    return {"status": "ok"}

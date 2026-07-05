@@ -1,95 +1,16 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ChatSession, ChatMessage, PendingAction, ToolInvocation, AgentConfig
-from app.template_utils import get_templates
 from app.services.agent_service import (
-    process_chat_message, confirm_pending_action, cancel_pending_action,
-)
+    process_chat_message, confirm_pending_action, cancel_pending_action)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
-templates = get_templates()
-
-
-@router.get("/chat")
-def chat_page(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id", 1)
-    sessions = (
-        db.query(ChatSession)
-        .filter(ChatSession.user_id == user_id)
-        .order_by(ChatSession.last_message_at.desc())
-        .limit(50)
-        .all()
-    )
-    # 自动跳转到最近的会话，而不是显示空白欢迎页
-    if sessions:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=f"/agent/chat/{sessions[0].id}", status_code=303)
-    config = db.query(AgentConfig).filter(AgentConfig.is_enabled == True).first()
-    welcome = config.welcome_message if config else "你好，我可以帮你查询资源、分析告警、生成运维任务等。"
-    suggested = config.get_suggested_questions() if config else []
-
-    return templates.TemplateResponse("agent_chat.html", {
-        "request": request,
-        "sessions": sessions,
-        "welcome_message": welcome,
-        "suggested_questions": suggested,
-        "active_session": None,
-        "messages": [],
-        "pending_actions": [],
-    })
-
-
-@router.get("/chat/{session_id}")
-def chat_session_page(request: Request, session_id: int, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id", 1)
-    sessions = (
-        db.query(ChatSession)
-        .filter(ChatSession.user_id == user_id)
-        .order_by(ChatSession.last_message_at.desc())
-        .limit(50)
-        .all()
-    )
-    active = db.query(ChatSession).filter(
-        ChatSession.id == session_id, ChatSession.user_id == user_id,
-    ).first()
-
-    messages = []
-    pending_list = []
-    if active:
-        messages = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == active.id)
-            .order_by(ChatMessage.created_at.asc())
-            .all()
-        )
-        pending_list = (
-            db.query(PendingAction)
-            .filter(
-                PendingAction.session_id == active.id,
-                PendingAction.status == PendingAction.STATUS_PENDING,
-            )
-            .all()
-        )
-
-    config = db.query(AgentConfig).filter(AgentConfig.is_enabled == True).first()
-    welcome = config.welcome_message if config else "你好，我可以帮你查询资源、分析告警、生成运维任务等。"
-    suggested = config.get_suggested_questions() if config else []
-
-    return templates.TemplateResponse("agent_chat.html", {
-        "request": request,
-        "sessions": sessions,
-        "welcome_message": welcome,
-        "suggested_questions": suggested,
-        "active_session": active,
-        "messages": messages,
-        "pending_actions": pending_list,
-    })
 
 
 @router.get("/sessions")
@@ -114,8 +35,7 @@ def list_sessions_json(request: Request, db: Session = Depends(get_db)):
 def session_history_json(session_id: int, request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get("user_id", 1)
     session = db.query(ChatSession).filter(
-        ChatSession.id == session_id, ChatSession.user_id == user_id,
-    ).first()
+        ChatSession.id == session_id, ChatSession.user_id == user_id).first()
     messages = []
     pending_list = []
     if session:
@@ -137,8 +57,7 @@ def session_history_json(session_id: int, request: Request, db: Session = Depend
 @router.post("/chat/send")
 async def send_message(
     request: Request,
-    db: Session = Depends(get_db),
-):
+    db: Session = Depends(get_db)):
     data = await request.json()
     user_id = request.session.get("user_id", 1)
     session_id = data.get("session_id")
@@ -159,8 +78,7 @@ async def send_message(
 def delete_session_json(session_id: int, request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get("user_id", 1)
     session = db.query(ChatSession).filter(
-        ChatSession.id == session_id, ChatSession.user_id == user_id,
-    ).first()
+        ChatSession.id == session_id, ChatSession.user_id == user_id).first()
     if session:
         db.query(ChatMessage).filter(ChatMessage.session_id == session.id).delete()
         db.query(PendingAction).filter(PendingAction.session_id == session.id).delete()
@@ -168,21 +86,6 @@ def delete_session_json(session_id: int, request: Request, db: Session = Depends
         db.delete(session)
         db.commit()
     return {"status": "ok"}
-
-
-@router.post("/chat/{session_id}/delete")
-def delete_session(session_id: int, request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id", 1)
-    session = db.query(ChatSession).filter(
-        ChatSession.id == session_id, ChatSession.user_id == user_id,
-    ).first()
-    if session:
-        db.query(ChatMessage).filter(ChatMessage.session_id == session.id).delete()
-        db.query(PendingAction).filter(PendingAction.session_id == session.id).delete()
-        db.query(ToolInvocation).filter(ToolInvocation.session_id == session.id).delete()
-        db.delete(session)
-        db.commit()
-    return RedirectResponse(url="/agent/chat", status_code=303)
 
 
 @router.post("/pending/{action_id}/confirm")
@@ -251,8 +154,9 @@ def tool_invocations(request: Request, db: Session = Depends(get_db)):
     ])
 
 
-@router.get("/pending")
-def pending_list(request: Request, db: Session = Depends(get_db)):
+@router.get("/api/pending")
+def api_pending_list(request: Request, db: Session = Depends(get_db)):
+    """待确认动作列表 JSON API（Vue 用）."""
     user_id = request.session.get("user_id", 1)
     actions = (
         db.query(PendingAction)
@@ -261,21 +165,31 @@ def pending_list(request: Request, db: Session = Depends(get_db)):
         .order_by(PendingAction.created_at.desc())
         .all()
     )
-    # 解析 result_payload 供模板展示执行结果/失败原因（修复静默失败反馈回路）
+    result = []
     for a in actions:
-        a.result_message = ""
+        result_message = ""
         if a.result_payload and a.result_payload != "{}":
             try:
                 parsed = json.loads(a.result_payload)
                 if parsed.get("status") == "error":
-                    a.result_message = parsed.get("message", "")
+                    result_message = parsed.get("message", "")
                 elif parsed.get("status") == "success":
                     inner = parsed.get("result") or {}
                     if isinstance(inner, dict):
-                        a.result_message = inner.get("message", "")
+                        result_message = inner.get("message", "")
             except (json.JSONDecodeError, TypeError):
                 pass
-    return templates.TemplateResponse("agent_pending.html", {
-        "request": request,
-        "actions": actions,
-    })
+        result.append({
+            "id": a.id,
+            "session_id": a.session_id,
+            "action_type": a.action_type,
+            "title": a.title,
+            "risk_level": a.risk_level,
+            "reason": a.reason,
+            "status": a.status,
+            "action_payload": a.action_payload,
+            "result_message": result_message,
+            "confirmed_by": a.confirmed_by,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        })
+    return {"actions": result, "count": len(result)}
