@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 import json
 from datetime import datetime, timedelta
 
@@ -60,11 +60,49 @@ class OnCallScheduleCreate(BaseModel):
     team_name: str
     rotation_type: str = "weekly"
     members: List[str]
-    schedule: List[dict]
+    schedule: List[dict] = []
     current_oncall: str
     current_period_start: datetime
     current_period_end: datetime
     created_by: Optional[str] = None
+
+    @field_validator("team_name")
+    @classmethod
+    def validate_team_name(cls, v):
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("团队名不能为空")
+        return v
+
+    @field_validator("rotation_type")
+    @classmethod
+    def validate_rotation_type(cls, v):
+        if v not in ("weekly", "monthly"):
+            raise ValueError("轮值方式只支持 weekly(周轮值) 或 monthly(月轮值)")
+        return v
+
+    @field_validator("members")
+    @classmethod
+    def validate_members(cls, v):
+        if not v:
+            raise ValueError("成员列表不能为空")
+        return [m for m in v if m]
+
+    @field_validator("current_oncall")
+    @classmethod
+    def validate_current_oncall(cls, v):
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("当前值班人不能为空")
+        return v
+
+    @model_validator(mode="after")
+    def validate_consistency(self):
+        if self.current_oncall and self.members and self.current_oncall not in self.members:
+            raise ValueError("当前值班人必须在成员列表中")
+        if self.current_period_end <= self.current_period_start:
+            raise ValueError("周期结束时间必须晚于开始时间")
+        return self
 
 
 class OnCallScheduleResponse(BaseModel):
@@ -78,6 +116,9 @@ class OnCallScheduleResponse(BaseModel):
     current_oncall: str
     current_period_start: datetime
     current_period_end: datetime
+    created_by: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     @field_validator("members", mode="before")
     @classmethod
@@ -256,19 +297,19 @@ def create_oncall(data: OnCallScheduleCreate, db: Session = Depends(get_db_sessi
 
 @router.get("/oncall/members")
 def list_oncall_members(db: Session = Depends(get_db_session)):
-    """聚合所有值班表的成员，作为成员复用候选库（主数据聚合）"""
+    """聚合所有值班表的成员，作为成员复用候选库（主数据聚合，dict 保序去重）"""
     rows = db.query(OnCallSchedule.members).all()
-    seen = []
+    seen = {}
     for (m_json,) in rows:
         if not m_json:
             continue
         try:
             for m in json.loads(m_json):
                 if m and m not in seen:
-                    seen.append(m)
+                    seen[m] = None
         except (json.JSONDecodeError, TypeError):
             continue
-    return {"members": seen}
+    return {"members": list(seen.keys())}
 
 
 @router.put("/oncall/{oncall_id}", response_model=OnCallScheduleResponse)
@@ -293,28 +334,39 @@ def update_oncall(oncall_id: int, data: OnCallScheduleCreate, db: Session = Depe
 def delete_oncall(oncall_id: int, db: Session = Depends(get_db_session)):
     """删除值班表"""
     obj = db.query(OnCallSchedule).filter(OnCallSchedule.id == oncall_id).first()
-    if obj:
-        db.delete(obj)
-        db.commit()
+    if not obj:
+        raise HTTPException(status_code=404, detail="值班表不存在")
+    db.delete(obj)
+    db.commit()
     return {"status": "ok"}
 
 
 @router.get("/oncall/current")
 def get_current_oncall(db: Session = Depends(get_db_session)):
-    """获取当前值班人"""
-    now = datetime.utcnow()
-    obj = db.query(OnCallSchedule).filter(
+    """获取当前值班人（返回所有当前周期内的值班表，按团队名排序）"""
+    now = datetime.now()
+    rows = db.query(OnCallSchedule).filter(
         OnCallSchedule.current_period_start <= now,
         OnCallSchedule.current_period_end >= now
-    ).first()
-    if obj:
-        return {
-            "team_name": obj.team_name,
-            "current_oncall": obj.current_oncall,
-            "period_start": obj.current_period_start,
-            "period_end": obj.current_period_end
+    ).order_by(OnCallSchedule.team_name).all()
+    if not rows:
+        return {"items": [], "current_oncall": None}
+    items = [
+        {
+            "team_name": r.team_name,
+            "current_oncall": r.current_oncall,
+            "period_start": r.current_period_start,
+            "period_end": r.current_period_end
         }
-    return {"team_name": None, "current_oncall": None}
+        for r in rows
+    ]
+    return {
+        "items": items,
+        "current_oncall": items[0]["current_oncall"],
+        "team_name": items[0]["team_name"],
+        "period_start": items[0]["period_start"],
+        "period_end": items[0]["period_end"]
+    }
 
 
 # ==================== Escalation 接口 ====================
@@ -508,7 +560,7 @@ def generate_availability_report(db: Session = Depends(get_db_session)):
         return {"status": "ok", "message": "没有 SLO 配置", "count": 0}
 
     count = 0
-    now = datetime.utcnow()
+    now = datetime.now()
     for slo in slos:
         budgets = db.query(ErrorBudget).filter(
             ErrorBudget.slo_id == slo.id
