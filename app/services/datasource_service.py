@@ -1,3 +1,4 @@
+from app.template_utils import parse_json_config
 import json
 import random
 import re
@@ -150,7 +151,7 @@ def test_source(db: Session, source_id: int) -> tuple:
 def _test_ssh(source: DataSource) -> tuple:
     try:
         import paramiko
-        cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+        cfg = parse_json_config(source.auth_config)
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(
@@ -171,7 +172,7 @@ def _test_ssh(source: DataSource) -> tuple:
 def _test_kubernetes(source: DataSource) -> tuple:
     try:
         from kubernetes import config, client
-        cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+        cfg = parse_json_config(source.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -186,7 +187,7 @@ def _test_kubernetes(source: DataSource) -> tuple:
 def _test_docker(source: DataSource) -> tuple:
     try:
         import docker
-        cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+        cfg = parse_json_config(source.auth_config)
         if source.endpoint:
             client = docker.DockerClient(base_url=source.endpoint)
         else:
@@ -205,7 +206,7 @@ def _test_elasticsearch(source: DataSource) -> tuple:
     except ImportError:
         return (False, "missing elasticsearch package")
     try:
-        cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+        cfg = parse_json_config(source.auth_config)
         username = cfg.get("username")
         if username and cfg.get("password"):
             auth = (cfg["username"], cfg["password"])
@@ -233,7 +234,7 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
         source.last_status = "error"
         source.last_error = "missing elasticsearch Python package"
     try:
-        cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+        cfg = parse_json_config(source.auth_config)
         auth = ()
         if cfg.get("username") and cfg.get("password"):
             auth = (cfg["username"], cfg["password"])
@@ -501,7 +502,7 @@ def _sync_docker_asset_via_ssh(db: Session, host: str, container_id: str, name: 
 
 def _scrape_ssh(db: Session, source: DataSource) -> tuple:
     import paramiko
-    cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+    cfg = parse_json_config(source.auth_config)
     host = source.endpoint
     port = int(cfg.get("port", 22))
     username = cfg.get("username", "")
@@ -648,7 +649,7 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
         source.last_status = "error"
         source.last_error = "missing kubernetes Python package"
     try:
-        cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+        cfg = parse_json_config(source.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         elif source.endpoint:
@@ -820,7 +821,7 @@ def _scrape_docker(db: Session, source: DataSource) -> tuple:
         source.last_status = "error"
         source.last_error = "missing docker Python package"
     try:
-        cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+        cfg = parse_json_config(source.auth_config)
         if source.endpoint:
             client = docker.DockerClient(base_url=source.endpoint)
         else:

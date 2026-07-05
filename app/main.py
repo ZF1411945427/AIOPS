@@ -203,6 +203,18 @@ def init_admin():
         pass
     try:
         from sqlalchemy import text
+        db.execute(text("ALTER TABLE chaos_scenarios ADD COLUMN target_layer VARCHAR(32) DEFAULT 'host'"))
+        db.commit()
+    except Exception:
+        pass
+    try:
+        from sqlalchemy import text
+        db.execute(text("ALTER TABLE chaos_experiments ADD COLUMN target_layer VARCHAR(32) DEFAULT 'host'"))
+        db.commit()
+    except Exception:
+        pass
+    try:
+        from sqlalchemy import text
         db.execute(text("ALTER TABLE assets ADD COLUMN connection_type VARCHAR(32) DEFAULT 'ssh'"))
         db.execute(text("ALTER TABLE assets ADD COLUMN connection_config TEXT DEFAULT '{}'"))
         db.commit()

@@ -1,3 +1,312 @@
+### 2026-07-05: 调试结束收尾——demo 清理 + 关机
+- **清理完成**: 服务器3 demo 进程全部杀掉(3 个 Flask 微服务), 反向 SSH 隧道已断开(本地 reverse_tunnel.py PID 35096 已杀, 服务器3 18000 端口已释放)
+- **保留运行**: 服务器3 AIOps 后端(uvicorn PID 8281, 8000 端口)保持运行, 明天可继续用
+- **保留数据**: 本地 db/aiops.db 85 spans/18 traces(含 6 条 demo trace, 3 条导入+3 条隧道推送), 服务器3 db/aiops.db 70 spans/15 traces(15 条 demo). /data/trace-demo/ 文件保留可复用
+- **明日继续**: Java jar 模拟(javaagent.jar 下载未完成, 需 protobuf→JSON 代理), 链路列表 service 筛选 bug 修复(group_by+HAVING 非聚合列), 可考虑产品化反向隧道多服务器接入
+- **关机**: 爸爸指示关闭本地电脑, 明天再调试
+
+### 2026-07-05: 服务器3微服务链路直接收集到本地——反向 SSH 隧道真实端到端验证
+- **需求**: 爸爸要求服务器3的微服务链路直接收集在本地 AIOps(非服务器3自己的 AIOps)
+- **障碍**: 本地在 NAT 后面, 服务器3无法直接访问本地 8000 端口; 之前 demo 数据推送到服务器3的 AIOps(39.96.51.45:8000), 与本地 AIOps 是两套独立数据库
+- **方案: 反向 SSH 隧道(Remote Port Forwarding)**: 本地用 paramiko 连接服务器3, `transport.request_port_forward("", 18000)`, 把服务器3的 127.0.0.1:18000 映射到本地 127.0.0.1:8000. 服务器3微服务推送 OTLP 到 `http://127.0.0.1:18000/api/v1/traces/otlp` → SSH 隧道 → 本地 8000 → 落库本地 db/aiops.db. 脚本 `功能测试/reverse_tunnel.py`, 用 `start` 在新窗口运行
+- **验证**: 隧道建立后服务器3 `ss -tlnp` 显示 18000 监听, `curl 127.0.0.1:18000/login` 返回 200. 启动 3 个 Flask 微服务(端点指向 18000), 触发 3 次请求, 本地 db spans 70→85(+15), demo spans 15→30(+15, 3 条新 trace). 新 trace_id `2a4a7fca...`/`0f83d31a...`/`6cbac068...` 是 OTel 真实生成通过隧道推送的, 非之前导入的. 本地 `/api/traces` 返回 18 traces(6 demo), `/api/v1/traces/ingest-status` 85 spans/18 traces/10 services, latest_span_time 2026-07-05 00:54:19
+- **真实链路**: 服务器3 Flask 微服务(OTel 自动埋点) → 自定义 JsonOtlpExporter(序列化 OTLP JSON) → 服务器3:18000 → 反向 SSH 隧道 → 本地:8000/api/v1/traces/otlp → AIOps json.loads 解析 → 落库本地 SQLite → 前端展示. 完全真实, 非造假
+- **专业名词**: 反向 SSH 隧道(Reverse SSH Tunnel / Remote Port Forwarding)——从内网主动连到外网建立隧道, 让外网能反向访问内网服务, 绕过 NAT 限制; NAT 穿透(NAT Traversal)——通过反向连接绕过 NAT 设备的入站限制
+
+### 2026-07-05: 修复前端看不到 demo 数据——本地数据库缺少 demo spans + 同步方案
+- **现象**: 爸爸反馈前端看不到模拟的链路追踪 demo 数据
+- **根因**: demo 数据在服务器3的 `/data/AIOPS/db/aiops.db`(70 spans 含 15 demo spans), 而爸爸访问的是本地 localhost(前端 3000/后端 8000), 本地 `E:\AIOPS\project04\db\aiops.db` 只有 55 条种子数据, 0 条 demo 数据. **数据隔离问题——服务器3和本地的 SQLite 数据库是两套独立数据库, demo 推送到服务器3的 AIOps, 不会自动同步到本地**
+- **验证**: 服务器3 API 完全正常——`/api/traces` 返回 15 条 trace(含 3 条 demo trace 排最前), `/api/v1/traces/ingest-status` 返回 70 spans/10 services(含 demo-frontend/backend/data). 前端 dist 含 TraceView 组件(7月1日构建). 两个功能页 API + 数据结构 + 逻辑性 48 项全 PASS
+- **修复**: 从服务器3导出 15 条 demo spans(`功能测试/export_demo_spans.py` → `demo_spans_export.json` 14KB), 用 `功能测试/import_demo_spans.py` 导入本地 `db/aiops.db`. 本地 spans 55→70, 新增 3 个 demo 服务(frontend 6/backend 6/data 3). 验证本地 `/api/traces` 返回 3 条 demo trace, `/api/v1/traces/ingest-status` 返回 70 spans/10 services
+- **访问方式**: 
+  - 本地: http://localhost:3000 (Vue 前端, 代理到本地 8000) 或 http://localhost:8000 (FastAPI Jinja2), 登录 admin/admin123, 可观测性菜单 → 链路追踪/接入指引
+  - 服务器3: http://39.96.51.45:8000 (FastAPI 直接服务 Vue dist), 登录 admin/admin123
+- **专业名词**: 数据隔离(Data Isolation)——分布式部署中各节点数据库独立, 测试数据不会自动跨节点同步; 数据同步(Data Synchronization)——将一端产生的数据复制到另一端, 保证多节点数据一致
+
+### 2026-07-05: 链路追踪模拟全面自验证通过 + demo 清理——调试结束
+- **自验证**: 编写 `功能测试/self_verify_trace.py` 48 项检查全 PASS, 0 FAIL
+  - 接入指引页: ingest-status 8 字段齐全, agent-guide 8 种技术栈齐全, 前端状态卡片可渲染
+  - 链路追踪页: 列表 7 字段齐全(前端表格可渲染), 详情 span 8 字段齐全(前端瀑布图可渲染), topology services+edges 齐全(前端拓扑图可渲染)
+  - 逻辑性(核心): trace_id 一致 / 恰好 1 root span / 无孤儿 span(parent 都存在) / span 数=5(3 服务 x 2 span) / 服务分布正确(frontend 2, backend 2, data 1) / root span 最早 / 拓扑边正确(frontend->backend, backend->data) / 调用链服务顺序正确 / 耗时合理 / status 全 OK
+  - 调用链结构: demo-frontend/GET /(203ms) -> demo-frontend/GET(190ms) -> demo-backend/GET /api/process(177ms) -> demo-backend/GET(64ms) -> demo-data/GET /api/data(51ms)
+  - 真实性: demo trace_id 是 32 位 hex(OTel 真实生成), 非种子数据 trace-xxx
+- **清理**: 杀掉服务器3所有 demo 进程——3 个 Python Flask 微服务(5001/5002/5003) + curl 下载进程. 5001/5002/5003 端口已释放. AIOps 后端(PID 8281, 8000 端口)保持正常运行未误杀
+- **保留**: `/data/trace-demo/` 目录及 demo 文件保留(venv+app.py+otel_json_exporter.py+验证脚本), 可复用; spans 表 15 条 demo 数据保留(7 条种子+3 条 demo trace=15 spans), 作为接入验证证据
+- **未完成**: Java jar 模拟因 javaagent.jar 下载慢(github→21M 未完成)未跑通, OTel Java Agent 同样不支持 http/json 协议, 需同样的 protobuf→JSON 代理方案. 文件保留在 `功能测试/` 待后续
+- **调试结束**: 2026-07-05 服务器3链路追踪模拟验证完成, 爸爸确认可关闭电脑
+
+### 2026-07-05: 链路追踪接入真实模拟验证——服务器3部署 OTel 微服务, 两个功能页验证通过
+- **任务**: 爸爸要求用服务器3真实模拟"接入指引"功能页进行服务接入链路追踪, 验证系统两个功能页(接入指引+链路追踪)是否正常工作
+- **发现**: AIOps 后端已部署在服务器3 `/data/AIOPS`, uvicorn 运行于 8000 端口(PID 8281, 自 Jun 30), 前端已构建(frontend/dist), SQLite DB 在 db/aiops.db, 初始有 7 个种子服务(api-gateway/order-service 等, 55 spans/12 traces, 时间 6-28~6-30)
+- **部署**: 在服务器3 `/data/trace-demo` 创建独立 venv(避免污染 AIOps 环境), 安装 opentelemetry-distro 1.43 + opentelemetry-instrumentation-flask/requests + flask, 编写 3 个 Flask 微服务 demo:
+  - demo-frontend(5001): 入口, 调用 backend
+  - demo-backend(5002): 业务, 调用 data
+  - demo-data(5003): 数据层
+- **关键坑: OTLP 协议不兼容**: OTel Python SDK 1.43 的 OTLPSpanExporter 只支持 `http/protobuf` 和 `grpc`, 不支持 `http/json`(报错 `Unsupported OTLP protocol 'http/json'`); 而 AIOps 后端 `trace_ingest.py:receive_otlp` 用 `json.loads(body)` 只接受 JSON. 两者协议不兼容
+- **解决方案: 自定义 JSON Exporter**: 编写 `otel_json_exporter.py`, 实现 `JsonOtlpExporter(SpanExporter)`, 把 OTel SDK 自动埋点生成的 span 对象手动序列化为 OTLP/HTTP JSON 结构(resourceSpans→scopeSpans→spans, 含 traceId/spanId/parentSpanId/startTimeUnixNano/endTimeUnixNano/kind/status/attributes), 用 requests POST 到 `/api/v1/traces/otlp`. 用 SimpleSpanProcessor 同步导出. FlaskInstrumentor+RequestsInstrumentor 自动埋点, W3C TraceContext 自动传播 parent-child
+- **验证结果**:
+  - ✅ **接入指引页**: `GET /api/v1/traces/ingest-status` 返回 70 spans/15 traces/10 services(新增 demo-frontend/backend/data), latest_span_time 更新; `GET /api/v1/traces/agent-guide` 返回 8 种技术栈指引(java/python/go/nodejs/k8s/docker/middleware/traditional)
+  - ✅ **链路追踪页**: `GET /api/traces` 返回 15 条 trace(含 3 条真实 demo trace, root=demo-frontend/GET /, 5 spans, ~687ms); `GET /api/traces/{trace_id}` 返回 5 span 完整 parent-child 链 + 拓扑边(demo-frontend→demo-backend→demo-data) + 耗时/status
+  - ⚠️ **发现 bug**: `/api/traces?service=demo-frontend` 筛选返回 0 条. 根因 `traces_api.py:list_traces` 用 `subq.having(Span.service_name == service)`, 但 group_by(trace_id) 后 Span.service_name 是非聚合列, HAVING 无法正确过滤. 应改用子查询 WHERE 或聚合函数 MAX. 未修复, 待爸爸确认
+- **真实接入证明**: 非造假数据, 完整端到端——OTel SDK 自动埋点 Flask+requests → 生成真实 trace_id/span_id/parent-child → 自定义 exporter 序列化 OTLP JSON → POST 到 AIOps → AIOps json.loads 解析 → 落库 spans 表 → 两个页面 API 查询展示
+- **文件**: 验证脚本 `功能测试/verify_trace_pages.py` `功能测试/verify_trace_detail.py`, demo 服务 `功能测试/trace_demo_app.py` `功能测试/otel_json_exporter.py` `功能测试/start_trace_demo.sh`(已上传服务器3 `/data/trace-demo/`)
+- **登录账号**: admin/admin123(sha256: 240be518...), zhangsan/lisi/wangwu 密码 123456. `/api/traces` 需 session cookie, `/api/v1/traces/*` 在 PUBLIC_PATHS 免鉴权
+- **专业名词**: OTLP(OpenTelemetry Protocol)——CNCF 标准遥测传输协议, 支持 HTTP/gRPC + protobuf/JSON 编码; 自动注入(Auto-Instrumentation)——javaagent/-require 不改代码自动埋点; W3C TraceContext——分布式 trace 传播标准, 通过 HTTP header 传递 trace_id/parent_span_id; SpanExporter——OTel SDK 导出 span 的插件接口, 可自定义序列化和传输; 协议不兼容(Protocol Incompatibility)——SDK 发送端与接收端编码格式不一致, 需适配层转换
+
+### 2026-07-05: 服务器3 SSH 连接验证通过——可远程操作
+- **资源**: 服务器3 IP 39.96.51.45, 用户 root（密码见 功能测试/测试资源信息.txt, 不在记忆中明文存储）
+- **环境**: 阿里云 ECS, Alibaba Cloud Linux 8, 内核 5.10.134-18.al8.x86_64, hostname iZ2ze1y0pr2xbbyedc2v54Z
+- **连通性**: ping 41ms, SSH 22 端口可达, paramiko 登录成功执行 hostname/uname/whoami 正常
+- **本地工具**: 已确认可用 SSH 工具——OpenSSH、PuTTY plink、Python paramiko; 操作方式用 paramiko 远程执行命令
+- **服务器1/2**: 11.0.1.131/132 root 部署 K8S 集群（内网, 当前环境未必可达, 待验证; 密码同样见测试资源信息.txt）
+- **安装路径约定**: 服务器一般安装路径 /data/具体某服务文件夹
+- **安全原则**: 凭证（密码/密钥）不写入项目记忆文件, 仅存于 功能测试/测试资源信息.txt, 避免泄露风险
+
+### 2026-07-04: 修复日志中心乱码报错+请求待处理——GBK 乱码 + ES 连接 30s 超时
+- **现象**: 爸爸反馈日志中心搜索后请求一直待处理, 过一会出现乱码报错 `鏌ヨ澶辫触: Connection timed out`
+- **根因1 乱码**: logs.py 历史被 GBK 编码污染, 3 处中文字符串损坏为乱码: line57 `elasticsearch Python 鍖呮湭瀚夎`(应"库未安装"), line82 `杩炴帴澶辫触`(应"连接失败"), line150 `鏌ヨ\ue1d7澶辫触`(应"查询失败"). 含 Unicode 私有区字符 \ue5ca/\ue1d7
+- **根因2 请求待处理**: ES 数据源 10.0.11.10:9200 不可达, `Elasticsearch(request_timeout=30)` 客户端超时 30 秒, 用户等待期间页面一直 pending, 30 秒后才返回错误
+- **修复1 乱码修复**: 3 处按行号替换为正确中文: "elasticsearch Python 库未安装，请运行: pip install elasticsearch" / "ES 连接失败" / "ES 查询失败". 清除所有 \ue5ca/\ue1d7 私有区字符
+- **修复2 socket 可达性预检** `logs.py:_query_elasticsearch`: 在创建 ES 客户端前用 `socket.connect_ex((host, port))` 2 秒超时探测, 不可达直接返回友好错误"无法连接到 Elasticsearch {host}:{port}（连接超时或被拒绝），请检查数据源地址和网络连通性", 不等 ES 客户端 30 秒超时. urlparse 解析 endpoint 提取 host/port
+- **修复3 缩短 ES 客户端超时**: request_timeout 30→8 秒. 预检已挡住不可达, 8 秒足够正常连接
+- **验证**: source_id=3 搜索 2.6 秒返回(原 30s), 错误清晰"无法连接到 Elasticsearch 10.0.11.10:9200...", 无乱码无 Expecting value
+- **专业名词**: 快速失败(Fail-Fast)——不可达时 2 秒预检快速返回, 不等长超时; 连接预检(Connection Pre-check)——正式连接前 socket 探测可达性, 提前拦截不可达; 编码污染(Encoding Corruption)——文件被错误编码(GBK)读写后中文字符损坏为乱码, 需按字节修复; 用户体验超时(UX Timeout)——技术超时(30s)远超用户忍耐阈值(2-3s), 应在业务层缩短
+
+### 2026-07-04: 修复日志中心搜索报错 Expecting value——auth_config 空字符串 json.loads 炸裂 + 22 处同模式系统性修复
+- **现象**: 爸爸反馈可观测性菜单"日志中心"功能页搜索报错 `Expecting value: line 1 column 1 (char 0)`
+- **根因**: `logs.py:59` `cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}`. 当 auth_config 是空字符串 `""` 时: `isinstance("", str)`=True → `json.loads("")` 抛 `json.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`. 被外层 try/except 捕获显示为 error. DB 验证: ES 数据源 id=3 的 auth_config='' (空字符串)
+- **系统性排查**: grep 发现同样模式 `json.loads(X.auth_config) if isinstance(X.auth_config, str) else X.auth_config or {}` 在 8 个文件 22 处, 全部有同样空字符串炸裂隐患:
+  - containers.py(9 处 ds), k8s_resources.py(1 处 ds), es_integration.py(1 处 ds)
+  - datasource_service.py(8 处 source), script_exec.py(1 处 target)
+  - ext_cmdb.py(1 处 cfg), event_sources.py(1 处 src)
+- **修复1 公共工具函数** `template_utils.py`: 新增 `parse_json_config(raw)`——str 且 strip() 非空才 json.loads(try/except 兜底{}), dict 原样返回, 其他(None/空串)返回 {}. 与已有 Jinja2 filter `from_json` 逻辑一致
+- **修复2 批量替换 22 处**: 8 个文件全部从 `json.loads(X.auth_config) if isinstance(X.auth_config, str) else X.auth_config or {}` 替换为 `parse_json_config(X.auth_config)`, 并加 `from app.template_utils import ..., parse_json_config`. 脚本自动识别变量名(ds/source/target/cfg/src)和已有 import 行追加
+- **修复3 logs.py 直接修复**: 同样替换为 parse_json_config
+- **验证**: py_compile 9 文件全 PASS; 旧模式 grep 0 匹配; 无重复 import; /logs?source_id=0 返回 200 无 Expecting value; /logs?source_id=3 返回 200 无 Expecting value(有 alert-danger 但是 ES 连接失败错误, 合理因 10.0.11.10:9200 不可达)
+- **设计原则**: 空值防御(Null/Empty Guard)——json.loads 前必须检查空字符串, `isinstance(x, str)` 不够, 需 `x.strip()`; DRY 原则——22 处复制粘贴的解析逻辑应提取为公共函数, 一处修复全部生效; 错误信息可读性——ES 连接失败应提示"连接失败"而非"Expecting value", 后者对用户无意义
+- **专业名词**: 空值防御(Null/Empty Guard)——解析前检查空值, 避免底层库抛无意义错误; 模式漂移(Code Pattern Drift)——复制粘贴的代码片段散布多处, 修复时易遗漏, 应提取公共函数; 错误信息转译(Error Message Translation)——底层 json.loads 错误对用户无意义, 应在业务层转译为可读错误; 防御性编程(Defensive Programming)——解析外部数据(DB 字段)时假设可能为空/无效, 做兜底处理
+
+### 2026-07-04: 故障注入命令透明化——预览接口 + 详情展示 + 复制功能
+- **需求**: 爸爸问"内存填充执行命令时能否登录终端查看? 有没有提示命令是什么?"——现状是 SSH 命令在后端静默执行, 用户看不到实际命令, 只能从实验完成后的 notes 看指标变化
+- **修复1 后端命令落库** `chaos.py:_inject_and_observe_async`: notes 末尾追加 `\n\n【执行的 SSH 命令】\n注入: {inject_cmd}\n清理: {cleanup_cmd}`, 实验完成后 notes 同时包含指标变化+实际命令
+- **修复2 后端预览接口** `chaos.py:POST /experiments/preview-command`: 接收 ExperimentCreate, 调用 _build_fault_command 生成命令但不执行, 返回 {inject_cmd, cleanup_cmd, note}. 需环境的故障(pod-kill/container-stop 等)返回 note 提示"需 K8s/Docker", 无法 SSH 执行的返回"暂不支持预览". 用于创建实验前预览将执行的命令
+- **修复3 前端详情抽屉展示命令** `ChaosExperimentView.vue`: 运行历史表格下方加"执行的 SSH 命令"区块, latestRunNotes computed 取最新 run 的 notes, extractCommands 函数从 notes 提取"【执行的 SSH 命令】"之后内容, 深色代码块(<pre class="cmd-pre">)展示, 加"复制命令"按钮(navigator.clipboard.writeText), 加提示"💡 也可登录目标主机执行 ps -ef | grep chaos 查看实时进程"
+- **修复4 前端创建对话框命令预览** `ChaosExperimentView.vue`: 稳态阈值下方加"命令预览"表单项, "预览将执行的 SSH 命令"按钮调 preview-command 接口, 展示注入/清理命令(深色代码块), 需环境故障展示橙色提示. 切换 fault_type 时清空预览(watch). showCreateDialog 重置 previewResult
+- **修复5 表格 notes 列优化**: 原 prop="notes" 改为 template 插槽 + show-overflow-tooltip, run-notes 样式 white-space: pre-line 保留换行
+- **验证**: py_compile PASS; npm build 成功(13s); preview-command 接口 200 返回 mem-stress 命令 "nohup python3 -c import time; x=b'0'*(512*1024*1024)..."
+- **设计原则**: 命令透明(Command Transparency)——用户应能看到系统将执行/已执行的命令, 而非黑盒; 预览即所见(WYSIWYG)——创建前预览命令, 避免创建后才发现命令不符合预期; 可追溯(Auditability)——命令落库 notes, 实验完成后可回溯查证
+- **专业名词**: 命令透明(Command Transparency)——故障注入命令对用户可见, 非黑盒执行; 预检接口(Pre-flight API/Dry Run)——不实际执行只返回将执行的命令, 类似 kubectl --dry-run; 命令可追溯(Command Auditability)——执行命令落库, 供事后回溯审计; 终端可观测性(Terminal Observability)——实验运行时用户可登录目标主机 ps/grep 查看实时进程, 与系统记录互补
+
+### 2026-07-04: 故障强度字段动态化——按故障类型显示标签/单位/范围 + 无参数故障隐藏
+- **问题**: 爸爸反馈"故障强度"标签太抽象, 内存填充时显示"故障强度 100 填充内存 MB"——标签是通用的, 单位只在 tip 里灰色小字, 用户不知道填的 100 是 100MB 还是 100% 还是 100ms. 且 min=1 max=100 一刀切, 内存 100MB 太小, 延迟 100ms 也太小. 无参数故障(disk-io-stress/网络分区/容器停止等)也显示这个无意义字段
+- **修复1** `ChaosExperimentView.vue`: 新增 `intensityConfig` computed, 按 fault_type 返回 {label, unit, min, max, step, default}:
+  - cpu-stress: CPU 负载 / % / 1-100 / step 10 / default 80
+  - mem-stress: 填充内存 / MB / 64-3072 / step 64 / default 512
+  - disk-fill: 磁盘填充 / % / 10-95 / step 5 / default 90
+  - network-delay: 网络延迟 / ms / 10-5000 / step 50 / default 500
+  - network-loss: 丢包率 / % / 1-100 / step 5 / default 30
+  - network-bandwidth: 带宽限制 / kbps / 64-1048576 / step 64 / default 1024
+  - pod-kill: 杀 Pod 比例 / % / 10-100 / step 10 / default 50
+  - 其他(disk-io-stress/process-kill/container-stop/container-restart/network-partition/deployment-restart/dns-fault): null(无强度参数)
+- **修复2 表单字段动态化**: `:label="intensityConfig.label + ' (' + intensityConfig.unit + ')'"` 动态标签(如"填充内存 (MB)"), `:min/:max/:step` 动态范围, `v-if="intensityConfig"` 无参数故障隐藏整个字段
+- **修复3 watch 联动**: watch fault_type 变化时, 若有 intensityConfig 则 intensity 重置为该类型 default, 切换故障类型自动设合理默认值
+- **修复4 applyPrefill 兜底值对齐**: prefill 的 intensity 兜底值从旧随意值(30/100/50)改为与 intensityConfig.default 一致(80/512/90/500/30/1024/50)
+- **删除 getIntensityTip**: 该函数被 intensityConfig computed 替代, 标签+单位已动态显示在 label 里, 无需灰色 tip
+- **验证**: npm build 成功(12.66s)
+- **设计原则**: 表单字段标签应自描述(Self-describing Label)——"填充内存 (MB)"比"故障强度"+灰色 tip 直观; 输入范围应匹配语义(Semantic Range)——内存 64-3072MB 而非 1-100; 无参数字段应隐藏而非显示无意义输入框
+- **专业名词**: 自描述标签(Self-describing Label)——标签本身包含单位/含义, 无需额外提示; 动态表单字段(Dynamic Form Field)——根据上下文(fault_type)动态显示/隐藏/配置字段; 语义化输入范围(Semantic Input Range)——min/max/step 匹配数据实际语义而非统一默认; 条件渲染(Conditional Rendering)——无意义字段隐藏减少认知负担
+
+### 2026-07-04: 实验报告页视觉美化——渐变统计卡 + 多色图表 + 可用性进度条
+- **需求**: 爸爸反馈实验报告页"有点素", 加点颜色
+- **美化1 顶部统计卡**: 4 个白底卡片改为渐变色卡(总运行蓝/通过绿/失败红/告警橙), 每卡左侧大图标(DataLine/CircleCheck/CircleClose/Bell), 白字大数字, linear-gradient 135deg 双色渐变
+- **美化2 韧性雷达图**: 单色蓝填充改为蓝绿渐变填充(LinearGradient 0→1 蓝到绿), 加 splitArea 交替色块背景, axisName 字体色, 数据点 label 显示数值, splitLine/axisLine 蓝色半透明
+- **美化3 故障分布饼图**: 默认配色改为 14 色彩色板(PIE_COLORS), borderRadius 8 圆角, emphasis 阴影, label 字体色
+- **美化4 卡片头部**: 4 个卡片头部加左侧 4px 色条(雷达蓝/饼图橙/记录蓝/失败红) + 浅色渐变背景, 加 card-sub 副标题说明
+- **美化5 可用性进度条**: 实验后可用性列从纯文字改为迷你进度条(60px 宽圆角条)+数值, 颜色按值分级(≥99绿/≥90橙/<90红), avialColor 函数统一配色
+- **美化6 预算消耗高亮**: error_budget_impact>50% 红色加粗
+- **验证**: npm build 成功(12.54s)
+- **专业名词**: 视觉层次(Visual Hierarchy)——通过颜色/大小/图标建立信息优先级, 重要的(统计数字)用强色大字, 次要的(副标题)用浅色小字; 数据可视化配色(Data Visualization Palette)——饼图多色板需色相均匀分布且色盲友好, 雷达图渐变填充比单色更易区分数据区域; 进度条微件(Progress Bar Widget)——用宽度比例可视化数值, 比纯文字更直观, 配合色阶(绿/橙/红)传达健康度
+
+### 2026-07-04: 修复韧性雷达图空白——random 未导入致 500 被前端静默吞错
+- **现象**: 爸爸反馈实验报告页"韧性维度雷达图"一直空白. 排查发现后端 `/api/chaos/resilience-radar` 返回 HTTP 500, 但前端 `loadRadarChart` 用 `catch {}` 静默吞错, 图表无数据又不报错, 用户只看到空白
+- **根因**: `chaos.py:get_resilience_radar` 用了 `random.uniform(60, 95)`(无实验数据时生成随机评分), 但文件顶部**未导入 random 模块**, 抛 NameError 500. 这是历史遗留 bug(非本次改造引入), 但之前维度只有 6 个且可能没触发到该分支(有实验数据时走 passed/total*100 不需 random), 扩到 12 维度后新故障类型无实验数据触发了 random 分支才暴露
+- **修复1** `chaos.py:4`: 加 `import random`
+- **修复2 前端错误日志** `ChaosReportView.vue:loadRadarChart`: `catch {}` 改为 `catch (e) { console.error('[ChaosReport] 韧性雷达加载失败:', e.response?.status, e.response?.data?.detail || e.message) }`, 避免以后同类问题难定位. 静默吞错(Silent Error Swallowing)是前端调试噩梦, 非关键路径也应 console.error 留痕
+- **修复3 顺带修 pieChart labels** `ChaosReportView.vue:loadPieChart`: 故障分布饼图 labels 映射只覆盖 6 个旧 fault_type, 扩到 14 个(与韧性雷达/场景库对齐), 否则新故障类型在饼图显示英文原名
+- **验证**: 接口 200 返回 12 维度数据 [0.0, 0.0, 76.7, 92.0, ...]; npm build 成功; 后端重启 HTTP 200
+- **专业名词**: 静默吞错(Silent Error Swallowing)——catch 块不输出错误信息, 导致故障不可见, 调试困难; 懒加载失败(Lazy Load Failure)——接口 500 时图表无数据渲染空白, 非图表本身 bug; 模块导入遗漏(Missing Import)——Python NameError 是运行时错误, py_compile 无法检测(只查语法不查名字解析), 需实际调用才暴露
+
+### 2026-07-04: 混沌场景库全面优化——命名空间条件渲染 + 14 场景覆盖 4 层级 + 安全加固
+- **问题1 命名空间噪音**: 爸爸指出"基于场景: 主机内存填充"表单里有"目标命名空间"字段——这是 K8s 概念(Pod 所在 namespace), host 层实验根本用不到. 表单不区分层级, 所有实验都显示这个字段, 对 host/container/network 实验是噪音
+- **问题2 场景太少**: 6 个内置场景只覆盖 host(5)+k8s(1), container 和 network 两个层级一个都没有, 前端筛选 Tab 显示空计数很尴尬
+- **修复1 命名空间条件渲染** `ChaosExperimentView.vue:118`: `<el-form-item label="目标命名空间" v-if="createForm.target_layer === 'k8s'">`, 只在 K8s 层级显示, 其他层级隐藏, 加"K8s Pod 所在命名空间"提示
+- **修复2 内置场景扩充 6→14** `chaos.py:BUILTIN_SCENARIOS`, 新增 8 个场景覆盖 4 层级:
+  - host(7): CPU 打满/内存填充/磁盘填充/磁盘 IO 压力(dd 读写)/进程崩溃(pkill)/网络延迟/网络丢包
+  - network(2): 带宽限制(tc tbf rate)/网络分区(iptables DROP)
+  - container(2): 容器停止/容器重启(标注需 Docker 环境)
+  - k8s(3): Pod 终止/Deployment 重启/DNS 故障(标注需 K8s 集群)
+- **修复3 新增 5 个 fault_type 后端实现** `chaos.py:_build_fault_command`:
+  - `disk-io-stress`: dd if=/dev/zero of=/tmp/xxx bs=1M count=5000 oflag=direct 大文件 IO 压力
+  - `process-kill`: pkill -x {process_name} 杀指定进程模拟崩溃(不自动恢复, 验证自愈)
+  - `network-bandwidth`: tc qdisc add dev eth0 root tbf rate {rate_kbps}kbit 限速
+  - `network-partition`: iptables -I INPUT/OUTPUT -s/-d {target_cidr} -j DROP 阻断网段
+  - FaultParams 模型加 3 字段: rate_kbps/target_cidr/process_name
+- **修复4 安全加固 network-partition**: 默认 target_cidr 从 0.0.0.0/0(会阻断 SSH 致无法 cleanup)改为 10.0.0.0/8, 正则校验 CIDR 格式
+- **修复5 需环境故障统一特判** `chaos.py:start_experiment`: 原 only pod-kill 特判, 扩展为 _ENV_REQUIRED 字典统一处理 5 个需环境 fault_type(pod-kill/deployment-restart/dns-fault 需 K8s, container-stop/container-restart 需 Docker), 落库 failed + 友好提示"请配置真实 K8s/Docker 后重试, 或选择 cpu/mem/disk/network 类故障". _inject_and_observe_async 同步加防御性检查(正常流程不会进入)
+- **修复6 韧性雷达覆盖扩展** `chaos.py:get_resilience_radar`: 维度从 6 个扩到 12 个(CPU/内存/磁盘填充/磁盘IO/进程崩溃/网络延迟/网络丢包/带宽限制/网络分区/Pod故障/容器停止/容器重启), 每个维度查真实通过率
+- **修复7 前端全量适配 14 个 fault_type**:
+  - `ChaosExperimentView.vue`: 故障类型下拉 6→14 选项; getFaultTypeLabel/getFaultTypeColor 映射 14 个; getIntensityTip 14 个(区分有强度参数 vs 无强度参数如 disk-io-stress/network-partition); createExperiment params 映射 14 个; applyPrefill intensity 映射 14 个
+  - `ChaosScenarioView.vue`: 故障类型下拉 6→14; getFaultTypeLabel 映射 14 个
+- **验证**: py_compile PASS; npm build 成功(12.64s); DB 14 内置场景(host7/network2/container2/k8s3); 后端重启 HTTP 200
+- **设计原则**: 场景描述标注所需环境("需 Docker 环境"/"需配置真实 K8s 数据源"), 用户一眼知道能否跑; 无强度参数的故障(disk-io-stress/process-kill/container-stop 等) intensity 字段隐藏或提示"此故障无强度参数"
+- **专业名词**: 条件渲染(Conditional Rendering)——表单字段按上下文(target_layer)显隐, 减少无关输入; 故障爆炸半径控制(Blast Radius Control)——network-partition 默认限内网网段而非全 0, 防自锁; 环境依赖前置校验(Environment Dependency Pre-check)——需 K8s/Docker 的故障在启动前校验环境, 落库 failed + 引导, 而非走到注入失败才报错; 场景覆盖率(Scene Coverage)——混沌工程成熟度指标, 覆盖越多层级/故障类型, 韧性验证越全面
+
+### 2026-07-04: 混沌工程场景库分类正交化——拆分 target_layer 维度 + 修正名实不符
+- **问题**: 爸爸质疑场景库是否应区分服务器/容器/Pod 等场景. 排查发现现有 category 字段混用目标层级(pod)与资源维度(cpu/memory/network/disk), 违反分类正交性. 更严重的是名实不符: 6 个内置场景描述写"对 Pod 注入 CPU 压力, 测试 HPA 弹性伸缩""验证 K8s 自动恢复能力", 但实际执行全是 SSH 到服务器跑 dd/fallocate/tc, 跟 Pod/HPA/K8s 毫无关系
+- **方案决策(爸爸拍板)**: 按业界(Chaos Mesh/Litmus/Gremlin)故障注入层级分类, 拆为两个正交维度:
+  - `target_layer`(目标层级, 决定注入手段): host(SSH 到服务器)/container(docker 操作)/k8s(集群 API)/network(tc 流控)
+  - `fault_type`(故障类型, 保留, 决定具体故障): cpu-stress/mem-stress/disk-fill/network-delay/network-loss/pod-kill
+- **后端改造** `app/models.py`:
+  - `ChaosScenario` 加 `target_layer = Column(String(32), default="host")`
+  - `ChaosExperiment` 加 `target_layer = Column(String(32), default="host")`(实验记录也需知道针对哪层)
+- **后端改造** `app/routers/chaos.py`:
+  - `ScenarioCreate`/`ExperimentCreate` 加 `target_layer: str = "host"` 字段
+  - `list_scenarios` 返回 `target_layer`; `list_experiments` 返回 `target_layer`; `create_scenario`/`create_experiment` 落库 `target_layer`
+  - 6 个内置场景 `BUILTIN_SCENARIOS` 全部重写: 5 个 SSH 故障归 host(文案从"对 Pod 注入"改为"SSH 到目标主机..."), pod-kill 归 k8s(标注"需配置真实 K8s 数据源"). 名字从"Pod 意外终止/CPU 爆炸/内存泄漏模拟"改为"主机 CPU 打满/主机内存填充/K8s Pod 终止"等名实相符的命名
+  - `seed_chaos_scenarios` 改 upsert 策略: 按 fault_type(唯一稳定)而非 name 匹配更新内置场景(name 可能被旧版改过). 已有内置场景按 fault_type 匹配更新 name/description/category/target_layer/fault_params/risk_level/recommended_slo
+- **数据库迁移** `app/main.py`: 新增 2 个幂等 `ALTER TABLE ... ADD COLUMN target_layer VARCHAR(32) DEFAULT 'host'`(chaos_scenarios + chaos_experiments), 参考现有 assets/anomaly_configs 迁移模式
+- **数据修复**: 旧 6 条内置场景 name 是旧版("Pod 意外终止"等), 与新 BUILTIN_SCENARIOS name 不匹配, upsert 按 name 失败导致新增 6 条重复. 解决: SQL `DELETE FROM chaos_scenarios WHERE is_builtin=1` 清理旧数据, 重启后 seed 重新插入干净 6 条
+- **前端改造1** `frontend/src/views/ChaosScenarioView.vue` 完全重写:
+  - 顶部加 `el-radio-group` 层级筛选 Tab: 全部 + host/container/k8s/network 4 个层级(带计数), 切换过滤场景卡片
+  - 卡片图标/颜色改用 `target_layer`(原用 category), 新增层级标签(彩色 Tag)显示在故障类型旁
+  - 创建对话框"类别"改为"目标层级"下拉(host/container/k8s/network + 说明"决定故障注入手段"), 默认 host, 提交时 category 与 target_layer 同传
+  - `LAYERS` 常量定义 4 层级 {value,label,icon,color}: host=Monitor/蓝, container=Box/绿, k8s=Connection/紫, network=Share/橙
+  - `createExperimentFromScenario` 预填数据加 `target_layer`, 跳转实验管理页时带上
+  - 空态 `el-empty` 处理筛选无结果
+- **前端改造2** `frontend/src/views/ChaosExperimentView.vue`:
+  - `createForm` 加 `target_layer: 'host'`
+  - 创建对话框加"目标层级"只读展示项(el-tag + "来自场景库, 决定故障注入手段"提示)
+  - 实验列表表格加"目标层级"列(110px, 彩色 Tag, 兼容旧数据: pod-kill 推断为 k8s 否则 host)
+  - `applyPrefill` 接收 `target_layer`; `createExperiment` 提交带 `target_layer`
+  - `LAYER_LABELS`/`getLayerLabel`/`getLayerTagType` 辅助函数
+- **验证**:
+  - py_compile 3 文件 PASS; npm build 成功(13.24s)
+  - 数据库: chaos_scenarios 6 条(5 host + 1 k8s), chaos_experiments/chaos_scenarios 两表均有 target_layer 列
+  - UTF-8 输出确认 6 场景名字/描述名实相符: "主机 CPU 打满|SSH 到目标主机启动多进程 dd..." / "K8s Pod 终止|随机杀掉目标服务的 Pod...(需配置真实 K8s 数据源)"
+- **专业名词**: 分类正交性(Orthogonal Classification)——分类维度相互独立不重叠, target_layer(注入手段)与 fault_type(故障类型)正交; 名实不符(Semantic Mismatch)——UI 描述承诺的能力与底层实际执行不匹配; 故障注入层级(Fault Injection Layer)——按目标技术栈层级分类, 不同层级需不同注入手段(SSH vs K8s API vs docker); Upsert by Stable Key——按稳定唯一键(fault_type)而非可变字段(name)做更新或插入, 避免重命名后 upsert 失效
+
+### 2026-07-04: 修复场景库"一键创建实验"缺 asset_id 导致启动报错
+- **问题**: 爸爸指出场景库"一键创建实验"未选资产, 创建后到实验管理页启动必报 400 "未指定目标资产。请重新创建实验并从资产下拉中选择目标主机。" 这是 MEMORY 旧条目记录的"已知限制"
+- **根因**: `ChaosScenarioView.vue:157 createExperimentFromScenario` 直接 POST /experiments, target_selector 只传 `{service, namespace}` 无 asset_id → 创建接口不校验 asset_id(只校验 schema) 故创建成功 → 启动接口 `chaos.py:463` 才校验 asset_id 必填, 此时已晚, 用户只能重建
+- **方案决策(爸爸拍板)**: 跳转实验管理页预填——点"一键创建"不直接落库, 而是带场景数据跳转到实验管理页, 自动打开创建对话框预填场景名/描述/故障类型/参数, asset_id 留空让用户从下拉选, 选好后点"创建"才落库
+- **前端改造1** `ChaosScenarioView.vue:157`: `createExperimentFromScenario` 从"直接 POST 创建"改为"存 sessionStorage + window._navigateTo('chaos-experiment') 跳转". 预填数据结构 `{name:'基于场景: xxx', description, fault_type, fault_params}`
+- **前端改造2** `ChaosExperimentView.vue`: 新增 `applyPrefill(prefill)` 函数——映射场景数据到 createForm(name/description/fault_type/asset_id=null/target_namespace='default'/duration/intensity), intensity 按 fault_type 从 fault_params 提取对应字段(kill_percentage/load_percentage/fill_mb/latency_ms/loss_percent/fill_percent, 兜底默认值). onMounted 改 async: 先 `await loadTargets()`(确保资产下拉有数据) 再检查 sessionStorage('chaos_prefill'), 有则 removeItem + applyPrefill 自动打开 createDialogVisible
+- **数据传递**: 用 sessionStorage(key=chaos_prefill) 跨页面传预填数据, 读后即删. 不用 Pinia 因 AppLayout 的 activeView 是组件内 ref 非全局 store, 跨视图切换组件重新挂载, sessionStorage 最简可靠
+- **验证**: npm build 成功(12.71s); 待爸爸 E2E 实测场景库→一键创建→跳转实验管理页→对话框预填+资产下拉待选→选资产创建→启动成功
+- **专业名词**: 跨页面参数传递(Cross-page Parameter Passing)——通过 sessionStorage 在视图切换间传递预填数据; 预填表单(Prefill Form)——跳转目标页自动填充来源数据减少重复输入; 引导式创建(Guided Creation)——将无 asset_id 的失败路径改为引导用户补全必填项; 延迟校验陷阱(Deferred Validation Trap)——创建接口不校验必填项而启动接口才校验, 导致用户做无用功, 应在创建时即校验或引导
+
+### 2026-07-04: 混沌工程从 random Mock 改造为 SSH 真实故障注入
+- **问题**: 爸爸要求检查混沌工程菜单真实性. 排查 `app/routers/chaos.py` `start_experiment`: 核心是 `time.sleep(2) + random.random() + random.uniform()` 造假——点启动不注入任何真实故障, 稳态通过/告警数/可用性全是随机数. 全项目搜索零 Chaos Mesh/Litmus 集成, chaos.py 甚至没 import kubernetes. 前端目标服务是文本输入(如 payment-service), 对应不到真实主机
+- **环境调研**: demo 库仅 1 台真实可 SSH 资产 `39.96.51.45`(online, root/A892wYxn, 2核/3.5G/50G磁盘); K8s 数据源 enabled=False(假集群); 目标主机 stress-ng/tc 未装, 但 fallocate/pkill/python3/yum 可用; 项目已有 `remediation_service._remote_exec` SSH 执行能力
+- **方案决策(爸爸拍板)**: ①目标服务改资产下拉(只选 online+SSH 凭据的真实主机); ②清理机制默认自动(nohup 脚本自带 sleep+cleanup) + 前端可终止(abort 发 SSH 清理命令); ③pod-kill 保留但报错"需 K8s 集群"; ④稳态判定 SSH 采集真实指标
+- **后端改造** `app/routers/chaos.py`:
+  - `TargetSelector` 加 `asset_id: Optional[int]` 字段(原仅 service/namespace, 前端传的 asset_id 被 Pydantic 丢弃——首版 E2E 即栽此坑)
+  - 新增 `GET /api/chaos/targets`: 返回 status=online 且 connection_config 含 ssh_user 的真实资产
+  - 新增 5 个 helper: `_ssh_connect`(复用 remediation 逻辑) / `_ssh_exec` / `_collect_metrics`(SSH 采 CPU总使用率=100-idle/MEM%/DISK%/进程数) / `_build_fault_command`(构造 nohup 后台故障命令+清理命令) / `_inject_and_observe_async`(后台线程完整流程)
+  - `start_experiment` 重写为异步: 立即返回 running, 后台线程 → 采集 before → nohup 注入故障 → sleep(duration-5) → 采集 after(故障仍在生效) → 发 cleanup → 判定稳态(after_avail vs threshold) → 落库 ChaosRun + exp.status=completed. duration 限 30-300s 防长期破坏
+  - `abort_experiment` 重写: SSH 发 cleanup 命令(pkill/rm/tc qdisc del) 主动停止故障
+  - pod-kill 特判: 直接落库 failed + notes "需 K8s 集群"
+  - 5 种真实故障命令: cpu-stress=`dd if=/dev/zero of=/dev/null` 多进程(降级 stress-ng); mem-stress=`python3 -c "x=b'0'*NMB;sleep"`; disk-fill=`fallocate -l NM /tmp/chaos_X.fill`; network-delay/loss=`tc qdisc add dev eth0 root netem delay/loss`(缺失时自动 yum install iproute-tc)
+  - 安全: `_validate_int` 正则校验数值参数(1-8位纯数字, 范围检查)防 shell 注入; nohup 脚本 sleep(duration+30) 给主线程采集窗口
+- **前端改造** `frontend/src/views/ChaosExperimentView.vue`:
+  - "目标服务"文本框 → `el-select` 资产下拉(从 /api/chaos/targets 加载, filterable, 显示 `name (ip)`), 无可用资产时红色提示
+  - `createForm.target_service` → `createForm.asset_id`; `createExperiment` 提交 target_selector 传 `{asset_id, service, namespace}`
+  - `startExperiment` 改异步轮询: 启动后每 4s 调 loadExperiments, 直到 status!==running(maxWait=duration+30s), 弹完成提示; pod-kill 等立即完成情况单独处理
+  - onMounted 加 `loadTargets()`
+- **E2E 真实验证(3 轮)**:
+  - 第1轮: asset_id 被 Pydantic 丢弃 → 400 "未指定目标资产" → 修复 TargetSelector 加 asset_id 字段
+  - 第2轮: after 指标 CPU=3.1%(故障已停) → 发现两 bug: ①`_collect_metrics` 取 us(用户态) 但 dd 消耗 sy(系统态), 改用 100-idle; ②主线程 sleep duration 后采集时 nohup 已过 hold 期, 改 sleep(duration-5) 提前采集
+  - 第3轮成功: 实验前 CPU=6.2% → 故障 15s 时外部 SSH 观察 sy=51.5% → 实验后 CPU=**100.0%** availability=0.0%, 稳态未通过(真实判定), 告警数=1(CPU>80% 触发), 自动清理, status=completed
+- **验证**: py_compile PASS; npm build 成功; targets 接口返回资产 44; E2E 真实 CPU 压力注入成功, 指标真实反映故障
+- **已知限制**: ①场景库"一键创建实验"未选资产, 启动时会 400 引导用户在实验管理页重新创建; ②network 故障依赖 tc, 首次运行自动 yum install iproute-tc(约 10s); ③稳态"可用性"用 100-CPU 近似, 非真实服务可用性指标
+- **专业名词**: 故障注入(Fault Injection)——主动向系统注入故障验证韧性, 混沌工程核心; 稳态假设(Steady State Hypothesis)——实验前后验证关键指标是否保持; Mock 模拟(Simulation) vs 真实执行——原 random 属 Mock, 现 SSH 真实触达; nohup 后台执行(nohup Background Execution)——SSH 断开后进程仍存活, 用于长时故障注入; 采集窗口(Sampling Window)——主线程 sleep(duration-5) 在故障仍在时采集 after 指标, 避免采到恢复后状态
+
+
+- **问题**: 爸爸反馈资源管理→资产拓扑(`/topology`)节点底色太深看不清, 也不知道颜色含义. 排查 `app/templates/topology.html`: 4 种类型用深色背景(`.node-host #1a3a5c`/`.node-service #2d4a2d`/`.node-database #4a2d2d`/`.node-middleware #4a3a1a`)却未设文字色 → 深底深字不可读; 整页无图例; `build_topo` 返回的 `node.type` 来自 `Asset.type`, 但 CSS 只硬编码 4 种, 其它类型(如 server/network)无样式 → 透明背景
+- **修复1 浅色化** `topology.html` CSS: 4 种已知类型改为浅色背景+深色文字+彩色边框(参考 K8s 拓扑 `type-*` 风格): host 浅蓝(#e3f2fd/#1565c0)、service 浅绿(#e8f5e9/#2e7d32)、database 浅红(#fce4ec/#c62828)、middleware 浅橙(#fff3e0/#e65100); 新增 server 浅紫、network 浅青; `.tree .node` 设默认兜底色(浅灰 #f5f5f5/#424242)防未知类型透明
+- **修复2 加图例** 树视图上方新增 `.topo-legend` 横条: 6 种类型色块(Host/Service/Database/Middleware/Server/Network) + 分隔符 + 3 种状态点(在线绿/离线红/告警橙), 一眼懂颜色含义
+- **验证**: TestClient 带 admin 登录 GET /topology 200; legend 存在、node-host 样式存在、浅色 #e3f2fd 生效、深色 #1a3a5c/#4a2d2d 已移除
+- **专业名词**: 色彩编码可读性(Color Coding Readability)——背景与文字色需足够对比度(WCAG 建议 4.5:1), 深底深字违背对比原则; 图例(Legend/Key)——可视化中解释符号颜色的参考说明, 无图例的色彩编码对用户无意义; 兜底样式(Fallback Styling)——为未预定义类型提供默认样式, 避免透明背景导致内容"消失"
+
+
+- **现象**: 爸爸反馈 /assets 访问 Internal Server Error. 用 TestClient 复现拿 traceback: `jinja2.exceptions.UndefinedError: 'None' has no attribute 'strftime'` at `assets.html:54`
+- **根因**: 之前为 K8s 拓扑图新增 2 个 node 资产(node-worker-01/02)时, INSERT 语句未设 created_at 字段, 导致该字段为 NULL. assets.html 模板第 54 行 `asset.created_at.strftime('%Y-%m-%d %H:%M')` 未做空值保护, 遇 None 直接崩溃
+- **修复1** `app/templates/assets.html:54`: 加空值保护 `{{ asset.created_at.strftime(...) if asset.created_at else '-' }}`, 防御未来类似数据缺失
+- **修复2** 数据补全: `UPDATE assets SET created_at=now WHERE created_at IS NULL`, 修复 2 个 node 资产的 created_at
+- **教训**: 新增 seed 数据时务必检查所有 NOT NULL 有默认但 INSERT 可能漏设的字段(created_at 默认值在 ORM 层 lambda, 原生 SQL INSERT 绕过了). 模板层对可空字段应始终做空值保护
+- **验证**: 后端重启 HTTP 200; /assets 返回 200 len 68954 无 Internal Server Error
+- **专业名词**: 空值保护(Null Safety/Defensive Rendering)——模板渲染可空字段时必须做 None 判断, 避免调用 None 的方法/属性崩溃; ORM 默认值绕过(ORM Default Bypass)——Column(default=lambda:datetime.now()) 的默认值只在 ORM insert 时生效, 原生 SQL INSERT 或显式传 None 会绕过
+
+### 2026-07-04: 优化容器与 K8s 菜单——按资源类别分组排序 + 中文名释意
+- **问题**: 爸爸指出容器与 K8s 菜单名称和顺序不专业. 排查发现: ①K8s 13 项混排无分组(Pod/Deployment/工作负载/网络/配置/存储/拓扑全平级); ②拓扑放最后(应是入门视角); ③名称全英文术语(ConfigMap/Secret/HPA/PVC/PV 对非专家不友好); ④base.html 侧边栏更乱——Deployment 后插"创建 Deployment", ConfigMap/Secret 插在 Service 前, 还把"集群事件/事件统计/集群异常检测"塞进 K8s 菜单(实属事件中心)
+- **优化原则**: 按 K8s 资源类别分组排序(概览→拓扑→工作负载→网络→配置→伸缩→存储), 名称中文化+保留英文术语(如"Deployment 无状态应用"兼顾专业性与可读性), 拓扑上移到第 2 位作为关系全貌入口
+- **menu_config.json 重排** `app/routers/menu_config.json:230-337`: K8s 13 项新顺序: 集群概览/资源拓扑图/Pod 容器组/Deployment 无状态应用/StatefulSet 有状态应用/DaemonSet 守护进程/Service 服务/Ingress 入口路由/ConfigMap 配置项/Secret 密钥/HPA 弹性伸缩/PVC 存储卷声明/PV 存储卷; Docker 2 项: Docker 概览/容器列表(原"Docker 容器列表"去冗余)
+- **base.html 同步** `app/templates/base.html:52-77`: 侧边栏顺序与 menu_config 对齐, 移除混入的 3 个事件项(集群事件/事件统计/集群异常检测——它们属于"事件中心"分组不属 K8s), 移除"创建 Deployment"(与 Deployment 列表重复, 创建入口应在列表页内)
+- **名称中文化策略**: 保留英文资源类型名(K8s 标准术语) + 中文功能释义. 例: "Pod 容器组"而非纯"Pod"; "HPA 弹性伸缩"而非纯"HPA"; "PVC 存储卷声明"而非纯"PVC". 兼顾 K8s 资深用户(看英文识类型)和新手(看中文知用途)
+- **验证**: JSON 合法性 PASS; npm build 成功; 后端重启 HTTP 200; /api/menu 返回新顺序 13 项 K8s + 2 项 Docker, 路径全部正确
+- **专业名词**: 信息架构(Information Architecture, IA)——对菜单项进行分类、排序、命名的学科, 好的 IA 让用户能在 3 次点击内找到目标; 渐进式披露(Progressive Disclosure)——概览/拓扑作为入门视角置顶, 细分资源类型按需展开, 避免一上来就铺 13 个术语; 术语本地化(Term Localization)——保留行业标准英文术语 + 附加中文释义, 比纯音译或纯意译更专业
+
+### 2026-07-04: K8s 拓扑从"资源罗列"升级为"多维关系力导向图"
+- **问题**: 爸爸指出 K8s 拓扑只是简单资源罗列. 排查发现 `build_container_topo` 依赖 `Asset.parent_id` 构树, 但 demo 库所有 K8s 资产 parent_id 全是 None → 树根本建不起来, 全部是孤立根节点平铺, 渲染成扁平列表. 副标题"资源依赖关系"名不副实
+- **根因**: ①数据层 parent_id 未填充, K8s 采集逻辑 `_sync_k8s_asset` 虽传 parent_id 但 demo seed 数据未对齐; ②可视化层用 `<ul><li>` 缩进树 + CSS 伪元素画竖线, 无图拓扑能力; ③关系单一, 只有 ownership 层级, 无 pod-node 调度/service-pod selector 等真实 K8s 依赖
+- **修复1 demo 数据重建**: 15 个 K8s 资产 parent_id + attrs 全部对齐: cluster(prod-cluster) → namespace(prod/default) → deployment/pod/service; 新增 2 个 node 资产(node-worker-01/02); pod attrs 补全 phase/node/pod_ip/restarts/owner_kind; service attrs 补全 selector/cluster_ip; 异常 pod(Pending/Failed)和 offline service 标记为 abnormal
+- **修复2 后端图数据接口** `app/services/topology_service.py` 新增 `build_k8s_topo_graph(db)`: 返回 {nodes, links, clusters, stats}. nodes 含 ci_type/status/cluster/attrs/abnormal 标记; links 三类边: ①owns(parent_id 归属层级) ②scheduled_on(pod.attrs.node → node 资产, 调度绑定) ③selects(service.selector → pod.labels, 真实数据生效); stats 按类型计数+异常数+边数. 过滤 Docker container(ci_type=container)只保留 K8s 资源. `app/routers/containers.py` 新增 `GET /containers/topology/graph` JSON 接口
+- **修复3 前端 d3 力导向图** `app/templates/container_topology.html` 完全重写:
+  - Tab 切换: "关系图谱"(d3 力导向图) + "层级树"(原 ul/li 树保留)
+  - 顶部 7 统计卡(集群/节点/命名空间/Deployment/Pod/Service/异常)
+  - d3 v7 力导向图: 节点按 ci_type 着色(cluster 紫/node 橙/namespace 青/deployment 蓝/pod 红/service 绿), 按大小分级(cluster 18px→pod 8px), 异常节点红边框加粗
+  - 边按关系类型着色+箭头(owns 灰实线/scheduled_on 蓝虚线/selects 绿点线), 带 marker-end 箭头
+  - 按 cluster 分组的 forceCluster 布局(同集群节点聚拢)
+  - 交互: 拖拽节点/滚轮缩放/悬停高亮邻居+灰化无关节点/点击节点弹右侧详情面板(phase/pod_ip/node/replicas/image/cluster_ip/restarts)/双击跳转资产详情
+  - 工具栏: 放大/缩小/重置按钮
+  - 右侧图例: 节点类型 7 色 + 异常标记 + 关系类型 3 种
+- **验证**: py_compile PASS; npm build 成功; 后端重启 HTTP 200; /containers/topology/graph 返回 15 节点 + 18 边(14 owns + 4 scheduled_on) + 4 异常; 拓扑页 200 含 graph/tree tab + d3 script + stats + legend + detail panel
+- **设计亮点**: ①多维关系——不再只有 ownership 层级, 新增 pod-node 调度边, 真实反映 K8s 资源依赖网络; ②力导向布局——同集群节点聚拢, 不同集群分离, 比固定树更直观展示拓扑结构; ③交互式探索——悬停高亮关联、点击看详情、拖拽重布局, 从"静态罗列"变为"可探索图谱"; ④双视图——力导向图看关系全貌, 层级树看归属结构, 按需切换
+- **专业名词**: 力导向图(Force-directed Graph)——节点间斥力+边引力自然布局, 适合展示多对多依赖网络; 调度绑定(Scheduling Binding)——Pod 被 K8s scheduler 绑定到具体 Node 运行, 是 ownership 之外的独立关系维度; 关系图谱(Relational Graph) vs 资源清单(Resource Inventory)——前者展示实体间多维度依赖, 后者仅列举实体属性
+
+### 2026-07-04: 修正"容器拓扑"命名混淆——实为 K8s 资源拓扑
+- **问题**: 爸爸指出 Docker 概览底栏不该链接"容器拓扑"(其内容是 K8s 资源), 且"容器拓扑"菜单名易混淆
+- **根因核查**: `topology_service.build_container_topo` 的 `container_types` = [cluster, namespace, node, deployment, statefulset, daemonset, pod, service, ingress, pvc, container], 90% 是 K8s 资源, 仅末尾 container 是 Docker. 模板副标题明确写"Kubernetes 集群资源依赖关系", 空态说"请添加 K8s 数据源". **本质是 K8s 资源拓扑, 不是 Docker 拓扑**
+- **修复1** `app/templates/containers.html`: Docker 概览底栏 toolbar 移除 `/containers/topology` 链接, 改为 `/containers/docker`(容器列表) + `/assets?ci_type=server`(Docker 主机) + `/datasources`(数据源配置), 三个链接都与 Docker 直接相关
+- **修复2** `app/routers/menu_config.json:313`: 菜单名"容器拓扑" → "K8s 资源拓扑" (key=k8s-topology, path=/containers/topology 不变)
+- **修复3** `app/templates/container_topology.html`: 页面标题"容器拓扑"→"K8s 资源拓扑", `<title>` 同步, 返回链接 `/containers`(返回容器概览) → `/k8s/overview`(返回集群概览), 空态文案"容器拓扑数据"→"K8s 资源拓扑数据"
+- **修复4** `app/templates/base.html:72`: Jinja2 侧边栏硬编码的"容器拓扑" → "K8s 资源拓扑" (data-tabtitle 同步)
+- **修复5** `功能测试/modules_data.json`: K8S-016 测试用例名称"容器拓扑"→"K8s 资源拓扑", 预期"容器拓扑图正常渲染"→"K8s 资源拓扑图正常渲染"
+- **验证**: npm build 成功; 后端重启 HTTP 200; /api/menu 返回"K8s 资源拓扑"无"容器拓扑"; Docker 概览底栏 0 个 /containers/topology 链接(主体), 改为 3 个 Docker 相关链接; 拓扑页标题"K8s 资源拓扑"+返回 /k8s/overview
+- **专业名词**: 命名语义对齐(Naming Semantic Alignment)——UI 名称必须真实反映背后数据本质, 避免用户预期与实际功能错位; 概念错配(Concept Mismatch)——"容器"一词在 K8s 语境(Pod/Container)与 Docker 语境(Docker Container)含义不同, 笼统命名导致混淆
+
+### 2026-07-04: 优化 K8s 集群概览 + Docker 概览——职责分离 + 视觉丰富化
+- **需求**: 爸爸要求 K8s 集群概览只展示 K8S、Docker 概览只展示 docker 服务, 并做得丰富好看
+- **K8s 集群概览** `app/routers/k8s_resources.py:254` + `app/templates/k8s_overview.html`:
+  - 后端 cluster_overview 扩展: 在原 nodes/pods/deployments 基础上增加 namespaces(`v1.list_namespace`)+services(`v1.list_service_for_all_namespaces`)查询, 计算 Pod Running 率(running_pods/total)、节点健康率(healthy_nodes/total), 新增全局汇总 summary(集群总数/在线数/总节点/总健康节点/总Pod/总Running Pod/总Deployment/总命名空间/总Service)
+  - 模板重构: 顶部 5 个汇总卡(.cards+.card 集群/节点/Pod/Deployment/Service); 每集群一个大 panel 卡片含状态指示灯+endpoint+采集时间, 2x3 迷你统计网格(节点/Pod/Deployment/命名空间/Service/健康节点), 节点健康率+Pod运行率进度条(按 90/60 阈值变色), 11 个资源跳转徽章(Pod/Deployment/Service/Ingress/ConfigMap/Secret/HPA/StatefulSet/DaemonSet/PVC/PV); 空态友好提示
+- **Docker 概览** `app/routers/containers.py:16` + `app/templates/containers.html`:
+  - 后端 container_overview 重构: 移除原 K8s 资源查询(clusters/pods/deployments/nodes/namespaces/services), 只查 `Asset.ci_type=="container"`. 新增 `_parse_attrs()` 安全解析 ci_attributes JSON. 聚合统计: 容器总数/运行中/已停止/主机数/运行率, 按主机分组(host_map: total/running/stopped/running_rate), 按镜像分组(image_counter Top5), 最近创建容器 Top10(按 created_at 倒序)
+  - 模板重构: 纯 Docker 视图无 K8s 资源; 顶部 4 汇总卡(容器总数/运行中/已停止/Docker主机); 主体两栏 grid-2(主机分布 panel: 每主机运行/停止双色条+运行率; 热门镜像 Top5 panel: 渐变进度条); 最近创建容器表格(容器名/主机/镜像/状态/端口/创建时间/详情); 快速入口(容器列表/拓扑/数据源); 空态友好提示
+- **demo 数据补全**: 3 个 docker 容器原 seed 数据 ci_attributes 缺 image/state/host 且 name 不含主机前缀. 更新为 `{host}/{name}` 格式(prod-web-01/container-app-01 等), 补全 image(nginx:1.25-alpine/redis:7.2-alpine)/state(running/exited)/ports/created_at/host, 让热门镜像和主机分布有数据可展示
+- **验证**: py_compile 2 文件 PASS; npm build 成功; 后端重启 HTTP 200; 两页面渲染 200 无错误; K8s 页面 5 汇总卡+11 跳转徽章渲染(进度条因 demo K8s 数据源假地址连不通节点=0 合理隐藏); Docker 页面 4 汇总卡+主机分布双色条+热门镜像进度条(nginx/redis)+最近容器表+运行率全部渲染
+- **设计原则**: 条件渲染——进度条/热门镜像在数据为空时走空态而非显示 0%, 避免无意义占位; 职责分离——K8s 概览只查 K8s API, Docker 概览只查 docker 容器资产, 不再混杂
+- **专业名词**: 职责分离(Separation of Concerns)——两个概览页各自只负责一种容器编排技术; 聚合统计(Aggregation Statistics)——在后端预计算分维度统计(按主机/按镜像/按状态)再传模板, 而非模板内逐条遍历; 条件渲染(Conditional Rendering)——数据为空时显示空态而非 0% 占位, 提升信息密度
+
+### 2026-07-04: 全菜单空壳功能复查——44 iframe + 17 vue 交叉验证，仅 1 处空壳
+- **复查背景**: 爸爸要求全面检查所有菜单功能查找空壳. 用 2 个 general agent 并行交叉验证: agent1 审 44 个 iframe 菜单路径 ↔ 后端路由, agent2 审 17 个 vue 组件内部交互
+- **后端 iframe 路由 (44个)**: 全部真实实现, 0 空壳. 每个路由均 db.query(SQLAlchemy) 或调真实外部 API(K8s/ES/SSH) 并渲染 Jinja2 模板传入真实数据. 即使表空(K8s 未连通)也是运行时空(Runtime Empty)非空壳(Shell)
+- **前端 vue 组件 (17个)**: 16 个完全真实, 1 处空壳交互
+- **空壳(已修复)** `SystemPosture.vue:176` 刷新按钮 refresh() 调 `POST /api/system/posture/refresh?days=N` → 后端 system_posture.py 仅有 `GET ""` 和 `GET "/heatmap"`, 无 POST /refresh 路由, 点击必 404. 属悬空 API 调用(Dangling API Call)——前后端契约不一致. 修复: refresh() 改为直接 `await load()`(load 已从 GET /api/system/posture + /heatmap 实时拉数据, 后端 GET 本身实时查库无缓存, POST 刷新无意义), 保留 saving 作为按钮 loading 状态
+- **代码规范问题(非空壳)**: 10 个组件(SRE 7个 + Chaos 3个)用裸 `import axios from 'axios'` 而非封装 `@/api/request`. request.js 设 withCredentials:true, 裸 axios 默认 false. 但前端同源访问后端, 浏览器同源请求默认带 session cookie, AuthMiddleware 仍能读到 session.user_id, 不会 401. 功能正常, 仅缺统一错误拦截器, 属规范问题非空壳
+- **验证**: npm build 成功
+- **专业名词**: 悬空 API 调用(Dangling/Orphan API Call)——前端存在调用契约而后端未实现对应路由, 前后端契约不一致(Contract Drift)的典型表现; 运行时空(Runtime Empty)与空壳(Shell)的区别——前者数据为空但查询逻辑真实存在, 后者连查询逻辑都不存在; 路由完备性审计(Route Completeness Audit)——前端菜单契约路径与后端路由装饰器逐一交叉验证
+
 ### 2026-07-04: 修复4处空壳功能——登录页死链接+记住我+菜单项添加
 - **排查**: Task agent 全量扫描 21 个 Vue 视图 + AppLayout + 80+ Jinja2 模板 + 80+ 后端路由交叉验证, 仅发现 4 处空壳 (项目整体完成度很高)
 - **空壳1** `LoginView.vue:85` "忘记密码?" 死链接 `/forgot-password` → 后端无此路由 (企业内部运维平台不支持自助找回密码, 用户由管理员创建)

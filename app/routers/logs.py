@@ -54,9 +54,34 @@ def _query_elasticsearch(source, query_str, time_range, page, size):
     try:
         from elasticsearch import Elasticsearch
     except ImportError:
-        return [], 0, "elasticsearch Python 鍖呮湭瀹夎"
+        return [], 0, "elasticsearch Python 库未安装，请运行: pip install elasticsearch"
 
-    cfg = json.loads(source.auth_config) if isinstance(source.auth_config, str) else source.auth_config or {}
+    # 连接前 socket 可达性预检（2 秒快速失败，不等 ES 客户端长超时）
+    import socket
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(source.endpoint)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 9200
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        if result != 0:
+            return [], 0, f"无法连接到 Elasticsearch {host}:{port}（连接超时或被拒绝），请检查数据源地址和网络连通性。"
+    except Exception as e:
+        return [], 0, f"ES 地址解析失败: {e}"
+
+    raw = source.auth_config
+    if isinstance(raw, str) and raw.strip():
+        try:
+            cfg = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            cfg = {}
+    elif isinstance(raw, dict):
+        cfg = raw
+    else:
+        cfg = {}
     auth = ()
     if cfg.get("username") and cfg.get("password"):
         auth = (cfg["username"], cfg["password"])
@@ -64,13 +89,13 @@ def _query_elasticsearch(source, query_str, time_range, page, size):
 
     try:
         if api_key:
-            es = Elasticsearch(source.endpoint, api_key=api_key, request_timeout=30)
+            es = Elasticsearch(source.endpoint, api_key=api_key, request_timeout=8)
         elif auth:
-            es = Elasticsearch(source.endpoint, basic_auth=auth, request_timeout=30)
+            es = Elasticsearch(source.endpoint, basic_auth=auth, request_timeout=8)
         else:
-            es = Elasticsearch(source.endpoint, request_timeout=30)
+            es = Elasticsearch(source.endpoint, request_timeout=8)
     except Exception as e:
-        return [], 0, f"杩炴帴澶辫触: {e}"
+        return [], 0, f"ES 连接失败: {e}"
 
     # Time range
     now = datetime.now()
@@ -138,5 +163,5 @@ def _query_elasticsearch(source, query_str, time_range, page, size):
             es.close()
         except Exception:
             pass
-        return [], 0, f"鏌ヨ澶辫触: {e}"
+        return [], 0, f"ES 查询失败: {e}"
 

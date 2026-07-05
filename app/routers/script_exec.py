@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import DataSource, ScriptTask
-from app.template_utils import get_templates
+from app.template_utils import get_templates, parse_json_config
 
 router = APIRouter(prefix="/script", tags=["script"])
 templates = get_templates()
@@ -33,7 +33,7 @@ def execute_script(
     if not target:
         raise HTTPException(404, "Target not found")
 
-    cfg = json.loads(target.auth_config) if isinstance(target.auth_config, str) else target.auth_config or {}
+    cfg = parse_json_config(target.auth_config)
     host = target.api_url or cfg.get("host") or target.name
     port = cfg.get("port", 22)
     username = cfg.get("username", "root")

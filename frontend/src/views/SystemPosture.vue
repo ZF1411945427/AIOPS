@@ -173,10 +173,7 @@ async function load() {
 async function refresh() {
   saving.value = true
   try {
-    await request.post(`/api/system/posture/refresh?days=${days.value}`)
     await load()
-  } catch (e) {
-    console.error(e)
   } finally {
     saving.value = false
   }

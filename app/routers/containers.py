@@ -1,11 +1,12 @@
 import json
+from collections import Counter
 from datetime import datetime
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.template_utils import get_templates
+from app.template_utils import get_templates, parse_json_config
 from app.models import Asset, DataSource
 from app.services import asset_service, topology_service, pod_health_service
 
@@ -13,24 +14,94 @@ router = APIRouter(prefix="/containers", tags=["containers"])
 templates = get_templates()
 
 
+def _parse_attrs(c):
+    """安全解析 ci_attributes JSON，兼容 str/dict/None"""
+    if not c.ci_attributes:
+        return {}
+    if isinstance(c.ci_attributes, dict):
+        return c.ci_attributes
+    try:
+        return json.loads(c.ci_attributes)
+    except Exception:
+        return {}
+
+
 @router.get("", response_class=HTMLResponse)
 def container_overview(request: Request, db: Session = Depends(get_db)):
-    clusters = db.query(Asset).filter(Asset.ci_type == "cluster").all()
-    pods = db.query(Asset).filter(Asset.ci_type == "pod").all()
-    deployments = db.query(Asset).filter(Asset.ci_type == "deployment").all()
-    nodes = db.query(Asset).filter(Asset.ci_type == "node").all()
-    namespaces = db.query(Asset).filter(Asset.ci_type == "namespace").all()
-    services = db.query(Asset).filter(Asset.ci_type == "service").all()
+    """Docker 容器概览——只展示 Docker 容器服务，聚合统计"""
     docker_containers = db.query(Asset).filter(Asset.ci_type == "container").all()
+
+    # 聚合统计
+    total = len(docker_containers)
+    running_count = 0
+    stopped_count = 0
+    host_map = {}      # host -> {total, running, stopped}
+    image_counter = Counter()
+    host_set = set()
+    recent_containers = []
+
+    for c in docker_containers:
+        attrs = _parse_attrs(c)
+        state = attrs.get("state", "")
+        image = attrs.get("image", "-")
+        host = c.name.split("/")[0] if "/" in c.name else (attrs.get("host", "-"))
+        host_set.add(host)
+        is_running = (state == "running") or (c.status == "online")
+        if is_running:
+            running_count += 1
+        else:
+            stopped_count += 1
+        if image and image != "-":
+            image_counter[image] += 1
+        # 主机分布
+        if host not in host_map:
+            host_map[host] = {"total": 0, "running": 0, "stopped": 0}
+        host_map[host]["total"] += 1
+        if is_running:
+            host_map[host]["running"] += 1
+        else:
+            host_map[host]["stopped"] += 1
+        # 最近创建容器
+        created = attrs.get("created_at", "")
+        recent_containers.append({
+            "id": c.id,
+            "name": c.name.split("/")[-1] if "/" in c.name else c.name,
+            "host": host,
+            "image": image,
+            "state": "running" if is_running else "stopped",
+            "status_text": attrs.get("status", "-"),
+            "ports": attrs.get("ports", "-"),
+            "created_at": created,
+        })
+
+    # 按创建时间倒序（字符串排序兼容 ISO 时间格式）
+    recent_containers.sort(key=lambda x: x["created_at"], reverse=True)
+    recent_containers = recent_containers[:10]
+
+    # 主机分布转列表并按容器数倒序
+    host_stats = [
+        {"host": h, **v, "running_rate": round(v["running"] / v["total"] * 100, 1) if v["total"] else 0}
+        for h, v in host_map.items()
+    ]
+    host_stats.sort(key=lambda x: x["total"], reverse=True)
+
+    # 热门镜像 Top 5
+    top_images = [{"image": img, "count": cnt} for img, cnt in image_counter.most_common(5)]
+
+    summary = {
+        "total": total,
+        "running": running_count,
+        "stopped": stopped_count,
+        "host_count": len(host_set),
+        "running_rate": round(running_count / total * 100, 1) if total else 0,
+    }
+
     return templates.TemplateResponse("containers.html", {
         "request": request,
-        "clusters": clusters,
-        "pods": pods,
-        "deployments": deployments,
-        "nodes": nodes,
-        "namespaces": namespaces,
-        "services": services,
-        "docker_containers": docker_containers,
+        "summary": summary,
+        "host_stats": host_stats,
+        "top_images": top_images,
+        "recent_containers": recent_containers,
     })
 
 
@@ -77,9 +148,18 @@ def deployment_list(request: Request, cluster: str = "", namespace: str = "", db
 @router.get("/topology", response_class=HTMLResponse)
 def container_topology(request: Request, db: Session = Depends(get_db)):
     trees = topology_service.build_container_topo(db)
+    stats = topology_service.build_k8s_topo_graph(db)["stats"]
     return templates.TemplateResponse("container_topology.html", {
-        "request": request, "trees": trees,
+        "request": request, "trees": trees, "stats": stats,
     })
+
+
+@router.get("/topology/graph")
+def container_topology_graph(db: Session = Depends(get_db)):
+    """K8s 资源关系图数据（d3 力导向图用）：nodes + links + clusters + stats"""
+    from fastapi.responses import JSONResponse
+    data = topology_service.build_k8s_topo_graph(db)
+    return JSONResponse(data)
 
 
 @router.get("/pod/{asset_id}", response_class=HTMLResponse)
@@ -112,7 +192,7 @@ def pod_logs(asset_id: int, tail: int = 100, db: Session = Depends(get_db)):
 
     try:
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -147,7 +227,7 @@ async def pod_log_ws(websocket: WebSocket, asset_id: int):
             return
 
         from kubernetes import config, client, watch
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -193,7 +273,7 @@ async def pod_terminal_ws(websocket: WebSocket, asset_id: int):
             return
 
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -336,7 +416,7 @@ def deployment_rollout(asset_id: int, image: str = Form(""), db: Session = Depen
             return PlainTextResponse("K8s data source not found", status_code=404)
 
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -371,7 +451,7 @@ def deployment_scale(asset_id: int, replicas: int = Form(...), db: Session = Dep
             return PlainTextResponse("K8s data source not found", status_code=404)
 
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -396,7 +476,7 @@ def deployment_canary(asset_id: int, canary_replicas: int = Form(1), db: Session
         if not ds:
             return PlainTextResponse("K8s data source not found", status_code=404)
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -438,7 +518,7 @@ def deployment_promote(asset_id: int, db: Session = Depends(get_db)):
         if not ds:
             return PlainTextResponse("K8s data source not found", status_code=404)
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -472,7 +552,7 @@ def deployment_rollback(asset_id: int, revision: int = Form(0), db: Session = De
             return PlainTextResponse("K8s data source not found", status_code=404)
 
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
         else:
@@ -519,7 +599,7 @@ def deploy_create(
         if not ds:
             return PlainTextResponse("Cluster not found", status_code=404)
         from kubernetes import config, client
-        cfg = json.loads(ds.auth_config) if isinstance(ds.auth_config, str) else ds.auth_config or {}
+        cfg = parse_json_config(ds.auth_config)
         try:
             if cfg.get("in_cluster"):
                 config.load_incluster_config()

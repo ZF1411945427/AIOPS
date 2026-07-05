@@ -72,5 +72,13 @@ tok.txt
 .env
 .env.*
 
+# ===== 含真实服务器密码，禁止入库 =====
+功能测试/测试资源信息.txt
+功能测试/reverse_tunnel.py
+
+# ===== 一次性数据库修复脚本 =====
+/_fix_k8s_data.py
+/_fix_*.py
+
 # ===== 开发工具配置（含 API Key，禁止入库）=====
 opencode.json
