@@ -1341,3 +1341,46 @@ class AgentWorkflowNodeRun(Base):
             return json.loads(self.output) if self.output else {}
         except (json.JSONDecodeError, TypeError):
             return {}
+
+
+# ─── Ansible 运维操作：主机清单 / Playbook 模板 / 执行历史 ───
+class AnsibleInventory(Base):
+    """Ansible 主机清单（YAML 格式）"""
+    __tablename__ = "ansible_inventories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False)
+    description = Column(String(256), default="")
+    content = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class AnsiblePlaybook(Base):
+    """Ansible Playbook 模板（YAML 格式）"""
+    __tablename__ = "ansible_playbooks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False)
+    description = Column(String(256), default="")
+    content = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class AnsibleRun(Base):
+    """Ansible 执行历史记录"""
+    __tablename__ = "ansible_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    inventory_id = Column(Integer, nullable=True)
+    playbook_id = Column(Integer, nullable=True)
+    inventory_name = Column(String(128), default="")
+    playbook_name = Column(String(128), default="")
+    extra_vars = Column(Text, default="")
+    output = Column(Text, default="")
+    error = Column(Text, default="")
+    exit_code = Column(Integer, default=0)
+    status = Column(String(32), default="pending")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    finished_at = Column(DateTime, nullable=True)

@@ -90,3 +90,9 @@ app/static/uploads/
 AIOPSproject04cookies.txt
 AIOPSproject04login_resp.txt
 test_user.json
+
+# ===== 授权许可证（防破解，禁止入库）=====
+tools/private_key.pem
+license.lic
+tools/license.lic
+data/license_state.json

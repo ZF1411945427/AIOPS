@@ -183,6 +183,12 @@
         "path": "/script"
       },
       {
+        "key": "ansible",
+        "label": "Ansible 运维",
+        "type": "vue",
+        "path": "/ansible"
+      },
+      {
         "key": "blue-green",
         "label": "蓝绿发布",
         "type": "vue",
@@ -337,6 +343,12 @@
             "label": "PV 存储卷",
             "type": "vue",
             "path": "/k8s/pvs"
+          },
+          {
+            "key": "k8s-namespaces",
+            "label": "Namespace 命名空间",
+            "type": "vue",
+            "path": "/k8s/namespaces"
           }
         ]
       },
@@ -355,6 +367,18 @@
             "label": "容器列表",
             "type": "vue",
             "path": "/containers/docker"
+          }
+        ]
+      },
+      {
+        "key": "helm",
+        "label": "Helm",
+        "items": [
+          {
+            "key": "helm-releases",
+            "label": "Helm 应用",
+            "type": "vue",
+            "path": "/helm/releases"
           }
         ]
       }
@@ -505,6 +529,12 @@
         "label": "集成管理",
         "type": "vue",
         "path": "/es-integration"
+      },
+      {
+        "key": "license",
+        "label": "授权管理",
+        "type": "vue",
+        "path": "/license"
       }
     ]
   }

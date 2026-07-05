@@ -1,3 +1,116 @@
+### 2026-07-06: 三大功能集成注册 + 全量验证通过（主 agent 收尾）
+- **集成注册**(主 agent 统一完成，避免子 agent 并发改公共文件冲突):
+  - `app/main.py`: import helm/ansible/license + 3 个 include_router + import LicenseMiddleware + add_middleware(LicenseMiddleware)（注册于 AuthMiddleware 后、SessionMiddleware 前，执行序 Session→License→Auth→GZip→路由）
+  - `app/routers/menu_config.json`: +4 菜单 k8s-namespaces(Kubernetes子组 k8s-pvs后) / helm-releases(Helm子组 docker后) / ansible(任务中心 script-exec后) / license(系统管理 integration后)
+  - `frontend/src/layout/AppLayout.vue`: +3 import(HelmView/AnsibleView/LicenseView) +4 v-else-if(k8s-namespaces/helm-releases/ansible/license) +VUE_PAGES Set +4 key
+  - `frontend/src/api/request.js`: 拦截器加 403+license_status 检测，自动 window._navigateTo('license') 跳授权页
+- **开发授权签发**: 用 tools/generate_license.py 签发 license.lic（绑定本机指纹 745669fc51036a82a28a0cd9e7a61040，旗舰版，2036-12-31 到期，全功能，max_nodes 9999），供开发/验收；出售时爸爸用私钥签发客户指纹有限期 lic
+- **验证全 PASS**: 后端 ast.parse 6文件 OK / import app.main OK 316路由 / 启动 Uvicorn 8000 PORT OPEN / /license/api/status active 旗舰版 剩余3831天 / /api/menu 74 keys 含4新 / /helm/api/status 未安装友好提示 / /ansible/api/status 未安装 / /k8s/api/namespaces 200 / /ansible/api/inventories|playbooks 200空 / 前端 npm run build 14.23s 2409 modules
+- **架构文档** `AIOPS系统架构设计.md`: 追加第十二章(K8S资源声明式管理+Helm应用管理)/十三章(Ansible运维操作平台)/十四章(授权许可证控制防破解)，更新日期 2026-07-06
+- **子 agent 分工**: 4 个 general agent 并行——K8S资源创建(改 k8s_resources.py+K8sResourceListView.vue) / Helm全栈(新建 helm.py+HelmView.vue) / Ansible全栈(追加 models+新建 ansible.py+AnsibleView.vue) / 授权全栈(新建 license_service.py+license.py+LicenseView.vue+generate_license.py+密钥对)；各自只碰自己文件，公共注册文件由主 agent 统一改避免冲突
+- **专业名词**: 中间件链路顺序(Middleware Chain Order,后注册先执行外层)、授权降级(Authorization Degradation)、声明式资源管理(Declarative Resource Management)、子 agent 任务隔离(Subagent Task Isolation)
+
+### 2026-07-06: 授权有效期控制功能（防破解 RSA 许可证）全栈实现
+- **需求**: 爸爸要求实现平台出售的「授权有效期控制」功能，必须防破解：RSA 非对称签名 + 机器指纹绑定 + 时钟防回拨 + 中间件拦截 + 前端授权页 + 离线签发工具
+- **防破解设计**: RSA-2048 非对称签名(私钥离线保管+公钥硬编码) / 机器指纹绑定(MAC+CPU+磁盘+主机名 SHA256 前32字符) / 时钟防回拨(data/license_state.json 记录 last_check_time，now < last-60s 则 locked) / 离线验证 / 多点校验(LicenseMiddleware+前端授权页+10s缓存) / 过期降级(403+放行授权管理接口)
+- **新建文件**: app/services/license_service.py(核心服务+LicenseMiddleware) / app/routers/license.py(prefix=/license,6个API) / frontend/src/views/LicenseView.vue(状态卡+上传+指纹+进度) / tools/generate_license.py(离线签发) / tools/private_key.pem+public_key.pem(RSA-2048,私钥已gitignore)
+- **许可证格式**: `BASE64(payload_json_utf8)."."BASE64(rsa_signature)`，payload={customer,edition,issued_at,expire_at,fingerprint,max_nodes,features}，PKCS1v15+SHA256 签名
+- **依赖**: cryptography 44.0.0 已装；用 uuid.getnode+wmic/lsblk 跨平台收集指纹
+- **验证全 PASS**: 语法3文件OK / 指纹745669fc51036a82a28a0cd9e7a61040 / 签发633bytes / 验签valid=True / 篡改检测valid=False / 指纹绑定匹配 / 剩余543天active / 时钟回拨10天→locked→清除→active
+- **主 agent 集成注意点**: main.py 加 import license + include_router + add_middleware(LicenseMiddleware)(建议在 AuthMiddleware 之后) / menu_config.json 系统管理分组加 key=license path=/license type=vue / AppLayout.vue import LicenseView + v-else-if key=license + VUE_PAGES Set 加 license / .gitignore 已追加 tools/private_key.pem + license.lic + tools/license.lic + data/license_state.json
+- **专业名词**: RSA 非对称签名许可证(私钥签发公钥验签,攻击者无私钥无法伪造); 机器指纹绑定(MAC+CPU+磁盘+主机名 SHA256 绑定单机); 时钟防回拨(记录最后已知时间,回拨超容差锁死); 离线验证(纯本地验签不依赖网络); 过期降级(失效后403锁功能但放行授权管理接口); 中间件拦截(请求链路前置校验授权)
+
+### 2026-07-06: K8s 资源创建/删除功能全量扩展（8 类资源 16 个 API + 前端表单）
+- **需求**: 爸爸要求扩展 K8s 资源「创建/删除」功能，当前仅 Deployment+HPA 能创建，其他资源只能查看
+- **后端** `app/routers/k8s_resources.py`(末尾追加 ~280 行):
+  - 新增 16 个创建/删除 API + 1 个 namespace 列表 GET(补全，让 namespace 资源可查看)
+  - `POST /k8s/api/namespaces/create` + `POST /k8s/api/namespaces/{cluster}/{name}/delete`(namespace 集群级，路径无 namespace 段)
+  - `POST /k8s/api/statefulsets/create`(body: image/replicas/service_name/container_port/cpu_request/cpu_limit/mem_request/mem_limit) + delete
+  - `POST /k8s/api/daemonsets/create` + delete
+  - `POST /k8s/api/services/create`(body: type/port/target_port/protocol) + delete
+  - `POST /k8s/api/ingresses/create`(body: host/path/service_name/service_port/tls，tls 自动生成 secretName={name}-tls) + delete
+  - `POST /k8s/api/configmaps/create`(body: data 对象) + delete
+  - `POST /k8s/api/secrets/create`(body: data 明文，后端 base64 编码) + delete
+  - `POST /k8s/api/pvcs/create`(body: storage/access_mode/storage_class) + delete
+  - 辅助函数 `_build_resources(payload)` 统一构造容器 resources.requests/limits(cpu/memory)
+  - 校验: cluster/name 必填 → 400，ds 不存在 → 404，异常 → 500 {ok:false,error}
+  - 复用现有 `_get_k8s_client(ds)` 返回 (CoreV1Api, AppsV1Api, NetworkingV1Api)
+- **前端** `frontend/src/views/K8sResourceListView.vue`:
+  - TITLE_MAP/COLUMN_MAP 加 namespaces(列: name/status/age)，badgeClass 加 Active/Terminating 状态
+  - toolbar「+ 创建」按钮统一化(canCreate computed 覆盖 9 类资源)，hpas 转发原 openCreateHpa 保留原对话框
+  - 通用创建对话框(modal-lg): form-grid 双列网格，按 resourceType v-if 渲染字段，configmaps/secrets 用 createDataRows 键值行(复用 .cm-row 样式)
+  - 每行加「删除」按钮(canDeleteRow + deleteRow)，ElMessageBox 确认，namespace 走无 namespace 段路径
+  - openCreate/buildCreatePayload/saveCreate: 按类型组装 payload 调 `/k8s/api/{type}/create`
+  - 保留 configmaps 查看/编辑、hpas 创建/编辑/删除原逻辑不变
+  - CSS 新增 .form-grid(2列) .req(红星) .data-block .data-block-title
+- **验证**: 后端 `ast.parse` OK；前端 `npm run build` 15.16s 成功(无编译错误，仅已有动态导入 warning)
+- **集成注意**: namespace 资源类型是新增的，主 agent 需在 menu_config.json + AppLayout.vue 加 `namespaces` 菜单 key(指向 K8sResourceListView，resourceType='namespaces')
+- **专业名词**: 集群级资源(Cluster-scoped Resource)——Namespace 不属于任何命名空间，API 路径无 namespace 段; 声明式创建(Declarative Create)——构造 dict body 传给 kubernetes client create 方法; 资源配额(Resource Quota)——containers.resources.requests/limits 的 cpu/memory; Base64 编码保密(Base64-encoded Secret)——K8s Secret data 值必须 base64 编码存储; 表单条件渲染(Conditional Form Rendering)——单一对话框按 resourceType v-if 渲染不同字段块
+
+### 2026-07-06: Ansible 运维操作功能全栈实现（主机清单/Playbook 模板/执行/历史）
+- **需求**: 爸爸要求新建 Ansible 运维操作功能，含主机清单管理、Playbook 模板管理、执行(调用 ansible-playbook CLI)、执行历史；通过 subprocess 调用
+- **后端** `app/models.py`(末尾追加 3 模型,不改动现有):
+  - `AnsibleInventory`(ansible_inventories): name(unique)/description/content(YAML)/created_at/updated_at
+  - `AnsiblePlaybook`(ansible_playbooks): name(unique)/description/content(YAML)/created_at/updated_at
+  - `AnsibleRun`(ansible_runs): inventory_id/playbook_id/inventory_name/playbook_name/extra_vars(JSON字符串)/output/error/exit_code/status(pending/running/completed/failed)/created_at/finished_at
+- **后端** `app/routers/ansible.py`(新建, prefix=/ansible):
+  - 14 个 API: GET/POST/PUT/DELETE /api/inventories · GET/POST/PUT/DELETE /api/playbooks · POST /api/run(执行) · GET /api/runs(最近50条) · GET/DELETE /api/runs/{id} · GET /api/status(ansible-playbook --version 检测) · POST /api/test-inventory(ansible all -m ping)
+  - 执行流程: 创建 AnsibleRun(status=running) → tempfile.NamedTemporaryFile 写 inventory.yml+playbook.yml → subprocess.run(["ansible-playbook","-i",inv,pb,"-e",extra_vars_json], timeout=300) → 捕获 FileNotFoundError(未安装)/TimeoutExpired → 更新 output/error/exit_code/status/finished_at → os.unlink 清理临时文件
+  - datetime 用 strftime("%Y-%m-%d %H:%M:%S") 格式化; output 截断 20000 字符, error 截断 8000
+  - Pydantic 校验 InventoryCreate/PlaybookCreate/RunCreate/TestInventoryReq
+  - **未修改** main.py(主 agent 集成 include_router)、menu_config.json(主 agent 加菜单)、AppLayout.vue(主 agent 加 import/v-else-if)
+- **前端** `frontend/src/views/AnsibleView.vue`(新建, 组件名 AnsibleView):
+  - 页头: 标题+副标题+ansible 状态提示(已安装绿点/未安装橙点)
+  - Tab 切换: 「执行历史」「主机清单」「Playbook 模板」
+  - 执行历史 tab: 执行按钮(打开对话框: 选 inventory+选 playbook+extra_vars JSON textarea)+表格(id/inventory/playbook/status彩色badge/exit_code/created_at/finished_at/操作:查看/删除)+查看弹窗(完整 output 等宽 pre 块可滚动)
+  - 主机清单 tab: 表格+新建/编辑对话框(name/description/content YAML textarea)+测试连接(调 test-inventory 显示结果弹窗)+删除
+  - Playbook 模板 tab: 表格+新建/编辑对话框+删除
+  - status badge: .badge.green(成功)/.red(失败)/.blue(运行中)/.gray(等待)
+  - YAML 编辑区 textarea + ui-monospace 等宽字体
+  - 参考风格: K8sResourceListView.vue (.panel/.table/.modal-overlay/.modal-box/.form-row/.input/.btn/.badge)
+  - CSS 变量: var(--text)/var(--bg-card)/var(--accent)/var(--text-secondary)/var(--border)
+- **验证**:
+  - `python -c ast.parse ansible.py` → OK
+  - `python -c ast.parse models.py` → OK
+  - 前端 Read 通读结构完整
+- **建议菜单 key**: ansible, 放在"任务中心"分组(tasks) script-exec 之后, path: /ansible
+- **主 agent 集成注意点**:
+  1. main.py 加 `from app.routers import ansible` + `app.include_router(ansible.router)`
+  2. menu_config.json tasks 组 items 加 `{key:"ansible",label:"Ansible 运维",type:"vue",path:"/ansible"}`
+  3. AppLayout.vue 加 `import AnsibleView from '@/views/AnsibleView.vue'` + v-else-if="activeMenu==='ansible'" + VUE_PAGES Set 加 'ansible'
+  4. 后端 Base.metadata.create_all 启动时自动建 3 张新表(无需手动迁移)
+  5. ansible 未安装时所有执行 API 返回 status=failed/error="未找到 ansible-playbook 命令", status API 返回 installed=false
+- **专业名词**: 主机清单(Inventory)——Ansible 管理的目标主机集合,INI/YAML 格式定义主机与分组; Playbook——YAML 格式的自动化任务剧本,定义 hosts+tasks; 额外变量(Extra vars, -e)——运行时注入的动态参数,JSON 字符串传入; 临时文件模式(Tempfile Pattern)——执行时写临时 inventory.yml/playbook.yml,执行后 os.unlink 清理,避免污染工作目录; 子进程超时(Subprocess Timeout)——subprocess.run timeout=300 防止任务卡死; 命令存在性检测(Command Presence Check)——shutil.which 判断 CLI 是否安装
+
+### 2026-07-06: 新建 Helm 资源管理功能（全栈，subprocess 调 helm CLI）
+- **需求**: 爸爸要求新建 Helm 仓库管理 + Release 列表 + 安装/升级/卸载/回滚/历史，通过 subprocess 调 helm CLI 实现
+- **后端** `app/routers/helm.py`(新建, prefix=/helm, tags=["helm"]):
+  - 13 个 API: GET /api/status(helm version) / GET /api/repos(helm repo list -o json) / POST /api/repos/add / POST /api/repos/remove / POST /api/repos/update / GET /api/releases(helm list -A -o json, 需 KUBECONFIG) / GET /api/charts(helm search repo) / POST /api/install / POST /api/upgrade / POST /api/uninstall / POST /api/rollback / GET /api/history / GET /api/status/{cluster}/{namespace}/{name}(helm status -o json)
+  - `_run_helm(cmd, env, timeout)`: subprocess.run(capture_output, text, timeout=120), 捕获 FileNotFoundError 返回 helm_missing 友好错误, 捕获 TimeoutExpired
+  - `_prepare_kubeconfig(db, cluster)`: 从 DataSource(type=kubernetes, name=cluster) 取 auth_config, parse_json_config 解析 kubeconfig(dict→json.dumps), 写 tempfile.NamedTemporaryFile(suffix=".kubeconfig", delete=False), 设 env KUBECONFIG=临时路径, 返回 (env, tmp_path, err); endpoint 用 try/finally _cleanup 删临时文件
+  - install/upgrade 写 values 临时 .values.yaml 文件传 -f, 加 --create-namespace; 无注释, 中文提示, JSONResponse
+- **前端** `frontend/src/views/HelmView.vue`(新建, <script setup>):
+  - 3 Tab: Release 列表 / 仓库管理 / 安装应用, 用原生 .tab-bar button 切换保持项目风格(项目未用 el-tabs)
+  - Release: 集群下拉(从 /datasources/api/list 过滤 type=kubernetes) + 表格(name/namespace/chart/version/status badge/updated + 查看/回滚/卸载); 查看弹窗显示 status 详情(name/ns/chart/version/status badge/notes) + history 表格; 回滚弹窗选 revision(降序) + 确认; 卸载 ElMessageBox.confirm
+  - 仓库管理: helm 状态 alert + 添加仓库表单(name+url) + 更新仓库索引按钮 + 仓库列表表格(name/url/删除)
+  - 安装应用: 表单(集群/Release名/Chart/namespace/version) + chart 搜索(防抖 400ms 调 /helm/api/charts, 点击 chart-item 填入) + Values YAML 可折叠 textarea(等宽字体) + 安装/升级按钮
+  - 状态 badge 颜色: deployed/superseded=绿, failed=红, pending*=黄, 其它=灰
+  - CSS 复用 .panel/.table/.modal-overlay/.form-row/.input/.btn/.badge/.btn-primary/.btn-danger, CSS 变量 var(--text/--bg-card/--accent/--border) 等
+- **集成注意点**(主 agent 需做):
+  - **后端路由注册**: app/main.py 需 import helm + include_router(helm.router) — 本任务禁止改 main.py, 需主 agent 补
+  - **菜单注册**: menu_config.json 在"容器与K8s"分组 docker 之后加 helm-releases 菜单项 {key:"helm-releases", label:"Helm 应用", type:"vue", path:"/helm/releases"}
+  - **AppLayout.vue 集成**: 需 import HelmView + 加 v-else-if="activeView==='helm-releases'" + VUE_PAGES Set 加 key — 本任务禁止改 AppLayout.vue, 需主 agent 补
+  - **构建**: cd frontend && npm run build
+- **验证**: 后端 ast.parse OK; 前端结构完整 670 行; LSP 报错均为其他历史文件(k8s_resources.py/containers.py/main.py)与本次新建无关
+- **专业名词**: subprocess CLI 包装(CLI Wrapper via subprocess)——用子进程调外部 CLI 而非 SDK, 捕获 FileNotFoundError/Timeout 友好降级; KUBECONFIG 临时文件注入(Ephemeral Kubeconfig Injection)——写临时文件设环境变量传 kubeconfig 给子进程, 用完即删避免泄漏; 临时文件清理(Temp File Cleanup)——try/finally 确保临时 kubeconfig/values 文件删除避免堆积; 命令防抖搜索(Debounced Search)——input 事件 setTimeout 400ms 防抖避免频繁调 API; 上下文菜单状态(Contextual Menu State)——单页多 Tab 用 activeTab 切换避免多路由; Helm Release 生命周期(Lifecycle)——install→upgrade→rollback→uninstall 完整链路 + history 多版本回溯
+
+### 2026-07-06: 项目启动踩坑——前端 Vite 启动有延迟，netstat 检查过早会误判
+- **现象**: `start "AIOps Frontend" cmd /k "npm run dev --prefix frontend"` 启动后，前 5-8 秒 `netstat | findstr :3000` 看不到 LISTENING，误以为未启动；实际 vite 进程已在后台加载，约 10-15 秒后才真正监听 3000
+- **二次踩坑**: 误判后再前台 `npm run dev` → vite 提示 "Port 3000 is in use, trying another one..." 自动改用 3001（因后台那个已占用 3000）
+- **正确验证姿势**: 启动前端后等待 ≥15 秒，用 HTTP 请求验证（`urllib.urlopen('http://127.0.0.1:3000')` 返回 200），不要仅靠 netstat 早判
+- **当前运行状态**: 后端 8000 (PID 4436) + 前端 3000 (PID 10920, node.exe) 均 HTTP 200
+- **专业名词**: 端口监听就绪延迟(Port Listen-ready Latency)——进程已启动但尚未完成 bind+listen，netstat 短暂查不到; 端口占用回退(Port-in-use Fallback)——Vite 检测端口被占自动切换下一端口(3000→3001); 探活验证(Health-check Verification)——用 HTTP 200 响应而非端口状态判定服务真正可用
+
 ### 2026-07-05: 全菜单刷新保持当前页（修复刷新跳回默认仪表盘）
 - **需求**: 爸爸反馈在 SLO 配置等页面刷新会跳回默认仪表盘，要求全部菜单刷新都停留在自己的页面
 - **根因** `frontend/src/layout/AppLayout.vue`:

@@ -13,7 +13,7 @@
       <input v-model="filters.namespace" class="input ns-input" placeholder="命名空间（留空查全部）" @keyup.enter="loadList" />
       <button class="btn" @click="loadList">查询</button>
       <button class="btn" @click="resetFilters">重置</button>
-      <button v-if="resourceType === 'hpas'" class="btn btn-primary" @click="openCreateHpa">+ 创建 HPA</button>
+      <button v-if="canCreate" class="btn btn-primary" @click="openCreate">+ 创建 {{ title }}</button>
     </div>
 
     <div v-if="errorMsg" class="error-banner">⚠️ {{ errorMsg }}</div>
@@ -44,6 +44,7 @@
                   <button class="btn btn-sm" @click="openEditHpa(it)">编辑</button>
                   <button class="btn btn-sm btn-danger" @click="deleteHpa(it)">删除</button>
                 </template>
+                <button v-if="canDeleteRow(it)" class="btn btn-sm btn-danger" @click="deleteRow(it)">删除</button>
               </td>
             </tr>
           </tbody>
@@ -112,6 +113,158 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showCreate" class="modal-overlay" @click.self="closeCreate">
+      <div class="modal-box modal-lg">
+        <h3>创建 {{ title }}</h3>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>集群 <span class="req">*</span></label>
+            <select v-model="createForm.cluster" class="input">
+              <option value="">请选择集群</option>
+              <option v-for="c in clusters" :key="c.name" :value="c.name">{{ c.name }}</option>
+            </select>
+          </div>
+          <div v-if="resourceType !== 'namespaces'" class="form-row">
+            <label>命名空间</label>
+            <input v-model="createForm.namespace" class="input" placeholder="default" />
+          </div>
+          <div class="form-row">
+            <label>名称 <span class="req">*</span></label>
+            <input v-model="createForm.name" class="input" :placeholder="namePlaceholder" />
+          </div>
+          <template v-if="resourceType === 'statefulsets' || resourceType === 'daemonsets'">
+            <div class="form-row">
+              <label>镜像 <span class="req">*</span></label>
+              <input v-model="createForm.image" class="input" placeholder="如: nginx:1.25" />
+            </div>
+            <div class="form-row">
+              <label>容器端口</label>
+              <input v-model.number="createForm.container_port" type="number" min="1" class="input" placeholder="80" />
+            </div>
+          </template>
+          <div v-if="resourceType === 'statefulsets'" class="form-row">
+            <label>副本数</label>
+            <input v-model.number="createForm.replicas" type="number" min="0" class="input" placeholder="1" />
+          </div>
+          <div v-if="resourceType === 'statefulsets'" class="form-row">
+            <label>Headless Service</label>
+            <input v-model="createForm.service_name" class="input" placeholder="如: web-svc（留空则用名称）" />
+          </div>
+          <template v-if="resourceType === 'statefulsets' || resourceType === 'daemonsets'">
+            <div class="form-row">
+              <label>CPU 请求</label>
+              <input v-model="createForm.cpu_request" class="input" placeholder="如: 100m" />
+            </div>
+            <div class="form-row">
+              <label>CPU 上限</label>
+              <input v-model="createForm.cpu_limit" class="input" placeholder="如: 500m" />
+            </div>
+            <div class="form-row">
+              <label>内存请求</label>
+              <input v-model="createForm.mem_request" class="input" placeholder="如: 128Mi" />
+            </div>
+            <div class="form-row">
+              <label>内存上限</label>
+              <input v-model="createForm.mem_limit" class="input" placeholder="如: 512Mi" />
+            </div>
+          </template>
+          <template v-if="resourceType === 'services'">
+            <div class="form-row">
+              <label>类型</label>
+              <select v-model="createForm.svc_type" class="input">
+                <option value="ClusterIP">ClusterIP</option>
+                <option value="NodePort">NodePort</option>
+                <option value="LoadBalancer">LoadBalancer</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>端口 <span class="req">*</span></label>
+              <input v-model.number="createForm.port" type="number" min="1" class="input" placeholder="80" />
+            </div>
+            <div class="form-row">
+              <label>目标端口</label>
+              <input v-model.number="createForm.target_port" type="number" min="1" class="input" placeholder="80" />
+            </div>
+            <div class="form-row">
+              <label>协议</label>
+              <select v-model="createForm.protocol" class="input">
+                <option value="TCP">TCP</option>
+                <option value="UDP">UDP</option>
+              </select>
+            </div>
+          </template>
+          <template v-if="resourceType === 'ingresses'">
+            <div class="form-row">
+              <label>Host <span class="req">*</span></label>
+              <input v-model="createForm.host" class="input" placeholder="如: app.example.com" />
+            </div>
+            <div class="form-row">
+              <label>路径</label>
+              <input v-model="createForm.path" class="input" placeholder="/" />
+            </div>
+            <div class="form-row">
+              <label>Service 名称 <span class="req">*</span></label>
+              <input v-model="createForm.svc_name" class="input" placeholder="如: web-svc" />
+            </div>
+            <div class="form-row">
+              <label>Service 端口 <span class="req">*</span></label>
+              <input v-model.number="createForm.svc_port" type="number" min="1" class="input" placeholder="80" />
+            </div>
+            <div class="form-row">
+              <label>启用 TLS</label>
+              <select v-model="createForm.tls" class="input">
+                <option :value="false">否</option>
+                <option :value="true">是</option>
+              </select>
+            </div>
+          </template>
+          <template v-if="resourceType === 'secrets'">
+            <div class="form-row">
+              <label>类型</label>
+              <select v-model="createForm.secret_type" class="input">
+                <option value="Opaque">Opaque</option>
+                <option value="kubernetes.io/tls">kubernetes.io/tls</option>
+                <option value="kubernetes.io/dockerconfigjson">kubernetes.io/dockerconfigjson</option>
+              </select>
+            </div>
+          </template>
+          <template v-if="resourceType === 'pvcs'">
+            <div class="form-row">
+              <label>容量 <span class="req">*</span></label>
+              <input v-model="createForm.storage" class="input" placeholder="如: 5Gi" />
+            </div>
+            <div class="form-row">
+              <label>访问模式</label>
+              <select v-model="createForm.access_mode" class="input">
+                <option value="ReadWriteOnce">ReadWriteOnce</option>
+                <option value="ReadOnlyMany">ReadOnlyMany</option>
+                <option value="ReadWriteMany">ReadWriteMany</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>StorageClass</label>
+              <input v-model="createForm.storage_class" class="input" placeholder="留空使用默认" />
+            </div>
+          </template>
+        </div>
+
+        <div v-if="resourceType === 'configmaps' || resourceType === 'secrets'" class="data-block">
+          <div class="data-block-title">数据键值（{{ resourceType === 'secrets' ? '明文值，提交时自动 Base64 编码' : 'ConfigMap 值' }}）</div>
+          <div v-for="(row, i) in createDataRows" :key="i" class="cm-row">
+            <input v-model="row.key" class="input cm-key" placeholder="键" />
+            <textarea v-model="row.value" class="input cm-val" rows="2" :placeholder="resourceType === 'secrets' ? '明文值' : '值'"></textarea>
+            <button class="btn btn-sm btn-danger" @click="createDataRows.splice(i, 1)">删</button>
+          </div>
+          <button class="btn btn-sm" @click="createDataRows.push({ key: '', value: '' })">+ 新增键</button>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn" @click="closeCreate">取消</button>
+          <button class="btn btn-primary" :disabled="createSaving" @click="saveCreate">{{ createSaving ? '保存中...' : '保存' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -125,6 +278,7 @@ const props = defineProps({
 })
 
 const TITLE_MAP = {
+  namespaces: 'Namespace',
   statefulsets: 'StatefulSet',
   daemonsets: 'DaemonSet',
   services: 'Service',
@@ -137,6 +291,11 @@ const TITLE_MAP = {
 }
 
 const COLUMN_MAP = {
+  namespaces: [
+    { key: 'name', label: '名称' },
+    { key: 'status', label: '状态', render: 'badge' },
+    { key: 'age', label: '创建时间' },
+  ],
   statefulsets: [
     { key: 'name', label: '名称' },
     { key: 'namespace', label: '命名空间' },
@@ -222,10 +381,36 @@ const hpaDialogMode = ref('create')
 const hpaSaving = ref(false)
 const hpaForm = reactive({ cluster: '', namespace: 'default', name: '', target: '', min_replicas: 1, max_replicas: 3, cpu_percent: 80 })
 
+const showCreate = ref(false)
+const createSaving = ref(false)
+const createForm = reactive({
+  cluster: '', namespace: 'default', name: '',
+  image: '', replicas: 1, container_port: 80, service_name: '',
+  cpu_request: '', cpu_limit: '', mem_request: '', mem_limit: '',
+  svc_type: 'ClusterIP', port: 80, target_port: 80, protocol: 'TCP',
+  host: '', path: '/', svc_name: '', svc_port: 80, tls: false,
+  secret_type: 'Opaque',
+  storage: '5Gi', access_mode: 'ReadWriteOnce', storage_class: '',
+})
+const createDataRows = ref([])
+
+const CREATE_TYPES = ['namespaces', 'statefulsets', 'daemonsets', 'services', 'ingresses', 'configmaps', 'secrets', 'pvcs', 'hpas']
+const DELETE_ROW_TYPES = ['namespaces', 'statefulsets', 'daemonsets', 'services', 'ingresses', 'configmaps', 'secrets', 'pvcs']
+
+const canCreate = computed(() => CREATE_TYPES.includes(props.resourceType))
+const namePlaceholder = computed(() => {
+  const m = {
+    namespaces: '如: dev-team', statefulsets: '如: web-sts', daemonsets: '如: log-agent',
+    services: '如: web-svc', ingresses: '如: web-ingress', configmaps: '如: app-config',
+    secrets: '如: app-secret', pvcs: '如: data-pvc', hpas: '如: web-hpa',
+  }
+  return m[props.resourceType] || '名称'
+})
+
 const title = computed(() => TITLE_MAP[props.resourceType] || props.resourceType)
 const subtitle = computed(() => `${title.value} 资源列表`)
 const columns = computed(() => COLUMN_MAP[props.resourceType] || [])
-const hasAction = computed(() => props.resourceType === 'configmaps' || props.resourceType === 'hpas')
+const hasAction = computed(() => ['namespaces', 'statefulsets', 'daemonsets', 'services', 'ingresses', 'configmaps', 'secrets', 'pvcs', 'hpas'].includes(props.resourceType))
 
 function rowKey(it) {
   return (it.namespace || '') + '/' + (it.name || '') + '/' + Math.random().toString(36).slice(2, 6)
@@ -233,8 +418,8 @@ function rowKey(it) {
 
 function badgeClass(key, val) {
   if (key === 'status') {
-    if (val === 'Bound' || val === 'Available') return 'green'
-    if (val === 'Pending') return 'yellow'
+    if (val === 'Bound' || val === 'Available' || val === 'Active') return 'green'
+    if (val === 'Pending' || val === 'Terminating') return 'yellow'
     return 'gray'
   }
   return 'gray'
@@ -378,6 +563,138 @@ async function deleteHpa(it) {
   }
 }
 
+function canDeleteRow(it) {
+  if (props.resourceType === 'hpas') return false
+  return DELETE_ROW_TYPES.includes(props.resourceType)
+}
+
+function openCreate() {
+  if (props.resourceType === 'hpas') {
+    openCreateHpa()
+    return
+  }
+  createForm.cluster = filters.cluster || (clusters.value[0]?.name || '')
+  createForm.namespace = filters.namespace || 'default'
+  createForm.name = ''
+  createForm.image = ''
+  createForm.replicas = 1
+  createForm.container_port = 80
+  createForm.service_name = ''
+  createForm.cpu_request = ''
+  createForm.cpu_limit = ''
+  createForm.mem_request = ''
+  createForm.mem_limit = ''
+  createForm.svc_type = 'ClusterIP'
+  createForm.port = 80
+  createForm.target_port = 80
+  createForm.protocol = 'TCP'
+  createForm.host = ''
+  createForm.path = '/'
+  createForm.svc_name = ''
+  createForm.svc_port = 80
+  createForm.tls = false
+  createForm.secret_type = 'Opaque'
+  createForm.storage = '5Gi'
+  createForm.access_mode = 'ReadWriteOnce'
+  createForm.storage_class = ''
+  createDataRows.value = (props.resourceType === 'configmaps' || props.resourceType === 'secrets') ? [{ key: '', value: '' }] : []
+  showCreate.value = true
+}
+
+function closeCreate() {
+  showCreate.value = false
+  createDataRows.value = []
+}
+
+function buildCreatePayload() {
+  const t = props.resourceType
+  const p = { cluster: createForm.cluster, namespace: createForm.namespace || 'default', name: createForm.name }
+  if (t === 'statefulsets') {
+    p.image = createForm.image
+    p.replicas = createForm.replicas
+    p.service_name = createForm.service_name
+    p.container_port = createForm.container_port
+    p.cpu_request = createForm.cpu_request
+    p.cpu_limit = createForm.cpu_limit
+    p.mem_request = createForm.mem_request
+    p.mem_limit = createForm.mem_limit
+  } else if (t === 'daemonsets') {
+    p.image = createForm.image
+    p.container_port = createForm.container_port
+    p.cpu_request = createForm.cpu_request
+    p.cpu_limit = createForm.cpu_limit
+    p.mem_request = createForm.mem_request
+    p.mem_limit = createForm.mem_limit
+  } else if (t === 'services') {
+    p.type = createForm.svc_type
+    p.port = createForm.port
+    p.target_port = createForm.target_port
+    p.protocol = createForm.protocol
+  } else if (t === 'ingresses') {
+    p.host = createForm.host
+    p.path = createForm.path
+    p.service_name = createForm.svc_name
+    p.service_port = createForm.svc_port
+    p.tls = createForm.tls
+  } else if (t === 'configmaps' || t === 'secrets') {
+    const data = {}
+    for (const r of createDataRows.value) {
+      if (r.key) data[r.key] = r.value
+    }
+    p.data = data
+    if (t === 'secrets') p.type = createForm.secret_type
+  } else if (t === 'pvcs') {
+    p.storage = createForm.storage
+    p.access_mode = createForm.access_mode
+    p.storage_class = createForm.storage_class
+  }
+  return p
+}
+
+async function saveCreate() {
+  if (!createForm.cluster || !createForm.name) {
+    ElMessage.warning('请填写集群和名称')
+    return
+  }
+  if (props.resourceType === 'statefulsets' || props.resourceType === 'daemonsets') {
+    if (!createForm.image) { ElMessage.warning('请填写镜像'); return }
+  }
+  if (props.resourceType === 'ingresses') {
+    if (!createForm.host || !createForm.svc_name) { ElMessage.warning('请填写 Host 和 Service 名称'); return }
+  }
+  const payload = buildCreatePayload()
+  createSaving.value = true
+  try {
+    await request.post(`/k8s/api/${props.resourceType}/create`, payload)
+    ElMessage.success('已创建')
+    closeCreate()
+    loadList()
+  } catch (e) {
+    ElMessage.error('创建失败: ' + (e.message || e))
+  } finally {
+    createSaving.value = false
+  }
+}
+
+async function deleteRow(it) {
+  const t = props.resourceType
+  const label = it.name
+  try {
+    await ElMessageBox.confirm(`确认删除 ${title.value}「${label}」？该操作不可恢复。`, '删除确认', { type: 'warning' })
+    let url
+    if (t === 'namespaces') {
+      url = `/k8s/api/namespaces/${filters.cluster}/${it.name}/delete`
+    } else {
+      url = `/k8s/api/${t}/${filters.cluster}/${it.namespace}/${it.name}/delete`
+    }
+    await request.post(url)
+    ElMessage.success('已删除')
+    loadList()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('删除失败: ' + (e.message || e))
+  }
+}
+
 watch(() => props.resourceType, () => {
   items.value = []
   loadList()
@@ -433,4 +750,9 @@ onMounted(loadList)
 .form-row label { display: block; font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 4px; }
 .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+.form-grid .form-row { margin-bottom: 0; }
+.req { color: #ef4444; margin-left: 2px; }
+.data-block { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border, rgba(0,0,0,0.07)); }
+.data-block-title { font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 8px; }
 </style>
