@@ -254,6 +254,51 @@ def create_oncall(data: OnCallScheduleCreate, db: Session = Depends(get_db_sessi
     return obj
 
 
+@router.get("/oncall/members")
+def list_oncall_members(db: Session = Depends(get_db_session)):
+    """聚合所有值班表的成员，作为成员复用候选库（主数据聚合）"""
+    rows = db.query(OnCallSchedule.members).all()
+    seen = []
+    for (m_json,) in rows:
+        if not m_json:
+            continue
+        try:
+            for m in json.loads(m_json):
+                if m and m not in seen:
+                    seen.append(m)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return {"members": seen}
+
+
+@router.put("/oncall/{oncall_id}", response_model=OnCallScheduleResponse)
+def update_oncall(oncall_id: int, data: OnCallScheduleCreate, db: Session = Depends(get_db_session)):
+    """更新值班表"""
+    obj = db.query(OnCallSchedule).filter(OnCallSchedule.id == oncall_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="OnCall schedule not found")
+    obj.team_name = data.team_name
+    obj.rotation_type = data.rotation_type
+    obj.members = json.dumps(data.members)
+    obj.schedule = json.dumps(data.schedule)
+    obj.current_oncall = data.current_oncall
+    obj.current_period_start = data.current_period_start
+    obj.current_period_end = data.current_period_end
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@router.delete("/oncall/{oncall_id}")
+def delete_oncall(oncall_id: int, db: Session = Depends(get_db_session)):
+    """删除值班表"""
+    obj = db.query(OnCallSchedule).filter(OnCallSchedule.id == oncall_id).first()
+    if obj:
+        db.delete(obj)
+        db.commit()
+    return {"status": "ok"}
+
+
 @router.get("/oncall/current")
 def get_current_oncall(db: Session = Depends(get_db_session)):
     """获取当前值班人"""

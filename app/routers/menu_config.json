@@ -60,6 +60,18 @@
         "path": "/prediction-models"
       },
       {
+        "key": "agent-workflow-editor",
+        "label": "智能体编排",
+        "type": "vue",
+        "path": "/agent-workflow/editor"
+      },
+      {
+        "key": "agent-workflow-runs",
+        "label": "智能体执行",
+        "type": "vue",
+        "path": "/agent-workflow/runs"
+      },
+      {
         "key": "audit",
         "label": "智能体审计",
         "type": "vue",
@@ -181,6 +193,18 @@
         "label": "变更审批",
         "type": "vue",
         "path": "/change-workflow"
+      },
+      {
+        "key": "workflow-runs",
+        "label": "工作流执行",
+        "type": "vue",
+        "path": "/workflow/runs"
+      },
+      {
+        "key": "workflow-templates",
+        "label": "工作流模板",
+        "type": "vue",
+        "path": "/workflow/templates"
       }
     ]
   },
