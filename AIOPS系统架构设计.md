@@ -1539,4 +1539,140 @@ agent_workflow_node_runs:
 
 ---
 
-*最后更新: 2026-07-05*
+## 十二、K8s 资源声明式管理 + Helm 应用管理（新增）
+
+### 12.1 K8s 资源创建落地
+
+在原 Deployment/HPA 创建能力基础上，补齐 K8s 原生资源的声明式创建与删除，覆盖容器编排全生命周期。
+
+| 资源类型 | API 端点 | K8s API | 说明 |
+|---------|---------|---------|------|
+| **Namespace** | `POST /k8s/api/namespaces/create` | CoreV1Api.create_namespace | 集群级资源，无 namespace 段 |
+| **StatefulSet** | `POST /k8s/api/statefulsets/create` | AppsV1Api.create_namespaced_stateful_set | 有状态应用，含 service_name/headless 关联 |
+| **DaemonSet** | `POST /k8s/api/daemonsets/create` | AppsV1Api.create_namespaced_daemon_set | 守护进程，每节点一副本 |
+| **Service** | `POST /k8s/api/services/create` | CoreV1Api.create_namespaced_service | ClusterIP/NodePort/LoadBalancer 三型 |
+| **Ingress** | `POST /k8s/api/ingresses/create` | NetworkingV1Api.create_namespaced_ingress | 七层路由，自动 TLS secret 生成 |
+| **ConfigMap** | `POST /k8s/api/configmaps/create` | CoreV1Api.create_namespaced_config_map | 键值配置，支持查看/编辑/创建 |
+| **Secret** | `POST /k8s/api/secrets/create` | CoreV1Api.create_namespaced_secret | data 值后端 Base64 编码存储 |
+| **PVC** | `POST /k8s/api/pvcs/create` | CoreV1Api.create_namespaced_persistent_volume_claim | 存储卷声明，含 storage_class/access_mode |
+
+每个资源均提供 `POST /k8s/api/{type}/{cluster}/{namespace}/{name}/delete` 删除端点。前端 `K8sResourceListView.vue` 按资源类型条件渲染创建表单（form-grid 双列网格）+ 行内删除按钮（ElMessageBox 确认）。
+
+### 12.2 Helm 应用管理
+
+通过 subprocess 包装 Helm CLI 实现 Release 全生命周期管理，KUBECONFIG 通过临时文件注入（从数据源 auth_config 解析 kubeconfig 写 tempfile，执行后清理）。
+
+| 功能 | API | Helm 命令 |
+|------|-----|----------|
+| 仓库管理 | `GET/POST /helm/api/repos` | `helm repo list/add/remove/update` |
+| Release 列表 | `GET /helm/api/releases` | `helm list -A -o json` |
+| Chart 搜索 | `GET /helm/api/charts` | `helm search repo -o json` |
+| 安装/升级 | `POST /helm/api/install\|upgrade` | `helm install/upgrade -f values.yaml` |
+| 卸载/回滚 | `POST /helm/api/uninstall\|rollback` | `helm uninstall/rollback` |
+| 历史与状态 | `GET /helm/api/history\|status` | `helm history/status -o json` |
+
+前端 `HelmView.vue` 三 Tab（Release 列表/仓库管理/安装应用），支持 values YAML 编辑、chart 关键词防抖搜索、回滚 revision 选择。Helm CLI 未安装时所有 API 友好降级返回 `helm_missing` 错误。
+
+---
+
+## 十三、Ansible 运维操作平台（新增）
+
+将 Ansible 纳入平台运维执行能力，补足「批量脚本/配置下发/编排执行」场景，与现有「远程脚本」（单机 SSH）形成互补。
+
+### 13.1 数据模型
+
+| 模型 | 表名 | 关键字段 |
+|------|------|---------|
+| `AnsibleInventory` | ansible_inventories | name(unique)、content(YAML 主机清单)、description |
+| `AnsiblePlaybook` | ansible_playbooks | name(unique)、content(YAML playbook)、description |
+| `AnsibleRun` | ansible_runs | inventory_id/playbook_id、output、error、exit_code、status(pending/running/completed/failed)、created_at/finished_at |
+
+### 13.2 执行引擎
+
+通过 subprocess 调用 `ansible-playbook` CLI：
+1. 将 inventory content 与 playbook content 写入临时 `.yml` 文件（tempfile.NamedTemporaryFile）
+2. 拼接命令 `ansible-playbook -i inventory.yml playbook.yml -e '<extra_vars_json>'`
+3. `subprocess.run(capture_output=True, text=True, timeout=300)` 同步执行
+4. 捕获 stdout/stderr/returncode，更新 AnsibleRun 记录状态
+5. 执行后 `os.unlink` 清理临时文件
+
+### 13.3 API 清单（prefix=/ansible）
+
+| 端点 | 功能 |
+|------|------|
+| `GET/POST/PUT/DELETE /api/inventories` | 主机清单 CRUD |
+| `GET/POST/PUT/DELETE /api/playbooks` | Playbook 模板 CRUD |
+| `POST /api/run` | 执行（选 inventory + playbook + extra_vars） |
+| `GET/DELETE /api/runs[/{id}]` | 执行历史与详情 |
+| `GET /api/status` | 检测 ansible-playbook 安装情况 |
+| `POST /api/test-inventory` | `ansible all -m ping` 测试清单连通性 |
+
+前端 `AnsibleView.vue` 三 Tab（执行历史/主机清单/Playbook 模板），YAML 编辑区等宽字体，执行 output 用 pre 块等宽展示，status 彩色 badge（completed 绿/failed 红/running 蓝/pending 灰）。ansible 未安装时优雅降级。
+
+---
+
+## 十四、授权许可证控制（防破解 · 商业化出售）
+
+平台支持商业化分发，通过 RSA 非对称签名许可证 + 机器指纹绑定 + 时钟防回拨实现有效期控制与防破解。
+
+### 14.1 防破解设计六重防护
+
+| 防护层 | 机制 | 防御目标 |
+|--------|------|---------|
+| **RSA 非对称签名** | 私钥离线签发，公钥硬编码验签 | 防伪造许可证（攻击者无私钥无法签发合法 lic） |
+| **机器指纹绑定** | MAC+CPU+磁盘序列号+主机名 SHA256 取 32 位 | 防拷贝（许可证绑定单机，换机失效） |
+| **时钟防回拨** | 持久化 last_check_time，当前时间 < 上次 - 60s 即锁定 | 防改系统时间绕过到期 |
+| **离线验证** | 纯本地验签，不依赖网络/服务器 | 防断网绕过 |
+| **中间件拦截** | `LicenseMiddleware` 拦截所有 API，过期/无效返回 403 | 单点管控全局生效 |
+| **多点校验** | 中间件(每请求) + 登录 + 后台定期 | 防单一校验点被 patch |
+
+### 14.2 许可证格式
+
+```
+BASE64(payload_json) + "." + BASE64(rsa_signature)
+```
+- payload: `{customer, edition(标准版/企业版/旗舰版), issued_at, expire_at, fingerprint, max_nodes, features[]}`
+- signature: 对 payload_json 的 UTF-8 字节做 RSA-SHA256(PKCS1v15) 签名
+- 验签: 公钥 `verify(signature, payload_bytes, PKCS1v15(), SHA256())`
+
+### 14.3 机器指纹采集（跨平台）
+
+| 维度 | Windows | Linux |
+|------|---------|-------|
+| MAC | `uuid.getnode()` 12 位 hex | 同 |
+| CPU | `platform.processor()` | `/proc/cpuinfo` model name |
+| 磁盘 | `wmic diskdrive get serialnumber` | `lsblk -dno SERIAL` |
+| 主机名 | `platform.node()` | 同 |
+
+拼接 `mac|cpu|disk|host` 后 `sha256().hexdigest()[:32]`。
+
+### 14.4 中间件链路
+
+```
+Session → License → Auth → GZip → 路由
+```
+- LicenseMiddleware 放行路径: `/license`、`/login`、`/static`、`/api/menu` 等
+- 授权状态: `active`(有效) / `expired`(过期) / `invalid`(无效/未授权) / `locked`(时钟异常)
+- 非 active 状态返回 `403 {detail, license_status}`，前端 request.js 拦截 403+license_status 自动跳授权页
+
+### 14.5 离线签发工具
+
+`tools/generate_license.py` 使用 `tools/private_key.pem`（离线保管，已 gitignore）签发许可证：
+```
+python tools/generate_license.py --customer "XX公司" --edition 企业版 \
+  --expire 2027-12-31 --fingerprint <机器指纹> --max-nodes 100 \
+  --features "aiops,sre,chaos" --output license.lic
+```
+客户在「授权管理」页上传 `.lic` 文件激活。公钥硬编码于 `license_service.py`，私钥绝不随产品分发。
+
+### 14.6 商业化分发流程
+
+1. 售前：客户提供机器指纹（授权页「复制指纹」或 `GET /license/api/fingerprint`）
+2. 签发：用私钥 + 客户指纹 + 期限生成 `.lic`
+3. 交付：随产品分发 `.lic`，客户上传激活
+4. 到期：API 返回 403，平台锁定，引导续期
+5. 防破解：私钥不外泄 → 无法伪造；指纹绑定 → 无法拷贝；时钟防回拨 → 无法改时间
+
+---
+
+*最后更新: 2026-07-06*

@@ -20,11 +20,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
-from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow
+from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
 from app.services.report_service import generate_report
+from app.services.license_service import LicenseMiddleware
 from app.seed_data import seed_all
 from app.routers.chaos import seed_chaos_scenarios
 
@@ -60,6 +61,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(AuthMiddleware)
+app.add_middleware(LicenseMiddleware)
 app.add_middleware(SessionMiddleware, secret_key="aiops-secret-key-change-in-production")
 
 
@@ -170,6 +172,9 @@ app.include_router(trace_ingest.router)
 app.include_router(chaos.router)
 app.include_router(workflow.router)
 app.include_router(agent_workflow.router)
+app.include_router(helm.router)
+app.include_router(ansible.router)
+app.include_router(license.router)
 
 
 def init_admin():

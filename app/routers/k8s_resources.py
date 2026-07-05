@@ -495,3 +495,416 @@ def api_hpa_delete(cluster: str, namespace: str, name: str, db: Session = Depend
         return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/namespaces")
+def api_namespace_list(cluster: str = "", namespace: str = "", db: Session = Depends(get_db)):
+    try:
+        clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
+        items = []
+        error = None
+        ds = _get_k8s_ds(db, cluster) if cluster else None
+        if ds:
+            try:
+                v1, _, _ = _get_k8s_client(ds)
+                for ns in v1.list_namespace().items:
+                    items.append({
+                        "name": ns.metadata.name,
+                        "status": ns.status.phase or "Active",
+                        "age": str(ns.metadata.creation_timestamp) if ns.metadata.creation_timestamp else "-",
+                    })
+            except Exception as e:
+                error = str(e)
+        return JSONResponse({
+            "items": items, "cluster": cluster, "namespace": namespace, "error": error,
+            "clusters": [{"name": c.name, "endpoint": c.endpoint, "status": c.last_status} for c in clusters],
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _build_resources(payload):
+    requests = {}
+    limits = {}
+    if payload.get("cpu_request"):
+        requests["cpu"] = payload["cpu_request"]
+    if payload.get("mem_request"):
+        requests["memory"] = payload["mem_request"]
+    if payload.get("cpu_limit"):
+        limits["cpu"] = payload["cpu_limit"]
+    if payload.get("mem_limit"):
+        limits["memory"] = payload["mem_limit"]
+    resources = {}
+    if requests:
+        resources["requests"] = requests
+    if limits:
+        resources["limits"] = limits
+    return resources
+
+
+@router.post("/api/namespaces/create")
+def api_namespace_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        cluster = payload.get("cluster", "")
+        name = payload.get("name", "")
+        if not cluster or not name:
+            return JSONResponse({"ok": False, "error": "cluster 和 name 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        v1.create_namespace({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": name}})
+        return JSONResponse({"ok": True, "cluster": cluster, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/namespaces/{cluster}/{name}/delete")
+def api_namespace_delete(cluster: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        v1.delete_namespace(name)
+        return JSONResponse({"ok": True, "cluster": cluster, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/statefulsets/create")
+def api_statefulset_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        image = payload.get("image", "")
+        if not cluster or not name or not image:
+            return JSONResponse({"ok": False, "error": "cluster、name、image 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        replicas = int(payload.get("replicas", 1))
+        service_name = payload.get("service_name") or name
+        container_port = int(payload.get("container_port", 80))
+        resources = _build_resources(payload)
+        container = {
+            "name": name,
+            "image": image,
+            "ports": [{"containerPort": container_port}],
+        }
+        if resources:
+            container["resources"] = resources
+        body = {
+            "apiVersion": "apps/v1",
+            "kind": "StatefulSet",
+            "metadata": {"name": name, "namespace": namespace},
+            "spec": {
+                "serviceName": service_name,
+                "replicas": replicas,
+                "selector": {"matchLabels": {"app": name}},
+                "template": {
+                    "metadata": {"labels": {"app": name}},
+                    "spec": {"containers": [container]},
+                },
+            },
+        }
+        apps_v1.create_namespaced_stateful_set(namespace, body)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/statefulsets/{cluster}/{namespace}/{name}/delete")
+def api_statefulset_delete(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        apps_v1.delete_namespaced_stateful_set(name, namespace)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/daemonsets/create")
+def api_daemonset_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        image = payload.get("image", "")
+        if not cluster or not name or not image:
+            return JSONResponse({"ok": False, "error": "cluster、name、image 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        container_port = int(payload.get("container_port", 80))
+        resources = _build_resources(payload)
+        container = {
+            "name": name,
+            "image": image,
+            "ports": [{"containerPort": container_port}],
+        }
+        if resources:
+            container["resources"] = resources
+        body = {
+            "apiVersion": "apps/v1",
+            "kind": "DaemonSet",
+            "metadata": {"name": name, "namespace": namespace},
+            "spec": {
+                "selector": {"matchLabels": {"app": name}},
+                "template": {
+                    "metadata": {"labels": {"app": name}},
+                    "spec": {"containers": [container]},
+                },
+            },
+        }
+        apps_v1.create_namespaced_daemon_set(namespace, body)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/daemonsets/{cluster}/{namespace}/{name}/delete")
+def api_daemonset_delete(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        apps_v1.delete_namespaced_daemon_set(name, namespace)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/services/create")
+def api_service_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        if not cluster or not name:
+            return JSONResponse({"ok": False, "error": "cluster、name 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        svc_type = payload.get("type", "ClusterIP")
+        port = int(payload.get("port", 80))
+        target_port = int(payload.get("target_port", port))
+        protocol = payload.get("protocol", "TCP")
+        body = {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {"name": name, "namespace": namespace},
+            "spec": {
+                "type": svc_type,
+                "selector": {"app": payload.get("selector_app", name)},
+                "ports": [{"port": port, "targetPort": target_port, "protocol": protocol}],
+            },
+        }
+        v1.create_namespaced_service(namespace, body)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/services/{cluster}/{namespace}/{name}/delete")
+def api_service_delete(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        v1.delete_namespaced_service(name, namespace)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/ingresses/create")
+def api_ingress_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        host = payload.get("host", "")
+        if not cluster or not name or not host:
+            return JSONResponse({"ok": False, "error": "cluster、name、host 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        _, _, net_v1 = _get_k8s_client(ds)
+        path = payload.get("path", "/")
+        service_name = payload.get("service_name", "")
+        service_port = int(payload.get("service_port", 80))
+        tls = bool(payload.get("tls", False))
+        spec = {
+            "rules": [{
+                "host": host,
+                "http": {
+                    "paths": [{
+                        "path": path,
+                        "pathType": "Prefix",
+                        "backend": {
+                            "service": {"name": service_name, "port": {"number": service_port}},
+                        },
+                    }],
+                },
+            }],
+        }
+        if tls:
+            spec["tls"] = [{"hosts": [host], "secretName": f"{name}-tls"}]
+        body = {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "Ingress",
+            "metadata": {"name": name, "namespace": namespace},
+            "spec": spec,
+        }
+        net_v1.create_namespaced_ingress(namespace, body)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/ingresses/{cluster}/{namespace}/{name}/delete")
+def api_ingress_delete(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        _, _, net_v1 = _get_k8s_client(ds)
+        net_v1.delete_namespaced_ingress(name, namespace)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/configmaps/create")
+def api_configmap_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        if not cluster or not name:
+            return JSONResponse({"ok": False, "error": "cluster、name 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        body = {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": name, "namespace": namespace},
+            "data": payload.get("data", {}) or {},
+        }
+        v1.create_namespaced_config_map(namespace, body)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/configmaps/{cluster}/{namespace}/{name}/delete")
+def api_configmap_delete(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        v1.delete_namespaced_config_map(name, namespace)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/secrets/create")
+def api_secret_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        import base64
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        if not cluster or not name:
+            return JSONResponse({"ok": False, "error": "cluster、name 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        secret_type = payload.get("type", "Opaque")
+        raw_data = payload.get("data", {}) or {}
+        encoded = {k: base64.b64encode(str(v).encode("utf-8")).decode("utf-8") for k, v in raw_data.items()}
+        body = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": name, "namespace": namespace},
+            "type": secret_type,
+            "data": encoded,
+        }
+        v1.create_namespaced_secret(namespace, body)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/secrets/{cluster}/{namespace}/{name}/delete")
+def api_secret_delete(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        v1.delete_namespaced_secret(name, namespace)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/pvcs/create")
+def api_pvc_create(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        if not cluster or not name:
+            return JSONResponse({"ok": False, "error": "cluster、name 必填"}, status_code=400)
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        storage = payload.get("storage", "5Gi")
+        access_mode = payload.get("access_mode", "ReadWriteOnce")
+        storage_class = payload.get("storage_class", "")
+        spec = {
+            "accessModes": [access_mode],
+            "resources": {"requests": {"storage": storage}},
+        }
+        if storage_class:
+            spec["storageClassName"] = storage_class
+        body = {
+            "apiVersion": "v1",
+            "kind": "PersistentVolumeClaim",
+            "metadata": {"name": name, "namespace": namespace},
+            "spec": spec,
+        }
+        v1.create_namespaced_persistent_volume_claim(namespace, body)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/pvcs/{cluster}/{namespace}/{name}/delete")
+def api_pvc_delete(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        v1.delete_namespaced_persistent_volume_claim(name, namespace)
+        return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

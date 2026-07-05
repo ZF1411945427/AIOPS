@@ -193,6 +193,7 @@
           <K8sResourceListView v-else-if="activeView === 'k8s-hpas'" resource-type="hpas" />
           <K8sResourceListView v-else-if="activeView === 'k8s-pvcs'" resource-type="pvcs" />
           <K8sResourceListView v-else-if="activeView === 'k8s-pvs'" resource-type="pvs" />
+          <K8sResourceListView v-else-if="activeView === 'k8s-namespaces'" resource-type="namespaces" />
           <ContainerTopologyView v-else-if="activeView === 'k8s-topology'" />
           <K8sPodsView v-else-if="activeView === 'k8s-pods'" />
           <K8sDeploymentsView v-else-if="activeView === 'k8s-deployments'" />
@@ -211,6 +212,9 @@
           <WorkflowTemplatesView v-else-if="activeView === 'workflow-templates'" />
           <AgentWorkflowEditor v-else-if="activeView === 'agent-workflow-editor'" />
           <AgentWorkflowRunsView v-else-if="activeView === 'agent-workflow-runs'" />
+          <HelmView v-else-if="activeView === 'helm-releases'" />
+          <AnsibleView v-else-if="activeView === 'ansible'" />
+          <LicenseView v-else-if="activeView === 'license'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -296,6 +300,9 @@ import WorkflowRunsView from '@/views/WorkflowRunsView.vue'
 import WorkflowTemplatesView from '@/views/WorkflowTemplatesView.vue'
 import AgentWorkflowEditor from '@/views/AgentWorkflowEditor.vue'
 import AgentWorkflowRunsView from '@/views/AgentWorkflowRunsView.vue'
+import HelmView from '@/views/HelmView.vue'
+import AnsibleView from '@/views/AnsibleView.vue'
+import LicenseView from '@/views/LicenseView.vue'
 import request from '@/api/request'
 
 const appStore = useAppStore()
@@ -334,7 +341,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs'])
+const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces'])
 
 function _flattenItems(items) {
   const result = []
