@@ -1,3 +1,197 @@
+### 2026-07-05: 立即体验改深色加粗文字(去按钮底色)+右下角返回顶部按钮
+- **需求**: 爸爸反馈"立即体验四个字太灰蒙蒙",不要按钮风格不要白框不要hover变化,要黑色或加粗;另要求右下角加返回顶部功能
+- **立即体验改文字风格** `app/templates/product_overview.html`:
+  - 旧: background蓝底+白字+发光+白框(多轮调蓝均灰蒙,爸爸嫌丑)
+  - 新: background:transparent 透明无底色 + color:#0F172A 深黑 + font-weight:900 极粗 + letter-spacing:0.06em 加宽 + border:none + 仅hover color→#1D4ED8 蓝色文字
+  - 原理: 去掉底色边框发光,纯文字深黑极粗在浅蓝灰底上对比度最高最清晰,告别灰蒙;hover仅文字变蓝做轻反馈
+- **返回顶部按钮**:
+  - CSS #back-top: position fixed right:28px bottom:28px z-index:200, 44×44圆形, surface底+border+shadow, 默认opacity:0 visibility:hidden translateY(12px)隐藏, .show类显示
+  - hover: background→primary蓝 + color白 + 蓝色发光 + svg上移2px
+  - HTML: footer后加<div id="back-top">含上箭头SVG↑ + title/aria-label无障碍
+  - JS: scroll>320px加show类显示,click触发window.scrollTo({top:0,behavior:'smooth'})平滑回顶
+- **验证**: /product/overview 200, 54411 bytes, nav-btn transparent True/#0F172A True/font-weight 900 True/border none True/#back-top CSS+HTML+JS True/scrollY>320 True/scrollTo smooth True
+- **专业名词**: 文字态CTA(Text-style CTA)——去掉底色边框,纯文字靠字重+颜色对比做CTA,比按钮态在浅底上更清晰; 对比度优先(Contrast Priority)——深黑#0F172A在浅蓝灰底上对比度远高于任何蓝底白字; 返回顶部锚点(Back-to-top Anchor)——固定定位+滚动阈值显隐+平滑滚动的UX组件; 滚动阈值显隐(Scroll-threshold Reveal)——超过特定scrollY才显示元素,避免首屏干扰
+
+
+- **需求**: 爸爸反馈上轮渐变深蓝按钮默认态更灰蒙(只有hover明显),左上地球左边空白太大四角不对称
+- **主按钮改回纯亮蓝+强发光**(nav/hero/cta 三处):
+  - 旧: linear-gradient(180deg,#2563EB→#1D4ED8) 深蓝渐变 + inset 顶部高光 —— 默认态偏深+inset雾感显灰蒙
+  - 新: background:#3B82F6 纯亮蓝(无渐变无inset) + box-shadow 0 4-8px 18-32px rgba(59,130,246,0.55-0.60) 强蓝色发光 + 0 0 0 1px rgba(37,99,235,0.30) 描边圈 + font-weight 800
+  - hover: #3B82F6→#2563EB 加深 + 发光增强 0.75-0.80 + translateY(-1px)
+  - 原理: 纯亮蓝+强发光让按钮从背景"浮"出鲜亮跳眼,无渐变无inset避免雾感;默认态即鲜明,hover加深增强反馈
+- **地球贴左上角内侧**:
+  - 旧: earthCx=c.x+c.w/2, earthCy=c.y+c.h/2 (居中在CORNERS.tl区域中心,导致地球偏右左边空白大)
+  - 新: earthCx=c.x+earthR+6, earthCy=c.y+earthR+6 (贴CORNERS.tl左上角内侧,地球左边缘距左边距仅6px)
+  - 效果: 地球紧贴左上角,与右上代码雨/左下拓扑/右下电路对称贴角
+- **验证**: /product/overview 200, 52844 bytes, nav-btn #3B82F6纯色True/无linear-gradient/无inset/box-shadow rgba(59,130,246,0.55)True/hero-btn纯色True/cta-btn纯色True/earthCx=c.x+earthR+6 True
+- **专业名词**: 纯色发光按钮(Solid Glow Button)——纯亮色+强外发光+描边圈,避免渐变与inset产生的雾感; 默认态显眼度(Default-state Visibility)——CTA按钮默认态即鲜明跳眼,不依赖hover; 贴角定位(Corner-anchored Positioning)——元素中心=角区域内侧+半径+边距,紧贴角而非居中区域; 渐变雾感(Gradient Haze)——浅底上深色渐变+inset高光产生的灰蒙感,降低显眼度
+
+
+- **需求**: ①爸爸要求四个角的动态背景严格挨着四角对称 ②顶栏"立即体验"字被蓝底显得灰蒙蒙不显眼
+- **四角对称化** `app/templates/product_overview.html` Canvas:
+  - 新增 CORNERS 对象 + computeCorners() 统一计算四角区域: 水平边距 MX=w*0.04, 垂直顶距 MYT=h*0.10 底距 MYB=h*0.04, 区域宽 CW=w*0.26 高 CH=h*0.28; 四角严格对称 tl(x=MX,y=MYT) / tr(x=w-MX-CW,y=MYT) / bl(x=MX,y=h-MYB-CH) / br(x=w-MX-CW,y=h-MYB-CH)
+  - 左上地球: setEarth 用 CORNERS.tl, earthR=min(c.w,c.h)*0.42, earthCx=c.x+c.w/2, earthCy=c.y+c.h/2 (原 min(w,h)*0.085 + w*0.14/h*0.18 硬编码)
+  - 右上代码雨: initRain/drawRain 用 CORNERS.tr, 列起点 c.x+i*24, y范围 c.y~c.y+c.h (原 w*0.70 + h*0~0.42)
+  - 左下拓扑: initTopo/drawTopo 用 CORNERS.bl, 节点在 c.x~c.x+c.w / c.y~c.y+c.h, 边界反弹用 c (原 w*0.05/0.28 h*0.66/0.30 + w*0.04/0.35 h*0.64/0.97)
+  - 右下电路: initCircuit 用 CORNERS.br, 走线在 c 范围 (原 w*0.70 h*0.66/0.28/0.30)
+  - 效果: 四角元素严格贴角对称,中间留白区域一致
+- **主按钮显眼度强化**(nav-btn/hero-btn/cta-btn 三处统一):
+  - 旧: background:var(--primary) #3B82F6 纯色平面, 中饱和蓝白字对比不足显灰蒙
+  - 新: background:linear-gradient(180deg,#2563EB 0%,#1D4ED8 100%) 深蓝渐变; border:1px solid #1E40AF 加深边框; box-shadow 0 4-8px 14-28px rgba(37,99,235,0.45-0.50) 蓝色外发光 + inset 0 1px 0 rgba(255,255,255,0.25) 顶部内高光(立体感); font-weight 700→800; letter-spacing 0.03-0.04em; hover 加深+发光增强+translateY(-1px) 上浮
+  - 效果: 深蓝底白字对比度↑, 渐变+发光+立体感让按钮"浮"出背景, CTA转化力↑
+- **验证**: /product/overview 200, 53152 bytes, CORNERS True/computeCorners True/tl/tr/bl/br 全用CORNERS True/nav-btn渐变#1D4ED8 True/hero-btn渐变True/cta-btn渐变True/inset立体True/letter-spacing True/旧纯色#3B82F6按钮gone
+- **专业名词**: 四角对称区域(Four-corner Symmetric Region)——用统一参数计算四角元素位置保证严格对称贴角; 渐变深蓝按钮(Gradient Deep-blue Button)——线性渐变+深色边框+外发光+内高光的多层立体按钮; 内高光(inset highlight)——inset box-shadow模拟顶部光源反射,增加立体感; 对比度优化(Contrast Optimization)——深底配白字提升可读性,解决中饱和色显灰蒙问题; letter-spacing字间距——加宽字间距提升标题感与显眼度
+
+
+- **需求**: ①爸爸反馈能力矩阵分页太长导致scroll-snap上下滑动 ②右上角数字雨是日文片假名,要求换成运维或产品相关代码
+- **能力矩阵一屏压缩** `app/templates/product_overview.html`:
+  - 删除5个domain-card的`.domain-modules`标签组(AIOps 8模块/SRE 7/DevOps 7/混沌 3/可观测 14),保留`.domain-tags`核心标签
+  - 理由: modules与tags内容重叠冗余;实际功能模块在系统左侧菜单已有完整展示,营销页不需重复;第五卡片可观测14个modules撑最高,删除后5卡高度均衡一屏稳放下
+  - 可观测性描述文案精简: 删",而不是一堆让你自己猜的图表"尾部冗余
+- **数字雨日文→运维代码雨**:
+  - 旧: String.fromCharCode(0x30A0+Math.floor(Math.random()*96)) 日文片假名(0x30A0-0x30FF),与产品无关且爸爸觉得突兀
+  - 新: RAIN_POOL字符池='0123456789abcdef{}[]()<>;=+-*/$#_|.&kubectlgetpoddscalerestartlogsdfpsgrepawkexit200404500503okfailexc{}();=>' 含运维命令(kubectl/get/pod/scale/restart/logs/df/ps/grep/awk/exit)+状态码(200/404/500/503)+代码符号({}[]()<>;=+-*/$#_|.&) + 布尔/状态(ok/fail/exc),rainChar()随机取
+  - 主题契合: 运维代码雨直接呼应AIOps运维产品主题,比通用日文片假名更有专属感
+- **结构修复**: 上一步edit遗留3个多余</div>(460-462行,modules标签组闭合残留),修复为正确闭合,避免布局错乱
+- **验证**: /product/overview 200, 51265 bytes, domain-modules gone/0x30A0 gone/RAIN_POOL True/rainChar True/kubectlgetpod True/运维代码雨 True/div结构正确
+- **专业名词**: 内容去冗余(Content Deduplication)——营销页与系统菜单功能模块重复,删除营销页冗余保留核心标签; 一屏适配(Viewport-fit)——删除高密度标签组让内容精确适配100dvh不溢出; 字符池随机采样(Character Pool Sampling)——从预定义运维符号集随机取字符替代固定编码区间; 主题专属化(Theme Specificity)——背景元素符号与产品领域强相关,提升品牌识别度
+
+
+- **需求**: 爸爸反馈"橘色主调和动态背景色不搭"——上轮冷灰蓝底+冷色科技元素(蓝/青/紫)下饱和橙#EA580C突兀,冷暖撞色;提供4方向(群青蓝/青绿/深靛/回暖灰保留橙),爸爸选"群青蓝#3B82F6"
+- **主色替换** `app/templates/product_overview.html`(replaceAll 3批):
+  - --primary #EA580C → #3B82F6 / --primary-bg rgba(234,88,12,0.10) → rgba(59,130,246,0.10) / --primary-glow rgba(234,88,12,0.30) → rgba(59,130,246,0.30)
+  - hover #C2410C → #2563EB(深蓝hover) / 所有 rgba(234,88,12,0.22/0.18/0.12/0.15) → rgba(59,130,246,...) / 硬编码#EA580C → #3B82F6(orch L图标+compare 4个✓图标stroke)
+  - var(--primary) 引用自动跟随(按钮/eyebrow/数据高亮/logo em/selection/CTA/trust-icon/panel-num.warn/sec-eyebrow/orch-feat/msg.hl/compare-col.right h3)
+- **选型理由**: 群青蓝与冷灰蓝底同色系和谐无撞色;蓝是科技/商务/信任色(IBM/Azure/Linear/GitHub标配);CTA转化力不输橙;全冷调统一专业商务感最强
+- **验证**: /product/overview 200, 52437 bytes, #3B82F6 True/rgba(59,130,246) True/#2563EB hover True/EA580C gone/234,88,12 gone/C2410C gone/橙色零残留
+- **专业名词**: 冷暖撞色(Warm-Cool Color Clash)——冷背景配饱和暖主色产生视觉突兀; 同色系和谐(Monochromatic Harmony)——主色与背景同色相不同明度,视觉统一; 群青蓝(Ultramarine Blue #3B82F6)——介于天蓝与靛蓝之间的标准蓝,科技商务页最常用CTA色; 品牌色延续性(Brand Color Consistency)——主色替换需同步所有硬编码引用避免色值漂移
+
+
+- **需求**: 爸爸反馈全息地球"不好看",三要点:①背景元素不要放中间要分散或两边 ②背景和主调色都橘色撞色没层次 ③换一个;核查系统现有 skill 无专门动态背景skill,有 redesign/high-end-visual-design/gpt-taste 可组合指导;提供3个具象方案(双地球分立/四角科技矩阵/机房剪影+数据流),爸爸选"四角科技元素矩阵+冷灰蓝底",主色保留橙
+- **配色全面换型 暖米白→冷灰蓝** `app/templates/product_overview.html`:
+  - --bg #F7F3EC→#EEF2F7 / --bg2 #F1ECE3→#E2E9F1 / --surface #FCFAF5→#F4F7FB / --surface2 #F4EEE3→#E8EEF5 / --surface3 #EDE5D7→#DCE4ED
+  - --fg #1F1B16(暖墨)→#1A2333(冷墨蓝) / --fg2 #5C5248→#4A5868 / --fg3 #8B7F71→#7A8898 / --border #E0D6C3→#D0DAE5
+  - 阴影 rgba(31,27,22,...)暖黑→rgba(26,35,51,...)冷墨蓝
+  - vignette rgba(247,243,236,0.6)→rgba(238,242,247,0.6) / nav rgba(247,243,236,0.78)→rgba(238,242,247,0.78)
+  - compare-col.left X图标 stroke #8B7F71→#7A8898
+  - **--primary 橙 #EA580C 保留**(按钮/重点/eyebrow),冷底上橙跳眼形成冷暖对比
+  - **data-theme 全改冷色系**: HERO 234,88,12→79,70,229(靛) / TRUST→59,130,246(蓝) / DOMAINS→13,148,136(青) / ORCH 217,119,6→124,58,237(紫) / HOW→59,130,246(蓝) / SECURITY 124,58,237→79,70,229(靛) / CTA→13,148,136(青);背景元素始终冷色变化,与橙主色永远对比不撞色
+- **背景换型 居中地球→四角科技元素矩阵**:
+  - 旧: 全息线框地球居中(w/2,h/2,R=min*0.30)+3层轨道光带——爸爸嫌居中呆板+橙撞色
+  - 新: **四角分散科技元素,中间留白给内容**:
+    - **左上**(w*0.14,h*0.18): 小线框地球(R=min*0.085,经纬线18°间隔+7簇大陆光点+地轴倾角TILT=-0.32+Y轴自转0.0012/帧)
+    - **右上**(w*0.70~0.96,h*0~0.42): 数字雨(Matrix风格下落片假名0x30A0+,列宽24px,8-15字符尾迹,速度0.4-1.3,顶部渐入底部重置,alpha随尾迹衰减0.26峰值)
+    - **左下**(w*0.05~0.35,h*0.66~0.97): 拓扑节点网络(14节点缓慢漂移+反弹边界,近距离<110px自动连线,沿连线流动光点flow 0.008/帧,节点1.5-3px)
+    - **右下**(w*0.70~0.98,h*0.66~0.96): 电路板纹理(10条L型走线4-7段+焊盘点+沿走线流动电流光点flow 0.006/帧,shadowBlur发光)
+  - 拖尾 rgba(238,242,247,0.20) 冷色半透明覆盖,元素留渐隐轨迹
+  - 主题色插值驱动四角元素统一冷色调,随滚动 section 平滑过渡(靛→蓝→青→紫→蓝→靛→青)
+  - 关键参数: earthR min*0.085 / 雨列宽24 / 雨速0.4-1.3 / topo 14节点/110px连线 / circuit 10路径/4-7段 / 拖尾alpha 0.20 / shadowBlur 5-6
+  - 选型理由: 四角分散彻底解决居中呆板;冷灰蓝底+橙主色冷暖对比解决撞色;四种科技元素(地球/数字雨/拓扑/电路)呼应运维多领域,元素丰富抓眼球
+- **验证**: /product/overview 200, 52428 bytes, Four-corner Tech Matrix True/drawEarth/drawRain/drawTopo/drawCircuit True/earthLand/rainCols/topoNodes/circuitPaths True/initAll True/Holographic Data Earth gone/function project gone/const orbits gone/#EEF2F7 True/#1A2333 True/247,243,236 gone/F7F3EC gone/data-theme冷色系 True(79,70,229/59,130,246/13,148,136/124,58,237)/暖色阴影31,27,22 gone→26,35,51 True
+- **专业名词**: 四角分散布局(Four-corner Dispersion Layout)——背景元素分布于画面四角,中间留白给内容,避免居中呆板; 冷暖对比配色(Warm-Cool Contrast Palette)——冷色背景+暖色主色形成视觉张力,主色更跳眼; 数字雨(Matrix Rain)——片假名/字符自上而下流动的瀑布效果,源自《黑客帝国》; 拓扑节点网络(Topology Node Network)——节点+近距离自动连线+数据流动光点; 电路板走线(PCB Trace)——L型直角走线+焊盘点+电流流动,模拟印刷电路板; 色调撞色消除(Hue Collision Elimination)——背景色与主色拉开色相距离避免同色系叠加平淡; mix-blend-mode multiply——正片叠底,噪点与冷底相乘
+
+
+- **需求**: 爸爸反馈"不是线就是点的,没有亮眼的地方,要抓住眼球吸引商机",要求复杂具象场景(景/物体/动画/动漫朋克影视中国风);核查系统现有 redesign/high-end-visual-design/gpt-taste 三个 skill 可组合指导(无专门动态背景skill);提供4个具象方案(全息地球/数字孪生机房/科技水墨山水/影视星云宇宙),爸爸选"全息线框地球+数据光带"
+- **背景换型** `app/templates/product_overview.html`:
+  - 旧: 粒子星云漩涡(黑洞吸积盘,640小圆点旋转)——爸爸嫌"还是点"
+  - 新: **全息线框地球+数据光带(Holographic Data Earth)**——3D线框地球(经纬线网格每15°一条,只绘正面+边缘 z>-R*0.4),地轴倾角TILT=-0.32,绕Y轴自转 rotY+=0.0016;**大陆光点簇**(15簇近似经纬度:亚欧/非洲/北美/南美/澳洲,每簇10点随机散布);**球面数据流光点**(22个沿纬线流动 theta+=speed,带shadowBlur发光);**3层外围轨道光带**(倾角0.5/-0.7/1.3、半径1.32R/1.52R/1.74R、速度正负、6/5/4个流动光点);中心径向光晕呼吸(R*1.15±sin*8);拖尾 rgba(247,243,236,0.15);色调跟随section平滑插值
+  - 3D数学: 球面坐标(经度theta,极角phi)→直角(x=R sinφ cosθ, y=R cosφ, z=R sinφ sinθ)→绕Y轴自转→绕X轴倾斜TILT→2D投影; 正面判定 pr.z>0 控制可见性, (pr.z+R)/(2R) 控制深度渐变alpha
+  - 关键参数: R=min(w,h)*0.30 / TILT=-0.32 / rotY 0.0016/帧 / 经纬线 15°间隔 theta步进0.07 / 大陆15簇×10点 / flow 22个 / 3轨道倾角0.5/-0.7/1.3 / 拖尾alpha 0.15 / shadowBlur 7-8
+  - 选型理由: 线框地球=全球运维纳管主题(500+资产),有物体有景深有动画,经纬线+大陆+数据流+轨道光带多层叠加复杂度高,完全非线非点;暖底用低饱和橙/青线勾勒柔和不脏;呼应"运维如星际导航/全球协同"
+- **6处优化**:
+  - 字体: head加Google Fonts link(Plus Jakarta Sans 400-800 + JetBrains Mono 400-600),修复--font-sans变量无加载问题(fallback系统字体丢分)
+  - grain噪点: 新增.bg-grain(SVG feTurbulence fractalNoise data URI, opacity 0.045, mix-blend-mode multiply, z-index 2),redesign skill强调"纯平背景显廉价"
+  - CTA文案: HERO"让运维拥有判断力"与CTA重复→CTA改"现在,轮到你的运维进化/把判断力交给智能体"递进不重复
+  - nav锚点: 3个→4个,加"安全"指向#security
+  - 内联样式入CSS: final-section style="padding:64px 0 36px"→.final-section CSS类; panel-cell style="color:var(--fg3)"→.panel-num.muted类
+  - final-section加id="security"配nav锚点
+- **验证**: /product/overview 200, 50933 bytes(比上轮41671增9262,新背景脚本+字体link+grain), Holographic Data Earth True/function sphere True/大陆光点True/orbits True/球面数据流True/外围轨道光带True/PARTICLE_COUNT gone/黑洞吸积盘 gone/Plus Jakarta Sans link True/bg-grain div True/nav #security True/id=security True/panel-num muted True/CTA新文案True/final-section无inline padding True
+- **专业名词**: 全息线框地球(Holographic Wireframe Earth)——3D线框球体+经纬线网格+大陆光点的全息投影风格背景; 球面坐标投影(Spherical Coordinate Projection)——经纬度(theta,phi)→3D直角→旋转→2D投影; 地轴倾角(Axial Tilt)——自转轴相对轨道面的倾斜,用X轴旋转TILT模拟立体感; 深度渐变(Depth Gradient)——按z坐标控制alpha,正面明亮背面淡化营造立体; 轨道光带(Orbital Light Band)——环绕主体的椭圆轨道+流动光点,模拟卫星/数据链路; grain噪点纹理(Grain Noise Overlay)——SVG feTurbulence生成细噪点叠加层,打破数字平面廉价感; mix-blend-mode multiply——正片叠底混合,噪点与底色相乘增加质感
+
+
+- **需求**: 爸爸反馈"不是线就是点的,没有亮眼的地方",要求复杂科技感背景;确认系统无可用 skill(Available skills: none);提供5个方向选择,爸爸选"粒子星云漩涡"
+- **背景换型** `app/templates/product_overview.html`:
+  - 旧: 神经拓扑网络(节点+连线+数据流动光点)——爸爸嫌"还是线还是点"
+  - 新: **粒子星云漩涡(黑洞吸积盘)**——640 粒子绕屏幕中心螺旋旋转,向中心汇聚,到中心重置到外圈;开普勒角速度(内圈快外圈慢 speedMul=1+(1-radius/maxR)*1.6);拖尾星轨效果(每帧 rgba(247,243,236,0.082) 半透明覆盖,粒子留下螺旋渐隐轨迹);中心径向光晕核心(createRadialGradient,半径随时间 sin 呼吸 160±18);色调跟随 section 平滑插值
+  - 关键参数: PARTICLE_COUNT=640 / maxR=min(w,h)*0.58 / angSpeed 0.0016-0.0046 / radSpeed 0.06-0.28 / 拖尾 alpha 0.082 / 中心光晕 alpha 0.32→0
+  - 选型理由: 螺旋星云向中心汇聚=黑洞吸积盘视觉,有深度有动感,完全非线非点,粒子留下螺旋星轨形成"流动星云"
+- **死代码清理**: 删除 .bg-aurora + 4 个 aurora-blob + 4 个 drift keyframes + .bg-grid 3D透视 + gridRun keyframes(共~30行CSS),删除 body 内 bg-aurora div + bg-grid div,漩涡 Canvas 独占背景,仅保留 bg-vignette 暗角
+- **验证**: /product/overview 200, 41671 bytes(比上轮 45087 减 3416,死代码清理生效), 漩涡脚本True/PARTICLE_COUNT=640True/黑洞吸积盘True/神经拓扑gone/bg-aurora gone/bg-grid gone/aurora-blob css gone/gridRun gone/radial glow True/拖尾True/开普勒speedMul True/section=7/vignette保留
+- **专业名词**: 粒子星云漩涡(Particle Nebula Vortex)——粒子绕中心螺旋旋转汇聚的星云动画; 黑洞吸积盘(Black Hole Accretion Disk)——物质螺旋落入黑洞形成的盘状结构,粒子向中心旋转汇聚; 开普勒角速度(Keplerian Angular Velocity)——内圈快外圈慢,符合天体力学; 拖尾星轨(Trail Star-track)——每帧半透明覆盖背景让旧粒子位置渐隐,形成长曝光星轨效果; 径向光晕呼吸(Radial Glow Breathing)——中心光晕半径随 sin 函数周期性缩放
+
+
+
+- **需求**: 爸爸反馈"AI越能干越要管得住页面太长,吸附有多余滚动空间"+"要复杂一点科技感一些的背景(除简单波浪粒子光点外)"
+- **final-section 一屏压缩** `app/templates/product_overview.html`:
+  - sec-card padding 28px 24px → 16px 14px, badge margin-bottom 14→6, h3 font 15→14, p font 13→12 line-height 1.65→1.45
+  - compare-col padding 32px 28px → 18px 16px, h3 margin-bottom 20→8 font 16→14, li padding 12px 0 → 5px 0 font 14→12
+  - sec-cols gap 16→10, compare-cols gap 16→10, 容器内 gap 32→20
+  - final-section .sec-hd margin-bottom 32→18, section padding 80/60 → 64/36
+  - 文案精简: "我们给智能体套了六道安全枷锁。不是不让它做事,是让它只做该做的事。" → "六道安全枷锁,让它只做该做的事。"
+  - 估算高度: 100dvh 内 ~576px, 一屏足够
+- **DOMAINS 预防性压缩**: domain-icon 48→42, h3 17→16, p line-height 1.7→1.6, tags mt 12→8, modules mt 10→7
+- **背景升级为三层科技感叠加**:
+  - **层1 极光光斑(保留)**: 4 blob 暖色氛围层
+  - **层2 3D 透视地平线(升级)**: .bg-grid 从平面网格 → Tron 风格 3D 透视,`perspective(420px) rotateX(62deg)` 向远处汇聚,底部对齐,mask 向上淡出,gridRun 14s 动画(原 gridPan 180s),opacity 0.55,线条加粗 rgba 0.06→0.16
+  - **层3 神经拓扑网络(重写Canvas)**: 弃用涟漪+光点,改为——46 节点缓慢漂移 + 近距离(<165px)自动连线(alpha 随距离衰减) + **沿连线流动的数据光点**(每条连线 1 个 flow 光点循环移动,代表数据包/事件传播) + **18% 概率 hub 节点带光晕**(大节点) + **鼠标 140px 内节点排斥+放大高亮**(鼠标交互) + 节点 sin 脉动 + 色调跟随 section 平滑插值 + 连线每 220ms 重建
+  - 选型理由: 神经拓扑+数据流动呼应"AI 神经推理+运维事件传播"主题,比简单粒子/波浪复杂一档;3D 透视网格 Tron 风格科技感强;鼠标交互增加沉浸感
+  - 关键参数: NODE_COUNT=46 / LINK_DIST=165 / flow fspeed 0.003-0.008 / hub 18% / 鼠标排斥半径 140 / 连线重建间隔 220ms
+- **验证**: /product/overview 200, 45087 bytes, 神经拓扑脚本True/NODE_COUNT=46True/LINK_DIST=165True/涟漪gone/mousemove交互True/hub节点True/数据流动lk.flowTrue/3D透视perspective(420px)True/gridRun动画True/gridPan gone/final padding64/36True/sec-card16pxTrue/compare-col18pxTrue/section数=7
+- **专业名词**: 神经拓扑网络(Neural Topology Network)——节点+近距离自动连线模拟神经网络,带数据流动光点; 数据流动光点(Data Flow Particle)——沿连线路径循环移动的光点,代表数据包/事件传播; 3D透视地平线(3D Perspective Horizon)——CSS perspective+rotateX 让平面向远处汇聚,Tron 风格; 鼠标排斥交互(Mouse Repulsion Interaction)——鼠标附近节点被推开+放大高亮; hub节点(Hub Node)——大尺寸+光晕的中心节点,模拟网络枢纽; 一屏压缩(Viewport Compression)——减少 padding/字号/间距让内容精确适配 100dvh
+
+
+
+- **需求**: 爸爸反馈"动态背景波浪不满意，要除波浪外的其他效果"+"滚动吸附分页长度要正好一屏"+"调整布局卡片文案更有特色"
+- **背景换型** `app/templates/product_overview.html` Canvas 脚本:
+  - 旧: 流光线条(16条贝塞尔波浪曲线沿水平方向流动) → 爸爸不满意
+  - 新: **涟漪扩散 + 漂浮光点**——58 个光点缓慢漂移+脉动呼吸,每隔 1.1-2s 从随机光点发出同心圆涟漪扩散(半径递增+alpha 衰减),色调跟随 section data-theme 平滑插值
+  - 选型理由: 涟漪扩散呼应"运维事件传播/告警扩散"主题(独特,非通用波浪),光点漂浮呼应"节点监测",比波浪更有主题特色;浅色底上柔和优雅
+  - 关键参数: DOT_COUNT=58 / 涟漪 maxR=140-340 / 涟漪 alpha 0.45 起按 0.984 衰减 / 光点 alpha 0.22-0.52 + sin 脉动 / 涟漪发射间隔 1100+random*900ms
+- **分页一屏适配**:
+  - section padding 80px 0 60px → 72px 0 48px(留出 nav 64px 空间,内容区=100dvh-120)
+  - 拆分 FINAL section: 原 1 层(安全6卡+对比2列+CTA)内容超屏 → 拆为 2 层: ①final-section(安全6卡+对比2列) ②cta-section(CTA独立成屏)
+  - section 总数 6 → 7(HERO/TRUST/DOMAINS/ORCH/HOW/SECURITY+COMPARE/CTA),每屏内容更聚焦不溢出
+  - sec-hd margin-bottom 40→32, trust-header 56→44, domain-card padding 28→22(gap 20→18),压缩垂直空间
+  - DOMAINS 第5卡片(可观测性)模块标签 18→14(删数据源管理/K8s资源监控/集群事件/外部CMDB 4个次要项),避免该卡过高撑破一屏
+- **文案微调**: HERO 副标"替你想、替你做、替你扛"→"替你想、替你做"(精炼,避免三连冗余)
+- **验证**: /product/overview 200, 43902 bytes, 涟漪脚本True/DOT_COUNT=58True/波浪gone/贝塞尔gone/CTA独立sectionTrue/final-sectionTrue/section数=7/padding72True/domain-card22True
+- **专业名词**: 涟漪扩散动画(Ripple Propagation Animation)——同心圆从中心点半径递增+alpha 衰减扩散,常用于雷达/事件传播可视化; 漂浮光点脉动(Floating Dot Pulse)——光点 sin 脉动呼吸+缓慢位移; scroll-snap 一屏适配(Viewport-fit Snap Sizing)——section min-height:100dvh + 内容量控制确保不溢出; 分屏解耦(Screen Decoupling)——过长 section 拆为多个独立 snap 屏,每屏聚焦单一主题
+
+
+
+- **重塑原因**: 爸爸反馈"不要深色主色调，也不要白色"，要求找最优方案
+- **skill 查询**: 系统无可用 UI skill（No skills are currently available），自行按 UI 设计最佳实践选定方案
+- **方案选型**: 暖奶油商务风（Warm Cream Neutral）——业界高端 SaaS 落地页（Stripe/Linear 浅色页）主流的"不深不白"方案，比纯白柔和有质感，比深色轻盈通透
+- **配色改造** `app/templates/product_overview.html`:
+  - 主背景: 深色 #0B0F19 → 暖米白 #F7F3EC；次背景 #111827 → #F1ECE3
+  - 卡片: 深色 #161E2E → 米白 #FCFAF5（非纯白）；次级 #1C2535 → #F4EEE3；三级 #232D40 → #EDE5D7
+  - 文字: 浅色 #F3F4F6 → 深墨黑 #1F1B16（暖调）；次文字 #9CA3AF → #5C5248；三级 #6B7280 → #8B7F71
+  - 边框: #2A3548 → 暖米 #E0D6C3
+  - 主色: 亮橙 #F97316 → 沉稳深橙 #EA580C（米底上更商务）；hover #FB923C → #C2410C
+  - 彩色图标统一调深一档确保浅底可读: indigo #818CF8→#4F46E5 / violet #A78BFA→#7C3AED / teal #14B8A6→#0D9488 / amber #F59E0B→#D97706 / red #EF4444→#DC2626
+  - 按钮/选中文字色: 深底反差 #0B0F19 → 白色 #FFFFFF（橙底白字对比清晰）
+  - 阴影: 新增 --shadow-soft/card 变量(rgba(31,27,22,0.08-0.10)暖调阴影)，替换全部 rgba(0,0,0,0.3-0.4) 硬编码黑阴影
+- **动态背景适配浅色底**:
+  - 极光光斑 opacity 0.5→0.35，颜色饱和度降低（橙0.7→0.55/靛0.4→0.30/青0.35→0.28/琥珀0.3→0.22），浅底不显脏
+  - 网格线 rgba(249,115,22,0.04)→rgba(234,88,12,0.06) 加深可见
+  - 暗角 rgba(11,15,25,0.5)→rgba(247,243,236,0.6) 改为暖色边缘加深
+  - 流光线条 alpha 0.12-0.32→0.18-0.38 提升浅底可见度，shadowBlur 8→4、shadowColor alpha 0.5→0.25 避免浅底发光过脏
+  - data-theme 滚动色调同步新色: 249,115,22→234,88,12 / 245,158,11→217,119,6 / 20,184,166→13,148,136 / 167,139,250→124,58,237
+  - nav 背景 rgba(11,15,25,0.7)→rgba(247,243,236,0.78) 浅色毛玻璃
+- **验证**: /product/overview 200, 43884 bytes, 暖米底#F7F3EC True/米白卡#FCFAF5 True/深橙#EA580C True/旧深色#0B0F19已清除/旧亮橙#F97316已清除/白字#FFFFFF True/深墨字#1F1B16 True/极光+流光线条保留 True
+- **专业名词**: 暖中性色商务风（Warm Neutral Business Theme）——以暖米/奶油色为基底的高端浅色方案,介于纯白与深色之间; 米白卡片（Off-white Card）——非纯白#FFFFFF而是带暖色调的#FCFAF5,避免刺眼; 暖调阴影（Warm-toned Shadow）——用rgba(31,27,22,...)暖黑替代rgba(0,0,0,...)纯黑,与暖底协调; 浅底极光降饱和（Light-bg Aurora Desaturation）——浅色底上极光光斑需降低opacity与饱和度避免脏感; 对比度可读性（Contrast Readability）——浅底上彩色图标需调深一档确保WCAG对比度
+
+
+
+- **推送结果**: commit af55071 (22文件 +5336/-602) 成功推送到 origin/main
+- **踩坑3连**:
+  1. **LFS locks verify 失败**: GitHub LFS 锁定验证 API 不通 → `git config lfs.*.locksverify false` 禁用
+  2. **SSL TLS EOF 错误**: 代理链路偶发中断 → 直接重试 git push（第2次成功）
+  3. **推送超时 60s**: db/aiops.db 32MB LFS 上传慢 → 分两步: `git lfs push --all origin` 先传大文件，再 `git push origin main` 传提交
+- **token.txt 追加第十章「推送常见问题与解决方案」**: 记录3个问题的报错/原因/解决，附标准推送流程（5步）和LFS大文件优化建议（3方案）
+- **专业名词**: Git LFS Locks Verify（LFS锁定验证API）、TLS EOF（传输层安全协议意外结束）、分步推送（Staged Push: LFS先传再传提交）
+
+
 ### 2026-07-05: 产品全景页深色商务重塑 + 独家主张文案重写
 - **重塑原因**: 爸爸反馈"没有商务感""文案和其他平台相似没有独自特色"
 - **视觉改造** `app/templates/product_overview.html`（浅色→深色商务高端风）:
