@@ -1,3 +1,31 @@
+### 2026-07-05: AI 助手知识库 RAG 化 Phase 1 落地——文档上传/TF-IDF 向量化/语义检索/MCP 工具
+- **需求**: 爸爸要求按 AIOPS系统架构设计.md 第十章 Phase 1 开始实施知识库 RAG 化，做完自己检查两遍逻辑性/可用性/界面美化
+- **技术方案调整(零新依赖)**: requirements.txt 无 sentence-transformers/langchain/pypdf/python-docx，改用现有 numpy 实现 TF-IDF 本地向量化，不依赖外部库。文档解析 md/txt 原生、pdf/docx 可选安装(pypdf/python-docx, try/except 降级)。切片自研 chunk_text(500字符+100重叠, 按段落边界)。Embedding 双模式预留: 当前 TF-IDF, Phase 5 升级 LLM Provider 的 /embeddings API
+- **实现内容(6 个文件)**:
+  - `app/models.py`: 新增 KbDocument(文档管理) + KbChunk(切片+向量索引) 两表, embedding 存 JSON 字符串兼容 SQLite, create_all 自动建表
+  - `app/services/rag_service.py`(新, 387行): parse_document 解析 / chunk_text 切片 / tokenize 中英文混合分词(中文字+英文词) / build_tfidf_vector TF-IDF 稀疏向量 / cosine_similarity 余弦相似度 / _build_idf_map IDF 全局缓存(threading.Lock 线程安全) / index_document 索引流程 / recompute_all_embeddings 批量重算 / vector_search 语义检索(0.05 阈值过滤) / archive_alert_case + archive_incident_case 自动归档
+  - `app/routers/knowledge_documents.py`(新, 165行): GET /knowledge/documents 列表页 / GET /search RAG JSON 检索 / GET /{id} 详情 / POST /create 手动创建 / POST /upload 文件上传(md/txt/pdf/docx, 10MB 限制) / POST /{id}/reindex 重新索引 / POST /{id}/delete 删除(联动清切片+删文件)
+  - `app/services/mcp_tools.py`: 新增 query_knowledge_rag MCP 工具(risk_level=read_only, expose_to_llm=True), AI 助手可语义检索知识库
+  - `app/templates/knowledge_documents.html`(新): 统计卡(文档/已索引/切片) + RAG 语义检索区(实时 AJAX + 相似度% + 元数据 badge) + 上传拖拽区 + 手动创建 modal + 文档列表表格 + 状态/来源彩色 badge
+  - `app/templates/knowledge_document_detail.html`(新): 文档头部 meta + 4 格信息卡 + 内容预览(5000 字符) + 切片列表(前 20 个, token 计数)
+  - `app/templates/base.html`: 侧边栏"智能分析"组加"知识库文档 RAG"入口
+  - `app/main.py`: 注册 knowledge_documents router(顺序在 knowledge 之前, 解决路由冲突)
+- **三遍自检发现并修复的 bug**:
+  - ① 路由冲突: /knowledge/documents 被 knowledge.py 的 /{kb_id} 抢匹配(422 int_parsing), 调整 router 注册顺序 knowledge_documents 在 knowledge 之前
+  - ② cosine_similarity 变量名错误: `w * v2.get(w, 0.0)` 用了字典 key 而非 value, 应为 `wv * v2.get(w, 0.0)`, 导致 500 TypeError
+  - ③ 相似度阈值缺失: 无关词检索返回低相似度噪音(0.04), 加 0.05 阈值过滤
+- **验证通过**: py_compile 5 文件全 PASS; 后端启动 200; 文档创建 303→/knowledge/documents/1; RAG 检索 200 sim=0.3064; 文件上传 md 303→/2; MCP 工具 call_mcp_tool('query_knowledge_rag') status=success sim=0.4747; 删除联动(doc+chunks 全清); 自动归档 alert_case 索引成功; 不支持文件类型拒绝; 界面 CSS 类完整(stat-card/rag-box/upload-zone/doc-badge/modal-overlay)
+- **已知局限**: ① TF-IDF 中文单字分词对"完全不存在的概念"可能返回低相似度噪音(0.06), Phase 5 升级 BGE Embedding 模型后解决; ② pdf/docx 解析需 pip install pypdf python-docx(未装则提示); ③ SQLite 内存检索适合 <1 万切片, 超过建议升级 pgvector
+- **专业名词**: TF-IDF(Term Frequency-Inverse Document Frequency)——词频乘逆文档频率, 评估词在文档集中的重要性; 余弦相似度(Cosine Similarity)——向量夹角余弦值, 衡量语义相似度; 稀疏向量(Sparse Vector)——只存非零维度, TF-IDF 大部分维度为零; IDF 缓存(Inverse Document Frequency Cache)——全局词重要性映射, 避免每次检索重算; 文档切片(Document Chunking)——长文档切短片段便于向量检索; 路由冲突(Route Conflict)——同前缀路径被泛化参数路由抢匹配; 自动归档(Auto-Archiving)——告警/故障单解决后自动转为知识库文档
+
+### 2026-07-05: AI 助手能力增强方案设计——知识库 RAG 化 + SOP 工作流引擎
+- **需求**: 爸爸问 AI 智能助手需不需要丰富工作流和知识库功能。排查现状后给出判断：需要，优先级高
+- **现状盘点**: ①知识库 `KnowledgeBase` 表仅 6 字段(title/symptom/root_cause/solution/tags/severity)，`query_knowledge` 工具只做 `ilike` 模糊匹配，无文档上传/无向量化/无 Embedding/无 RAG 检索；②工作流 `change_workflow` 是人填单走审批的状态机，与 AI 助手完全脱钩，AI 只有单步 ReAct 无 SOP 编排能力
+- **判断依据**: AIOps 核心价值闭环是"感知→认知→决策→执行"。当前系统感知(告警/指标/链路/日志)✅全、执行(MCP工具+SSH真实注入)✅硬核，但认知(知识库太薄)❌、决策(无SOP工作流)❌。知识库是AI的"大脑"，工作流是AI的"骨架"，二者补齐才能从"问答助手"升级成"自主运维Agent"
+- **方案输出**: 在 `AIOPS系统架构设计.md` 新增第十章"AI 助手能力增强：知识库 RAG 化 + SOP 工作流引擎"，含 9 小节：背景/整体架构(ASCII图)/知识库RAG化(数据模型KbDocument+KbChunk/文档处理流水线/语义检索/MCP工具query_knowledge_rag)/SOP工作流引擎(数据模型WorkflowTemplate+WorkflowRun+WorkflowNodeRun/DAG状态机/预置5个SOP模板/propose_workflow工具)/与change_workflow关系/实施路线图(5阶段约4.5周)/技术选型(分阶段BGE本地模型→pgvector)/预期收益/复用关系
+- **关键设计决策**: ①知识库分两阶段：阶段一SQLite+JSON字符串存向量兼容现有架构，阶段二升级PostgreSQL+pgvector；②Embedding用BAAI/bge-small-zh-v1.5本地模型零成本数据不出域；③SOP工作流节点动作复用现有execute_* MCP工具不重写；④写操作节点复用PendingAction确认机制；⑤SOP高危节点可联动change_workflow生成变更单走审批
+- **专业名词**: RAG(Retrieval-Augmented Generation检索增强生成)——先检索知识库文档片段再喂LLM生成回答; Embedding(向量化嵌入)——文本转高维向量做语义检索; SOP(Standard Operating Procedure标准作业流程)——固定运维剧本; Agentic Workflow(智能体工作流)——AI按DAG流程图自主推进多步骤任务; DAG(Directed Acyclic Graph有向无环图)——工作流编排数据结构; Topology Sort(拓扑排序)——按DAG依赖确定节点执行顺序; Rerank(重排序)——cross-encoder对Top-K结果精排提升精度
+
 ### 2026-07-05: 项目更新推送到 GitHub——安全排除敏感文件 + LFS 推送
 - **提交**: fd5fe35, 40 文件 +2870/-453, 推送到 origin/main (0010f94..fd5fe35). LFS 上传 db/aiops.db 5.8MB. 涵盖混沌工程SSH真实故障注入/K8s拓扑力导向图/链路追踪端到端验证/日志空值防御/容器K8s菜单重排/功能测试脚本
 - **安全排除(硬性)**: ①`功能测试/测试资源信息.txt` 含3台服务器root密码(服务器1/2 root/123456, 服务器3 root/A892wYxn) → `git rm --cached` 从仓库移除 + .gitignore; ②`功能测试/reverse_tunnel.py:11` 硬编码 `PWD="A892wYxn"` → .gitignore 排除; ③`_fix_k8s_data.py` 一次性DB修复脚本 → .gitignore `/_fix_*.py`

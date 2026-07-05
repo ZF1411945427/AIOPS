@@ -1,6 +1,6 @@
 # AIOps 智能运维系统 — 架构设计文档
 
-> 最后更新: 2026-06-23
+> 最后更新: 2026-07-05
 
 ---
 
@@ -716,4 +716,471 @@ Phase 4 (可选)
 
 ---
 
-*最后更新: 2026-06-28*
+## 十、AI 助手能力增强：知识库 RAG 化 + SOP 工作流引擎
+
+> 当前 AI 助手已具备 MCP 工具调用、ReAct 多轮循环、"提议-确认"闭环、链式推进、幻觉检测等能力，但缺乏"记忆"（知识库语义检索）和"骨架"（SOP 工作流编排）。本章设计知识库 RAG 化升级与 SOP 工作流引擎，使 AI 助手从"问答助手"升级为"自主运维 Agent"。
+
+### 10.1 背景与目标
+
+#### 10.1.1 现状痛点
+
+| 模块 | 现状 | 问题 |
+|------|------|------|
+| **知识库** | `KnowledgeBase` 表仅 6 字段（title/symptom/root_cause/solution/tags/severity）；`query_knowledge` 工具仅 `ilike` 模糊匹配 | 无文档上传、无向量化、无 Embedding、无语义检索。AI 拿不到精准经验，无法做根因建议 |
+| **工作流** | `change_workflow` 是人工填单走审批的状态机，与 AI 助手完全脱钩 | AI 只有对话驱动的单步 ReAct，无 SOP 编排能力。固定流程（如"磁盘告警→查盘→清理→验证→关告警"）需逐步问用户 |
+
+#### 10.1.2 增强目标
+
+```
+问答助手（当前）  →  自主运维 Agent（目标）
+  │                    │
+  ├─ 单步 ReAct        ├─ ReAct + 知识库 RAG 检索（有记忆）
+  └─ 一问一答          └─ ReAct + SOP 工作流编排（有骨架）
+```
+
+- **知识库 RAG 化**：AI 助手能语义检索历史故障处置经验、运维文档，回答"该怎么做"
+- **SOP 工作流引擎**：AI 助手能 `propose_workflow` 一键触发整套运维剧本，自动执行多步骤、关键节点人工确认
+
+### 10.2 整体架构
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     AI 智能助手（Agent 管道）                     │
+│   用户提问 → Action Router → ReAct 循环 → 工具调用 → 两阶段回答    │
+└───────┬──────────────────────────────────┬───────────────────────┘
+        │                                  │
+        ▼                                  ▼
+┌───────────────────────┐      ┌────────────────────────────────┐
+│   知识库 RAG 检索      │      │     SOP 工作流引擎             │
+│  (AI 的"记忆")         │      │  (AI 的"骨架")                 │
+│                       │      │                                │
+│  文档上传 → 切片       │      │  SOP 模板编排 (DAG)            │
+│  → Embedding 向量化    │      │  ↓                             │
+│  → 向量库存储          │      │  AI 触发 propose_workflow      │
+│  → 语义检索 (Top-K)    │      │  ↓                             │
+│  → 重排序 (Rerank)     │      │  节点逐步执行                  │
+│  → 注入 LLM 上下文     │      │  ├─ 只读步骤: 自动执行          │
+│                       │      │  ├─ 写操作步骤: 人工确认        │
+│  query_knowledge_rag  │      │  └─ 失败: 自动重试/回滚         │
+│  (MCP 工具)            │      │  ↓                             │
+│                       │      │  propose_workflow (MCP 工具)    │
+└──────────┬────────────┘      └───────────────┬────────────────┘
+           │                                   │
+           ▼                                   ▼
+┌───────────────────────┐      ┌────────────────────────────────┐
+│  向量存储层            │      │  工作流执行引擎                │
+│  pgvector / Chroma    │      │  节点调度 + 状态机 + 审计日志   │
+│  + 关系存储 (SQLite)   │      │  + 与现有 execute_* 工具复用    │
+└───────────────────────┘      └────────────────────────────────┘
+```
+
+### 10.3 知识库 RAG 化设计
+
+#### 10.3.1 数据模型扩展
+
+在现有 `KnowledgeBase` 基础上新增文档管理与向量索引模型：
+
+```python
+# ─── 文档管理（支持上传 markdown/pdf/word/txt）───
+class KbDocument(Base):
+    __tablename__ = "kb_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    kb_id = Column(Integer, ForeignKey("knowledge_base.id"), nullable=True)  # 可关联到知识条目，也可独立
+    title = Column(String(256), nullable=False)
+    source_type = Column(String(32), default="manual")  # manual / upload / alert_case / incident_case
+    file_path = Column(String(512), default="")         # 上传文件原始路径
+    content = Column(Text, default="")                  # 全文内容
+    chunk_count = Column(Integer, default=0)            # 切片数量
+    status = Column(String(32), default="pending")      # pending / indexed / failed
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+# ─── 文档切片 + 向量索引 ───
+class KbChunk(Base):
+    __tablename__ = "kb_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("kb_documents.id"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)       # 切片序号
+    content = Column(Text, nullable=False)              # 切片文本
+    embedding = Column(Text, default="")                # 向量 JSON 字符串（SQLite 兼容）；pgvector 用 vector 类型
+    token_count = Column(Integer, default=0)
+    # 元数据用于过滤检索
+    tags = Column(String(256), default="")
+    asset_type = Column(String(32), default="")
+    severity = Column(String(32, default="warning"))
+    created_at = Column(DateTime, default=lambda: datetime.now())
+```
+
+**字段设计要点：**
+- `KbDocument.source_type` 区分手工录入、文件上传、告警自动归档、故障单自动归档，支持知识库自动沉淀
+- `KbChunk.embedding` 在 SQLite 阶段用 JSON 字符串存储向量（兼容现有架构）；升级 PostgreSQL 后改用 `pgvector` 原生类型，提升检索性能
+- `KbChunk` 保留 `tags/asset_type/severity` 元数据，支持检索时按业务维度过滤
+
+#### 10.3.2 文档处理流水线
+
+```
+上传文档 (md/pdf/word/txt)
+   │
+   ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ 文档解析     │ →  │ 文本切片     │ →  │ Embedding   │ →  │ 向量入库     │
+│ (unstructured│    │ (Chunking)  │    │ (向量化)    │    │ (持久化)    │
+│  /pypdf)     │    │ 512 token   │    │ BGE/OpenAI  │    │ SQLite/     │
+└─────────────┘    │ 128 重叠    │    │ /本地模型    │    │ pgvector    │
+                   └─────────────┘    └─────────────┘    └─────────────┘
+```
+
+| 阶段 | 技术选型 | 说明 |
+|------|---------|------|
+| **文档解析** | `unstructured` / `pypdf` / `python-docx` | 支持 markdown/pdf/word/txt，提取纯文本 |
+| **文本切片** | 递归字符切分（LangChain `RecursiveCharacterTextSplitter`） | 512 token / 128 重叠，保留语义完整性 |
+| **Embedding** | `BAAI/bge-small-zh-v1.5`（本地 sentence-transformers）或 OpenAI `text-embedding-3-small` | 本地模型零成本、数据不出域；OpenAI 效果更优 |
+| **向量入库** | SQLite（JSON 字符串）→ pgvector（升级路径） | 阶段一兼容现有架构，阶段二升级 |
+
+#### 10.3.3 语义检索流程
+
+```
+用户提问 / 告警触发
+   │
+   ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ Query       │ →  │ 向量检索     │ →  │ 重排序       │ →  │ 上下文构造   │
+│ Embedding   │    │ Top-K=10    │    │ (Rerank)    │    │ 注入 LLM     │
+│             │    │ 余弦相似度   │    │ Top-N=3     │    │              │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+```
+
+1. **Query 向量化**：把用户问题或告警描述用同一 Embedding 模型转向量
+2. **向量检索**：在 `KbChunk` 表中按余弦相似度检索 Top-K（默认 10），支持按 `tags/asset_type/severity` 元数据过滤
+3. **重排序**（可选）：用 cross-encoder 模型对 Top-K 重排序取 Top-N（默认 3），提升精度
+4. **上下文构造**：把 Top-N 切片内容拼接到 LLM prompt，生成回答
+
+**SQLite 阶段的检索实现**（无原生向量索引，用 Python 内存计算）：
+```python
+def vector_search(query_embedding: List[float], top_k: int = 10, filters: dict = None) -> List[KbChunk]:
+    chunks = db.query(KbChunk).all()
+    # 元数据过滤
+    if filters:
+        chunks = [c for c in chunks if matches_filters(c, filters)]
+    # 余弦相似度排序
+    scored = [(cosine_sim(query_embedding, json.loads(c.embedding)), c) for c in chunks]
+    scored.sort(key=lambda x: -x[0])
+    return [c for _, c in scored[:top_k]]
+```
+
+> 注：此方案适合知识库 <1 万切片。超过后建议升级 pgvector + IVFFlat 索引。
+
+#### 10.3.4 MCP 工具集成
+
+新增 `query_knowledge_rag` MCP 工具替代现有 `query_knowledge` 的 `ilike` 匹配：
+
+```python
+@register_mcp_tool(
+    name="query_knowledge_rag",
+    description="语义检索运维知识库（RAG）。支持按症状、故障类型、资产类型语义匹配历史处置经验与运维文档，返回最相关的知识条目与文档切片。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "检索问题或故障描述"},
+            "asset_type": {"type": "string", "description": "资产类型过滤（可选）"},
+            "severity": {"type": "string", "description": "严重级别过滤（可选）"},
+            "top_k": {"type": "integer", "description": "返回数量", "default": 5},
+        },
+        "required": ["query"],
+    },
+    risk_level="read_only",
+)
+def query_knowledge_rag(db, user_id=None, **kwargs):
+    query = kwargs["query"]
+    top_k = kwargs.get("top_k", 5)
+    filters = {k: kwargs[k] for k in ("asset_type", "severity") if kwargs.get(k)}
+    # 1. Query 向量化
+    query_emb = embed_text(query)
+    # 2. 向量检索
+    chunks = vector_search(query_emb, top_k=top_k, filters=filters)
+    # 3. 返回结果（含原文 + 来源文档 + 相似度）
+    return {
+        "count": len(chunks),
+        "items": [
+            {
+                "document_title": chunk.document.title,
+                "content": chunk.content,
+                "similarity": round(chunk._score, 3),
+                "tags": chunk.tags,
+            }
+            for chunk in chunks
+        ],
+    }
+```
+
+**与告警自动关联**：告警触发时自动用告警 `metric_name + message` 调 `query_knowledge_rag`，把匹配的处置经验推送通知，实现"告警即推荐"。
+
+### 10.4 SOP 工作流引擎设计
+
+#### 10.4.1 设计思路
+
+```
+现有 change_workflow（人填单走审批）  ← 保留，作为"变更管理"功能
+        ↑ 区别
+SOP 工作流引擎（新）                   ← 新增，作为"AI 驱动的自动化剧本"
+  - 模板化：预置高频运维 SOP（磁盘清理/服务重启/扩缩容/故障自愈）
+  - 可编排：DAG 节点图，节点间有依赖关系
+  - AI 触发：AI 助手通过 propose_workflow 一键触发
+  - 自动执行：只读步骤自动跑，写操作步骤人工确认
+  - 复用现有：节点动作复用 execute_* MCP 工具
+```
+
+#### 10.4.2 数据模型
+
+```python
+# ─── SOP 模板（可复用的运维剧本）───
+class WorkflowTemplate(Base):
+    __tablename__ = "workflow_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    category = Column(String(64), default="generic")  # disk / service / scaling / healing / custom
+    trigger_type = Column(String(32), default="manual")  # manual / alert_auto / scheduled
+    trigger_condition = Column(Text, default="")          # JSON：触发条件（告警 metric+阈值）
+    nodes = Column(Text, default="[]")                    # JSON：节点定义（DAG）
+    edges = Column(Text, default="[]")                    # JSON：边定义（依赖关系）
+    risk_level = Column(String(32), default="medium")
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+# ─── 工作流执行实例 ───
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("workflow_templates.id"), nullable=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)  # 触发的 AI 会话
+    title = Column(String(256), nullable=False)
+    status = Column(String(32), default="pending")  # pending / running / paused / completed / failed / aborted
+    context = Column(Text, default="{}")            # JSON：运行时上下文（asset_id、告警信息等）
+    trigger_source = Column(String(32), default="ai")  # ai / manual / alert_auto
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+# ─── 节点执行记录 ───
+class WorkflowNodeRun(Base):
+    __tablename__ = "workflow_node_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, ForeignKey("workflow_runs.id"), nullable=False)
+    node_id = Column(String(64), nullable=False)     # 对应 template.nodes[].id
+    node_name = Column(String(128), default="")
+    action_type = Column(String(64), nullable=False) # 对应 execute_* 工具后缀
+    payload = Column(Text, default="{}")             # JSON：执行参数
+    status = Column(String(32), default="pending")   # pending / running / awaiting_confirm / completed / failed / skipped
+    result = Column(Text, default="")                # JSON：执行结果
+    requires_confirm = Column(Boolean, default=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+```
+
+**节点定义 JSON 结构（`WorkflowTemplate.nodes`）：**
+```json
+[
+  {
+    "id": "node_1",
+    "name": "检查磁盘占用",
+    "action_type": "run_command",
+    "payload_template": {"command": "df -h", "asset_id": "{{context.asset_id}}"},
+    "requires_confirm": false,
+    "retry_count": 0
+  },
+  {
+    "id": "node_2",
+    "name": "清理磁盘",
+    "action_type": "clean_disk",
+    "payload_template": {"path": "/tmp", "asset_id": "{{context.asset_id}}"},
+    "requires_confirm": true,
+    "retry_count": 1
+  },
+  {
+    "id": "node_3",
+    "name": "验证清理结果",
+    "action_type": "run_command",
+    "payload_template": {"command": "df -h", "asset_id": "{{context.asset_id}}"},
+    "requires_confirm": false,
+    "retry_count": 0
+  }
+]
+```
+
+#### 10.4.3 状态机与执行引擎
+
+```
+WorkflowRun 状态机:
+  pending → running → [paused (等待人工确认)] → running → completed
+                                              ↓
+                                           failed / aborted
+
+NodeRun 状态机:
+  pending → running → awaiting_confirm (写操作) → completed
+                    ↓                          ↓
+                  completed (只读)           failed (确认拒绝→整个 Run aborted)
+```
+
+**执行引擎核心逻辑：**
+1. **拓扑排序**：按 DAG 依赖关系确定节点执行顺序
+2. **节点调度**：依次执行节点，渲染 `payload_template`（Jinja2 模板，注入 `context` 与上游节点 `result`）
+3. **只读自动执行**：`requires_confirm=false` 的节点直接调 `execute_*` 工具
+4. **写操作暂停等待**：`requires_confirm=true` 的节点创建 `PendingAction`，状态置 `awaiting_confirm`，用户确认后继续
+5. **失败处理**：节点失败按 `retry_count` 自动重试；超过重试次数则整个 Run 置 `failed`，可手动 `abort`
+6. **审计**：每个节点执行结果落库 `WorkflowNodeRun`，完整可追溯
+
+#### 10.4.4 MCP 工具集成
+
+```python
+@register_mcp_tool(
+    name="list_workflow_templates",
+    description="列出可用的 SOP 工作流模板",
+    input_schema={"type": "object", "properties": {"category": {"type": "string"}}},
+    risk_level="read_only",
+)
+def list_workflow_templates(db, user_id=None, **kwargs):
+    ...
+
+@register_mcp_tool(
+    name="propose_workflow",
+    description="提议执行一个 SOP 工作流。不直接执行，创建待确认工作流实例。AI 助手处理多步骤运维任务时应优先用此工具，而非逐步 propose_action。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "template_id": {"type": "integer", "description": "SOP 模板 ID（可选，无则需提供 nodes）"},
+            "title": {"type": "string", "description": "工作流标题"},
+            "context": {"type": "object", "description": "运行时上下文（asset_id、告警信息等）"},
+            "nodes": {"type": "array", "description": "自定义节点（无 template_id 时必填）"},
+            "edges": {"type": "array", "description": "自定义边（无 template_id 时必填）"},
+        },
+        "required": ["title"],
+    },
+    risk_level="advisory",
+)
+def propose_workflow(db, user_id=None, **kwargs):
+    # 创建 WorkflowRun + 首批 NodeRun，返回 _pending_workflow
+    # 与 propose_action 类似，由前端展示确认按钮
+    ...
+```
+
+#### 10.4.5 预置 SOP 模板
+
+| 模板名 | 触发场景 | 节点流程 |
+|--------|---------|---------|
+| **磁盘告警处置 SOP** | `disk_usage > 90%` 告警 | 查盘(df) → 定位大文件(du) → 清理(/tmp或/var/log) → 验证(df) → 关告警 |
+| **服务重启 SOP** | 服务无响应告警 | 查进程(ps) → 重启(systemctl restart) → 验证(ps+curl) → 关告警 |
+| **Pod 重启循环处置 SOP** | CrashLoopBackOff 事件 | 查 Pod 日志(logs) → 查事件(events) → 重启Pod(delete pod) → 验证(kubectl get) |
+| **扩容 SOP** | CPU/内存持续高位告警 | 查当前副本数 → 扩容(scale) → 验证副本数 → 观察5分钟指标 |
+| **数据库慢查询处置 SOP** | 慢查询告警 | 查进程列表(show processlist) → 杀慢查询(kill) → 验证 |
+
+### 10.5 与现有 change_workflow 的关系
+
+```
+┌─────────────────────┐     ┌─────────────────────────┐
+│ change_workflow     │     │ SOP 工作流引擎（新）     │
+│ (变更管理)          │     │ (AI 驱动自动化剧本)      │
+├─────────────────────┤     ├─────────────────────────┤
+│ 人填单 → 审批 → 执行│     │ AI 触发 → 自动执行       │
+│ 关注"变更是否被授权"│     │ 关注"运维动作自动完成"   │
+│ draft→approve→done  │     │ DAG 节点编排             │
+└──────────┬──────────┘     └────────────┬────────────┘
+           │                              │
+           └──────────┬───────────────────┘
+                      ▼
+          高危变更可联动：SOP 工作流中
+          requires_confirm 的写操作节点，
+          可自动生成 change_workflow 变更单
+          走审批流，审批通过后继续执行
+```
+
+**二者并存，不替换：**
+- `change_workflow`：保留，用于"人工发起的变更审批"
+- `SOP 工作流引擎`：新增，用于"AI 触发的自动化运维"
+- 联动点：SOP 工作流的高危节点可自动创建 `ChangeRequest`，审批通过后继续执行
+
+### 10.6 实施路线图
+
+```
+Phase 1 (1周) ── 知识库 RAG 基础
+├── KbDocument / KbChunk 数据模型 + 迁移
+├── 文档上传接口（/knowledge/documents/upload）
+├── 文档解析 + 切片（unstructured + RecursiveCharacterTextSplitter）
+├── Embedding 集成（BGE 本地模型 / OpenAI）
+└── 向量入库 + 语义检索 query_knowledge_rag 工具
+
+Phase 2 (1周) ── 知识库自动沉淀
+├── 告警解决后自动归档为 KbDocument（source_type=alert_case）
+├── 故障单关闭后自动归档为 KbDocument（source_type=incident_case）
+├── 告警触发自动调 query_knowledge_rag 推荐处置经验
+└── 前端知识库页面增加文档上传 + RAG 检索入口
+
+Phase 3 (1.5周) ── SOP 工作流引擎核心
+├── WorkflowTemplate / WorkflowRun / WorkflowNodeRun 数据模型
+├── DAG 拓扑排序 + 执行引擎
+├── 节点 payload_template 渲染（Jinja2）
+├── 只读节点自动执行 + 写操作节点 PendingAction 确认
+├── propose_workflow / list_workflow_templates MCP 工具
+└── 5 个预置 SOP 模板（磁盘/服务/Pod/扩容/慢查询）
+
+Phase 4 (1周) ── AI 助手集成 + 前端
+├── AI 助手 system_prompt 增加 SOP 工作流使用引导
+├── 前端工作流执行监控页（节点状态图 + 实时日志）
+├── 工作流模板管理页（CRUD + 可视化节点编辑）
+└── 告警自动触发 SOP 工作流（trigger_type=alert_auto）
+
+Phase 5 (可选) ── 升级与优化
+├── 升级 PostgreSQL + pgvector（向量索引性能）
+├── Rerank 模型集成（cross-encoder 提升精度）
+├── 工作流节点支持并行执行（DAG 多分支）
+└── 工作流执行历史分析与模板推荐
+```
+
+### 10.7 技术选型
+
+| 组件 | 阶段一（兼容现有） | 阶段二（性能升级） |
+|------|------------------|------------------|
+| **向量存储** | SQLite + JSON 字符串 | PostgreSQL + pgvector + IVFFlat |
+| **Embedding 模型** | `BAAI/bge-small-zh-v1.5`（本地，512维，零成本） | 同左 / OpenAI `text-embedding-3-small` |
+| **文档解析** | `unstructured` + `pypdf` + `python-docx` | 同左 |
+| **文本切片** | LangChain `RecursiveCharacterTextSplitter` | 同左 |
+| **Rerank** | （跳过，Top-K 直接用） | `BAAI/bge-reranker-base` cross-encoder |
+| **模板渲染** | Jinja2（复用现有 `template_utils`） | 同左 |
+| **DAG 调度** | 自研拓扑排序 + 状态机 | 可选 LangGraph / Temporal |
+| **前端可视化** | Element Plus + 自研节点状态图 | 可选 AntV X6 / G6 DAG 可视化 |
+
+### 10.8 预期收益
+
+| 指标 | 当前 | 目标 | 提升 |
+|------|------|------|------|
+| 知识库检索准确率 | `ilike` 关键词（低） | 语义检索 Top-3 命中率 >80% | 显著提升 |
+| 告警处置建议可用性 | 无 | 自动推荐历史处置经验 | 从无到有 |
+| 多步运维操作人工介入 | 每步确认 | 仅写操作确认，只读自动执行 | 介入次数 -60% |
+| 固定 SOP 执行时间 | 人工逐步操作 15min | AI 触发自动执行 3min | -80% |
+| 知识库自动沉淀 | 人工录入 | 告警/故障单自动归档 | 零成本积累 |
+
+### 10.9 与现有系统的复用关系
+
+| 现有能力 | 复用方式 |
+|---------|---------|
+| `execute_*` MCP 工具 | SOP 工作流节点动作直接复用，无需重写 |
+| `PendingAction` 确认流 | SOP 工作流写操作节点复用确认机制 |
+| `propose_action` 工具 | `propose_workflow` 复用其设计模式（advisory 风险等级 + _pending_ 字段返回） |
+| `template_utils.parse_json_config` | 节点 payload 解析复用 |
+| `change_workflow` | 高危 SOP 节点联动生成变更单 |
+| `knowledge_graph_service.recommend_kb_for_alert` | 升级为 RAG 检索后保留打分逻辑作为 Rerank 信号 |
+
+---
+
+*最后更新: 2026-07-05*

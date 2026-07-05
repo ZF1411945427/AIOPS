@@ -20,7 +20,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
-from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos
+from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
@@ -99,6 +99,7 @@ app.include_router(incidents.router)
 app.include_router(topology.router)
 app.include_router(containers.router)
 app.include_router(knowledge_graph.router)
+app.include_router(knowledge_documents.router)
 app.include_router(knowledge.router)
 app.include_router(remediation.router)
 app.include_router(datasources.router)

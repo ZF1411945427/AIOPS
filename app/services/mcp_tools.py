@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_session_for, get_db_mode
 from app.models import Alert, AlertRule, Asset, ChatSession, MetricRecord, K8sEvent, Incident, KnowledgeBase
 from app.services.mcp_registry import register_mcp_tool, get_internal_tools, get_mcp_tool
-from app.services import remediation_service, alert_service, incident_service, asset_service
+from app.services import remediation_service, alert_service, incident_service, asset_service, rag_service
 
 
 def _get_db():
@@ -292,6 +292,52 @@ def query_knowledge(db: Optional[Session] = None, user_id: Optional[int] = None,
                 }
                 for k in items
             ],
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── Knowledge RAG Tools (语义检索, 升级版 query_knowledge) ─────
+
+@register_mcp_tool(
+    name="query_knowledge_rag",
+    description="语义检索运维知识库（RAG）。通过 TF-IDF 向量余弦相似度匹配历史故障处置经验、运维文档、告警归档案例，返回最相关的知识片段。比 query_knowledge 的关键词匹配更精准，支持语义近似查询。适用于：告警根因分析时查找历史处置经验、排查问题时搜索相关运维文档、新故障需要参考类似案例。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "检索问题或故障描述，如'磁盘空间不足告警如何处理'、'nginx 服务无响应'"},
+            "asset_type": {"type": "string", "description": "资产类型过滤（可选），如 server、pod、service"},
+            "severity": {"type": "string", "description": "严重级别过滤（可选）：warning / critical / info"},
+            "tags": {"type": "string", "description": "标签过滤（可选），如 disk、network"},
+            "top_k": {"type": "integer", "description": "返回数量限制", "default": 5},
+        },
+        "required": ["query"],
+    },
+    risk_level="read_only",
+)
+def query_knowledge_rag(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        query = kwargs.get("query", "")
+        if not query or not query.strip():
+            return {"error": "检索内容不能为空"}
+        top_k = kwargs.get("top_k", 5)
+        results = rag_service.vector_search(
+            db,
+            query=query,
+            top_k=min(int(top_k), 20),
+            asset_type=kwargs.get("asset_type") or None,
+            severity=kwargs.get("severity") or None,
+            tags=kwargs.get("tags") or None,
+        )
+        return {
+            "count": len(results),
+            "query": query,
+            "items": results,
         }
     finally:
         if close_db:
