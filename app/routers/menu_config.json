@@ -42,6 +42,18 @@
         "path": "/agent/pending"
       },
       {
+        "key": "agent-workflow-editor",
+        "label": "智能体编排",
+        "type": "vue",
+        "path": "/agent-workflow/editor"
+      },
+      {
+        "key": "agent-workflow-runs",
+        "label": "智能体执行",
+        "type": "vue",
+        "path": "/agent-workflow/runs"
+      },
+      {
         "key": "ai-providers",
         "label": "智能体配置",
         "type": "vue",
@@ -58,18 +70,6 @@
         "label": "预测模型",
         "type": "vue",
         "path": "/prediction-models"
-      },
-      {
-        "key": "agent-workflow-editor",
-        "label": "智能体编排",
-        "type": "vue",
-        "path": "/agent-workflow/editor"
-      },
-      {
-        "key": "agent-workflow-runs",
-        "label": "智能体执行",
-        "type": "vue",
-        "path": "/agent-workflow/runs"
       },
       {
         "key": "audit",
