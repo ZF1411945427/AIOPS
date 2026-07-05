@@ -1,4 +1,40 @@
-### 2026-07-05: 立即体验改深色加粗文字(去按钮底色)+右下角返回顶部按钮
+### 2026-07-05: 全菜单刷新保持当前页（修复刷新跳回默认仪表盘）
+- **需求**: 爸爸反馈在 SLO 配置等页面刷新会跳回默认仪表盘，要求全部菜单刷新都停留在自己的页面
+- **根因** `frontend/src/layout/AppLayout.vue`:
+  - `activeView` 初始值硬编码 `'dashboard'`(line 307)，刷新后 SPA 重建状态归零
+  - 当前菜单位置只在**切换数据库**时写入 localStorage(`handleDbModeSwitch` line 454)，且 `onMounted` 恢复后**立即 removeItem 删除**(line 431)
+  - 普通刷新(F5)时 localStorage 无 `aiops-active-menu`，onMounted 不恢复，停在默认 dashboard
+- **修复** `frontend/src/layout/AppLayout.vue`:
+  - `handleMenuSelect` 末尾加 `localStorage.setItem('aiops-active-menu', key)`：每次菜单切换都持久化当前 key，不再依赖切换数据库时才写入
+  - `onMounted` 恢复逻辑改为：`_findItem(_savedMenu)` 找到则 `handleMenuSelect` 恢复(不删 key 供下次刷新用)，找不到(如切换数据库后菜单变化)才 `removeItem` 清除回到默认
+  - `handleDbModeSwitch` 原有 `localStorage.setItem` 保留作双保险
+- **效果**: 任意菜单页刷新→setup 读 localStorage→onMounted 加载菜单→找到匹配项→handleMenuSelect 恢复到原页面；菜单加载期间 menuLoading 遮罩遮挡首帧 dashboard 闪烁
+- **验证**: 前端构建 14.89s 通过；逻辑链路完整(handleMenuSelect 持久化→onMounted 恢复→找不到才清除)
+- **专业名词**: 菜单状态持久化(Menu State Persistence)——将当前激活菜单 key 存入 localStorage，刷新后从存储恢复避免状态归零; SPA 状态丢失(SPA State Loss)——单页应用刷新时 JS 状态重置，需外部存储(URL/localStorage)恢复; 首帧闪烁(First-frame Flicker)——恢复前先渲染默认页再切换目标页造成的视觉跳动，用 loading 遮罩遮挡; 状态恢复兜底(State Restore Fallback)——存储的 key 在当前菜单找不到时清除存储回到默认，避免死循环
+
+### 2026-07-05: SRE值班表表单逻辑错误全面修复+优化（11处Bug+8项优化）
+- **需求**: 爸爸要求审查 SRE 值班表表单的逻辑错误与优化点，选择"全部修复"
+- **后端修复** `app/routers/sre.py`:
+  - **Pydantic 校验补齐** `OnCallScheduleCreate`: field_validator 校验 team_name 非空(strip)、rotation_type 枚举(只允许 weekly/monthly)、members 非空(过滤空串)、current_oncall 非空(strip)；model_validator 校验 current_oncall∈members(防幽灵值班人)、period_end>period_start(防负周期)
+  - **时区统一**: `get_current_oncall` 与 `generate_availability_report` 的 `datetime.utcnow()`(已废弃且与前端本地时间差8h) → `datetime.now()`(本地naive，与前端 date-picker 存储基准一致)，修复"当前值班"在周期边界查错
+  - **多团队值班**: `get_current_oncall` 由 `.first()`(只返回1条无序) → `.order_by(team_name).all()` 返回 items 列表，前端遍历显示多个当前值班 alert
+  - **去重优化**: `list_oncall_members` 由 list `not in`(O(n)) → dict 保序去重(O(1)查找)
+  - **删除404**: `delete_oncall` 不存在时由静默返回 ok → raise 404"值班表不存在"
+  - **Response 补审计字段**: `OnCallScheduleResponse` 加 created_by/created_at/updated_at
+- **前端修复** `frontend/src/views/OnCallView.vue`(重写):
+  - **表单校验**: el-form 加 ref+rules，6字段校验(团队名必填/轮值方式必选/成员非空/值班人必选且在成员内/周期开始必选/周期结束必选且晚于开始)，saveOncall 先 validate 通过才提交，失败 ElMessage.warning
+  - **幽灵值班人防护**: `watch(form.members)` 当 current_oncall 不在新成员列表时自动清空，杜绝"值班人不在团队"脏数据
+  - **轮值联动周期**: `autoPeriodEnd()` 选 rotation_type 或改 period_start 时自动计算 period_end=start+(7或30)天
+  - **schedule 改真实排期**: `buildSchedule()` 按 members 顺序+rotation_type 步长生成每人起止日期 `[{order,name,start,end}]`，告别原"members副本仅标序号"的冗余无意义字段
+  - **datetime→date**: date-picker type="datetime"→type="date"+value-format="YYYY-MM-DD"(值班按天无需时分秒)
+  - **多值班显示**: currentItems computed 遍历 currentOncall.items 显示多个团队当前值班 alert
+  - **v-loading**: 列表加载时 loading 遮罩
+  - **列表加创建时间列** + 操作列 fixed="right"
+  - **错误提示细化**: saveOncall/deleteOncall catch 显示 `e.response.data.detail`(后端校验错误信息)而非笼统"保存失败"
+- **验证**:
+  - 前端构建 14.87s 成功(2403 modules，无编译错误)
+  - 后端 API 测试 8 场景全 PASS: rotation_type非法→422 / current_oncall不在members→422 / period_end≤start→422 / members空+oncall空→422 / team_name空格→422 / 正常创建schedule排期完整存储→200(created_at/updated_at返回) / DELETE不存在→404 / DELETE存在→200
+- **专业名词**: 字段级校验器(Field Validator)——Pydantic 对单个字段做类型/约束校验; 模型级校验器(Model Validator)——跨字段一致性校验(如current_oncall必须在members内); 幽灵值班人(Orphan On-call)——值班人记录存在但已不在团队成员中的脏数据; 时区基准不一致(Timezone Basis Mismatch)——存储用本地时间查询用UTC导致周期边界8h偏差; 保序去重(Order-preserving Dedup)——用dict键集去重同时保留首次出现顺序; 轮值排期表(Rotation Schedule)——每人值班起止时间的完整排期，区别于成员列表; 枚举约束(Enum Constraint)——字段值限定在预定义集合内(weekly/monthly)
 - **需求**: 爸爸反馈"立即体验四个字太灰蒙蒙",不要按钮风格不要白框不要hover变化,要黑色或加粗;另要求右下角加返回顶部功能
 - **立即体验改文字风格** `app/templates/product_overview.html`:
   - 旧: background蓝底+白字+发光+白框(多轮调蓝均灰蒙,爸爸嫌丑)

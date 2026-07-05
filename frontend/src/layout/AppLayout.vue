@@ -383,6 +383,8 @@ function handleMenuSelect(arg) {
     activeView.value = ''
     activePath.value = item.path
   }
+  // 持久化当前菜单位置，供刷新恢复
+  localStorage.setItem('aiops-active-menu', key)
 }
 
 function toggleChatWidget() {
@@ -426,10 +428,15 @@ onMounted(async () => {
   try {
     const data = await request.get('/api/menu')
     menuGroups.value = Array.isArray(data) ? data : (data.menu || [])
-    // 恢复切换数据库前的菜单位置
+    // 恢复上次菜单位置（刷新或切换数据库后均生效）
     if (_savedMenu) {
-      localStorage.removeItem('aiops-active-menu')
-      handleMenuSelect(_savedMenu)
+      const item = _findItem(_savedMenu)
+      if (item) {
+        handleMenuSelect(_savedMenu)
+      } else {
+        // 菜单项不存在（如切换数据库后菜单变化），清除存储回到默认
+        localStorage.removeItem('aiops-active-menu')
+      }
     }
   } catch (e) {
     ElMessage.error('加载菜单失败: ' + e.message)

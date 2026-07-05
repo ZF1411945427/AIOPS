@@ -21,7 +21,7 @@
             <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{row}">
             <el-button type="primary" size="small" @click="editSlo(row)">编辑</el-button>
             <el-button type="danger" size="small" @click="deleteSlo(row.id)">删除</el-button>
