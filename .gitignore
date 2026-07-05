@@ -82,3 +82,6 @@ tok.txt
 
 # ===== 开发工具配置（含 API Key，禁止入库）=====
 opencode.json
+
+# ===== 知识库用户上传文件（运行时产物，禁止入库）=====
+app/static/uploads/

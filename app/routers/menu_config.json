@@ -411,6 +411,43 @@
     ]
   },
   {
+    "key": "knowledge",
+    "label": "知识管理",
+    "icon": "Reading",
+    "items": [
+      {
+        "key": "kb-list",
+        "label": "故障知识库",
+        "type": "iframe",
+        "path": "/knowledge"
+      },
+      {
+        "key": "kb-documents",
+        "label": "知识库文档 RAG",
+        "type": "iframe",
+        "path": "/knowledge/documents"
+      },
+      {
+        "key": "kb-graph",
+        "label": "运维知识图谱",
+        "type": "iframe",
+        "path": "/knowledge/graph"
+      },
+      {
+        "key": "smart-recommend",
+        "label": "智能推荐",
+        "type": "iframe",
+        "path": "/smart-recommend"
+      },
+      {
+        "key": "runbooks",
+        "label": "Runbook",
+        "type": "iframe",
+        "path": "/runbooks"
+      }
+    ]
+  },
+  {
     "key": "system",
     "label": "系统管理",
     "icon": "Setting",

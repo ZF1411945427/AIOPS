@@ -1064,3 +1064,42 @@ class AvailabilityReport(Base):
     incident_count = Column(Integer, default=0)         # 故障次数
     total_duration = Column(Integer, default=0)         # 总时长(秒)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── 知识库 RAG：文档管理 + 向量切片 ───
+class KbDocument(Base):
+    """知识库文档（支持上传 md/txt/pdf/docx，可关联 KnowledgeBase 条目或独立存在）"""
+    __tablename__ = "kb_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    kb_id = Column(Integer, ForeignKey("knowledge_base.id"), nullable=True)
+    title = Column(String(256), nullable=False)
+    source_type = Column(String(32), default="manual")   # manual / upload / alert_case / incident_case
+    file_path = Column(String(512), default="")          # 上传文件原始存储路径
+    file_ext = Column(String(16), default="")            # 文件扩展名 md/txt/pdf/docx
+    content = Column(Text, default="")                   # 全文内容
+    chunk_count = Column(Integer, default=0)             # 切片数量
+    status = Column(String(32), default="pending")       # pending / indexed / failed
+    tags = Column(String(256), default="")
+    asset_type = Column(String(32), default="")
+    severity = Column(String(32), default="warning")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class KbChunk(Base):
+    """文档切片 + 向量索引（embedding 存 JSON 字符串，兼容 SQLite；升级 pgvector 后改 vector 类型）"""
+    __tablename__ = "kb_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("kb_documents.id"), nullable=False, index=True)
+    chunk_index = Column(Integer, nullable=False)        # 切片序号
+    content = Column(Text, nullable=False)               # 切片文本
+    embedding = Column(Text, default="")                 # 向量 JSON 字符串
+    embedding_mode = Column(String(32), default="tfidf") # tfidf / provider
+    token_count = Column(Integer, default=0)
+    tags = Column(String(256), default="")
+    asset_type = Column(String(32), default="")
+    severity = Column(String(32), default="warning")
+    created_at = Column(DateTime, default=lambda: datetime.now())
