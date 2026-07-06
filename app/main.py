@@ -11,6 +11,7 @@ mimetypes.add_type("text/javascript", ".mjs")
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -21,7 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
-from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license
+from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license, mobile
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
@@ -95,7 +96,7 @@ for _eng in get_all_engines().values():
 
 app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -104,6 +105,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not any(path.startswith(p) for p in PUBLIC_PATHS):
             user_id = request.session.get("user_id")
             if not user_id:
+                auth = request.headers.get("authorization", "")
+                if auth.startswith("Bearer "):
+                    from app.services.mobile_push_service import verify_login_token
+                    payload = verify_login_token(auth[7:])
+                    if payload:
+                        request.session["user_id"] = payload.get("user_id")
+                        request.session["username"] = payload.get("username", "")
+                        return await call_next(request)
                 return RedirectResponse(url="/login", status_code=303)
         return await call_next(request)
 
@@ -112,6 +121,14 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(LicenseMiddleware)
 app.add_middleware(SessionMiddleware, secret_key="aiops-secret-key-change-in-production")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
@@ -224,6 +241,7 @@ app.include_router(agent_workflow.router)
 app.include_router(helm.router)
 app.include_router(ansible.router)
 app.include_router(license.router)
+app.include_router(mobile.router)
 
 
 def init_admin():

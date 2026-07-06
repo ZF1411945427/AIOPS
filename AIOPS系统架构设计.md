@@ -1675,4 +1675,457 @@ python tools/generate_license.py --customer "XX公司" --edition 企业版 \
 
 ---
 
-*最后更新: 2026-07-06*
+## 十五、移动端架构（APP 端 · 移动运维）
+
+### 15.1 定位与核心原则
+
+移动端**不是 Web 端的缩小版**，而是围绕「移动运维场景」做差异化。Web 端面向工位上的深度操作（编排画布、复杂表单、多窗口对比），APP 端面向**碎片时间、应急响应、现场运维**三大场景。
+
+| 维度 | Web 端 | APP 端 |
+|------|--------|--------|
+| 主要场景 | 编排编辑、深度分析、配置管理 | 告警应急、AI 问答、现场扫码、值班响应 |
+| 交互范式 | 鼠标 + 大屏 + 多 Tab | 单手 + 小屏 + 拇指热区 + 系统级推送 |
+| 核心诉求 | 功能完整、信息密度 | 极速触达、低步数、离线可用 |
+| 能力差异 | 受限于浏览器 | 可调用推送/扫码/NFC/相机/语音/生物识别/GPS |
+
+**五条核心原则**：
+1. **场景优先**——只搬移动场景必需的功能，不追求 1:1 对齐 Web
+2. **触达优先**——告警推送是 APP 端第一价值，未打开也要触达
+3. **低步数**——核心动作 ≤3 步（告警确认 1 步、AI 提问 1 步、扫码定位 1 步）
+4. **复用后端**——所有数据走现有 FastAPI，不另起服务，不重复造轮子
+5. **安全等齐**——登录/授权/审计与 Web 端同等强度，不因移动端降级
+
+### 15.2 技术选型
+
+| 方案 | 优势 | 劣势 | 推荐度 |
+|------|------|------|--------|
+| **UniApp (Vue 3)** | 复用现有 Vue 代码与设计系统；一套代码出 iOS/Android/H5/小程序；学习成本最低 | 性能略逊原生；复杂动画需 nvue | ⭐⭐⭐⭐⭐ **推荐** |
+| Flutter | 性能接近原生；UI 一致性好；单码双端 | Dart 语言栈与现有 Vue 割裂；无法复用前端代码 | ⭐⭐⭐ |
+| React Native | 生态成熟；原生模块多 | JS bridge 性能；与 Vue 栈不统一 | ⭐⭐ |
+| 原生双端 (Swift + Kotlin) | 性能/体验最佳；硬件能力全开 | 双端重复开发；维护成本高 | ⭐⭐ |
+
+**决策：UniApp (Vue 3 + Vite)**
+
+理由：
+- 现有 `frontend/src/views/` 30+ Vue 组件可低成本改造为 UniApp 页面（语法几乎一致，仅 `<div>`→`<view>`、`<img>`→`<image>` 等标签替换）
+- 设计系统 `frontend/src/assets/main.css` 可直接移植
+- API 层 `frontend/src/api/request.js`（Axios 封装）改用 `uni.request` 即可
+- 可同时输出 Android APK + iOS（HBuilderX 云打包）+ H5（应急访问）+ 微信小程序（轻量入口）
+- 团队无需学新语言，复用 Vue 知识储备
+
+### 15.3 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    移动端（UniApp）                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────┐  │
+│  │ 告警中心 │ │ AI 助手  │ │ 待确认   │ │ 扫码/NFC/拍照 │  │
+│  │ 推送处理 │ │ 语音对话 │ │ 动作     │ │ 资产识障      │  │
+│  └──────────┘ └──────────┘ └──────────┘ └───────────────┘  │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────┐  │
+│  │ 值班打卡 │ │ 态势速览 │ │ 工作流   │ │ 离线缓存     │  │
+│  │ 一键交接 │ │ 下拉刷新 │ │ 监控重试 │ │ 弱网降级     │  │
+│  └──────────┘ └──────────┘ └──────────┘ └───────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│            uni.request / WebSocket / 推送 SDK                │
+├─────────────────────────────────────────────────────────────┤
+│              现有 FastAPI 后端（端口 8000）                  │
+│  /alerts /agent-chat /agent/pending /assets /oncall ...     │
+│  + 新增 /mobile/* 移动专用端点 + /push/* 推送注册           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**关键：后端零侵入复用**。APP 端 90% 请求走现有 API（`/alerts`、`/agent-chat`、`/assets` 等），仅新增：
+- `/mobile/push/register`——设备 token 注册
+- `/mobile/push/unregister`——注销
+- `/mobile/scan/asset`——扫码解析资产（复用 `asset_service`）
+- `/mobile/vision/diagnose`——拍照识障（复用 `call_llm` 多模态）
+- `/mobile/auth/biometric`——生物识别 token 签发
+
+### 15.4 功能分层
+
+#### 🔴 P0 刚需（MVP 必做）
+| 功能 | 价值 | 复用后端 |
+|------|------|---------|
+| 告警中心 + 推送 | 半夜应急响应核心 | `/alerts` + 新增推送 |
+| AI 智能助手 | 移动问答 + 触发工作流 | `/agent-chat`（SSE 流式） |
+| 待确认动作 | 写操作人工确认 | `/agent/pending` |
+| 系统态势速览 | 速看健康度 | `/system-posture` |
+| 登录 + 授权 | 复用现有 session + license | `/login` + `/license` |
+
+#### 🟡 P1 移动特色（差异化）
+| 功能 | 价值 | 复用后端 |
+|------|------|---------|
+| 扫码运维 | 机房扫码定位资产 | 新增 `/mobile/scan/asset` + `/assets/api/{id}` |
+| NFC 碰一碰 | 靠近设备识别 | 同上 |
+| 拍照识障 | 拍面板灯 AI 识别 | 新增 `/mobile/vision/diagnose` + `call_llm` |
+| 语音输入 | 语音对话 AI | 前端 ASR + `/agent-chat` |
+| 生物识别登录 | 免密快速 | 新增 `/mobile/auth/biometric` |
+| 值班管理 | 查值班/换班/拨号 | `/sre/api/oncall` |
+
+#### 🟢 P2 创新增强（差异化卖点）
+| 功能 | 价值 | 复用后端 |
+|------|------|---------|
+| 工作流监控 | 跟踪 SOP/Agent Workflow | `/workflow/api/runs` + `/agent-workflow/api/runs` |
+| 离线缓存 | 弱网可读历史 | 前端 SQLite + 后端无改动 |
+| 位置打卡 | 现场签到留证 | 新增 `/mobile/checkin` |
+| 一键拨号/分享 | 告警转发 | 前端原生能力 |
+| AR 巡检 | 摄像头叠加设备信息 | `/assets/api/{id}` + AR 框架 |
+| 可穿戴联动 | 手表接收告警 | 推送 + Watch SDK |
+| 桌面 Widget | 实时健康分 | 推送 + Widget 配置 |
+
+### 15.5 核心功能详细设计
+
+#### 15.5.1 告警中心 + 推送（P0 核心）
+
+**交互流程**：
+```
+推送到达 → 系统通知栏（震动/声音按 severity 分级）
+   ├─ 点击 → 直达告警详情页（深链）
+   │   └─ 详情页操作：确认/认领/转派/静默/触发自愈/AI 根因分析
+   ├─ 滑动操作（iOS）→ 左滑快速"认领"
+   └─ 长按（Android）→ 快捷操作菜单
+```
+
+**推送分级**（按 `alert.severity`）：
+| severity | 通知方式 | 震动 | 声音 | 备注 |
+|----------|---------|------|------|------|
+| critical | 横幅 + 强震 + 绕过勿扰 | 长震 3 次 | 高频警报音 | 半夜必须叫醒 |
+| high | 横幅 + 震动 | 短震 2 次 | 警告音 | |
+| medium | 通知栏 + 轻震 | 短震 1 次 | 默认 | |
+| low/info | 通知栏 | 无 | 无 | 折叠分组 |
+
+**告警详情页操作**（复用现有 API）：
+| 操作 | API | 说明 |
+|------|-----|------|
+| 确认告警 | `POST /alerts/api/{id}/ack` | 标记已知晓 |
+| 认领 | `POST /alerts/api/{id}/claim` | 指定处理人 |
+| 静默 | `POST /alerts/api/{id}/silence` | 临时屏蔽 |
+| 触发自愈 | `POST /remediation/api/run` | 关联自愈规则 |
+| AI 根因 | `POST /agent-chat/api/message` | 带"分析告警 #id"指令 |
+| 触发工作流 | `POST /workflow/api/runs/create` | 选 SOP 模板 |
+
+#### 15.5.2 AI 智能助手（P0）
+
+**移动端差异化**：
+- **语音输入**：长按麦克风说话 → ASR 转文字 → 自动发送（用 `uni.getRecorderManager` 录音 + 科大讯飞/腾讯 ASR 插件）
+- **流式输出**：复用现有 SSE `/agent-chat/api/message`，逐字渲染
+- **快捷指令**：底部预置「分析告警」「巡检报告」「根因分析」三按钮，一键带预设 prompt
+- **结果操作**：AI 返回 `propose_action` 时，卡片化展示「确认执行/拒绝」按钮（复用 PendingAction 确认流）
+- **历史会话**：复用 `ChatSession`，左右滑切换会话
+- **多模态**：拍照/相册图片插入对话，走 `/mobile/vision/diagnose` 多模态识别
+
+#### 15.5.3 待确认动作（P0）
+
+**设计要点**：
+- 列表页：待确认动作卡片，按风险等级红/橙/黄背景渐变
+- 卡片内容：动作描述 + 目标资产 + 风险等级 + 「确认」「拒绝」大按钮（拇指热区）
+- 高危动作（high/critical）：二次确认弹窗 + 风险提示 + 强制阅读 3 秒倒计时
+- 确认/拒绝复用现有 `POST /agent/pending/{id}/confirm|reject`
+- 离线时：操作入本地队列，恢复网络后重放
+
+#### 15.5.4 系统态势速览（P0）
+
+**单屏卡片化**（不复用复杂仪表盘，重新设计移动版）：
+```
+┌──────────────────────────────┐
+│  系统健康分    92  ▲ 3      │  ← 复用 /system-posture
+│  在线资产  487/512           │
+├──────────────────────────────┤
+│  今日告警  23  待处理 5  🔴  │  ← /alerts/api/stats
+│  MTTR  13min  ▼ 5min        │
+├──────────────────────────────┤
+│  当前值班  张三  138****1234 │  ← /sre/api/oncall/current
+│  [一键拨号] [一键交接]       │
+├──────────────────────────────┤
+│  运行工作流  3  失败 1  ⚠   │  ← /workflow/api/runs?status=running
+└──────────────────────────────┘
+```
+下拉刷新 + 5 秒轮询（前台时）。每张卡片可点击进入详情页。
+
+#### 15.5.5 扫码运维（P1）
+
+**场景**：运维人员进机房，扫机柜/服务器二维码，直达资产详情 + 快捷操作。
+
+**流程**：
+1. 首页「扫码」按钮（悬浮 FAB）→ 调 `uni.scanCode`（支持二维码/条形码）
+2. 扫码结果传 `/mobile/scan/asset?code=xxx` → 后端查 `Asset.tags` 或 `Asset.name` 匹配
+3. 命中 → 跳转资产详情页（资产信息 + 在线状态 + 最近告警 + 快捷操作）
+4. 快捷操作：远程脚本（`/script/api/run`）、查看指标（`/metrics/api/query`）、重启服务（`/remediation`）、AI 诊断（`/agent-chat`）
+
+**NFC 碰一碰**：调 `uni.startHceDiscovery` 读 NFC 标签 NDEF，解析为资产编号走同一接口。
+
+#### 15.5.6 拍照识障（P1 创新卖点）
+
+**场景**：拍服务器面板指示灯/告警屏 → AI 多模态识别故障类型 → 推荐处置方案。
+
+**流程**：
+1. 拍照或相册选图 → 前端压缩到 1024px → base64
+2. `POST /mobile/vision/diagnose` `{image_base64, asset_id?}`
+3. 后端构造多模态 prompt：「这是服务器面板，请识别指示灯状态（正常/告警/故障），判断可能故障类型，给出处置建议」+ base64 图
+4. 调 `call_llm`（需 provider 支持多模态，如 GPT-4V/Qwen-VL）→ 返回结构化诊断
+5. 前端展示：识别结果 + 建议处置 + 「执行自愈」「转人工」「拍照重试」按钮
+
+**降级**：provider 不支持多模态时，提示「当前 AI 模型不支持图像识别，请切换模型或手动描述」。
+
+#### 15.5.7 生物识别登录（P1）
+
+**设计**：
+1. 首次登录：账号密码 + 验证码 → 成功后后端签发 `biometric_token`（JWT，绑定 user_id + device_id，7 天有效）→ 前端调 `uni.startSoterAuthentication` 录入指纹/Face ID → token 存 `uni.setStorageSync`
+2. 后续登录：检测本地 token → 调 `uni.checkIsSupportSoterAuthentication` → 生物识别 → `POST /mobile/auth/biometric` {token} → 验签通过返回 session
+3. token 过期：回退账号密码登录，重新签发 token
+
+**安全**：
+- `biometric_token` 用 HS256 签名，secret 存后端环境变量
+- 设备绑定：token 内含 device_id（指纹/IMEI），换设备需重新登录
+- 7 天有效期，过期自动清理
+
+#### 15.5.8 值班管理（P1）
+
+复用 `/sre/api/oncall/*`，移动端增强：
+- **我的值班卡片**：当前是否值班 + 剩余时长 + 一键交接班按钮
+- **值班人拨号**：点击电话号码调 `uni.makePhoneCall`
+- **值班日历**：月视图查看排班
+- **换班申请**：选目标人 + 日期 → `POST /sre/api/oncall/swap`（需新增）
+
+### 15.6 推送服务设计
+
+#### 15.6.1 后端扩展 `notification_service.py`
+
+现有 `NotificationChannel` 支持 email/webhook/dingtalk/wecom/feishu，新增 `push` 类型对接移动推送。
+
+| 推送渠道 | 适用 | 接入方式 |
+|---------|------|---------|
+| **个推/极光** | Android 国内 | REST API + AppKey，国内到达率最高 |
+| **FCM** | Android 海外 | Firebase Cloud Messaging |
+| **APNs** | iOS | p8 证书 + HTTP/2 |
+| **小米/华为/OPPO/VIVO** | Android 厂商通道 | 各自 SDK，国内必接（否则厂商机型杀后台） |
+
+**推荐**：国内用个推/极光聚合（一套 SDK 覆盖华为/小米/OPPO/VIVO 厂商通道 + 自有通道），海外用 FCM，iOS 用 APNs。
+
+#### 15.6.2 推送触发点
+
+复用现有 `send_notification(db, alert, channel)`，告警生成时自动触发：
+
+| 触发事件 | 推送对象 | 来源 |
+|---------|---------|------|
+| 新告警（severity ≥ high） | 当前值班人 + 告警关注人 | `alert_service.create_alert` |
+| 待确认动作 | 动作发起人 + 相关操作人 | `agent_service.propose_action` |
+| 工作流节点失败 | 工作流触发人 | `workflow_service._execute_node` 失败 |
+| 工作流完成 | 触发人 | `workflow_service.finalize_run` |
+| 值班交接提醒 | 下一班值班人 | 定时任务（新增） |
+| 授权即将过期 | 管理员 | `license_service` 定时检查 |
+
+#### 15.6.3 推送内容格式
+
+```json
+{
+  "title": "[critical] cpu_usage > 90%",
+  "body": "资产 web-01 · 当前 95.2% · 阈值 90%",
+  "severity": "critical",
+  "type": "alert",
+  "ref_id": 1234,
+  "deep_link": "aiops://alert/1234",
+  "action": "view"
+}
+```
+- `deep_link`：APP 协议深链，点击直达对应页面（告警详情/AI 助手/待确认列表）
+- `action`：view（查看）/ confirm（确认）/ claim（认领），支持通知快捷操作
+
+### 15.7 数据模型扩展
+
+新增 3 张表（追加到 `app/models.py`）：
+
+```python
+class MobileDevice(Base):
+    """移动设备注册"""
+    __tablename__ = "mobile_devices"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    device_id = Column(String(128), nullable=False)  # 设备唯一标识(IMEI/IDFV)
+    platform = Column(String(16), nullable=False)    # ios/android
+    push_token = Column(String(256))                 # 推送 token
+    biometric_token = Column(String(512))            # 生物识别 JWT
+    app_version = Column(String(32))
+    last_active_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("user_id", "device_id", name="uq_user_device"),)
+
+class PushRecord(Base):
+    """推送记录（审计 + 重试）"""
+    __tablename__ = "push_records"
+    id = Column(Integer, primary_key=True)
+    device_id = Column(Integer, ForeignKey("mobile_devices.id"), nullable=False)
+    title = Column(String(128), nullable=False)
+    body = Column(Text)
+    payload = Column(Text)        # JSON
+    type = Column(String(32))     # alert/pending/workflow/license
+    ref_id = Column(Integer)
+    status = Column(String(16), default="pending")  # pending/sent/failed
+    provider_msg_id = Column(String(128))           # 三方返回的消息 ID
+    error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime)
+
+class CheckinRecord(Base):
+    """现场签到记录"""
+    __tablename__ = "checkin_records"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    asset_id = Column(Integer, ForeignKey("assets.id"))
+    latitude = Column(Float)
+    longitude = Column(Float)
+    address = Column(String(256))
+    photo_path = Column(String(256))   # 现场照片 OSS/本地路径
+    note = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+```
+
+`main.py` 的 `_MIGRATIONS` 自动建表（沿用现有迁移机制）。
+
+### 15.8 API 设计
+
+#### 移动端专用新增端点（prefix=/mobile）
+
+| 端点 | 方法 | 功能 | 复用 |
+|------|------|------|------|
+| `/mobile/push/register` | POST | 注册设备 token | 新增 |
+| `/mobile/push/unregister` | POST | 注销设备 | 新增 |
+| `/mobile/auth/biometric` | POST | 生物识别登录 | 新增（签发/验证 JWT） |
+| `/mobile/scan/asset` | GET | 扫码解析资产 | `asset_service.find_by_code` |
+| `/mobile/vision/diagnose` | POST | 拍照识障 | `call_llm` 多模态 |
+| `/mobile/checkin` | POST | 现场签到 | 新增 |
+| `/mobile/dashboard` | GET | 移动端聚合首页（一次返回健康分+告警统计+值班+工作流） | 聚合多个 service |
+
+#### 复用现有端点（零改动）
+
+| 功能 | 端点 | 说明 |
+|------|------|------|
+| 登录 | `POST /login` | 复用 session 认证 |
+| 授权状态 | `GET /license/api/status` | 复用 license 中间件 |
+| 告警列表 | `GET /alerts/api/list` | 支持分页/过滤 |
+| AI 对话 | `POST /agent-chat/api/message` | SSE 流式 |
+| 待确认动作 | `GET /agent/pending` | 列表 |
+| 确认/拒绝 | `POST /agent/pending/{id}/confirm\|reject` | |
+| 资产详情 | `GET /assets/api/{id}/detail` | |
+| 值班 | `GET /sre/api/oncall/current` | |
+| 工作流执行 | `GET /workflow/api/runs` | |
+| 远程脚本 | `POST /script/api/run` | |
+| 菜单 | `GET /api/menu` | 移动端可过滤只显示移动支持的菜单 |
+
+### 15.9 安全设计
+
+| 威胁 | 防护措施 |
+|------|---------|
+| 设备丢失 | 生物识别 token 7 天过期 + 管理端可远程注销设备 + 敏感操作仍需密码二次确认 |
+| 抓包 | 全链路 HTTPS + API 签名（HMAC-SHA256，按时间戳防重放） |
+| 推送伪造 | 推送 payload 仅做通知，所有操作必须调 API 完成（深链打开后仍需鉴权） |
+| 逆向 | 关键逻辑后端化 + APP 加固（梆梆/360 加固保）+ 代码混淆 |
+| 越狱/Root | 检测 `uni.isRooted` 越狱设备告警 + 高危操作拒绝 |
+| 授权绕过 | 复用 `LicenseMiddleware`，APP 同样受 license 拦截 |
+| 审计 | 所有移动端操作写 `audit` 表，记录 device_id + user + action |
+
+**敏感操作分级**：
+- 只读（查看告警/资产/指标）→ 生物识别即可
+- 写操作（确认/认领/静默）→ 生物识别 + session 有效
+- 高危（重启服务/删除资源/执行脚本）→ 强制重新输入密码（不复用生物识别）
+
+### 15.10 离线与弱网策略
+
+| 场景 | 策略 |
+|------|------|
+| 告警列表 | 本地 SQLite 缓存最近 100 条，离线可查 |
+| 资产详情 | 缓存最近访问 50 个资产 |
+| AI 对话 | 离线时提示「网络不可用」，缓存历史会话可查 |
+| 确认/拒绝操作 | 入本地队列，网络恢复后重放（带操作时间戳，后端按时间排序） |
+| 推送到达但无网 | 通知栏可查看，点击时若 API 失败提示「网络异常，已记录稍后重试」 |
+| 图片上传 | 压缩 + 断点续传 + 失败本地保留 24h |
+
+### 15.11 实施路线图
+
+| Phase | 内容 | 工时估算 | 优先级 |
+|-------|------|---------|--------|
+| **Phase 1 - MVP** | UniApp 脚手架 + 登录(账号密码) + 告警中心 + AI 助手 + 待确认动作 + 系统态势 | 2 周 | P0 |
+| **Phase 2 - 推送** | 后端 notification_service 扩展 push 渠道 + 设备注册 + 告警推送触发 + 推送分级 | 1 周 | P0 |
+| **Phase 3 - 移动特色** | 扫码运维 + 拍照识障 + 语音输入 + 生物识别 + 值班管理 | 2 周 | P1 |
+| **Phase 4 - 增强** | 离线缓存 + 工作流监控 + 位置打卡 + 一键拨号分享 | 1.5 周 | P2 |
+| **Phase 5 - 创新** | AR 巡检 + 可穿戴联动 + 桌面 Widget | 2 周 | P2 |
+| **Phase 6 - 上架** | 加固 + 签名 + 应用宝/华为/小米商店上架 + iOS App Store 审核 | 2 周 | — |
+
+总工时约 10.5 周（2.5 个月），MVP 3 周可出 demo。
+
+### 15.12 与现有系统复用关系
+
+| 现有能力 | 移动端复用方式 |
+|---------|--------------|
+| FastAPI 全部 316 路由 | 90% 端点零改动直接调用 |
+| `agent_service` AI 管道 | AI 助手页直接复用 SSE 流式 |
+| `NotificationChannel` | 扩展 push 类型，复用 `send_notification` |
+| `license_service` | 授权校验对移动端同等生效 |
+| `auth.py` session | 移动端复用 session cookie |
+| `asset_service` | 扫码/详情复用 |
+| `call_llm` 多模型 | 拍照识障复用多模态 |
+| `workflow_service` / `agent_workflow_service` | 工作流监控复用 |
+| `frontend/src/views/*.vue` | 30+ 组件低成本改造为 UniApp 页面 |
+| `frontend/src/assets/main.css` | 设计系统直接移植 |
+| `frontend/src/api/request.js` | Axios → `uni.request` 改造 |
+
+### 15.13 项目结构（移动端）
+
+```
+mobile/                          # UniApp 项目（与 frontend/ 平级）
+├── manifest.json                # UniApp 配置（appid/权限/模块）
+├── pages.json                   # 页面路由 + tabBar 配置
+├── App.vue                      # 入口
+├── main.js                      # Vue 入口
+├── uni.scss                     # 全局样式变量（移植自 frontend）
+├── static/                      # 图标/启动图
+├── api/
+│   ├── request.js               # uni.request 封装（带 token/签名）
+│   ├── alert.js                 # 告警 API
+│   ├── agent.js                 # AI 助手 API（SSE 用 uni.request + 分块）
+│   ├── asset.js                 # 资产 API
+│   └── push.js                  # 推送注册 API
+├── store/                       # Pinia 状态管理
+│   ├── user.js                  # 登录态/生物识别 token
+│   └── offline.js               # 离线队列/缓存
+├── pages/
+│   ├── index/index.vue          # 首页（系统态势速览）
+│   ├── alert/list.vue           # 告警列表
+│   ├── alert/detail.vue         # 告警详情 + 操作
+│   ├── agent/chat.vue           # AI 助手（语音 + 流式）
+│   ├── pending/list.vue         # 待确认动作
+│   ├── asset/scan.vue           # 扫码页
+│   ├── asset/detail.vue         # 资产详情
+│   ├── asset/diagnose.vue       # 拍照识障
+│   ├── oncall/my.vue            # 我的值班
+│   ├── workflow/list.vue        # 工作流监控
+│   ├── login/index.vue          # 登录（账号密码 + 生物识别）
+│   └── settings/index.vue       # 设置（推送开关/清缓存/退出）
+├── components/
+│   ├── AlertCard.vue            # 告警卡片
+│   ├── RiskBadge.vue            # 风险等级徽章
+│   ├── ChatBubble.vue           # 聊天气泡
+│   ├── HealthCard.vue           # 健康分卡片
+│   └── ScanFab.vue              # 悬浮扫码按钮
+└── utils/
+    ├── push.js                  # 推送 SDK 封装
+    ├── biometric.js             # 生物识别封装
+    ├── offline.js               # 离线队列管理
+    └── crypto.js                # HMAC 签名
+```
+
+### 15.14 tabBar 设计（底部导航 4 项）
+
+| 项 | 图标 | 页面 | 说明 |
+|----|------|------|------|
+| 首页 | 仪表盘 | `pages/index/index` | 系统态势速览 |
+| 告警 | 铃铛(带角标) | `pages/alert/list` | 角标显示未处理数 |
+| AI | 对话气泡 | `pages/agent/chat` | AI 助手 |
+| 我的 | 用户 | `pages/settings/index` | 个人/设置/值班 |
+
+扫码为悬浮 FAB（首页右下角），不占 tabBar 位置。
+
+---
+
+*最后更新: 2026-07-06（追加第十五章 移动端架构）*

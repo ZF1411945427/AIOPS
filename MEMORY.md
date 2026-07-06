@@ -1,3 +1,243 @@
+### 2026-07-06: AI 助手 SSE→JSON 改造 + 告警/AI 跳转链路修复（两轮自检通过）
+- **用户反馈**: AI 根因分析请求不到 /agent/chat/send；有返回也只显示"AI"两字；告警中心 AI 根因分析无反应
+- **根因**: 后端 /agent/chat/send 是普通 JSON 响应（{session_id, reply, tool_results, pending_actions}），非 SSE 流式；前端却用 enableChunked+onChunkReceived 按 SSE chunk 解析，导致 JSON 被切碎解析失败，ChatBubble 因 content 空 segments 返回 [] 只渲染 avatar "AI"
+- **修复（7 文件）**:
+  - `api/agent.js`: sendMessage 从 SSE 改普通 JSON 请求；新增 setPendingPreset/takePendingPreset 模块变量跨页传参；session_id 空时传 null
+  - `pages/agent/chat.vue`: doSend 改 async/await，从 data.reply 取回复；移除 currentTask/onChunk/onUnload 流式逻辑；onShow 调 takePendingPreset 自动发送预设问题
+  - `pages/alert/detail.vue`: goAI 改用 setPendingPreset + uni.switchTab（AI 页是 tabBar 必须 switchTab，navigateTo 跳 tabBar 静默失败）
+  - `pages/alert/list.vue`: goDetail 传完整 item 对象 + 缓存 globalData.currentAlert
+  - `pages/asset/detail.vue`: 最近告警改为前端 filter（后端 list 不认 asset_id 参数）
+  - `pages/index/index.vue`: 告警统计卡加跳转入口
+- **实测**: /agent/chat/send 200 返回 reply(69字)+session_id+pending_actions ✓
+- **两轮自检**: H5 build 通过 + AI 请求实测通过 + 告警→AI 跳转链路代码核对通过
+- **专业名词**: 分块传输错配(Chunked Transfer Mismatch)——前端按 SSE chunked 解析但后端返回完整 JSON 被切碎；tabBar 路由约束——tabBar 页只能用 switchTab 跳转且不支持 query；参数盲传(Parameter Blind-pass)——前端传后端不认的查询参数被静默忽略
+
+### 2026-07-06: 移动端告警跳转链路 + API 路径对齐修复（4 文件，构建通过）
+- **排查范围**: 通读 16 个必读文件 + 后端 alerts/agent_chat/alert_silence/sre/workflow/agent_workflow/assets 路由，逐个核对前端调用路径
+- **问题1 - 告警详情数据获取失败**: `alert/detail.vue` fetchDetail 调 `getList({id, per_page:1})`，但后端 `/alerts/api/list` 只认 status/severity/page/per_page **不认 id**，只能拿第一页第一条，find 不到目标告警
+- **问题2 - 资产最近告警错位**: `asset/detail.vue` fetchRecentAlerts 调 `getList({asset_id})`，后端不认 asset_id，返回所有告警第一页而非该资产告警
+- **问题3 - silence API 404**: `POST /alerts/api/{id}/silence` 后端无此端点（`alert_silence.py` 是 prefix=/alert-silence 的空路由，alert_service 有 create_silence 函数但未暴露 HTTP 端点）
+- **问题4 - 首页告警统计无跳转**: index 告警统计卡无点击事件
+- **修复**:
+  - `alert/list.vue`: goDetail(item) 传完整对象存 `getApp().globalData.currentAlert`；AlertCard `@click="goDetail(item)"`
+  - `alert/detail.vue`: onLoad 优先读 globalData.currentAlert（id 匹配立即渲染避免闪烁）；fetchDetail 改 per_page=100 find by id 回退；handleSilence 改友好提示引导走 AI/Web 端；移除未用 silence import
+  - `asset/detail.vue`: fetchRecentAlerts 改 per_page=100 前端 filter asset_id slice(0,5)
+  - `index/index.vue`: 告警统计卡加 @tap="goAlerts"，goAlerts 用 switchTab 跳 tabBar 告警列表
+- **AI 跳转链路**: 由另一 agent 在 agent.js(chat.vue/detail.vue goAI)用 setPendingPreset/takePendingPreset 模块级变量 + switchTab 实现，本 agent 不碰 agent.js/chat.vue，detail.vue goAI 已融合其方案
+- **后端路径核对全 PASS**: oncall(`/api/sre/oncall`·`/current`·`/members`) / workflow retry(`/workflow`·`/agent-workflow` `/api/runs/{id}/node/{nid}/retry`) / assets(`/assets/api/list`·`ci-types`·`{id}/detail`·`create`·`{id}/update`·`{id}/delete`) / agent pending(`/agent/api/pending`·`/agent/pending/{id}/confirm`·`cancel`) 前端路径全部匹配；唯一缺失是 alerts silence 端点
+- **验证**: `npm run build:h5` → `DONE Build complete.` 无语法错误（仅 sass legacy-js-api 弃用警告）
+- **专业名词**: 参数盲传(Parameter Blind-pass)——前端传后端不认的查询参数被静默忽略导致筛选失效; 前端字段过滤(Client-side Filtering)——后端不支持筛选参数时请求全量再 filter; 端点缺失降级(Missing Endpoint Degradation)——后端无 silence 端点前端改为提示引导; tabBar 间跳转(tabBar-to-tabBar Switch)——tabBar 页之间用 switchTab 而非 navigateTo
+
+### 2026-07-06: 移动端 AI 助手 SSE→JSON 改造 + 告警根因跳转修复（3 文件）
+- **问题**: ① AI 助手点"根因分析"快捷指令 POST /agent/chat/send 失败 ② 即使有返回回复只显示"AI"两个字 ③ 告警详情点"AI 根因分析"无反应
+- **根因**:
+  - `api/agent.js` sendMessage 用 `enableChunked:true`+SSE onChunkReceived 解析，但后端返回普通 JSON（Content-Type: application/json 非 text/event-stream），uni.request 把 JSON 当 chunk 切碎解析失败导致请求异常
+  - `chat.vue` onChunk 把 JSON 字符串当文本塞 content，ChatBubble 因 content 为空 segments 返回 [] 只渲染 avatar "AI"
+  - `alert/detail.vue` goAI 用 `uni.navigateTo` 跳 tabBar 页面（AI 是 tabBar）无效；switchTab 不支持 URL query
+  - session_id 为 undefined 时序列化成字符串 "undefined" 传后端
+- **修复**（3 文件）:
+  - `api/agent.js`: sendMessage 从 SSE 改普通 JSON 请求（移除 enableChunked/onChunkReceived/agentHeaders/decodeChunk）返回 Promise resolve res.data；新增 setPendingPreset/takePendingPreset 模块变量传预设问题（不依赖 getApp().globalData）；session_id 为空传 null 让后端自动创建会话
+  - `pages/agent/chat.vue`: doSend 改 async/await，从 data.reply 取内容赋 aiMsg.content，data.tool_results 映射成 {name,args,result}，data.pending_actions 入队确认卡片，data.session_id 更新会话；移除 currentTask/onChunk/onLoad/onUnload 流式逻辑；onShow 调 takePendingPreset 自动发送预设问题
+  - `pages/alert/detail.vue`: goAI 改用 setPendingPreset + uni.switchTab 跳 tabBar（移除 globalData.presetMessage + setStorageSync 双方案统一走模块变量）
+- **验证**: python 检查 3 个 .vue 文件 template/script/style 三段齐全 + 括号平衡(){}[]均=0 + 无 currentTask/onChunkReceived/enableChunked/onUnload 残留
+- **专业名词**: 分块传输错配(Chunked Transfer Mismatch)——前端按 SSE chunked 解析但后端返回完整 JSON 导致响应被切碎; tabBar 路由限制(tabBar Route Constraint)——uni.navigateTo 无法跳 tabBar 页面必须用 switchTab 且不支持 query; 模块级单例(Module-level Singleton)——用 ES module 变量跨页面传参避免 getApp().globalData 在 Vue3 不可靠; 响应字段映射(Response Field Mapping)——后端 tool_results 字段映射到 ChatBubble 期望的 {name,args,result}
+
+
+- **问题**: 复用端点（/alerts/api/list, /agent/api/pending, /workflow/api/runs, /agent-workflow/api/runs）返回 HTML 登录页而非 JSON，因 AuthMiddleware 只认 session cookie 不认 Authorization token
+- **修复**: `app/main.py` AuthMiddleware dispatch 增加 token 分支——无 session 时检查 `Authorization: Bearer xxx`，verify_login_token 通过则设 session 放行
+- **测试结果**: 14 项全 PASS
+  - 登录返回 token+user ✓ /me token 验证 ✓ /mobile/dashboard ✓
+  - /alerts/api/list 返回 JSON（不再 HTML）✓ /agent/api/pending ✓
+  - /api/sre/oncall/current ✓ /workflow/api/runs ✓ /agent-workflow/api/runs ✓
+  - /mobile/devices ✓ /mobile/push/logs ✓ /mobile/push/register ✓
+  - /mobile/checkin ✓ /mobile/scan/asset 404（无此资产正确）✓
+  - 无 token 请求 401 ✓
+- **专业名词**: 统一认证中间件(Unified Auth Middleware)——中间件层同时支持 session cookie 和 Bearer token，所有端点无需单独改造; Forbidden Header(禁用头)——浏览器禁止 JS 手动设置 Cookie header，跨域必须用 withCredentials 或改 token 方案
+
+### 2026-07-06: 移动端 token 认证改造 + 24 处前端修复（H5 构建通过）
+- **背景**: 后端从 cookie session 改为 JWT token 认证（POST /login 返回 {ok,token,user}，新增 GET /me），mobile 前端需全面适配
+- **修改 26 个文件**（API 层 6 + store 1 + 页面 12 + 组件 5 + 配置 1 + 图标 1 批）:
+  - **API 层 token 化**:
+    - `config.js`: commonHeaders 移除 'Cookie'，改 `Authorization: Bearer <token>`；新增 setToken(t) 导出
+    - `request.js`（新建）: 统一 request 封装，401 自动 reLaunch 登录页，统一错误 toast，支持 hideError
+    - `auth.js`: login/biometricLogin 成功后 setToken；新增 getMe() 调 GET /me；logout 加 commonHeaders
+    - `agent.js`: 移除重复 buildUrl 用 config.js 的；所有请求改 commonHeaders（移除硬编码 Cookie）；decodeChunk 优先用 TextDecoder（fallback escape/unescape）
+    - `alert.js`: getList 参数支持 id/asset_id/per_page（不再用 page_size）；新增 silence(id)
+    - `workflow.js`: listRuns/listAgentRuns 用 per_page；retryNode 第三参数 type 区分 sop/agent 走不同 API
+  - **store/user.js 登录态修复**:
+    - login: 存 token+userInfo；登录成功后异步调 issueBiometricIfNeeded（checkSupport 通过则 issueBiometric 签发 7 天 JWT 并 saveBiometric）
+    - checkLogin: 只检查 token（不再依赖 getCookie）
+    - 新增 issueBiometricIfNeeded()；导出 biometricLogin()（包装 checkBiometric 供 login 页调用）
+  - **页面字段映射**:
+    - `index/index.vue`: dashboard.health.avg_sla→健康分，assets.online/total→副指标，alerts.total/triggered/suppressed_total→统计，oncall.current_oncall→值班人，workflows.running_sop+running_agent/failed_sop+failed_agent→工作流；全部改 computed 修复重复三元
+    - `alert/list.vue`: 数据从 data.alerts 取；per_page=20；tab 加"已恢复"
+    - `alert/detail.vue`: 字段 metric_name/actual_value/threshold/asset_name/created_at；操作改为确认/解决/静默/触发自愈；调 acknowledge/resolve/silence
+    - `asset/scan.vue`: 从 res.asset 取 id 跳详情
+    - `asset/detail.vue`: 资产从 data.asset；最近告警单独请求 GET /alerts/api/list?asset_id=xxx
+    - `asset/diagnose.vue`: H5 降级——#ifdef H5 用 fetch+blob+FileReader，fallback canvas toDataURL；#ifdef APP-PLUS 保留 plus.io
+    - `oncall/my.vue`: 字段 team_name/current_oncall；members JSON.parse；schedule JSON.parse 提取日期；remainText 用 current_period_end；myOncall 用 oncall.current_oncall 匹配；callMember 从 members 解析 phone
+    - `workflow/list.vue`: 字段 template_name/workflow_name/triggered_by/started_at；handleRetry 按 activeTab 传 type 给 retryNode
+    - `pending/list.vue`: 字段 title/risk_level/reason/action_payload；formatPayload 格式化；onUnmounted 清 timer；action.id 校验
+    - `settings/index.vue`: clearCache 保留 user_info/device_id/push_enabled；deleteDevice 已用 removeDeviceApi
+    - `agent/chat.vue`: currentTask 用 ref 持有；onUnload 调 task.abort()；v-for key 用 msg.id/pa-id；propose_action 校验 a.id 才入队；newSession 也 abort 旧 task
+    - `login/index.vue`: serverUrl 从 getBaseURL() 读；handleBiometric 改调 userStore.checkBiometric()
+  - **组件统一**:
+    - `RiskBadge.vue`: 补 critical 级别（text '极高危'，背景 #7C1D1D）；字体改 $font-xs；背景用 $risk-* 变量
+    - `AlertCard.vue`: 补 severity 'info' 样式；statusText 统一为 triggered→待处理/acknowledged→已确认/resolved→已恢复/suppressed→已静默；硬编码颜色全改 uni.scss 变量
+    - `HealthCard.vue`: 硬编码颜色全改 uni.scss 变量（$bg-card-solid/$text/$text-muted/$success/$danger/$primary/$border）
+    - `ChatBubble.vue`: 硬编码颜色全改 uni.scss；v-for key 用 tc.id 唯一
+    - `ScanFab.vue`: 硬编码背景改 $primary
+  - **配置与图标**:
+    - `vite.config.js`: alias '@' 改 path.resolve(__dirname,'./src')（不再用 '/src' 字符串）；补全 /me /assets /workflow /agent-workflow 代理
+    - `static/tab/*.png`: 用 Python PIL 生成 8 个 81x81 PNG 图标（home/alert/ai/mine 各 _on 选中态，灰色 #7A8898/蓝色 #3B82F6）
+- **验证**:
+  - 18 个 .vue 文件全部含 template/script/style 三段（App.vue 是 UniApp 根组件无 template 属规范允许）
+  - `npm run build:h5` → `DONE Build complete.` 无语法错误（仅 sass legacy-js-api 弃用警告，无害）；产物 dist/build/h5/ 含 index.html+assets+static
+- **专业名词**: Bearer Token 认证(Bearer Token Auth)——HTTP Authorization 头携带 JWT 实现 API 鉴权; 统一请求拦截(Unified Request Interceptor)——单一 request 封装统一处理 401 跳转和错误 toast 避免散落逻辑; 条件编译(Conditional Compilation)——UniApp #ifdef H5/#ifdef APP-PLUS 按平台编译不同代码分支; 离屏 Canvas 转码(Offscreen Canvas Transcode)——H5 端用 createOffscreenCanvas+toDataURL 替代 plus.io 实现图片 base64; 任务中断(Task Abort)——流式请求 task.abort() 在页面卸载时主动中断避免内存泄漏; 唯一键去重(Unique Key De-duplication)——v-for key 用业务 id 而非 idx 避免 DOM 复用错乱
+
+### 2026-07-06: 移动端全栈集成测试通过（后端 11 API + UniApp H5 构建成功）
+- **集成测试结果**:
+  - 后端语法 4 文件 ast.parse OK；import OK；11 路由注册正确
+  - 后端重启加载 mobile 路由（杀旧 PID 11156 → Start-Process 启动 → Uvicorn 8000 ready）
+  - **11 个 mobile API 实测全 PASS**（登录获取 session 后）:
+    - `/mobile/dashboard` 200 返回 health+alerts+oncall+workflows 聚合数据
+    - `/mobile/scan/asset?code=web-01` 404 "未找到匹配资产"（正确，无此资产）
+    - `/mobile/devices` 200 空列表（is_admin=true）
+    - `/mobile/push/logs` 200 空列表
+    - `/mobile/auth/biometric/issue` 200 返回 JWT token（HS256 签名）
+    - `/mobile/vision/diagnose` 400 "image_base64 不能为空"（正确校验）
+    - `/mobile/checkin` 200 创建签到记录 id=1
+    - `/mobile/push/register` 200 注册设备 id=2
+    - 复用端点: /alerts/api/list 200 / /agent/api/pending 200 / /api/sre/oncall/current 200 / /workflow/api/runs 200 / /agent-workflow/api/runs 200
+  - **UniApp H5 构建成功**: `npm run build:h5` → `DONE Build complete.` 产物 dist/build/h5/ 含 12 页面 JS + 14 CSS + index.html（214KB 主包）
+  - **UniApp H5 dev server** 启动 5173 端口 ready in 4446ms
+- **修复的构建问题**:
+  1. UniApp 要求源码在 `src/` 子目录（manifest.json/pages.json/App.vue/main.js 等），移动所有源文件到 mobile/src/
+  2. package.json/vite.config.js/index.html 放回 mobile/ 根目录
+  3. index.html main.js 路径 `/main.js` → `./src/main.js`
+  4. App.vue 删除 `@import './uni.scss'`（UniApp 自动注入）
+  5. 12 个 .vue 文件批量删除 `@import '@/uni.scss'`（Python 脚本 _fix_imports.py 处理）
+  6. settings/index.vue `deleteDevice` 命名冲突 → 重命名 import 为 `deleteDevice as removeDeviceApi`
+  7. pending/list.vue uni-popup 未安装 → 移除 uni-popup 用原生 mask 覆盖层
+- **依赖安装**: `npm install --registry=https://registry.npmmirror.com` 773 包 52s（淘宝镜像加速）
+- **目录结构**: mobile/（根）+ mobile/src/（源码：api/components/pages/store/utils + App.vue/main.js/manifest.json/pages.json/uni.scss）+ mobile/node_modules/ + mobile/dist/build/h5/
+- **专业名词**: BFF 聚合端点(BFF Aggregation)——/mobile/dashboard 一次请求聚合多数据源减少弱网往返; 设备绑定(Device Binding)——JWT payload 含 device_id 换机失效; 降级策略(Degradation)——推送 provider 未配置时跳过写日志不报错; 时序攻击防御(Timing-attack Defense)——hmac.compare_digest 常数时间比较签名; UniApp src 目录约定——UniApp 编译器要求 manifest.json 在 src/ 下，配置文件在根目录
+
+### 2026-07-06: UniApp 移动端 12 页面 + tabBar 图标说明全部落地（13 文件）
+- **背景**: 爸爸要求创建 mobile/pages/ 下所有页面文件，脚手架与 API 层已由另一 agent 创建
+- **新建 12 个 .vue 页面**（全部 `<script setup>` + `<style lang="scss" scoped>`，使用 uni.scss 变量，无注释）:
+  - `pages/login/index.vue` — 蓝色渐变登录页，用户名/密码/可折叠服务器地址，生物识别入口（读 biometric_token 判断显示），登录成功 switchTab 到首页
+  - `pages/index/index.vue` — 态势速览：HealthCard 健康分卡 + 告警统计(今日/待处理/MTTR) + 当前值班(一键拨号 makePhoneCall) + 运行工作流 + ScanFab 悬浮扫码；GET /mobile/dashboard 一次聚合；onShow 5s 轮询/onHide 停轮询；下拉刷新
+  - `pages/alert/list.vue` — 告警列表：全部/待处理/已确认 3 Tab 切换 status 过滤；AlertCard 组件列表；scroll-view 上拉加载更多(page_size=20)；离线降级读 offlineStore.getCachedAlerts；下拉刷新
+  - `pages/alert/detail.vue` — 告警详情：指标/当前值/阈值/级别/消息/时间/资产信息卡；确认(POST acknowledge)/认领/静默/触发自愈/AI根因(跳转 chat 带 preset="分析告警 #{id}")；GET /alerts/api/list?id=xxx
+  - `pages/agent/chat.vue` — AI 助手：ChatBubble 消息列表 + scroll-into-view 锚点滚动；底部输入框+发送+语音按钮(长按提示开发中)；快捷指令栏(分析告警/巡检报告/根因分析)；SSE 流式 onChunk 逐字追加到 AI 消息；propose_action 渲染确认/拒绝卡；左上角新建会话按钮
+  - `pages/pending/list.vue` — 待确认动作：RiskBadge 风险等级；高危(high/critical)点击确认弹遮罩+3s 倒计时(setInterval)防误操作；GET /agent/api/pending + POST confirm/cancel；下拉刷新
+  - `pages/asset/scan.vue` — 扫码：大按钮 uni.scanCode + 手动编码输入框；GET /mobile/scan/asset?code=xxx 命中跳详情；NFC 入口提示开发中
+  - `pages/asset/detail.vue` — 资产详情：基本信息卡 + 在线状态指示器(绿点在线/灰点离线)；最近告警列表；快捷操作(远程脚本提示去Web端/查看指标/重启服务/AI诊断跳拍照页)；GET /assets/api/{id}/detail
+  - `pages/asset/diagnose.vue` — 拍照识障：uni.chooseImage 拍照/相册 + 预览 + uni.compressImage 压缩 + plus.io.FileReader 转 base64；POST /mobile/vision/diagnose；诊断结果+执行自愈/转人工/重拍；可选关联资产 assetId
+  - `pages/oncall/my.vue` — 我的值班：当前值班状态卡(剩余时长计算+交接班按钮)；各团队值班列表(点击拨号)；值班日历月视图(前后月切换+值班日期标记 duty-dot)；GET /api/sre/oncall/current + list
+  - `pages/workflow/list.vue` — 工作流监控：SOP/智能体 Tab 切换；Run 列表(状态 badge completed绿/failed红/running蓝/pending灰)；点击展开节点详情；失败节点重试按钮 retryNode；GET /workflow/api/runs + agent-workflow
+  - `pages/settings/index.vue` — 设置/我的：用户信息卡(首字母头像)；推送开关 switch；服务器地址可编辑(setBaseURL)；离线缓存大小+清除(保留 session/auth/biometric token)；我的设备列表(GET /mobile/devices + DELETE)；关于 v1.0.0；退出登录 reLaunch 到登录页
+- **新建** `static/tab/README.txt` — 说明需放入 8 个 81x81 px PNG 图标(home/alert/ai/mine 各 _on 选中态)，未替换不影响功能
+- **设计规范**: 全部使用 $primary/$danger/$warning/$success/$severity-* 等 uni.scss 变量；rpx 单位(750rpx=屏宽)；88rpx 大按钮+44rpx 圆角；卡片化($card-radius 24rpx+$card-shadow)；UniApp 组件 view/text/scroll-view/image/button；onPullDownRefresh 下拉刷新
+- **依赖外部模块**(另一 agent 创建，本批页面已 import 引用): api/alert.js/auth.js/dashboard.js/workflow.js/mobile.js + store/user.js/offline.js + utils/biometric.js/push.js + components/AlertCard/HealthCard/RiskBadge/ChatBubble/ScanFab
+- **专业名词**: 态势速览(Situational Awareness)——聚合多数据源一屏展示系统全局状态; 拇指热区(Thumb Zone)——移动端单手操作易触达的屏幕下方区域; 轮询降级(Polling Degradation)——前台轮询后台停轮询节省电量; 高危操作防误触(Dangerous Action Guard)——二次确认+倒计时防止误点高危操作; 流式输出(Streaming Output)——SSE 逐字返回让用户提前看到响应; 离线降级(Offline Fallback)——网络失败时读本地缓存保持可用; 压缩上传(Compressed Upload)——图片压缩 base64 减少弱网传输量
+
+### 2026-07-06: UniApp 移动端 API 层/Store/Utils/Components 补全（16 文件）
+- **背景**: 爸爸要求补全 mobile/ 目录缺失的 API 层、store、utils、components，脚手架已有 config.js/agent.js/asset.js/oncall.js
+- **新建 16 文件**（全部非空，参考已有 api/asset.js 的 request 封装风格 `import { buildUrl, commonHeaders } from './config.js'`）:
+  - **API 层 5 文件**:
+    - `mobile/api/alert.js`: getList(分页筛选)/acknowledge/resolve/batchAcknowledge/batchResolve
+    - `mobile/api/auth.js`: login(从 res.header 提取 Set-Cookie 存 storage + setBaseURL)/logout/issueBiometric/biometricLogin(同 login 提取 cookie)
+    - `mobile/api/dashboard.js`: getDashboard → GET /mobile/dashboard
+    - `mobile/api/workflow.js`: listRuns/getRunDetail/listAgentRuns/getAgentRunDetail/retryNode
+    - `mobile/api/mobile.js`: registerDevice/unregisterDevice/diagnose/checkin/listDevices/deleteDevice/listPushLogs
+  - **Store 2 文件**（Pinia setup 风格，App.vue 已引用 useUserStore）:
+    - `mobile/store/user.js`: token/userInfo/biometricToken/serverUrl/deviceId + login/logout/checkLogin(reLaunch 登录页)/saveBiometric/checkBiometric(调用 biometric.js checkSupport+startAuth 后调 biometricLogin)/ensureDeviceId
+    - `mobile/store/offline.js`: offlineQueue/cache + addToQueue/flushQueue(批量重放失败保留)/cacheAlerts/cacheAsset/getCachedAlerts/getCachedAsset
+  - **Utils 4 文件**:
+    - `mobile/utils/push.js`: initPush(uni.getProvider→getClientInfo→registerDevice)/onPushReceive/onPushClick(解析 deep_link 跳转)
+    - `mobile/utils/crypto.js`: 纯 JS 实现 sha256/hmacSHA256/signRequest(参数排序拼接)/md5，UTF-8 编码后字节数组处理，32 位无符号运算用 `>>> 0`
+    - `mobile/utils/biometric.js`: checkSupport(uni.checkIsSupportSoterAuthentication)/startAuth(uni.startSoterAuthentication)/getDeviceId(md5(系统信息) 缓存 storage)
+    - `mobile/utils/offline.js`: setCache(带过期)/getCache(过期返 null)/removeCache/checkNetwork/onNetworkChange
+  - **Components 5 文件**（UniApp `<view>`/`<text>` 语法，SCSS rpx，`<script setup>`）:
+    - `mobile/components/AlertCard.vue`: 左侧 severity 颜色条(critical红/high橙/medium黄/low绿)+标题+资产名+时间+状态 badge
+    - `mobile/components/HealthCard.vue`: 大数字健康分+趋势箭头(绿↑红↓)+在线/总资产副指标行
+    - `mobile/components/RiskBadge.vue`: high红/medium橙/low绿圆角徽章
+    - `mobile/components/ChatBubble.vue`: user 右蓝/assistant 左白气泡，content 简单 markdown 渲染(**加粗**/`代码`/换行)，toolCalls 渲染工具调用卡片
+    - `mobile/components/ScanFab.vue`: position:fixed 右下角圆形蓝色 FAB，CSS 绘制扫描框图标
+- **设计决策**: store 用 Pinia setup 风格(defineStore 不用，直接 export 函数 return ref+actions)与 main.js createPinia 配合；crypto.js 不依赖外部库纯 JS 实现 SHA-256+HMAC+MD5；auth.js login 从 res.header['Set-Cookie'] 提取 cookie（兼容大小写+数组）
+- **专业名词**: 离线操作重放(Offline Replay)——断网时操作入队列恢复后批量执行; 带过期缓存(TTL Cache)——缓存项携带时间戳超时自动失效; HMAC-SHA256 签名(Hash-based Message Authentication Code)——用密钥对参数排序拼接后哈希防篡改; 生物识别免密(Biometric Passwordless)——指纹/FaceID 换取 JWT 免密登录; 深链跳转(Deep Link Routing)——推送 payload 携带 aiops://alert/1234 协议直达页面; SSE 分块传输(Server-Sent Events Chunked Transfer)——ChatBubble 支持流式接收文本
+
+### 2026-07-06: 移动端专用后端 API 落地（与现有系统隔离，11 路由 + 3 模型 + 推送服务）
+- **背景**: 爸爸要求开发移动端专用后端 API，与现有系统隔离不修改现有功能逻辑，参照第十五章移动端架构设计
+- **新建文件**:
+  - `app/services/mobile_push_service.py`: 推送服务 + 生物识别 JWT
+    - `register_device/unregister_device` 设备注册注销（user_id+device_id 唯一约束，upsert）
+    - `send_push` 查用户所有设备 → 个推(GeTui) REST API → 写 PushRecord 审计；未配置 getui_app_id 时 status=skipped 写日志降级
+    - `notify_alert`（critical 标记 priority=critical 绕勿扰）/ `notify_pending_action` / `notify_workflow_event`
+    - `sign_request(params,secret)` HMAC-SHA256 签名工具
+    - `issue_biometric_token/verify_biometric_token` 自实现 JWT HS256（无 PyJWT 依赖），secret 从 MOBILE_JWT_SECRET 环境变量读（默认 aiops-mobile-secret），payload 含 user_id/device_id/iat/exp（7天），base64url + hmac.compare_digest 防时序攻击
+  - `app/routers/mobile.py`: prefix=/mobile tags=["mobile"]，11 个端点全部 require_user 登录校验（未登录 HTTPException 401）
+- **修改文件**（最小改动）:
+  - `app/models.py`: 末尾追加 MobileDevice/PushRecord/CheckinRecord 3 模型；import 补 UniqueConstraint（Float/datetime 已有）
+  - `app/main.py`: import 行追加 mobile；PUBLIC_PATHS 加 "/mobile"（否则 AuthMiddleware 303 重定向到 /login，端点无法返回 401 JSON）；include_router(mobile.router)
+- **11 个 API 路由**:
+  - POST /mobile/push/register（device_id/platform/push_token/app_version）
+  - POST /mobile/push/unregister（device_id）
+  - POST /mobile/auth/biometric/issue（device_id，需已登录，签发 7 天 JWT 存 MobileDevice.biometric_token）
+  - POST /mobile/auth/biometric（biometric_token，验签+校验设备绑定匹配，通过设 session user_id/username）
+  - GET /mobile/scan/asset?code=xxx（查 Asset.name==code 或 tags LIKE %code%）
+  - POST /mobile/vision/diagnose（image_base64/asset_id?，调 call_llm 多模态 content=[text+image_url]，provider 不支持返回 503 友好错误）
+  - POST /mobile/checkin（asset_id/lat/lng/address/photo_base64?/note，photo 存 app/static/checkin/ 下）
+  - GET /mobile/dashboard（聚合：system_posture 健康分 + alert_stats + 当前值班 + 运行中工作流 + 资产统计，一次请求减少移动端往返）
+  - GET /mobile/devices（管理员看所有，普通用户看自己）
+  - DELETE /mobile/devices/{id}（管理员或本人）
+  - GET /mobile/push/logs（最近50条，管理员看所有，普通用户看自己）
+- **验证全 PASS**: ast.parse 4 文件 OK / models import OK / mobile router import OK 11 路由 / push service import OK / JWT issue/verify/tamper-reject OK / app.routes 11 mobile 路由注册
+- **设计决策**:
+  - 个推配置从 SystemConfig 读 getui_app_id/app_key/master_secret，未配置时降级写日志仍写 PushRecord(status=skipped) 审计
+  - 生物识别 JWT 自实现而非 PyJWT，避免新增依赖；token 绑定 device_id 换机失效；登录时校验 dev.biometric_token==token 防止旧 token 复用
+  - /mobile 加入 PUBLIC_PATHS 让中间件放行，由 require_user 依赖统一返回 401 JSON（移动端不能处理 303 重定向到 HTML 登录页）
+  - dashboard 复用 system_posture._build_systems/_process_system 计算健康分，复用 alert_service.get_alert_stats，避免重复造轮子
+- **专业名词**: 设备注册(Device Registration)——用户绑定物理设备唯一标识用于推送; 推送审计(Push Audit)——PushRecord 记录每条推送状态/错误/provider_msg_id 供追溯重试; 多模态识别(Multimodal Recognition)——LLM 接收图文混合输入识别设备故障; 生物识别免密(Biometric Passwordless)——指纹/FaceID 换取 JWT 免密登录; 设备绑定(Device Binding)——JWT payload 含 device_id 换机或解绑即失效; 聚合端点(BFF Aggregation)——后端聚合多数据源一次返回减少移动端弱网往返; 降级策略(Degradation Strategy)——推送 provider 未配置时不报错写日志跳过保持业务可用; 时序攻击防御(Timing-attack Defense)——hmac.compare_digest 常数时间比较签名避免耗时差泄露
+
+
+- **背景**: 爸爸要求做 APP 端，先出详细设计文档；读完 MEMORY 全貌 + menu_config.json(11分组70+模块) + 现有架构文档(到第十四章) + notification_service(email/webhook/dingtalk/wecom/feishu 无移动推送)
+- **产出**: 在 `AIOPS系统架构设计.md` 追加「第十五章 移动端架构（APP 端 · 移动运维）」(15.1-15.14 共 14 节，文档 1678→1774 行)
+- **核心决策**:
+  - **定位**: APP 不是 Web 缩小版，围绕「碎片时间/应急响应/现场运维」三大移动场景做差异化，5 条原则(场景优先/触达优先/低步数/复用后端/安全等齐)
+  - **技术选型**: UniApp(Vue3+Vite) ⭐⭐⭐⭐⭐ —— 复用现有 30+ Vue 组件 + main.css 设计系统 + 改造 request.js(uni.request)，一套代码出 iOS/Android/H5/小程序；淘汰 Flutter(RN/原生 因栈不统一)
+  - **功能分层**: P0刚需(告警推送+AI助手+待确认+态势+登录授权) / P1移动特色(扫码+NFC+拍照识障+语音+生物识别+值班) / P2创新(AR巡检+可穿戴+Widget+离线+位置打卡)
+  - **后端零侵入复用**: 90% 请求走现有 API(/alerts /agent-chat /assets /oncall 等)，仅新增 /mobile/* (push/register·scan/asset·vision/diagnose·auth/biometric·checkin·dashboard 聚合) + push 渠道扩展
+  - **推送服务**: notification_service 扩展 push 类型，国内个推/极光(聚合华为/小米/OPPO/VIVO厂商通道) + 海外 FCM + iOS APNs；按 severity 分级(critical 绕勿扰+强震+警报音)；6 个触发点(告警/待确认/工作流失败/完成/值班交接/license过期)
+  - **数据模型**: 新增 3 表 mobile_devices(user_id+device_id+push_token+biometric_token) / push_records(审计+重试) / checkin_records(现场签到)，main.py _MIGRATIONS 自动建表
+  - **安全**: 生物识别 token(JWT HS256 7天有效+设备绑定) + HTTPS+HMAC签名 + 推送 payload 仅通知操作必调API + 越狱检测 + 操作分级(只读生物即可/写操作需session/高危强制重输密码) + 复用 LicenseMiddleware
+  - **离线弱网**: SQLite 缓存最近100告警+50资产，操作入本地队列网络恢复重放，图片压缩断点续传
+  - **路线图**: 6 Phase 共 10.5 周，MVP 3 周出 demo(脚手架+登录+告警+AI+待确认+态势)
+  - **项目结构**: mobile/ 平级 frontend/，pages/(13页面) + components/(5组件) + api/(5模块) + store/(user/offline) + utils/(push/biometric/offline/crypto)
+  - **tabBar 4 项**: 首页/告警(角标)/AI/我的 + 扫码悬浮 FAB
+- **复用关系**: FastAPI 316 路由零改动 / agent_service SSE / NotificationChannel 扩展 / license 同等生效 / auth session / asset_service / call_llm 多模态 / workflow+agent_workflow / Vue 组件改造
+- **专业名词**: 移动优先策略(Mobile-First)——优先移动场景核心需求而非桌面移植; 推送通知通道(Push Channel)——FCM/APNs/个推系统级长连接，APP 未打开也触达; 多模态识别(Multimodal)——图文音多模态输入让AI理解设备故障; 生物识别免密(Biometric Passwordless)——指纹/FaceID替代密码符合FIDO2; 弱网降级(Weak-network Degradation)——离线缓存+断网可读历史; AR抬头显示(AR HUD)——增强现实叠加设备信息到摄像头; 深链(Deep Link)——aiops://alert/1234 协议直达指定页面; 设备绑定(Device Binding)——token含device_id换机失效; 推送分级(Push Tiering)——按severity决定震动/声音/绕勿扰; 厂商通道聚合(Provider Channel Aggregation)——个推/极光一套SDK覆盖华为/小米/OPPO/VIVO
+- **待爸爸决策**: 是否按 Phase 1 MVP 动手(UniApp 脚手架+登录+告警+AI+待确认+态势 2 周) / 推送渠道选个推还是极光 / 是否要 iOS(App Store 审核周期长)
+
+### 2026-07-06: 修复 license.lic 签名验证失败（旧私钥签发与硬编码公钥不配对）
+- **现象**: 前端报错 `{"detail":"授权签名验证失败（许可证可能被篡改或伪造）","license_status":"invalid"}`，LicenseMiddleware 返回 403
+- **排查链路**:
+  1. 读 `license_service.py:parse_license` → 验签失败返回该 reason，非指纹不匹配也非过期
+  2. 当前机器指纹 745669fc51036a82a28a0cd9e7a61040，与 license.lic 内 fingerprint 一致 → 排除指纹问题
+  3. 用 `tools/private_key.pem` 对 license.lic 原 payload 重新签名，再喂 `parse_license` → **验证通过** → 证明 `tools/private_key.pem` 与硬编码 `PUBLIC_KEY_PEM` 是配对密钥对，问题在 license.lic 文件本身的签名（旧私钥签的或被改过）
+- **修复**: 用 `tools/generate_license.py` 重新签发 `license.lic`（同客户/版本/指纹/到期/功能参数）→ `check_license()` 返回 status=active/valid=True/remaining_days=3831
+- **关键验证手段**: `serialization.load_pem_private_key` 加载私钥 → 对原 payload `pk.sign(payload_bytes, PKCS1v15, SHA256)` → 拼 `payload_b64.sig_b64` → 喂 `parse_license` 验证，能区分「私钥与公钥不配对」vs「license 文件被改」
+- **专业名词**: 签名验证失败(Signature Verification Failure)——验签时公钥无法验证签名，常见于密钥对不匹配或数据被篡改; 密钥对配对性测试(Key-pair Match Test)——用私钥重签同 payload 再用公钥验，判断私钥与公钥是否为一对; 离线签发(Offline Issuance)——用本地私钥签发许可证，无需联网，私钥需安全保管; PKCS#1 v1.5 签名(PKCS#1 v1.5 Signature)——RSA 经典签名填充方案，配合 SHA256 哈希
+
+### 2026-07-06: 服务启动——前端 git bash start 不可靠，改用 PowerShell Start-Process + 日志重定向
+- **后端 8000** 已在运行（PID 11156，HTTP 200），无需重启
+- **前端踩坑**: 按 AGENTS.md 推荐方式 `start "AIOps Frontend" cmd /k "npm run dev --prefix frontend"` 启动后，3000 端口长时间无监听；排查时发现 node 进程 PID 12140 实为 **opencode 自身**（`opencode-ai\bin\opencode`），并非前端 vite——印证爸爸「别把 opencode 服务杀了」的提醒，全程未执行任何杀进程命令
+- **可靠方案**: 改用 PowerShell `Start-Process cmd -ArgumentList '/c','npm run dev --prefix frontend > frontend_dev.log 2>&1' -WorkingDirectory 'E:/AIOPS/project05' -WindowStyle Minimized`：① Start-Process 启动独立进程，不随 bash 会话超时被杀 ② 输出重定向到 frontend_dev.log 可事后排查 ③ 窗口最小化不干扰
+- **验证**: Vite v6.4.3 ready in 2640ms，http://127.0.0.1:3000 HTTP 200；frontend_dev.log 显示监听 0.0.0.0:3000 + 多网卡 Network 地址
+- **专业名词**: 进程误杀(Process Mis-termination)——杀进程时误伤无关进程，需用精确 PID 定向 taskkill 而非通配 Get-Process; 脱离父会话(Detached from Parent Session)——用 Start-Process 启动独立进程，不依赖 bash 会话生命周期; 标准输出重定向(Stdout Redirection)——cmd /c "命令 > log 2>&1" 捕获长驻进程输出供事后排查; 探活验证(Health-check Verification)——用 HTTP 200 响应而非端口状态判定服务真正可用
+
 ### 2026-07-06: 移除 db/aiops.db 的 Git LFS 跟踪（可持续 push 方案落地）
 - **决策**: 爸爸选最优可持续方案——运行时 SQLite 数据库不该版本控制，移除 LFS 跟踪彻底解决 pre-push 钩子卡死
 - **执行**:

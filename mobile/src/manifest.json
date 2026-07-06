@@ -1,0 +1,87 @@
+{
+    "name": "AIOps 移动运维",
+    "appid": "",
+    "description": "AIOps 智能运维平台移动端",
+    "versionName": "1.0.0",
+    "versionCode": "100",
+    "transformPx": false,
+    "app-plus": {
+        "usingComponents": true,
+        "nvueStyleCompiler": "uni-app",
+        "compilerVersion": 3,
+        "splashscreen": {
+            "alwaysShowBeforeRender": true,
+            "waiting": true,
+            "autoclose": true,
+            "delay": 0
+        },
+        "modules": {
+            "Push": {},
+            "Camera": {},
+            "Barcode": {},
+            "Fingerprint": {},
+            "OAuth": {}
+        },
+        "distribute": {
+            "android": {
+                "permissions": [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
+                    "<uses-permission android:name=\"android.permission.NFC\"/>",
+                    "<uses-permission android:name=\"android.permission.VIBRATE\"/>",
+                    "<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
+                    "<uses-permission android:name=\"android.permission.USE_FINGERPRINT\"/>"
+                ],
+                "minSdkVersion": 21,
+                "targetSdkVersion": 30
+            },
+            "ios": {
+                "dSYMs": false
+            },
+            "sdkConfigs": {
+                "push": {
+                    "igexin": {
+                        "appid": "",
+                        "appkey": "",
+                        "appsecret": ""
+                    }
+                }
+            }
+        }
+    },
+    "quickapp": {},
+    "mp-weixin": {
+        "appid": "",
+        "setting": {
+            "urlCheck": false,
+            "es6": true,
+            "minified": true,
+            "postcss": true
+        },
+        "usingComponents": true,
+        "permission": {
+            "scope.userLocation": {
+                "desc": "用于现场运维位置打卡"
+            }
+        },
+        "requiredPrivateInfos": [
+            "getLocation"
+        ]
+    },
+    "mp-alipay": {
+        "usingComponents": true
+    },
+    "h5": {
+        "router": {
+            "mode": "hash",
+            "base": "/"
+        },
+        "title": "AIOps 移动运维",
+        "template": "index.html"
+    },
+    "vueVersion": "3"
+}

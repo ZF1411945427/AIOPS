@@ -519,7 +519,7 @@ def seed_all():
     if not db.query(DataSource).filter(DataSource.type == "kubernetes").first():
         db.add(DataSource(name="生产 K8s 集群", type="kubernetes", endpoint="https://k8s-api.prod.local:6443",
             auth_config=json.dumps({"auth_type": "token", "token": "seed-k8s-token"}),
-            status="unknown", enabled=False))
+            last_status="unknown", enabled=False))
 
     # ── AutoRemediation (5) ──
     if db.query(AutoRemediation).count() < 3:
