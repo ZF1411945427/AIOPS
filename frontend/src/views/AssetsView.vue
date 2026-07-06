@@ -11,7 +11,7 @@
         <option value="">全部 CI 类型</option>
         <option v-for="ct in ciTypes" :key="ct" :value="ct">{{ ct }}</option>
       </select>
-      <a href="/assets/create" class="btn btn-primary">+ 新增资产</a>
+      <a href="javascript:void(0)" class="btn btn-primary" @click="openCreate">+ 新增资产</a>
     </div>
 
     <div class="panel">
@@ -38,7 +38,7 @@
               <td class="text-sm">{{ a.tags || '-' }}</td>
               <td class="text-sm">{{ a.created_at || '-' }}</td>
               <td>
-                <a :href="`/assets/${a.id}/edit`" class="btn btn-sm">编辑</a>
+                <a href="javascript:void(0)" class="btn btn-sm" @click="openEdit(a.id)">编辑</a>
                 <button class="btn btn-sm btn-danger" @click="deleteAsset(a.id, a.name)">删除</button>
               </td>
             </tr>
@@ -47,6 +47,44 @@
         <div v-else class="empty-state">
           <div style="font-size:32px;margin-bottom:8px;">📦</div>
           <div>暂无资产数据</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增/编辑资产弹窗 -->
+    <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
+      <div class="modal-box">
+        <h3>{{ formMode === 'create' ? '新增资产' : '编辑资产 #' + form.id }}</h3>
+        <div class="form-grid">
+          <div class="form-row"><label>资产名称 *</label><input v-model="form.name" class="input" placeholder="如 web-server-01"></div>
+          <div class="form-row"><label>CI 类型</label>
+            <select v-model="form.ci_type" class="input">
+              <option v-for="ct in ciTypes" :key="ct" :value="ct">{{ ct }}</option>
+            </select>
+          </div>
+          <div class="form-row"><label>IP 地址</label><input v-model="form.ip" class="input" placeholder="10.0.0.1"></div>
+          <div class="form-row"><label>状态</label>
+            <select v-model="form.status" class="input">
+              <option value="online">online</option>
+              <option value="offline">offline</option>
+            </select>
+          </div>
+          <div class="form-row"><label>K8s 集群</label><input v-model="form.k8s_cluster" class="input" placeholder="留空表示非 K8s 资产"></div>
+          <div class="form-row"><label>标签</label><input v-model="form.tags" class="input" placeholder="逗号分隔，如 prod,web"></div>
+          <div class="form-row"><label>连接方式</label>
+            <select v-model="form.connection_type" class="input">
+              <option value="ssh">SSH</option>
+              <option value="agent">Agent</option>
+              <option value="k8s">K8s API</option>
+            </select>
+          </div>
+          <div class="form-row"><label>SSH 用户</label><input v-model="form.ssh_user" class="input" placeholder="root"></div>
+          <div class="form-row"><label>SSH 端口</label><input v-model.number="form.ssh_port" class="input" type="number" placeholder="22"></div>
+          <div class="form-row"><label>SSH 密码</label><input v-model="form.ssh_password" class="input" type="password" placeholder="留空则不设置"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="closeForm">取消</button>
+          <button class="btn btn-primary" @click="saveAsset">{{ formMode === 'create' ? '创建' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -64,6 +102,59 @@ const ciTypes = ref([])
 const search = ref('')
 const ciType = ref('')
 let searchTimer = null
+
+// 新增/编辑表单
+const showForm = ref(false)
+const formMode = ref('create')
+const form = ref({ id: null, name: '', ci_type: 'server', ip: '', status: 'offline', k8s_cluster: '', tags: '', connection_type: 'ssh', ssh_user: 'root', ssh_port: 22, ssh_password: '' })
+
+function openCreate() {
+  formMode.value = 'create'
+  form.value = { id: null, name: '', ci_type: 'server', ip: '', status: 'offline', k8s_cluster: '', tags: '', connection_type: 'ssh', ssh_user: 'root', ssh_port: 22, ssh_password: '' }
+  showForm.value = true
+}
+
+async function openEdit(id) {
+  try {
+    const detail = await request.get(`/assets/api/${id}/detail`)
+    formMode.value = 'edit'
+    form.value = {
+      id: detail.id, name: detail.name, ci_type: detail.ci_type || 'server',
+      ip: detail.ip || '', status: detail.status || 'offline',
+      k8s_cluster: detail.k8s_cluster || '', tags: detail.tags || '',
+      connection_type: detail.connection_type || 'ssh',
+      ssh_user: detail.ssh_user || 'root', ssh_port: detail.ssh_port || 22,
+      ssh_password: detail.ssh_password || '',
+    }
+    showForm.value = true
+  } catch (e) {
+    ElMessage.error('加载资产详情失败: ' + (e.message || e))
+  }
+}
+
+function closeForm() {
+  showForm.value = false
+}
+
+async function saveAsset() {
+  if (!form.value.name.trim()) {
+    ElMessage.warning('资产名称不能为空')
+    return
+  }
+  try {
+    if (formMode.value === 'create') {
+      await request.post('/assets/api/create', form.value)
+      ElMessage.success('资产创建成功')
+    } else {
+      await request.post(`/assets/api/${form.value.id}/update`, form.value)
+      ElMessage.success('资产更新成功')
+    }
+    showForm.value = false
+    loadAssets()
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e.message || e))
+  }
+}
 
 async function loadAssets() {
   loading.value = true
@@ -132,4 +223,12 @@ onMounted(() => {
 .badge.online { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.offline { background: rgba(100,116,139,0.1); color: #64748b; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 480px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+.modal-box h3 { margin: 0 0 16px; font-size: 1rem; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-row { margin-bottom: 0; }
+.form-row label { display: block; font-size: 0.76rem; color: var(--text-secondary, #64748b); margin-bottom: 4px; }
+.input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 </style>

@@ -1,3 +1,159 @@
+### 2026-07-06: 修复 PDF 报告 CJK 文字溢出（_wrap_cjk 逐字符换行）
+- **问题**: fpdf2 的 `multi_cell` 对中文字符宽度计算不精确，换行点偏后导致文字溢出右边界（最大 29pt）
+- **根因**: fpdf2 内部用 `get_string_width` 估算换行点，但对 CJK 字符的宽度估算不够准确
+- **修复**: 新增 `_wrap_cjk(text, max_width)` 函数，逐字符测量宽度并手动换行；所有 `multi_cell` 调用改为 `_wrap_cjk` + 逐行 `cell(0, h, wl, new_x="LMARGIN", new_y="NEXT")`
+- **验证**: PyMuPDF 检查 0 溢出，PDF 163KB 2页，6/6 检查通过
+
+### 2026-07-06: 智能体工作流 PDF 报告视觉溢出（暂缓处理）
+- **问题**: 下载的 PDF 报告在浏览器/WPS/其他阅读器中视觉溢出，文字超出页面边界
+- **现象**: run #41 生成的 164KB PDF（2页），在 Chrome/WPS/其他阅读器打开均有溢出
+- **排查**: 代码层面未发现 crash，FPDF `_page_w=170mm`、`_safe_text` 按 40 字符分割、`multi_cell` 换行均正常，PDF 结构有效（164KB，2页，字体 MPDFAA）
+- **根因未明**: 可能是中文字符宽度与 fpdf2 预期不符（fpdf2 的 `multi_cell` 对中日韩字符按半个 Latin 宽度估算，而 msyh.ttf 中文字符实际宽度不等于 fpdf2 内部估算），导致每行写入字符数偏多，实际总宽度超出 `_page_w`
+- **待处理**: 需要更精确的字符宽度处理——方案1：fpdf2 的 `unalign_text=True` 禁用对齐；方案2：自定义 `get_string_width` 覆盖；方案3：切换到 reportlab 或 weasyprint 等对 CJK 支持更好的库
+
+### 2026-07-06: 修复工作流多分支汇聚节点被错误 skip 的 bug
+- **问题**: 工作流 #3「故障自愈决策」执行后 end 节点被 skip，outputs 为空
+- **根因**: `agent_workflow_service.py` 第 688 行 `if failed_deps or skipped_deps` 逻辑有误——当 condition 分支只走一条路径时，其余分支节点被 skip，汇聚节点（end）检测到 skipped_deps 就跟着 skip 了
+- **修复**: 区分三种情况：
+  - 有 failed_deps → skip（上游失败）
+  - 全部 skipped → skip（无路径到达）
+  - 部分 skipped + 部分 completed → **继续执行**（多分支汇聚，至少一条路径完成）
+- **验证**: 4 个工作流全部测试通过（#1 根因分析、#2 运维问答、#3 故障自愈决策、#4 变更影响评估）
+
+### 2026-07-06: 智能体工作流节点自动布局 + PDF报告修复 + 启动脚本修复
+- **节点布局优化** `AgentWorkflowEditor.vue`:
+  - 原问题：`loadWorkflow` 中节点无 position 时用 `Math.random()` 分配坐标，导致节点杂乱重叠
+  - 新增 `autoLayout(rawNodes, rawEdges)` 函数：BFS 拓扑分层算法，从入度=0 的节点开始逐层排列，同层节点垂直居中分布
+  - 列间距 220px，行间距 100px，起始坐标 (80, 80)
+  - `loadWorkflow` 中检测所有节点缺 position 时自动调用 autoLayout
+  - 新增「自动排列」按钮 + `autoArrange()` 函数，用户可随时手动触发重新排列
+- **PDF报告溢出修复** `agent_workflow_service.py:export_run_pdf`:
+  - 删除 `_wrap_text` 逐字符换行（与 multi_cell 冲突导致溢出）
+  - 新增 `_strip_md_inline()` 清理 `**bold**` 和 `` `code` `` 标记
+  - 新增 `_strip_emoji()` 移除 emoji 字符（msyh 字体不含 emoji 字形）
+  - 补全 `###` 和 `####` 标题处理，显式 set_margins(20,20,20) + A4
+- **启动脚本修复** `_start_backend.bat` / `_start_frontend.bat`:
+  - 路径从 `E:\AIOPS\project03` 修正为 `D:\AIOPS\project05`
+- **前端 blob 错误处理** `AgentWorkflowRunsView.vue:exportPdf`:
+  - 增加 blob.type 检测，当后端返回 JSON 错误时解析并友好提示
+  - appendChild 确保 a.click() 下载触发
+- **依赖声明** `requirements.txt`: 添加 `fpdf2==2.8.7`
+- 验证：14/14 ad-hoc 检查通过（算法、无重叠、拓扑序、构建产物）
+
+### 2026-07-06: 智能体工作流自动执行模式三道免责防线（法律告知+危险拦截+审计日志）
+- **背景**: 爸爸要求免责任——使用者用弱智模型选自动执行，模型失误删生产库的平台责任隔离。单纯弹警告框只能"告知"，真正免责需多层防御
+- **防线1-法律层（风险告知）** `AgentWorkflowEditor.vue`:
+  - `onExecModeChange` 弹窗措辞强化：明示"弱模型可能误删数据/误重启服务"+"高危工具将被系统强制降级"+"审计日志不可抵赖"，必须点「我已知晓并承担风险」
+  - `executeRun` 二次确认措辞强化：列出自动节点清单 + 风险提示
+  - awaiting_confirm 节点显示 `.force-confirm-hint`「⚠️ 高危操作已自动从『自动执行』降级为『等待确认』」（当 config.execution_mode==='auto' 时）
+  - `AgentWorkflowRunsView.vue` 同步加 force-confirm-hint
+- **防线2-工程层（危险操作拦截）** `agent_workflow_service.py:_exec_tool`:
+  - **修复硬编码 RISK_MEDIUM bug**: 旧代码 `risk_level=PendingAction.RISK_MEDIUM` 硬编码，现读 `get_mcp_tool(tool_name).risk_level` 真实等级
+  - **高危强制降级**: `tool_risk in ("high","critical") and execution_mode=="auto"` 时强制 `execution_mode="confirm"` + `forced_confirm=True`，创建 PA 暂停等待确认，绝不自动执行
+  - 31 个工具风险等级: read_only(13个查询)/low(4个状态更新)/medium(4个创建更新)/high(4个删除重启)/critical(2个SSH命令脚本)
+  - 验证: wf#5 tool1 改 execute_run_command(critical)+auto → run#40 status=awaiting_confirm requires_confirm=True PA#105 创建，拦截生效
+- **防线3-证据层（不可抵赖审计）**:
+  - **新模型** `WorkflowAuditLog`(workflow_audit_logs): run_id/node_run_id/workflow_id/action/operator/tool_name/execution_mode/risk_level/detail/created_at
+  - **7 种 action**: run_start/node_auto_exec/node_confirm/node_cancel/run_abort/node_retry/node_force_confirm
+  - `AgentWorkflowRun` 加 `triggered_by`(VARCHAR64) 记录触发人
+  - `_audit()` 辅助函数: 在 start_workflow_run/confirm/cancel/abort/retry/auto_exec/force_confirm 7 处写入审计
+  - `auth.py` 登录加 `request.session["username"]=user.username`（旧只存 user_id，所有端点取 username 为空）
+  - 路由层 `agent_workflow.py`: execute/abort/retry/cancel 4 端点加 `request: Request` 取 username 传入服务层
+  - 验证: run#40 审计日志 id=9 action=node_force_confirm tool=execute_run_command risk=critical；run#36 id=3 run_start operator=admin id=4 node_auto_exec tool=query_metrics
+- **迁移修复** `main.py`:
+  - `_MIGRATIONS` 加 `agent_workflow_runs: triggered_by VARCHAR(64)`
+  - **重建 pending_actions 表**: 旧表 session_id NOT NULL，工作流场景 session_id=None 插入失败 `IntegrityError NOT NULL constraint failed`；迁移检测 notnull=1 时 CREATE _pa_new(nullable) → INSERT SELECT → DROP → RENAME 重建
+- **验证全 PASS**: 后端 ast.parse 4文件 OK / 前端 npm run build 13.99s / 迁移 workflow_audit_logs 表创建+triggered_by 列添加+pending_actions 重建 / API run#36 auto read_only 正常执行+审计 / run#40 critical auto 强制降级 awaiting_confirm+审计
+- **专业名词**: 纵深防御(Defense in Depth)——多层安全控制单层失守仍有下层防护; 人在回路(Human-in-the-loop HITL)——关键操作必须人工确认; 不可否认性(Non-repudiation)——操作人身份可追溯无法抵赖; 基于风险的访问控制(Risk-based Access Control)——根据操作风险等级决定是否需确认; 审计轨迹(Audit Trail)——不可篡改的操作历史记录; 强制降级(Forced Downgrade)——高危操作自动从自动模式降级为确认模式
+
+### 2026-07-06: 智能体工作流执行模式（待确认/自动执行）功能完成
+- **背景**: 参照 AI 智能助手的 propose_action→confirm 机制，给智能体工作流 tool 节点增加执行边界控制
+- **后端变更**:
+  - `AgentWorkflowNodeRun`: 新增 `requires_confirm`(Boolean)、`pending_action_id`(Integer)、`STATUS_AWAITING_CONFIRM`
+  - `AgentWorkflowRun`: 新增 `STATUS_AWAITING_CONFIRM = "awaiting_confirm"`
+  - `PendingAction`: 新增 `run_id`(Integer FK)、`node_run_id`(Integer FK)，`session_id` 改为 nullable
+  - `_exec_tool`: 读取 `execution_mode`，`"confirm"` 时创建 PendingAction、暂停 run 等待确认；`"auto"` 立即执行
+  - `_advance_run`: 检测 `awaiting_confirm` 状态，遇到时停止处理
+  - 新增 `confirm_workflow_node()`/`cancel_workflow_node()` 函数
+  - `_serialize_node_run`: 暴露 `requires_confirm` / `pending_action_id`
+  - Router: 新增 `POST /api/runs/{run_id}/node/{node_run_id}/confirm` 和 `/cancel` 端点
+  - DB 迁移: main.py `_MIGRATIONS` 自动加列
+- **前端编辑(AgentWorkflowEditor.vue)**:
+  - tool 节点属性面板加「执行模式」下接：确认（默认）/ 自动
+  - `getDefaultData('tool')` 默认 `execution_mode: 'confirm'`
+  - run-test 面板：`pollRunStatus` 识别 `awaiting_confirm` 停止轮询；节点展开区显示等待确认条+确认/取消按钮
+- **前端运行详情(AgentWorkflowRunsView.vue)**:
+  - 节点展开区：`awaiting_confirm` 节点显示 ⏳ 提示条 + 确认/取消按钮（带 loading 状态）
+  - CSS: `.node-card.nr-awaiting`（橙色左边框）`.badge.st-awaiting`（橙色徽章）`.node-awaiting-bar`（橙色背景操作栏）
+- **验证**: API 全部正常返回；confirm/cancel 端点对不存在的节点返回 400 中文错误
+
+### 2026-07-06: 执行结果展示重写 + PDF 导出
+- **AgentWorkflowRunsView.vue** 详情模态框重写：
+  - 输入参数从 raw JSON 改为 kv-list 键值对卡片
+  - 输出结果从 raw JSON 改为 output-card：长文本自动用可滚动文字卡片展示，短值/对象用代码块
+  - 节点卡片改为可折叠：▸ 箭头展开/收起（默认全展开），hover 响应，点击切换
+  - 展开后：开始/结束时间、错误（红色背景）、逐字段展示输出（长文本走文字卡片、否则走代码块）
+  - 新增「导出 PDF」按钮（右上 + 底部）：`window.open()` 生成独立报告页，自动弹浏览器打印对话框，用户选「另存为 PDF」
+  - 打印页样式：独立 HTML + CSS/print 优化，包含元数据、输入、输出、节点详情、水印
+- **AgentWorkflowEditor.vue** 运行测试模态框同步改进（上一轮已完成）
+
+### 2026-07-06: 修复 LLM 执行+前端轮询+代理超时三大 bug（全流程验证通过）
+- **Bug 1 - 系统代理导致 LLM 读超时**: 项目环境变量 `HTTP_PROXY=127.0.0.1:7897`，requests.post 走代理，代理对 LLM provider(39.96.51.45:9001) 长连接读超时 60s
+  - **修复**: `call_llm` 默认 `proxies={"http":None,"https":None}` 禁用系统代理；`_exec_llm` timeout_override 60→120s 给慢模型余量
+- **Bug 2 - LLM 响应文本提取错误**: `_exec_llm` 用 `result.get("content") or result.get("message")` 提取文本，但 OpenAI 标准响应在 `choices[0].message.content`
+  - **修复**: `choices`→`message.content` 路径提取
+- **Bug 3 - 前端轮询死循环**: `pollRunStatus` 用 `data.run?.status` 取值，但 GET `/api/runs/{id}` 返回直接是 run 数据顶层 `status`（无 `run` 包裹），导致 `data.run?.status` 永为 undefined
+  - **修复**: `data.run?.status` → `data.status`；同址修 `runStatusClass` 的 `?run?.status` → `?.status`
+- **验证结果**: run#30 completed/54s，report_len=1714，LLM 正常生成巡检报告
+
+### 2026-07-06: 修复智能体工作流 query_metrics 工具字段名错误
+- **现象**: 运行「巡检报告生成」工作流(wf#5)，tool1 节点失败，错误 `type object 'MetricRecord' has no attribute 'metric_name'`，导致下游 llm1/end 全部 skipped，run 状态 failed "部分节点失败"
+- **根因**: `app/services/mcp_tools.py:183` 的 `query_metrics` 函数用了 MetricRecord 模型上不存在的字段——`MetricRecord.metric_name`(实际是 `name`)、`MetricRecord.created_at`(实际是 `timestamp`)
+- **修复**: mcp_tools.py query_metrics 三处字段名修正：`metric_name`→`name`、`created_at`→`timestamp`(filter+order_by+输出格式化)
+- **工作流链路**: start(asset_id) → tool1(query_metrics 查 cpu_usage) → llm1(生成报告) → end(输出 report)；tool1 失败后 _advance_run 检测 failed_deps 将下游全标记 STATUS_SKIPPED
+- **验证**: 登录后 POST /agent-workflow/api/runs/5/execute，run.status=completed，4 节点全 completed，outputs={"report":""}(LLM 无 provider 时返回空串属正常)
+- **测试坑**: 无 session 调 /agent-workflow API 会被 AuthMiddleware 303 重定向到 /login，客户端跟随重定向拿到 Vue index.html(状态 200 CT:text/html)——需先 POST /login 拿 cookie；/assets 在 PUBLIC_PATHS 所以之前测试无需登录
+- **专业名词**: 字段名不匹配(Field Name Mismatch)、拓扑执行级联跳过(Cascading Skip on Topological Execution)、会话认证拦截(Session-based Auth Interception)、重定向跟随(Redirect Following)
+
+### 2026-07-06: 修复资产新增/编辑页面 404（Jinja2→Vue 重构遗留 bug）
+- **根因**: 提交 1cd2e33「Jinja2→Vue 改造收尾」用 AST 脚本批量删除 182 个 HTML 路由，其中 `assets.py` 的 `GET /assets/create`、`GET /assets/{id}/edit`、`POST /assets/create`、`POST /assets/{id}/edit` 被删，但前端 `AssetsView.vue` 的 `<a href="/assets/create">` 和 `<a :href="/assets/${a.id}/edit">` 死链接未同步改成 Vue 弹窗——典型重构遗留 bug
+- **后端** `app/routers/assets.py` 新增 3 个 API:
+  - `POST /assets/api/create`：新建资产（name/ci_type/ip/status/tags/k8s_cluster/connection_type/ssh_user/ssh_password/ssh_port），保存前探测连接决定 online/offline
+  - `POST /assets/api/{id}/update`：更新资产，改连接配置后自动重新探测状态
+  - `GET /assets/api/{id}/detail`：获取资产详情含连接配置解析（ssh_user/ssh_password/ssh_port），供编辑表单回填
+- **前端** `frontend/src/views/AssetsView.vue`:
+  - 死链接 `<a href="/assets/create">` → `<a @click="openCreate">`；`<a :href="/assets/${a.id}/edit">` → `<a @click="openEdit(a.id)">`
+  - 新增模态框（showForm/formMode/form 状态）+ openCreate/openEdit/closeForm/saveAsset 方法
+  - 表单字段双列网格布局：名称/CI类型/IP/状态/K8s集群/标签/连接方式/SSH用户/SSH端口/SSH密码
+  - openEdit 调 `/assets/api/{id}/detail` 回填表单
+- **验证**: 后端 ast.parse OK / 前端 npm run build 13.57s 通过 / API 实测 ci-types 200、create 200 (id=52)、detail 200、delete 200 全 PASS；测试资产已清理
+- **专业名词**: 重构遗留 bug(Refactor Leftover Bug)、死链接(Dead Link/Dangling Reference)、AST 批量重构(AST Batch Refactoring)、表单回填(Form Backfill)、连接探测(Connection Probing)
+
+### 2026-07-06: 智能体编排画布连接线删除交互全栈增强
+- **痛点**: `AgentWorkflowEditor.vue` 用 Vue Flow @vue-flow/core@1.48.2，连接线删除只能靠默认 Backspace 快捷键，无视觉反馈、无 UI 入口、使用说明未提及，爸爸"没找到怎么删除连线"
+- **改动**(10 处，均在 `frontend/src/views/AgentWorkflowEditor.vue`):
+  - 使用说明加第 5 条："点击连线选中，按 Backspace 删除，或右键『删除此连线』"
+  - VueFlow 加 `:edges-updatable="true"` + `@edge-click` + `@edge-context-menu` 事件
+  - 新增 `selectedEdge` / `edgeContextMenu` 响应式状态；useVueFlow 解构出 `removeEdges`
+  - 属性面板支持双模式：选中节点显示节点属性+删除节点按钮；选中边显示连接 ID/起点/终点+删除连接按钮+操作提示
+  - 新增 `onEdgeClick` / `onEdgeContextMenu` / `deleteEdge` / `closeEdgeContextMenu` / `propsPanelTitle`(computed)
+  - onPaneClick / onNodeClick 同步清空 selectedEdge + 关闭右键菜单
+  - onMounted 注册 document click + contextmenu 监听自动关闭右键菜单（点 edge 外区域时关闭）
+  - 右键菜单组件 `.edge-ctx-menu` + 菜单项 `.edge-ctx-item`
+  - 选中边醒目样式：`.vue-flow__edge.selected` 红色 #ef4444 + 3px + 阴影；hover 橙色 #f97316
+  - 连线属性提示样式 `.edge-tip` 群青蓝左边框
+- **模板结构坑**: 属性面板外层 `<template v-if="selectedNode">` 包裹 8 种节点类型子 template，HTTP 节点结束后需多一个 `</template>` 闭合外层；selectedEdge 分支用独立 `v-if`（非 v-else-if，避免与外层 v-if 层级错配）——首次构建报 "Element is missing end tag" 已修复
+- **验证**: npm run build 26.99s 通过，无编译错误
+- **专业名词**: 边(Edge)/节点(Node)、选中态视觉反馈(Selected State Visual Feedback)、交互可发现性(Discoverability)、多重冗余交互入口(Redundant Interaction Entries)、语义着色(Semantic Color Coding)
+
+### 2026-07-06: 从 GitHub 远程拉取项目到工作空间根目录
+- **操作**: 根据 tok.txt（仓库地址 https://github.com/ZF1411945427/AIOPS.git + GitHub PAT + 本地代理 7897）拉取项目
+- **初始状态**: 工作空间已存在 git 仓库（remote 已指向正确地址），但处于异常状态——存在未完成的合并冲突（MEMORY.md / agent_service.py / aiops.db 标记 UU），且所有 294 个已跟踪文件在工作树中被删除
+- **处理步骤**: ① 配置 git http/https 代理为 http://127.0.0.1:7897 ② remote set-url 内嵌 PAT 做鉴权 ③ git fetch origin（origin/main 从 20e2048 更新到 a003df8）④ git reset --hard origin/main 恢复全部 294 个文件并清除冲突索引
+- **结果**: 工作树干净（nothing to commit），与 origin/main 同步于 a003df8（feat: K8s资源创建全量落地+Helm/Ansible运维操作+RSA授权控制），297 个文件就位
+- **保留**: tok.txt / opencode.json / .hermes.md（未被 git 跟踪，reset 不影响）
+- **专业名词**: 远程仓库拉取(Remote Repository Pull)、硬重置(Hard Reset，丢弃工作区与暂存区改动强制对齐目标提交)、代理穿透(Proxy Tunneling via 7897)、PAT 内嵌鉴权(Token-embedded Authentication)
+
 ### 2026-07-06: 三大功能集成注册 + 全量验证通过（主 agent 收尾）
 - **集成注册**(主 agent 统一完成，避免子 agent 并发改公共文件冲突):
   - `app/main.py`: import helm/ansible/license + 3 个 include_router + import LicenseMiddleware + add_middleware(LicenseMiddleware)（注册于 AuthMiddleware 后、SessionMiddleware 前，执行序 Session→License→Auth→GZip→路由）

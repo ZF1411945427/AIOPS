@@ -921,8 +921,10 @@ class PendingAction(Base):
     STATUS_FAILED = "failed"
 
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
     message_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=True)
+    run_id = Column(Integer, nullable=True)
+    node_run_id = Column(Integer, nullable=True)
     action_type = Column(String(64), nullable=False)
     title = Column(String(128), default="")
     risk_level = Column(String(16), default=RISK_LOW)
@@ -1263,6 +1265,7 @@ class AgentWorkflowRun(Base):
 
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
+    STATUS_AWAITING_CONFIRM = "awaiting_confirm"
     STATUS_COMPLETED = "completed"
     STATUS_FAILED = "failed"
     STATUS_ABORTED = "aborted"
@@ -1281,6 +1284,7 @@ class AgentWorkflowRun(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+    triggered_by = Column(String(64), default="")
 
     def get_workflow_snapshot(self):
         try:
@@ -1313,6 +1317,7 @@ class AgentWorkflowNodeRun(Base):
 
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
+    STATUS_AWAITING_CONFIRM = "awaiting_confirm"
     STATUS_COMPLETED = "completed"
     STATUS_FAILED = "failed"
     STATUS_SKIPPED = "skipped"
@@ -1326,6 +1331,8 @@ class AgentWorkflowNodeRun(Base):
     status = Column(String(32), default=STATUS_PENDING)
     output = Column(Text, default="{}")
     error = Column(Text, default="")
+    requires_confirm = Column(Boolean, default=False)
+    pending_action_id = Column(Integer, nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
@@ -1341,6 +1348,31 @@ class AgentWorkflowNodeRun(Base):
             return json.loads(self.output) if self.output else {}
         except (json.JSONDecodeError, TypeError):
             return {}
+
+
+class WorkflowAuditLog(Base):
+    """智能体工作流操作审计日志（不可抵赖）"""
+    __tablename__ = "workflow_audit_logs"
+
+    ACTION_RUN_START = "run_start"
+    ACTION_NODE_AUTO_EXEC = "node_auto_exec"
+    ACTION_NODE_CONFIRM = "node_confirm"
+    ACTION_NODE_CANCEL = "node_cancel"
+    ACTION_RUN_ABORT = "run_abort"
+    ACTION_NODE_RETRY = "node_retry"
+    ACTION_NODE_FORCE_CONFIRM = "node_force_confirm"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, nullable=True, index=True)
+    node_run_id = Column(Integer, nullable=True)
+    workflow_id = Column(Integer, nullable=True)
+    action = Column(String(32), nullable=False)
+    operator = Column(String(64), default="")
+    tool_name = Column(String(64), default="")
+    execution_mode = Column(String(16), default="")
+    risk_level = Column(String(16), default="")
+    detail = Column(Text, default="{}")
+    created_at = Column(DateTime, default=lambda: datetime.now())
 
 
 # ─── Ansible 运维操作：主机清单 / Playbook 模板 / 执行历史 ───

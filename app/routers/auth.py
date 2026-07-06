@@ -87,6 +87,7 @@ async def login(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/login?error=用户名或密码错误", status_code=303)
 
     request.session["user_id"] = user.id
+    request.session["username"] = user.username
 
     if is_json:
         return {"ok": True, "message": "登录成功"}

@@ -76,8 +76,9 @@ DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 4. 给出具体建议或下一步操作"""
 
 
-def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Dict]] = None, timeout_override: Optional[int] = None) -> Dict:
-    """Call OpenAI-compatible API. timeout_override 可覆盖 provider.timeout_seconds 防卡死."""
+def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Dict]] = None, timeout_override: Optional[int] = None, proxies: Optional[Dict] = None) -> Dict:
+    """Call OpenAI-compatible API. timeout_override 可覆盖 provider.timeout_seconds 防卡死.
+    proxies 默认 {"http": None, "https": None} 禁用系统代理，避免本地代理(如 7897)对 LLM 长连接读超时."""
     if not provider or not provider.is_enabled:
         return {"error": "Provider not available"}
 
@@ -106,6 +107,7 @@ def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Di
             headers=headers,
             json=payload,
             timeout=timeout_override or provider.timeout_seconds,
+            proxies=proxies if proxies is not None else {"http": None, "https": None},
         )
         resp.raise_for_status()
         return resp.json()
