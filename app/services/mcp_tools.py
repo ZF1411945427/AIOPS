@@ -180,14 +180,14 @@ def query_metrics(db: Optional[Session] = None, user_id: Optional[int] = None, *
         hours = kwargs.get("hours", 1)
         limit = kwargs.get("limit", 60)
 
-        query = db.query(MetricRecord).filter(MetricRecord.metric_name == metric_name)
+        query = db.query(MetricRecord).filter(MetricRecord.name == metric_name)
         if asset_id:
             query = query.filter(MetricRecord.asset_id == asset_id)
         cutoff = datetime.now() - timedelta(hours=hours)
-        query = query.filter(MetricRecord.created_at >= cutoff)
-        records = query.order_by(MetricRecord.created_at.desc()).limit(limit).all()
+        query = query.filter(MetricRecord.timestamp >= cutoff)
+        records = query.order_by(MetricRecord.timestamp.desc()).limit(limit).all()
 
-        values = [{"value": r.value, "time": str(r.created_at)} for r in records]
+        values = [{"value": r.value, "time": str(r.timestamp.strftime("%Y-%m-%d %H:%M:%S")) if r.timestamp else None} for r in records]
         values.reverse()
 
         avg_value = sum(r.value for r in records) / len(records) if records else 0

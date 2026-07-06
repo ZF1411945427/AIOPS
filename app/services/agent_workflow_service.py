@@ -6,6 +6,7 @@
 """
 import json
 import re
+import threading
 import traceback
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.database import get_session_for, get_db_mode
 from app.models import (
     AgentWorkflow, AgentWorkflowRun, AgentWorkflowNodeRun,
-    AIProvider, ChatSession,
+    AIProvider, ChatSession, PendingAction, WorkflowAuditLog,
 )
 from app.services.mcp_registry import call_mcp_tool, get_internal_tools
 from app.services.mcp_tools import _get_db  # 复用 db helper
@@ -27,6 +28,29 @@ _jinja_env = Environment(loader=BaseLoader(), autoescape=False)
 
 def _now():
     return datetime.now()
+
+
+def _audit(db: Session, run_id: Optional[int] = None, node_run_id: Optional[int] = None,
+           workflow_id: Optional[int] = None, action: str = "", operator: str = "",
+           tool_name: str = "", execution_mode: str = "", risk_level: str = "",
+           detail: Optional[Dict] = None):
+    """写入工作流操作审计日志（不可抵赖）。"""
+    try:
+        log = WorkflowAuditLog(
+            run_id=run_id, node_run_id=node_run_id, workflow_id=workflow_id,
+            action=action, operator=operator or "",
+            tool_name=tool_name or "", execution_mode=execution_mode or "",
+            risk_level=risk_level or "",
+            detail=json.dumps(detail or {}, ensure_ascii=False),
+        )
+        db.add(log)
+        db.commit()
+    except Exception as e:
+        print(f"[wf-audit] 审计日志写入失败: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 
 # ─── 序列化 ───
@@ -58,6 +82,7 @@ def _serialize_run(run: AgentWorkflowRun, node_runs: Optional[List[AgentWorkflow
         "runtime_context": run.get_runtime_context(),
         "outputs": run.get_outputs(),
         "trigger_source": run.trigger_source,
+        "triggered_by": run.triggered_by or "",
         "error": run.error or "",
         "started_at": str(run.started_at) if run.started_at else None,
         "completed_at": str(run.completed_at) if run.completed_at else None,
@@ -79,6 +104,8 @@ def _serialize_node_run(nr: AgentWorkflowNodeRun) -> Dict:
         "status": nr.status,
         "output": nr.get_output(),
         "error": nr.error or "",
+        "requires_confirm": nr.requires_confirm,
+        "pending_action_id": nr.pending_action_id,
         "started_at": str(nr.started_at) if nr.started_at else None,
         "completed_at": str(nr.completed_at) if nr.completed_at else None,
     }
@@ -245,11 +272,17 @@ def _exec_llm(node_data: Dict, runtime_context: Dict, db: Session) -> Dict:
     messages.append({"role": "user", "content": user_prompt})
 
     from app.services.agent_service import call_llm
-    result = call_llm(provider, messages, timeout_override=60)
+    result = call_llm(provider, messages, timeout_override=120)
     if "error" in result:
         return {"output": {}, "status": "failed", "error": result["error"]}
 
-    text = result.get("content", "") or result.get("message", "")
+    text = ""
+    if result.get("choices"):
+        choices = result["choices"]
+        if choices and "message" in choices[0]:
+            text = choices[0]["message"].get("content", "") or ""
+        elif "text" in choices[0]:
+            text = choices[0].get("text", "") or ""
     if isinstance(text, list):
         text = "".join(t.get("text", "") for t in text if isinstance(t, dict))
     usage = result.get("usage", {})
@@ -282,20 +315,82 @@ def _exec_knowledge(node_data: Dict, runtime_context: Dict, db: Session) -> Dict
         return {"output": {}, "status": "failed", "error": f"知识库检索异常: {e}"}
 
 
-def _exec_tool(node_data: Dict, runtime_context: Dict, db: Session) -> Dict:
+def _exec_tool(node_data: Dict, runtime_context: Dict, db: Session, node_run: Optional[AgentWorkflowNodeRun] = None) -> Dict:
     tool_name = node_data.get("tool_name", "")
     parameters = _render_value(node_data.get("parameters", {}), runtime_context)
     if not tool_name:
         return {"output": {}, "status": "failed", "error": "未指定 tool_name"}
 
+    # 读取工具真实风险等级
+    from app.services.mcp_registry import get_mcp_tool
+    tool_info = get_mcp_tool(tool_name)
+    tool_risk = tool_info.risk_level if tool_info else "read_only"
+    title = tool_info.description if tool_info else tool_name
+
+    execution_mode = node_data.get("execution_mode", "confirm")
+    forced_confirm = False
+    # 危险操作拦截：high/critical 工具强制回到 confirm 模式，禁止 auto
+    if tool_risk in ("high", "critical") and execution_mode == "auto":
+        execution_mode = "confirm"
+        forced_confirm = True
+
+    # 等待确认模式：创建 PendingAction 暂停工作流
+    if execution_mode == "confirm" and node_run:
+        reason = f"工作流节点需确认后执行（风险等级: {tool_risk}）"
+        if forced_confirm:
+            reason += "；该工具为高危操作，已自动从「自动执行」降级为「等待确认」"
+        pa = PendingAction(
+            session_id=None,
+            run_id=node_run.run_id,
+            node_run_id=node_run.id,
+            action_type=tool_name,
+            title=f"[工作流] {title}",
+            risk_level=tool_risk,
+            reason=reason,
+            action_payload=json.dumps(parameters, ensure_ascii=False),
+            status=PendingAction.STATUS_PENDING,
+        )
+        db.add(pa)
+        db.flush()
+
+        node_run.pending_action_id = pa.id
+        node_run.requires_confirm = True
+        node_run.status = AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM
+        db.commit()
+
+        # 审计：高危强制降级确认
+        if forced_confirm:
+            _audit(db, run_id=node_run.run_id, node_run_id=node_run.id,
+                   action=WorkflowAuditLog.ACTION_NODE_FORCE_CONFIRM,
+                   tool_name=tool_name, execution_mode="auto", risk_level=tool_risk,
+                   detail={"reason": "high/critical 工具自动模式已降级为确认", "parameters": parameters})
+
+        return {
+            "output": {"_pending_action": {"id": pa.id, "title": title}, "_forced_confirm": forced_confirm},
+            "status": "awaiting_confirm",
+            "pending_action_id": pa.id,
+        }
+
     try:
         result = call_mcp_tool(tool_name, parameters, db=db, allow_internal=True)
         status = result.get("status", "success")
         rdata = result.get("result", result)
+        # 审计：自动执行记录（不可抵赖）
+        if execution_mode == "auto" and node_run:
+            _audit(db, run_id=node_run.run_id, node_run_id=node_run.id,
+                   action=WorkflowAuditLog.ACTION_NODE_AUTO_EXEC,
+                   tool_name=tool_name, execution_mode="auto", risk_level=tool_risk,
+                   detail={"parameters": parameters, "status": status,
+                           "result_summary": str(rdata)[:500] if rdata else ""})
         if status == "error":
             return {"output": {}, "status": "failed", "error": result.get("message", "")}
         return {"output": rdata if isinstance(rdata, dict) else {"data": rdata}, "status": "completed"}
     except Exception as e:
+        if execution_mode == "auto" and node_run:
+            _audit(db, run_id=node_run.run_id, node_run_id=node_run.id,
+                   action=WorkflowAuditLog.ACTION_NODE_AUTO_EXEC,
+                   tool_name=tool_name, execution_mode="auto", risk_level=tool_risk,
+                   detail={"parameters": parameters, "status": "error", "error": str(e)})
         return {"output": {}, "status": "failed", "error": f"工具调用异常: {e}"}
 
 
@@ -463,6 +558,7 @@ def start_workflow_run(
     session_id: Optional[int] = None,
     custom_nodes: Optional[List[Dict]] = None,
     custom_edges: Optional[List[Dict]] = None,
+    triggered_by: str = "",
 ) -> Tuple[Optional[AgentWorkflowRun], str]:
     """创建 Run + 全部 NodeRun，立即执行。返回 (run, error_msg)。"""
     nodes = []
@@ -496,6 +592,7 @@ def start_workflow_run(
         inputs=json.dumps(inputs or {}, ensure_ascii=False),
         runtime_context=json.dumps({"inputs": inputs or {}, "nodes": {}}, ensure_ascii=False),
         trigger_source=trigger_source,
+        triggered_by=triggered_by,
         started_at=_now(),
     )
     db.add(run)
@@ -513,7 +610,35 @@ def start_workflow_run(
         db.add(nr)
     db.commit()
 
-    _advance_run(db, run.id)
+    # 审计：工作流启动（记录触发人，不可抵赖）
+    auto_nodes = [n.get("data", {}).get("tool_name", "") for n in nodes
+                  if n.get("type") == "tool" and n.get("data", {}).get("execution_mode") == "auto"]
+    _audit(db, run_id=run.id, workflow_id=workflow_id,
+           action=WorkflowAuditLog.ACTION_RUN_START, operator=triggered_by,
+           detail={"trigger_source": trigger_source, "inputs": inputs,
+                   "auto_tool_nodes": auto_nodes})
+
+    # 异步执行：后台线程用独立 db session 跑节点，API 立即返回 run_id
+    _run_id = run.id
+    _db_mode = get_db_mode()
+
+    def _bg_advance():
+        bg_db = get_session_for(_db_mode)()
+        try:
+            _advance_run(bg_db, _run_id)
+        except Exception as e:
+            try:
+                _finalize_run(bg_db, _run_id, AgentWorkflowRun.STATUS_FAILED, f"后台执行异常: {e}")
+            except Exception:
+                pass
+            print(f"[wf] run#{_run_id} 后台执行异常: {e}")
+            traceback.print_exc()
+        finally:
+            bg_db.close()
+
+    t = threading.Thread(target=_bg_advance, daemon=True)
+    t.start()
+
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run.id).first()
     return run, ""
 
@@ -521,8 +646,12 @@ def start_workflow_run(
 def _advance_run(db: Session, run_id: int):
     """调度执行节点。"""
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run_id).first()
-    if not run or run.status != AgentWorkflowRun.STATUS_RUNNING:
+    if not run or run.status not in (AgentWorkflowRun.STATUS_RUNNING, AgentWorkflowRun.STATUS_AWAITING_CONFIRM):
         return
+    # 从等待确认恢复：继续推进后续节点
+    if run.status == AgentWorkflowRun.STATUS_AWAITING_CONFIRM:
+        run.status = AgentWorkflowRun.STATUS_RUNNING
+        db.commit()
 
     node_runs = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.run_id == run_id).all()
     if not node_runs:
@@ -548,6 +677,7 @@ def _advance_run(db: Session, run_id: int):
     progressed = False
     for nid in order:
         nr = nr_map.get(nid)
+        # 跳过非 pending 节点（含 awaiting_confirm——已暂停的节点等确认/取消）
         if not nr or nr.status != AgentWorkflowNodeRun.STATUS_PENDING:
             continue
         deps = _node_dependencies(nid, edges)
@@ -555,13 +685,26 @@ def _advance_run(db: Session, run_id: int):
         failed_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_FAILED}
         skipped_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_SKIPPED}
 
-        if failed_deps or skipped_deps:
+        # 上游有失败 → 跳过当前节点
+        if failed_deps:
             nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
             nr.completed_at = _now()
             db.commit()
             progressed = True
             continue
-        if not deps.issubset(completed_deps):
+        # 多分支汇聚：部分依赖被 condition 路由 skip，但至少一个 completed → 继续执行
+        if skipped_deps and not completed_deps:
+            # 所有依赖都被 skip → 跳过
+            nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+            nr.completed_at = _now()
+            db.commit()
+            progressed = True
+            continue
+        if skipped_deps and completed_deps:
+            # 部分 skip 部分 completed → 多分支汇聚，继续执行
+            pass
+        elif not deps.issubset(completed_deps):
+            # 还有 pending 依赖未完成 → 等待
             continue
 
         # 条件分支路由检查：如果上游是 condition 节点，检查是否路由到当前节点
@@ -598,9 +741,22 @@ def _advance_run(db: Session, run_id: int):
             continue
 
         try:
-            result = executor(node_data, runtime_context, db)
+            if nr.node_type == "tool":
+                result = executor(node_data, runtime_context, db, node_run=nr)
+            else:
+                result = executor(node_data, runtime_context, db)
+            result_status = result.get("status", "completed")
+            if result_status == "awaiting_confirm":
+                nr.status = AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM
+                nr.output = json.dumps(result.get("output", {}), ensure_ascii=False)
+                nr.completed_at = None
+                db.commit()
+                # 暂停工作流，等用户确认
+                run.status = AgentWorkflowRun.STATUS_AWAITING_CONFIRM
+                db.commit()
+                return  # 停止推进
             nr.output = json.dumps(result.get("output", {}), ensure_ascii=False)
-            nr.status = result.get("status", "completed")
+            nr.status = result_status
             nr.error = result.get("error", "")
             nr.completed_at = _now()
         except Exception as e:
@@ -646,7 +802,7 @@ def _finalize_run(db: Session, run_id: int, status: str, message: str):
     db.commit()
 
 
-def abort_run(db: Session, run_id: int, reason: str = "") -> Dict:
+def abort_run(db: Session, run_id: int, reason: str = "", operator: str = "") -> Dict:
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run_id).first()
     if not run:
         return {"success": False, "message": "工作流实例不存在"}
@@ -659,10 +815,12 @@ def abort_run(db: Session, run_id: int, reason: str = "") -> Dict:
             nr.completed_at = _now()
     db.commit()
     _finalize_run(db, run_id, AgentWorkflowRun.STATUS_ABORTED, reason or "用户手动中止")
+    _audit(db, run_id=run_id, action=WorkflowAuditLog.ACTION_RUN_ABORT, operator=operator,
+           detail={"reason": reason or "用户手动中止"})
     return {"success": True, "message": "工作流已中止"}
 
 
-def retry_node(db: Session, node_run_id: int) -> Dict:
+def retry_node(db: Session, node_run_id: int, operator: str = "") -> Dict:
     nr = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.id == node_run_id).first()
     if not nr:
         return {"success": False, "message": "节点不存在"}
@@ -680,8 +838,133 @@ def retry_node(db: Session, node_run_id: int) -> Dict:
     if run.status in (AgentWorkflowRun.STATUS_FAILED, AgentWorkflowRun.STATUS_COMPLETED, AgentWorkflowRun.STATUS_ABORTED):
         run.status = AgentWorkflowRun.STATUS_RUNNING
         db.commit()
+    _audit(db, run_id=run.id, node_run_id=nr.id,
+           action=WorkflowAuditLog.ACTION_NODE_RETRY, operator=operator,
+           detail={"node_name": nr.node_name})
     _advance_run(db, run.id)
     return {"success": True, "message": "节点已重试"}
+
+
+def confirm_workflow_node(db: Session, node_run_id: int, user_name: str) -> Dict:
+    """确认执行工作流中的待确认节点。"""
+    nr = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.id == node_run_id).first()
+    if not nr:
+        return {"success": False, "message": "节点不存在"}
+    if nr.status != AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM:
+        return {"success": False, "message": f"节点状态为 {nr.status}，无法确认"}
+    run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == nr.run_id).first()
+    if not run:
+        return {"success": False, "message": "工作流实例不存在"}
+
+    pending_action = None
+    if nr.pending_action_id:
+        pending_action = db.query(PendingAction).filter(PendingAction.id == nr.pending_action_id).first()
+        if pending_action and pending_action.status == PendingAction.STATUS_PENDING:
+            pending_action.status = PendingAction.STATUS_CONFIRMED
+            pending_action.confirmed_by = user_name
+            pending_action.confirmed_at = datetime.now()
+            db.commit()
+
+    # 执行工具
+    node_data = nr.get_config()
+    runtime_context = run.get_runtime_context()
+    tool_name = node_data.get("tool_name", "")
+    parameters = _render_value(node_data.get("parameters", {}), runtime_context)
+
+    try:
+        result = call_mcp_tool(tool_name, parameters, db=db, allow_internal=True)
+        rstatus = result.get("status", "success")
+        rdata = result.get("result", result)
+        if rstatus == "error":
+            nr.status = AgentWorkflowNodeRun.STATUS_FAILED
+            nr.error = result.get("message", "")
+            nr.completed_at = _now()
+            nr.output = "{}"
+            db.commit()
+            if pending_action:
+                pending_action.status = PendingAction.STATUS_FAILED
+                pending_action.result_payload = json.dumps({"error": result.get("message", "")}, ensure_ascii=False)
+                db.commit()
+            _audit(db, run_id=run.id, node_run_id=nr.id,
+                   action=WorkflowAuditLog.ACTION_NODE_CONFIRM, operator=user_name,
+                   tool_name=tool_name, execution_mode="confirm",
+                   risk_level=pending_action.risk_level if pending_action else "",
+                   detail={"parameters": parameters, "status": "failed", "error": result.get("message", "")})
+            _advance_run(db, run.id)
+            return {"success": False, "message": result.get("message", "")}
+
+        output = rdata if isinstance(rdata, dict) else {"data": rdata}
+        nr.status = AgentWorkflowNodeRun.STATUS_COMPLETED
+        nr.output = json.dumps(output, ensure_ascii=False)
+        nr.completed_at = _now()
+        db.commit()
+
+        if pending_action:
+            pending_action.status = PendingAction.STATUS_EXECUTED
+            pending_action.result_payload = json.dumps(output, ensure_ascii=False)
+            db.commit()
+
+        # 更新 runtime_context 并继续推进
+        runtime_context.setdefault("nodes", {})[nr.node_id] = {"output": output}
+        run.runtime_context = json.dumps(runtime_context, ensure_ascii=False)
+        db.commit()
+        _audit(db, run_id=run.id, node_run_id=nr.id,
+               action=WorkflowAuditLog.ACTION_NODE_CONFIRM, operator=user_name,
+               tool_name=tool_name, execution_mode="confirm",
+               risk_level=pending_action.risk_level if pending_action else "",
+               detail={"parameters": parameters, "status": "completed", "result_summary": str(output)[:500]})
+        _advance_run(db, run.id)
+        return {"success": True, "message": "执行完成"}
+    except Exception as e:
+        nr.status = AgentWorkflowNodeRun.STATUS_FAILED
+        nr.error = f"执行异常: {e}"
+        nr.completed_at = _now()
+        nr.output = "{}"
+        db.commit()
+        if pending_action:
+            pending_action.status = PendingAction.STATUS_FAILED
+            pending_action.result_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
+            db.commit()
+        _audit(db, run_id=run.id, node_run_id=nr.id,
+               action=WorkflowAuditLog.ACTION_NODE_CONFIRM, operator=user_name,
+               tool_name=tool_name, execution_mode="confirm",
+               risk_level=pending_action.risk_level if pending_action else "",
+               detail={"parameters": parameters, "status": "error", "error": str(e)})
+        _advance_run(db, run.id)
+        return {"success": False, "message": f"执行异常: {e}"}
+
+
+def cancel_workflow_node(db: Session, node_run_id: int, operator: str = "") -> Dict:
+    """取消执行工作流中的待确认节点，标记为已跳过。"""
+    nr = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.id == node_run_id).first()
+    if not nr:
+        return {"success": False, "message": "节点不存在"}
+    if nr.status != AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM:
+        return {"success": False, "message": f"节点状态为 {nr.status}，无法取消"}
+
+    if nr.pending_action_id:
+        pa = db.query(PendingAction).filter(PendingAction.id == nr.pending_action_id).first()
+        if pa and pa.status == PendingAction.STATUS_PENDING:
+            pa.status = PendingAction.STATUS_CANCELED
+            db.commit()
+
+    nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+    nr.completed_at = _now()
+    nr.error = "用户已取消"
+    db.commit()
+
+    # 审计：取消确认
+    node_data = nr.get_config()
+    _audit(db, run_id=nr.run_id, node_run_id=nr.id,
+           action=WorkflowAuditLog.ACTION_NODE_CANCEL, operator=operator,
+           tool_name=node_data.get("tool_name", ""),
+           detail={"reason": "用户取消执行"})
+
+    # 继续推进工作流
+    run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == nr.run_id).first()
+    if run:
+        _advance_run(db, run.id)
+    return {"success": True, "message": "已取消"}
 
 
 def list_runs(db: Session, status: Optional[str] = None, limit: int = 50) -> List[Dict]:
@@ -702,6 +985,144 @@ def get_run(db: Session, run_id: int) -> Optional[Dict]:
         return None
     node_runs = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.run_id == run_id).all()
     return _serialize_run(r, node_runs)
+
+
+def export_run_pdf(db: Session, run_id: int) -> Optional[bytes]:
+    """生成工作流执行报告 PDF，支持 Markdown 格式渲染，确保不溢出纸张。"""
+    from fpdf import FPDF
+
+    def _safe_text(s: str, max_chunk: int = 40) -> str:
+        """超长无空格字符串按固定长度插入空格，避免 multi_cell 宽度不足报错。"""
+        if len(s) <= max_chunk:
+            return s
+        return " ".join(s[i:i + max_chunk] for i in range(0, len(s), max_chunk))
+
+    def _wrap_cjk(text: str, max_width: float) -> str:
+        """逐字符测量宽度并手动换行，解决 fpdf2 multi_cell 对 CJK 宽度计算不精确导致溢出。"""
+        if not text:
+            return text
+        lines_out = []
+        for paragraph in text.split("\n"):
+            if not paragraph:
+                lines_out.append("")
+                continue
+            current = ""
+            for char in paragraph:
+                trial = current + char
+                if pdf.get_string_width(trial) > max_width and current:
+                    lines_out.append(current)
+                    current = char
+                else:
+                    current = trial
+            if current:
+                lines_out.append(current)
+        return "\n".join(lines_out)
+
+    import re as _re
+
+    def _strip_emoji(s: str) -> str:
+        """移除 emoji 字符（msyh 字体不含 emoji 字形，会导致子集化警告）。"""
+        return _re.sub(r"[\U0001F000-\U0001FAFF\U00002600-\U000027BF]", "", s)
+
+    def _strip_md_inline(s: str) -> str:
+        """移除行内 Markdown 标记（**bold**、`code`），保留纯文本内容。"""
+        s = _re.sub(r"\*\*(.+?)\*\*", r"\1", s)   # **bold** → bold
+        s = _re.sub(r"`(.+?)`", r"\1", s)          # `code` → code
+        s = _re.sub(r"\*(.+?)\*", r"\1", s)         # *italic* → italic
+        return s
+
+    run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run_id).first()
+    if not run:
+        return None
+
+    outputs = run.get_outputs()
+    report_text = ""
+    if outputs:
+        for k, v in outputs.items():
+            v_str = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+            if k == "report" or not report_text:
+                report_text = v_str
+
+    # A4 纵向，统一边距
+    pdf = FPDF(format="A4")
+    pdf.add_font("YaHei", "", r"C:\Windows\Fonts\msyh.ttc")
+    pdf.add_font("YaHei", "B", r"C:\Windows\Fonts\msyhbd.ttc")
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_margins(20, 20, 20)
+    _page_w = pdf.w - pdf.l_margin - pdf.r_margin  # 可用宽度
+
+    pdf.add_page()
+    pdf.set_font("YaHei", "B", 16)
+    pdf.set_text_color(30, 41, 59)
+    pdf.cell(0, 12, f"\u5de1\u68c0\u62a5\u544a #{run.id}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    if report_text:
+        for line in report_text.split("\n"):
+            line = line.rstrip()
+            if not line:
+                pdf.ln(4)
+                continue
+            # Markdown 标题
+            if line.startswith("### "):
+                pdf.set_font("YaHei", "B", 11)
+                pdf.set_text_color(99, 102, 241)
+                for wl in _wrap_cjk(_strip_emoji(line[4:]), _page_w).split("\n"):
+                    pdf.cell(0, 6, wl, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("YaHei", "", 10)
+                pdf.set_text_color(30, 41, 59)
+            elif line.startswith("#### "):
+                pdf.set_font("YaHei", "B", 10)
+                pdf.set_text_color(99, 102, 241)
+                for wl in _wrap_cjk(_strip_emoji(line[5:]), _page_w).split("\n"):
+                    pdf.cell(0, 5.5, wl, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("YaHei", "", 10)
+                pdf.set_text_color(30, 41, 59)
+            elif line.startswith("## "):
+                pdf.set_font("YaHei", "B", 12)
+                pdf.set_text_color(99, 102, 241)
+                for wl in _wrap_cjk(_strip_emoji(line[3:]), _page_w).split("\n"):
+                    pdf.cell(0, 7, wl, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("YaHei", "", 10)
+                pdf.set_text_color(30, 41, 59)
+            elif line.startswith("# "):
+                pdf.set_font("YaHei", "B", 14)
+                pdf.set_text_color(99, 102, 241)
+                for wl in _wrap_cjk(_strip_emoji(line[2:]), _page_w).split("\n"):
+                    pdf.cell(0, 7, wl, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("YaHei", "", 10)
+                pdf.set_text_color(30, 41, 59)
+            elif line.startswith("---"):
+                pdf.set_draw_color(200, 210, 220)
+                y = pdf.get_y()
+                pdf.line(pdf.l_margin, y, pdf.l_margin + _page_w, y)
+                pdf.ln(3)
+            elif line.startswith("**") and line.endswith("**") and len(line) > 4:
+                # 粗体整行
+                pdf.set_font("YaHei", "B", 10)
+                for wl in _wrap_cjk(_strip_emoji(line.strip("*")), _page_w).split("\n"):
+                    pdf.cell(0, 5.5, wl, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("YaHei", "", 10)
+            else:
+                # 普通正文：清理行内 Markdown 标记和 emoji，保证宽度安全
+                pdf.set_font("YaHei", "", 10)
+                pdf.set_text_color(30, 41, 59)
+                clean = _strip_md_inline(_strip_emoji(line))
+                for wl in _wrap_cjk(clean, _page_w).split("\n"):
+                    pdf.cell(0, 5.5, wl, new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("YaHei", "", 10)
+        pdf.set_text_color(100, 116, 139)
+        for wl in _wrap_cjk("\u672c\u6b21\u6267\u884c\u672a\u4ea7\u51fa\u62a5\u544a\u5185\u5bb9", _page_w).split("\n"):
+            pdf.cell(0, 6, wl, new_x="LMARGIN", new_y="NEXT")
+
+    from datetime import datetime as _dt
+    pdf.ln(6)
+    pdf.set_font("YaHei", "", 7)
+    pdf.set_text_color(148, 163, 184)
+    pdf.cell(0, 5, f"AIOps  \u5bfc\u51fa\u65f6\u95f4: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}", new_x="LMARGIN", new_y="NEXT", align="C")
+
+    return pdf.output()
 
 
 def seed_agent_workflows(db: Session):
@@ -744,7 +1165,7 @@ def _preset_workflows() -> List[Dict]:
             "outputs_schema": [{"key": "analysis", "value": "{{ nodes.llm1.output.text }}"}],
             "nodes": [
                 {"id": "start", "type": "start", "name": "开始", "data": {"inputs": [{"key": "alert_id", "type": "integer", "required": True}]}},
-                {"id": "tool1", "type": "tool", "name": "查询告警", "data": {"tool_name": "query_alerts", "parameters": {"alert_id": "{{ inputs.alert_id }}", "limit": 1}}},
+                {"id": "tool1", "type": "tool", "name": "查询告警", "data": {"tool_name": "query_alerts", "execution_mode": "auto", "parameters": {"alert_id": "{{ inputs.alert_id }}", "limit": 1}}},
                 {"id": "kb1", "type": "knowledge", "name": "检索知识库", "data": {"query": "{{ nodes.tool1.output.alerts[0].name if nodes.tool1.output.alerts else '告警' }}", "top_k": 5, "score_threshold": 0.5}},
                 {"id": "llm1", "type": "llm", "name": "根因分析", "data": {"system_prompt": "你是 AIOps 运维专家，根据告警信息和知识库文档分析根因，给出处置建议。", "user_prompt": "告警信息: {{ nodes.tool1.output | tojson }}\n\n知识库文档: {{ nodes.kb1.output | tojson }}\n\n请分析根因并给出处置建议。", "temperature": 0.3, "max_tokens": 2000}},
                 {"id": "end", "type": "end", "name": "结束", "data": {"outputs": [{"key": "analysis", "value": "{{ nodes.llm1.output.text }}"}]}},
@@ -788,10 +1209,10 @@ def _preset_workflows() -> List[Dict]:
             "outputs_schema": [{"key": "decision", "value": "{{ nodes.cond1.output.matched_branch }}"}, {"key": "reason", "value": "{{ nodes.llm1.output.text }}"}],
             "nodes": [
                 {"id": "start", "type": "start", "name": "开始", "data": {"inputs": [{"key": "alert_id", "type": "integer", "required": True}]}},
-                {"id": "tool1", "type": "tool", "name": "查询告警", "data": {"tool_name": "query_alerts", "parameters": {"alert_id": "{{ inputs.alert_id }}", "limit": 1}}},
+                {"id": "tool1", "type": "tool", "name": "查询告警", "data": {"tool_name": "query_alerts", "execution_mode": "auto", "parameters": {"alert_id": "{{ inputs.alert_id }}", "limit": 1}}},
                 {"id": "llm1", "type": "llm", "name": "决策分析", "data": {"system_prompt": "你是 AIOps 决策引擎，根据告警判断处置方式。只输出一个词：自愈、升级、通知。", "user_prompt": "告警: {{ nodes.tool1.output | tojson }}", "temperature": 0.1, "max_tokens": 50}},
                 {"id": "cond1", "type": "condition", "name": "决策分支", "data": {"branches": [{"condition": "{{ nodes.llm1.output.text contains '自愈' }}", "target": "heal"}, {"condition": "{{ nodes.llm1.output.text contains '升级' }}", "target": "escalate"}, {"condition": "default", "target": "notify"}]}},
-                {"id": "heal", "type": "tool", "name": "执行自愈", "data": {"tool_name": "query_alerts", "parameters": {"limit": 1}}},
+                {"id": "heal", "type": "tool", "name": "执行自愈", "data": {"tool_name": "query_alerts", "execution_mode": "auto", "parameters": {"limit": 1}}},
                 {"id": "escalate", "type": "llm", "name": "生成升级报告", "data": {"system_prompt": "生成升级报告", "user_prompt": "告警需升级: {{ nodes.tool1.output | tojson }}", "temperature": 0.3, "max_tokens": 500}},
                 {"id": "notify", "type": "code", "name": "生成通知", "data": {"code": "result = {'message': '已通知值班人员', 'alert': inputs.get('alert_info', {})}", "inputs_mapping": {"alert_info": "{{ nodes.tool1.output | tojson }}"}}},
                 {"id": "end", "type": "end", "name": "结束", "data": {"outputs": [{"key": "decision", "value": "{{ nodes.cond1.output.matched_branch }}"}, {"key": "reason", "value": "{{ nodes.llm1.output.text }}"}]}},
@@ -840,7 +1261,7 @@ def _preset_workflows() -> List[Dict]:
             "outputs_schema": [{"key": "report", "value": "{{ nodes.llm1.output.text }}"}],
             "nodes": [
                 {"id": "start", "type": "start", "name": "开始", "data": {"inputs": [{"key": "asset_id", "type": "integer", "required": False}]}},
-                {"id": "tool1", "type": "tool", "name": "查询指标", "data": {"tool_name": "query_metrics", "parameters": {"asset_id": "{{ inputs.asset_id }}", "metric_name": "cpu_usage", "limit": 24}}},
+                {"id": "tool1", "type": "tool", "name": "查询指标", "data": {"tool_name": "query_metrics", "execution_mode": "auto", "parameters": {"asset_id": "{{ inputs.asset_id }}", "metric_name": "cpu_usage", "limit": 24}}},
                 {"id": "llm1", "type": "llm", "name": "生成报告", "data": {"system_prompt": "你是运维巡检专家，根据指标数据生成巡检报告，包含异常点、趋势分析、建议。", "user_prompt": "最近 24 小时指标: {{ nodes.tool1.output | tojson }}", "temperature": 0.3, "max_tokens": 1500}},
                 {"id": "end", "type": "end", "name": "结束", "data": {"outputs": [{"key": "report", "value": "{{ nodes.llm1.output.text }}"}]}},
             ],

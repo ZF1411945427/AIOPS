@@ -1,4 +1,5 @@
 import hashlib
+import json
 import mimetypes
 import threading
 import time
@@ -33,16 +34,64 @@ from app.routers.chaos import seed_chaos_scenarios
 for _mode, _eng in get_all_engines().items():
     Base.metadata.create_all(bind=_eng)
 
-# SQLite create_all 只建新表不 ALTER 已存在表, 需幂等迁移补充 PendingAction.reason 列
-# (历史库已存在 pending_actions 表, 不迁移会导致 INSERT 含 reason 字段失败)
+# SQLite 幂等迁移: create_all 只建新表不 ALTER 已存在表, 补充缺失列
 from sqlalchemy import text as _sa_text
+_MIGRATIONS = {
+    "pending_actions": [
+        "reason VARCHAR(500)",
+        "run_id INTEGER",
+        "node_run_id INTEGER",
+    ],
+    "agent_workflow_node_runs": [
+        "requires_confirm BOOLEAN DEFAULT 0",
+        "pending_action_id INTEGER",
+    ],
+    "agent_workflow_runs": [
+        "triggered_by VARCHAR(64)",
+    ],
+}
 for _eng in get_all_engines().values():
     with _eng.connect() as _conn:
+        for _table, _cols in _MIGRATIONS.items():
+            for _col_def in _cols:
+                try:
+                    _conn.execute(_sa_text(f"ALTER TABLE {_table} ADD COLUMN {_col_def}"))
+                    _conn.commit()
+                except Exception:
+                    pass
+
+        # 重建 pending_actions 表：旧表 session_id 为 NOT NULL，工作流场景需 NULL
         try:
-            _conn.execute(_sa_text("ALTER TABLE pending_actions ADD COLUMN reason VARCHAR(500)"))
-            _conn.commit()
-        except Exception:
-            pass  # 列已存在则忽略; create_all 已保证表存在
+            _info = _conn.execute(_sa_text("PRAGMA table_info(pending_actions)")).fetchall()
+            _sess_col = [r for r in _info if r[1] == "session_id"]
+            if _sess_col and _sess_col[0][3] == 1:  # notnull=1
+                _conn.execute(_sa_text(
+                    "CREATE TABLE _pa_new (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "session_id INTEGER, message_id INTEGER, run_id INTEGER, node_run_id INTEGER, "
+                    "action_type VARCHAR(64) NOT NULL, title VARCHAR(128) DEFAULT '', "
+                    "risk_level VARCHAR(16) DEFAULT 'low', reason VARCHAR(500), "
+                    "status VARCHAR(16) DEFAULT 'pending', action_payload TEXT DEFAULT '{}', "
+                    "result_payload TEXT DEFAULT '{}', confirmed_by VARCHAR(64) DEFAULT '', "
+                    "confirmed_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+                ))
+                _conn.execute(_sa_text(
+                    "INSERT INTO _pa_new (id, session_id, message_id, run_id, node_run_id, "
+                    "action_type, title, risk_level, reason, status, action_payload, "
+                    "result_payload, confirmed_by, confirmed_at, created_at, updated_at) "
+                    "SELECT id, session_id, message_id, run_id, node_run_id, action_type, "
+                    "title, risk_level, reason, status, action_payload, result_payload, "
+                    "confirmed_by, confirmed_at, created_at, updated_at FROM pending_actions"
+                ))
+                _conn.execute(_sa_text("DROP TABLE pending_actions"))
+                _conn.execute(_sa_text("ALTER TABLE _pa_new RENAME TO pending_actions"))
+                _conn.commit()
+                print("[migrate] pending_actions 重建完成: session_id 已改为 nullable")
+        except Exception as _e:
+            try:
+                _conn.rollback()
+            except Exception:
+                pass
 
 app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
 
@@ -348,7 +397,7 @@ set_db_mode("demo")
 seed_all()
 # 两个库都播种 SOP 工作流模板（幂等，按 name 去重）
 from app.services.workflow_service import seed_workflow_templates
-from app.services.agent_workflow_service import seed_agent_workflows
+from app.services.agent_workflow_service import seed_agent_workflows, _preset_workflows as _get_agent_presets
 for _mode in ("demo", "real"):
     set_db_mode(_mode)
     _seed_db = get_session_for(_mode)()
@@ -359,6 +408,20 @@ for _mode in ("demo", "real"):
         _added2 = seed_agent_workflows(_seed_db)
         if _added2:
             print(f"[seed] {_mode} 库播种 {_added2} 个智能体工作流模板")
+        # 给已有种子工作流的 tool 节点补 execution_mode: auto（向后兼容）
+        from app.models import AgentWorkflow
+        from sqlalchemy import text as _sa_text2
+        _preset_names = [p["name"] for p in _get_agent_presets()]
+        for _wf in _seed_db.query(AgentWorkflow).filter(AgentWorkflow.name.in_(_preset_names)).all():
+            _nodes = _wf.get_nodes()
+            _changed = False
+            for _n in _nodes:
+                if _n.get("type") == "tool" and "execution_mode" not in _n.get("data", {}):
+                    _n.setdefault("data", {})["execution_mode"] = "auto"
+                    _changed = True
+            if _changed:
+                _wf.nodes = json.dumps(_nodes, ensure_ascii=False)
+                _seed_db.commit()
     finally:
         _seed_db.close()
 set_db_mode("demo")

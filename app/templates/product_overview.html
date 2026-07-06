@@ -724,7 +724,7 @@ footer .ft-brand { color: var(--fg2); font-weight: 600; margin-bottom: 4px; }
   function setEarth() {
     const c = CORNERS.tl;
     earthR = Math.min(c.w, c.h) * 0.42;
-    earthCx = c.x + earthR + 6;
+    earthCx = c.x + earthR - 4;
     earthCy = c.y + earthR + 6;
   }
   function projEarth(x, y, z) {
