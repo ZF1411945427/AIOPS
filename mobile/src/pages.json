@@ -1,0 +1,127 @@
+{
+    "pages": [
+        {
+            "path": "pages/index/index",
+            "style": {
+                "navigationBarTitleText": "态势速览",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
+            "path": "pages/alert/list",
+            "style": {
+                "navigationBarTitleText": "告警中心",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
+            "path": "pages/alert/detail",
+            "style": {
+                "navigationBarTitleText": "告警详情"
+            }
+        },
+        {
+            "path": "pages/agent/chat",
+            "style": {
+                "navigationBarTitleText": "AI 助手"
+            }
+        },
+        {
+            "path": "pages/pending/list",
+            "style": {
+                "navigationBarTitleText": "待确认操作",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
+            "path": "pages/asset/scan",
+            "style": {
+                "navigationBarTitleText": "扫码识别"
+            }
+        },
+        {
+            "path": "pages/asset/detail",
+            "style": {
+                "navigationBarTitleText": "资产详情"
+            }
+        },
+        {
+            "path": "pages/asset/diagnose",
+            "style": {
+                "navigationBarTitleText": "故障诊断"
+            }
+        },
+        {
+            "path": "pages/oncall/my",
+            "style": {
+                "navigationBarTitleText": "我的值班",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
+            "path": "pages/workflow/list",
+            "style": {
+                "navigationBarTitleText": "工作流",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
+            "path": "pages/login/index",
+            "style": {
+                "navigationBarTitleText": "登录",
+                "navigationStyle": "custom"
+            }
+        },
+        {
+            "path": "pages/settings/index",
+            "style": {
+                "navigationBarTitleText": "我的"
+            }
+        }
+    ],
+    "globalStyle": {
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "AIOps",
+        "navigationBarBackgroundColor": "#F4F7FB",
+        "backgroundColor": "#F4F7FB",
+        "backgroundTextStyle": "dark"
+    },
+    "tabBar": {
+        "color": "#7A8898",
+        "selectedColor": "#3B82F6",
+        "borderStyle": "black",
+        "backgroundColor": "#FFFFFF",
+        "list": [
+            {
+                "pagePath": "pages/index/index",
+                "text": "首页",
+                "iconPath": "static/tab/home.png",
+                "selectedIconPath": "static/tab/home_on.png"
+            },
+            {
+                "pagePath": "pages/alert/list",
+                "text": "告警",
+                "iconPath": "static/tab/alert.png",
+                "selectedIconPath": "static/tab/alert_on.png"
+            },
+            {
+                "pagePath": "pages/agent/chat",
+                "text": "AI",
+                "iconPath": "static/tab/ai.png",
+                "selectedIconPath": "static/tab/ai_on.png"
+            },
+            {
+                "pagePath": "pages/settings/index",
+                "text": "我的",
+                "iconPath": "static/tab/mine.png",
+                "selectedIconPath": "static/tab/mine_on.png"
+            }
+        ]
+    },
+    "easycom": {
+        "autoscan": true,
+        "custom": {
+            "^uni-(.*)": "@dcloudio/uni-ui/lib/uni-$1/uni-$1.vue"
+        }
+    }
+}

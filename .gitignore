@@ -97,3 +97,9 @@ tools/private_key.pem
 license.lic
 tools/license.lic
 data/license_state.json
+
+# ===== 移动端构建产物（可由源码重新生成）=====
+mobile/dist/
+
+# ===== 临时笔记文件 =====
+tools/1

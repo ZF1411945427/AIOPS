@@ -90,7 +90,9 @@ async def login(request: Request, db: Session = Depends(get_db)):
     request.session["username"] = user.username
 
     if is_json:
-        return {"ok": True, "message": "登录成功"}
+        from app.services.mobile_push_service import issue_login_token
+        token = issue_login_token(user.id, user.username)
+        return {"ok": True, "message": "登录成功", "token": token, "user": {"id": user.id, "username": user.username, "role": user.role}}
     return RedirectResponse("/", status_code=303)
 
 
@@ -98,5 +100,22 @@ async def login(request: Request, db: Session = Depends(get_db)):
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+
+@router.get("/me")
+def me(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    auth = request.headers.get("authorization", "")
+    if (not user_id) and auth.startswith("Bearer "):
+        from app.services.mobile_push_service import verify_login_token
+        payload = verify_login_token(auth[7:])
+        if payload:
+            user_id = payload.get("user_id")
+    if not user_id:
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return JSONResponse({"ok": False, "error": "用户不存在"}, status_code=401)
+    return {"ok": True, "user": {"id": user.id, "username": user.username, "role": user.role}}
 
 
