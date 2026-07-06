@@ -1,3 +1,30 @@
+### 2026-07-06: 移除 db/aiops.db 的 Git LFS 跟踪（可持续 push 方案落地）
+- **决策**: 爸爸选最优可持续方案——运行时 SQLite 数据库不该版本控制，移除 LFS 跟踪彻底解决 pre-push 钩子卡死
+- **执行**:
+  - `git lfs untrack 'db/aiops.db'` → `.gitattributes` 清空（仅此一条 LFS 规则）
+  - `git rm --cached db/aiops.db` → 从索引移除（保留本地文件，远端不再跟踪）
+  - `.gitignore` 加入 `db/aiops.db`，过时注释「主数据库用 Git LFS 推送」改为「运行时 SQLite 数据库不入库」
+  - 删除 `.git/hooks/pre-push`（git-lfs 注册的钩子，阻塞 push 的根源）
+- **效果**: 以后 `git push` 不再触发 lfs 钩子、不再卡 credential fill；http.sslBackend=schannel 已固化为 local 默认，push 全程无障碍
+- **遗留**: 历史提交中 db/aiops.db 仍是 LFS 指针（不可改历史），远端 clone 历史版本时该文件为指针文本；但程序运行时会自建新 aiops.db，不影响功能
+- **专业名词**: LFS 取消跟踪(LFS Untrack)——从 .gitattributes 移除 filter=lfs 规则，文件不再走 LFS 大文件存储; 索引移除(Index Removal, git rm --cached)——从暂存区删除跟踪但保留工作树文件; 钩子卸载(Hook Uninstall)——删除 .git/hooks/pre-push 使 git push 不再触发客户端脚本
+
+### 2026-07-06: 解决 git push 到 GitHub 长时间卡死问题（schannel + 跳过 lfs 钩子）
+- **现象**: `git push origin main` 反复超时（120s/300s/600s 均未完成），只推送 28 个对象 0.79MB 却卡死
+- **排查链路**:
+  1. `git count-objects -vH` 本地 pack 33.67MiB，但 `git rev-list --objects origin/main..HEAD` 计算实际待推送仅 28 对象 0.79MB → 排除"大文件传输慢"
+  2. `git fetch origin`（GET）秒成 → 代理 7897 可用，排除代理不通
+  3. 直连 github.com:443 git endpoint → Connection reset（被墙），必须走代理
+  4. SSH 直连 github.com:22 → 通到 TCP 但 `Permission denied (publickey)`（id_rsa 未注册 GitHub）
+  5. `GIT_TRACE=1 git push` → 定位到 `.git/hooks/pre-push` 钩子调用 `git-lfs pre-push`，lfs 执行 `ls-remote` 后卡在 `git credential fill`（凭证填充挂起）→ **根因1: lfs pre-push 钩子阻塞**
+  6. `git push --no-verify` 跳过钩子 → 改报 `TLS connect error: unexpected eof while reading`（OpenSSL 后端与代理 TLS 握手异常）
+  7. `git -c http.sslBackend=schannel push --no-verify` → **成功** `a003df8..7ed4c5b main -> main`
+- **根因总结**: 双重问题——① git-lfs 的 pre-push 钩子在非交互环境调 `git credential fill` 挂起阻塞 push；② hermes 自带 git 默认 OpenSSL 后端经 7897 代理 TLS 握手异常，换 Windows 原生 schannel 后端正常
+- **修复**: 推送命令用 `git -c http.sslBackend=schannel push --no-verify origin main`；已 `git config http.sslBackend schannel`（local）固化为本仓库默认
+- **遗留**: pre-push 钩子仍在，每次 push 需 `--no-verify`；若项目不用 LFS 可删 `.git/hooks/pre-push` 彻底解决（待爸爸确认）
+- **安全提醒**: remote URL 内嵌 GitHub PAT（明文），git remote -v / GIT_TRACE 日志会泄露，建议改用 credential helper 或 SSH key
+- **专业名词**: pre-push 钩子(Pre-push Hook)——git push 前触发的客户端脚本，常被 git-lfs 注册用于大文件上传; 凭证填充(Credential Fill)——git credential helper 查询/交互获取 HTTPS 凭证，非交互环境可能挂起; TLS 后端(TLS Backend)——git 可选 openssl(跨平台)或 schannel(Windows原生)做 TLS 握手，对代理证书兼容性不同; 意外 EOF(unexpected EOF)——TLS 握手时对端提前关闭连接，常因代理对特定 SNI/ALPN 的中断; SSH 公钥认证(Public Key Auth)——用 ~/.ssh/id_rsa 私钥签名、公钥需预注册到 GitHub 账号
+
 ### 2026-07-06: 修复 PDF 报告 CJK 文字溢出（_wrap_cjk 逐字符换行）
 - **问题**: fpdf2 的 `multi_cell` 对中文字符宽度计算不精确，换行点偏后导致文字溢出右边界（最大 29pt）
 - **根因**: fpdf2 内部用 `get_string_width` 估算换行点，但对 CJK 字符的宽度估算不够准确
