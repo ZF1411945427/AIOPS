@@ -125,12 +125,25 @@ def _remote_exec(asset: Asset, command: str, timeout: int = 30) -> tuple:
         ssh.close()
 
 
+# 动作类型别名映射：兼容种子数据生成的非标准名
+_ACTION_ALIASES = {
+    "restart_service": "restart",
+    "clean_disk": "clean",
+    "scale_up": "scale",
+    "scale_down": "scale",
+    "execute_command": "run_command",
+    "run_script": "script",
+}
+
+
 def execute_action(action_type: str, params: dict, asset: Asset) -> tuple:
     """在远程资产上执行修复动作 — 通过 SSH 远程执行，绝不触碰本机.
 
     params 含业务参数（service/path/script 等）；asset 提供连接信息（ip/ssh 凭据）。
     返回 (success, message)。
     """
+    # 别名自动转换
+    action_type = _ACTION_ALIASES.get(action_type, action_type)
     if action_type == "restart":
         # 远程重启服务：sudo systemctl restart {service}
         service_name = params.get("service", "")

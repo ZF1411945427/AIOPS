@@ -39,6 +39,10 @@ export function resolve(id) {
   return request({ url: `/alerts/api/${id}/resolve`, method: 'POST' })
 }
 
+export function triggerHeal(id) {
+  return request({ url: `/alerts/api/${id}/heal`, method: 'POST' })
+}
+
 export function silence(id, payload) {
   return request({ url: `/alerts/api/${id}/silence`, method: 'POST', data: payload || {} })
 }
@@ -55,6 +59,7 @@ export default {
   getList,
   acknowledge,
   resolve,
+  triggerHeal,
   silence,
   batchAcknowledge,
   batchResolve,

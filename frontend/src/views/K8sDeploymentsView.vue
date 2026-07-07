@@ -24,15 +24,15 @@
           <table class="table">
             <thead><tr><th>名称</th><th>命名空间</th><th>集群</th><th>副本</th><th>就绪</th><th>策略</th><th>镜像</th><th>状态</th><th>操作</th></tr></thead>
             <tbody>
-              <tr v-for="d in deployments" :key="d.id" class="row-click" @click="openManage(d)">
+              <tr v-for="d in deployments" :key="d.name" class="row-click" @click="openManage(d)">
                 <td class="name-cell">{{ d.name }}</td>
                 <td>{{ d.namespace || '-' }}</td>
                 <td>{{ d.cluster || '-' }}</td>
-                <td>{{ d.attrs?.replicas ?? '-' }}</td>
-                <td>{{ d.attrs?.ready_replicas ?? d.attrs?.ready ?? '-' }}</td>
-                <td>{{ d.attrs?.strategy || 'RollingUpdate' }}</td>
-                <td class="img-cell">{{ d.attrs?.image || '-' }}</td>
-                <td>{{ d.status || '-' }}</td>
+                <td>{{ d.replicas ?? '-' }}</td>
+                <td>{{ d.available ?? '-' }}</td>
+                <td>{{ d.strategy || 'RollingUpdate' }}</td>
+                <td class="img-cell">{{ d.image || '-' }}</td>
+                <td>{{ (d.available ?? 0) + '/' + (d.replicas ?? '?') }}</td>
                 <td @click.stop><button class="btn btn-sm btn-primary" @click="openManage(d)">管理</button></td>
               </tr>
             </tbody>
@@ -166,7 +166,7 @@ const rollbackForm = ref({ revision: 0 })
 async function loadDeployments() {
   loading.value = true
   try {
-    const data = await request.get('/containers/api/deployments', { params: { cluster: clusterFilter.value, namespace: namespaceFilter.value } })
+    const data = await request.get('/k8s/api/deployments', { params: { cluster: clusterFilter.value, namespace: namespaceFilter.value } })
     deployments.value = data.items || []
     clusters.value = data.clusters || []
   } catch (e) {

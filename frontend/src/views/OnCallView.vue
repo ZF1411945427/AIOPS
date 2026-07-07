@@ -13,7 +13,7 @@
         <el-alert
           v-for="c in currentItems"
           :key="c.team_name"
-          :title="`当前值班: ${c.current_oncall}（${c.team_name}）`"
+          :title="`当前值班: ${c.current_oncall}${c.phone ? ' ('+c.phone+')' : ''}（${c.team_name}）`"
           type="success"
           :closable="false"
           style="margin-bottom: 12px"
@@ -35,7 +35,9 @@
         </el-table-column>
         <el-table-column label="成员">
           <template #default="{row}">
-            <el-tag v-for="m in (row.members || [])" :key="m" size="small" style="margin: 2px">{{ m }}</el-tag>
+            <el-tag v-for="m in (row.members || [])" :key="m.name || m" size="small" style="margin: 2px">
+              {{ m.phone ? `${m.name || m}(${m.phone})` : (m.name || m) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="current_oncall" label="当前值班人" width="110" />
@@ -64,7 +66,7 @@
     </el-card>
 
     <!-- 新建/编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑值班表' : '新建值班表'" width="560px">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑值班表' : '新建值班表'" width="620px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="团队名" prop="team_name">
           <el-input v-model="form.team_name" placeholder="如: 运维组" />
@@ -77,23 +79,35 @@
           <div class="hint">选择后自动按周期长度计算结束时间</div>
         </el-form-item>
         <el-form-item label="成员" prop="members">
-          <el-select
-            v-model="form.members"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            :reserve-keyword="false"
-            placeholder="选择已有成员或输入新成员（可多选）"
-            style="width: 100%"
-          >
-            <el-option v-for="m in memberCandidates" :key="m" :label="m" :value="m" />
-          </el-select>
-          <div class="hint">已复用 {{ memberCandidates.length }} 名成员，避免重复输入</div>
+          <div style="width:100%">
+            <div v-for="(m, i) in form.members" :key="i" class="member-row" style="display:flex;align-items:center;margin-bottom:6px;gap:8px">
+              <el-input v-model="m.name" placeholder="姓名" style="width:150px" />
+              <el-input v-model="m.phone" placeholder="联系电话" style="width:180px" />
+              <el-button @click="removeMember(i)" type="danger" link size="small">删除</el-button>
+            </div>
+            <div class="member-actions" style="display:flex;align-items:center;margin-top:4px;gap:8px">
+              <el-button @click="addMember" type="primary" link size="small">+ 添加成员</el-button>
+              <el-select
+                v-model="quickPick"
+                @change="pickMember"
+                placeholder="复用已有成员"
+                filterable
+                clearable
+                style="width:220px"
+              >
+                <el-option
+                  v-for="c in memberCandidates"
+                  :key="c.name"
+                  :label="c.phone ? `${c.name} (${c.phone})` : c.name"
+                  :value="c.name"
+                />
+              </el-select>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="当前值班人" prop="current_oncall">
           <el-select v-model="form.current_oncall" placeholder="选择当前值班人" filterable>
-            <el-option v-for="m in form.members" :key="m" :label="m" :value="m" />
+            <el-option v-for="m in form.members" :key="m.name" :label="m.name" :value="m.name" />
           </el-select>
         </el-form-item>
         <el-form-item label="周期开始" prop="current_period_start">
@@ -123,10 +137,11 @@ const dialogVisible = ref(false)
 const editingId = ref(null)
 const loading = ref(false)
 const formRef = ref(null)
+const quickPick = ref("")
 const form = reactive({
   team_name: "",
   rotation_type: "weekly",
-  members: [],
+  members: [{ name: "", phone: "" }],
   current_oncall: "",
   current_period_start: new Date().toISOString().slice(0, 10),
   current_period_end: ""
@@ -137,12 +152,20 @@ const currentItems = computed(() => currentOncall.value.items || [])
 const rules = {
   team_name: [{ required: true, message: "请输入团队名", trigger: "blur" }],
   rotation_type: [{ required: true, message: "请选择轮值方式", trigger: "change" }],
-  members: [{ required: true, type: "array", min: 1, message: "请至少添加一名成员", trigger: "change" }],
+  members: [{
+    validator: (rule, value, callback) => {
+      const valid = (value || []).some(m => m && m.name && m.name.trim())
+      if (!valid) callback(new Error("请至少添加一名成员"))
+      else callback()
+    },
+    trigger: "change"
+  }],
   current_oncall: [
     { required: true, message: "请选择当前值班人", trigger: "change" },
     {
       validator: (rule, value, callback) => {
-        if (value && form.members.length && !form.members.includes(value)) {
+        const names = form.members.map(m => m.name).filter(Boolean)
+        if (value && names.length && !names.includes(value)) {
           callback(new Error("当前值班人必须在成员列表中"))
         } else {
           callback()
@@ -168,10 +191,22 @@ const rules = {
 }
 
 watch(() => form.members, (val) => {
-  if (form.current_oncall && val.length && !val.includes(form.current_oncall)) {
+  const names = (val || []).map(m => m.name).filter(Boolean)
+  if (form.current_oncall && names.length && !names.includes(form.current_oncall)) {
     form.current_oncall = ""
   }
 }, { deep: true })
+
+const addMember = () => { form.members.push({ name: "", phone: "" }) }
+const removeMember = (i) => { form.members.splice(i, 1) }
+const pickMember = (name) => {
+  if (!name) return
+  const c = memberCandidates.value.find(x => x.name === name)
+  if (c && !form.members.some(m => m.name === c.name)) {
+    form.members.push({ name: c.name, phone: c.phone || "" })
+  }
+  quickPick.value = ""
+}
 
 const autoPeriodEnd = () => {
   if (!form.current_period_start) return
@@ -188,9 +223,9 @@ const buildSchedule = () => {
   if (isNaN(start.getTime())) return []
   const step = form.rotation_type === "weekly" ? 7 : 30
   const dayMs = 86400000
-  return form.members.map((m, i) => ({
+  return form.members.filter(m => m.name).map((m, i) => ({
     order: i,
-    name: m,
+    name: m.name,
     start: new Date(start.getTime() + i * step * dayMs).toISOString().slice(0, 10),
     end: new Date(start.getTime() + (i + 1) * step * dayMs).toISOString().slice(0, 10)
   }))
@@ -230,7 +265,7 @@ const showCreateDialog = () => {
   editingId.value = null
   form.team_name = ""
   form.rotation_type = "weekly"
-  form.members = []
+  form.members = [{ name: "", phone: "" }]
   form.current_oncall = ""
   form.current_period_start = new Date().toISOString().slice(0, 10)
   autoPeriodEnd()
@@ -243,7 +278,10 @@ const showEditDialog = (row) => {
   editingId.value = row.id
   form.team_name = row.team_name
   form.rotation_type = row.rotation_type
-  form.members = [...(row.members || [])]
+  form.members = (row.members || []).map(m => ({
+    name: m.name || m || "",
+    phone: m.phone || ""
+  }))
   form.current_oncall = row.current_oncall
   form.current_period_start = row.current_period_start ? new Date(row.current_period_start).toISOString().slice(0, 10) : ""
   form.current_period_end = row.current_period_end ? new Date(row.current_period_end).toISOString().slice(0, 10) : ""
@@ -264,7 +302,10 @@ const saveOncall = async () => {
     const payload = {
       team_name: form.team_name,
       rotation_type: form.rotation_type,
-      members: form.members,
+      members: form.members.filter(m => m.name && m.name.trim()).map(m => ({
+        name: m.name.trim(),
+        phone: (m.phone || "").trim()
+      })),
       schedule: buildSchedule(),
       current_oncall: form.current_oncall,
       current_period_start: form.current_period_start,

@@ -62,7 +62,7 @@
 <script setup>
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { getList, acknowledge, resolve } from '@/api/alert.js'
+import { getList, acknowledge, resolve, triggerHeal } from '@/api/alert.js'
 import { setPendingPreset } from '@/api/agent.js'
 
 const alert = ref(null)
@@ -125,12 +125,27 @@ function handleSilence() {
     })
 }
 
-function handleHeal() {
+async function handleHeal() {
     uni.showModal({
         title: '触发自愈',
         content: '确认对该告警触发自愈流程？',
-        success: (r) => {
-            if (r.confirm) uni.showToast({ title: '自愈已触发', icon: 'success' })
+        success: async (r) => {
+            if (!r.confirm) return
+            uni.showLoading({ title: '自愈执行中...' })
+            try {
+                const res = await triggerHeal(alert.value.id)
+                uni.hideLoading()
+                if (res.error) {
+                    uni.showToast({ title: res.error, icon: 'none' })
+                } else {
+                    const stepInfo = (res.steps || []).map(s => (s.success ? '✓' : '✗') + s.action).join(' ')
+                    uni.showToast({ title: '自愈完成: ' + stepInfo, icon: 'success' })
+                    alert.value.status = 'acknowledged'
+                }
+            } catch (e) {
+                uni.hideLoading()
+                uni.showToast({ title: '自愈请求失败', icon: 'none' })
+            }
         },
     })
 }

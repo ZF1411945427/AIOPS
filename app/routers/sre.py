@@ -56,10 +56,25 @@ class ErrorBudgetResponse(BaseModel):
     status: str
 
 
+class MemberSchema(BaseModel):
+    """值班成员（姓名+联系电话）"""
+    name: str
+    phone: Optional[str] = ""
+
+
+def _coerce_member(m):
+    """把旧数据/松散输入统一成 {name, phone} dict，兼容字符串数组旧数据"""
+    if isinstance(m, str):
+        return {"name": m, "phone": ""}
+    if isinstance(m, dict):
+        return {"name": (m.get("name") or "").strip(), "phone": (m.get("phone") or "").strip()}
+    return {"name": "", "phone": ""}
+
+
 class OnCallScheduleCreate(BaseModel):
     team_name: str
     rotation_type: str = "weekly"
-    members: List[str]
+    members: List[dict]
     schedule: List[dict] = []
     current_oncall: str
     current_period_start: datetime
@@ -86,7 +101,11 @@ class OnCallScheduleCreate(BaseModel):
     def validate_members(cls, v):
         if not v:
             raise ValueError("成员列表不能为空")
-        return [m for m in v if m]
+        coerced = [_coerce_member(m) for m in v]
+        named = [m for m in coerced if m["name"]]
+        if not named:
+            raise ValueError("成员列表不能为空")
+        return named
 
     @field_validator("current_oncall")
     @classmethod
@@ -98,8 +117,10 @@ class OnCallScheduleCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_consistency(self):
-        if self.current_oncall and self.members and self.current_oncall not in self.members:
-            raise ValueError("当前值班人必须在成员列表中")
+        if self.current_oncall and self.members:
+            names = [m["name"] for m in self.members]
+            if self.current_oncall not in names:
+                raise ValueError("当前值班人必须在成员列表中")
         if self.current_period_end <= self.current_period_start:
             raise ValueError("周期结束时间必须晚于开始时间")
         return self
@@ -111,7 +132,7 @@ class OnCallScheduleResponse(BaseModel):
     id: int
     team_name: str
     rotation_type: str
-    members: List[str]
+    members: List[dict]
     schedule: List[dict]
     current_oncall: str
     current_period_start: datetime
@@ -124,8 +145,8 @@ class OnCallScheduleResponse(BaseModel):
     @classmethod
     def parse_members(cls, v):
         if isinstance(v, str):
-            return json.loads(v)
-        return v
+            v = json.loads(v)
+        return [_coerce_member(m) for m in (v or [])]
 
     @field_validator("schedule", mode="before")
     @classmethod
@@ -282,8 +303,8 @@ def create_oncall(data: OnCallScheduleCreate, db: Session = Depends(get_db_sessi
     obj = OnCallSchedule(
         team_name=data.team_name,
         rotation_type=data.rotation_type,
-        members=json.dumps(data.members),
-        schedule=json.dumps(data.schedule),
+        members=json.dumps(data.members, ensure_ascii=False),
+        schedule=json.dumps(data.schedule, ensure_ascii=False),
         current_oncall=data.current_oncall,
         current_period_start=data.current_period_start,
         current_period_end=data.current_period_end,
@@ -297,7 +318,8 @@ def create_oncall(data: OnCallScheduleCreate, db: Session = Depends(get_db_sessi
 
 @router.get("/oncall/members")
 def list_oncall_members(db: Session = Depends(get_db_session)):
-    """聚合所有值班表的成员，作为成员复用候选库（主数据聚合，dict 保序去重）"""
+    """聚合所有值班表的成员，作为成员复用候选库（主数据聚合，dict 保序去重）
+    返回 [{name, phone}] 对象数组，供 Web 端选已有成员时自动带出电话"""
     rows = db.query(OnCallSchedule.members).all()
     seen = {}
     for (m_json,) in rows:
@@ -305,11 +327,13 @@ def list_oncall_members(db: Session = Depends(get_db_session)):
             continue
         try:
             for m in json.loads(m_json):
-                if m and m not in seen:
-                    seen[m] = None
+                coerced = _coerce_member(m)
+                name = coerced["name"]
+                if name and name not in seen:
+                    seen[name] = coerced["phone"]
         except (json.JSONDecodeError, TypeError):
             continue
-    return {"members": list(seen.keys())}
+    return {"members": [{"name": k, "phone": v} for k, v in seen.items()]}
 
 
 @router.put("/oncall/{oncall_id}", response_model=OnCallScheduleResponse)
@@ -320,8 +344,8 @@ def update_oncall(oncall_id: int, data: OnCallScheduleCreate, db: Session = Depe
         raise HTTPException(status_code=404, detail="OnCall schedule not found")
     obj.team_name = data.team_name
     obj.rotation_type = data.rotation_type
-    obj.members = json.dumps(data.members)
-    obj.schedule = json.dumps(data.schedule)
+    obj.members = json.dumps(data.members, ensure_ascii=False)
+    obj.schedule = json.dumps(data.schedule, ensure_ascii=False)
     obj.current_oncall = data.current_oncall
     obj.current_period_start = data.current_period_start
     obj.current_period_end = data.current_period_end
@@ -343,27 +367,39 @@ def delete_oncall(oncall_id: int, db: Session = Depends(get_db_session)):
 
 @router.get("/oncall/current")
 def get_current_oncall(db: Session = Depends(get_db_session)):
-    """获取当前值班人（返回所有当前周期内的值班表，按团队名排序）"""
+    """获取当前值班人（返回所有当前周期内的值班表，按团队名排序）
+    顶层及 items 内均带 phone（当前值班人联系电话），供 App 拨号"""
     now = datetime.now()
     rows = db.query(OnCallSchedule).filter(
         OnCallSchedule.current_period_start <= now,
         OnCallSchedule.current_period_end >= now
     ).order_by(OnCallSchedule.team_name).all()
     if not rows:
-        return {"items": [], "current_oncall": None}
-    items = [
-        {
+        return {"items": [], "current_oncall": None, "phone": None}
+    items = []
+    for r in rows:
+        phone = ""
+        try:
+            mems = json.loads(r.members) if r.members else []
+            for m in mems:
+                coerced = _coerce_member(m)
+                if coerced["name"] == r.current_oncall:
+                    phone = coerced["phone"]
+                    break
+        except (json.JSONDecodeError, TypeError):
+            pass
+        items.append({
             "team_name": r.team_name,
             "current_oncall": r.current_oncall,
+            "phone": phone,
             "period_start": r.current_period_start,
             "period_end": r.current_period_end
-        }
-        for r in rows
-    ]
+        })
     return {
         "items": items,
         "current_oncall": items[0]["current_oncall"],
         "team_name": items[0]["team_name"],
+        "phone": items[0]["phone"],
         "period_start": items[0]["period_start"],
         "period_end": items[0]["period_end"]
     }

@@ -66,10 +66,41 @@
             }
         },
         {
+            "path": "pages/tools/index",
+            "style": {
+                "navigationBarTitleText": "工具箱"
+            }
+        },
+        {
             "path": "pages/login/index",
             "style": {
                 "navigationBarTitleText": "登录",
                 "navigationStyle": "custom"
+            }
+        },
+        {
+            "path": "pages/logs/index",
+            "style": {
+                "navigationBarTitleText": "日志搜索"
+            }
+        },
+        {
+            "path": "pages/metrics/index",
+            "style": {
+                "navigationBarTitleText": "指标监控"
+            }
+        },
+        {
+            "path": "pages/incident/index",
+            "style": {
+                "navigationBarTitleText": "故障单管理",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
+            "path": "pages/incident/detail",
+            "style": {
+                "navigationBarTitleText": "故障单详情"
             }
         },
         {
@@ -109,6 +140,12 @@
                 "text": "AI",
                 "iconPath": "static/tab/ai.png",
                 "selectedIconPath": "static/tab/ai_on.png"
+            },
+            {
+                "pagePath": "pages/tools/index",
+                "text": "工具箱",
+                "iconPath": "static/tab/tools.png",
+                "selectedIconPath": "static/tab/tools_on.png"
             },
             {
                 "pagePath": "pages/settings/index",

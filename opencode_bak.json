@@ -1,0 +1,19 @@
+﻿{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "gpustack/glm-5.2",
+  "provider": {
+    "gpustack": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "GPUStack (GLM-5.2)",
+      "options": {
+        "baseURL": "http://172.25.1.13:30088/v1",
+        "apiKey": "gpustack_8ba6f58b92975bf2_01b707031fe7acef7bcc370fbe98e4de"
+      },
+      "models": {
+        "glm-5.2": {
+          "name": "GLM-5.2 (GPU)"
+        }
+      }
+    }
+  }
+}

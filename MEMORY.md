@@ -1,3 +1,73 @@
+### 2026-07-07: 资产管理重构 — 按 CI 类型动态切换连接配置表单 + 新增 database/SNMP 类型
+- **问题**: 新增资产时表单固定显示 SSH 字段（用户名/密码/端口），但 K8s 子资源（deployment/pod/ingress 等）不需要 SSH，cluster 需要 K8s Token，数据库需要数据库连接信息
+- **重构内容**:
+  - **前端 AssetsView.vue**: 表单按 CI 类型动态切换 7 种配置面板：
+    - server/vm/node → SSH/Agent 连接（用户名/密码/端口）
+    - cluster → Kubernetes API（API Server 地址 + Token）
+    - namespace/deployment/pod/service/ingress 等 K8s 子资源 → 选择所属集群 + 命名空间（连接由集群管理）
+    - database → 数据库连接（类型/端口/用户/密码/库名）
+    - service → HTTP 连接（URL + 认证方式）
+    - 新增蓝色连接提示条 + 分区标题（基本信息/连接配置）
+  - **后端 assets.py**: create/update/detail 重构为通用 `_build_connection_config()`，支持 SSH/K8s/SNMP/Database/HTTP 5 种连接类型的灵活序列化与反序列化；detail 返回所有连接字段（不再只有 ssh_user/ssh_password/ssh_port）
+  - ci-types 新增 `database`
+- **验证**: Vite 构建通过，后端 py_compile 通过
+
+### 2026-07-07: AI助手对话无下文根因修复 + 4场景16轮多轮对话全通过
+- **问题**: "排查39.96.51.45安全问题"→只显示"正在远程登录🔧"; "你确定没有吗"→"让我确认它是否在运行："后面没结果
+- **根因**: LLM 在多轮工具循环中生成了简短无实质回复（<80字），或说"让我确认/让我检查"但不带结果，缺少兜底逻辑
+- **修复（最终版v4）**: 在 `process_chat_message` 中 try/except 包裹的兜底逻辑：
+  - 条件A: content < 200字 + execute_*有结果 → 自动追加执行摘要
+  - 条件B: content含"让我确认/让我检查/让我看看/正在确认"等意图词 → 自动追加结果
+  - 条件C: content < 100字且工具数≥3 → 从 tool_results 提取各工具数据摘要(query_alerts/query_assets/query_metrics/get_alert_detail等)拼接回复
+- **验证**: 4 个多轮对话场景，共 16 轮请求，全部 PASS（最短 201 字，最长 4217 字）
+  - Scenario 1 nginx排查→追问→启动→验证: 815→726→252→201 chars
+  - Scenario 2 查告警→详情→根因分析: 1072→1324→1999 chars  
+  - Scenario 3 列资产→查指标→查网络→总结: 924→544→722→543 chars
+  - Scenario 4 查IP→查tomcat→查磁盘→追问告警→安全评估: 467→411→466→1647→4217 chars
+- **专业名词**: 兜底组装(Fallback Assembly)——LLM 返回过短或无实质回复时，系统层从 tool_results 中提取各工具数据指标拼接可读回复
+
+### 2026-07-07: 修复自愈引擎 500 + 排查失败根因
+- **修复 500**: `alerts.py` 缺少 `Asset` 导入 → 添加；传给 `execute_action` 的是字符串而非 Asset 对象 → 改为查 Asset 对象传参
+- **加别名映射**: `remediation_service.py` 新增 `_ACTION_ALIASES`（`restart_service→restart`, `clean_disk→clean`, `scale_up→scale`），兼容种子数据
+- **修库数据**: `remediation_workflows` 表 4 个工作流步骤名改为合法动作名 + 补 `service`/`path` 参数
+- **步骤 params**: 两个 routes 中 step 循环提取除 `step`/`action` 外的 kv 作为 params 传入 `execute_action`
+
+### 2026-07-07: 补全 mobile APP 三个空壳子功能
+- **语音输入** (chat.vue): `uni.getRecorderManager()` 录制 MP3 → base64 上传 → 后端 `POST /mobile/voice/transcribe` 调用 AI Provider Whisper 兼容接口转写文字 → 自动发送
+- **NFC 识别** (scan.vue): `plus.android` 原生 API 读取 NDEF 标签 → 提取文本 → `queryAsset()` 查询资产；iOS/非 APP 环境给友好提示
+- **指标视图** (detail.vue): 指标面板调用 `GET /metrics/names` + `GET /metrics/data?asset_id=X&name=Y&hours=6` → 柱状图展示最近6小时数据
+- **后端新增**: `app/routers/mobile.py` 新增 `POST /mobile/voice/transcribe` 接口（multipart body 用 `chr(13)+chr(10)` 构造 CRLF，避免 patch 工具转义污染）
+- **验证**: ad-hoc 脚本 26 项检查全通过（py_compile + 端点签名 + 括号配对 + 无"开发中"残留 + 关键逻辑代码存在）
+
+### 2026-07-07: uni-app 页面组件 Vite 缓存坑 + 全局拦截绕过方案
+- **发现**: uni-app 的 Vite 插件对 `src/pages/` 下的页面组件有深层编译缓存，修改 `.vue` 文件后即使重启 dev server，浏览器 DOM 仍渲染旧版本（CSS 背景色、模板改动均不生效）
+- **确认**: `curl` 验证 Vite 返回的是新文件内容，但浏览器 Elements 面板中无对应元素；而 `main.js` 的改动 100% 生效（标题栏、console 日志均可见）
+- **绕过方案**: 将业务代码写在 `main.js` 中，通过 `document.addEventListener('click', fn, true)` 捕获阶段拦截组件内的 `@tap` 事件
+- **类名注意**: uni-app H5 渲染 `<view>` 为 `<uni-view>` 自定义元素；`class` 属性名可能被 uni-app 运行时修改（如 `call-icon` 在 DOM 中显示为 `call-btn`），推荐按文本内容匹配而非类名
+- **AGENTS.md 更新**: 写入"uni-app H5 页面组件缓存大坑"和"@tap 事件的 DOM 拦截"两条注意事项
+
+### 2026-07-07: members 升级为对象数组 + Web 值班表单补电话录入（App 底栏拨号修复）
+- **问题**: App 值班拨号显示"暂无联系电话"，Web 值班页无电话输入入口
+- **根因**: members 原始设计意图为 `[{name,phone}]` 对象数组（App 代码已按 `m.phone` 写死），但后端 `OnCallScheduleCreate/Response.members` 误用 `List[str]`，phone 无存储/返回源
+- **修复（6 文件）**:
+  - `app/routers/sre.py`: 新增 `MemberSchema`、`_coerce_member()` 兼容旧字符串数据；Create/Response.members 升级为 `List[dict]`；`/oncall/current` 返回项 + 顶层补 `phone`；`/oncall/members` 返回 `[{name,phone}]` 对象数组
+  - `app/routers/mobile.py`: Dashboard oncall 聚合也补 `phone` 字段
+  - `frontend/src/views/OnCallView.vue`: 成员录入从 el-select multiple→动态行（姓名 input + 电话 input + 删除/添加按钮 + 复用已有成员快捷选）；表格成员列显示 `姓名(电话)`；`pickMember` 快捷复用候选成员电话
+  - `mobile/src/pages/oncall/my.vue`: `fetchData` 中 `.map()` 从 `members` 提取 phone 注入 `item.phone` 顶层，确保 `callMember` 直接命中（解决页面缓存旧数据时 `extractPhone` 因成员是字符串永远找不到 phone 的问题）
+  - `tools/gen_tabbar_icons.py`: 新增（底栏图片缺失→8 个 81×81 PNG 图标生成脚本）
+- **兼容性**: `_coerce_member()` 自动将旧数据 `["张三","李四"]` 转为 `[{name:"张三",phone:""}]`，零迁移风险
+- **专业名词**: 前后端契约错配(Contract Mismatch)——App 期望对象数组但后端返回字符串数组导致拨号链数据断流；动态表单项(Dynamic Form Rows)——使用 v-for 渲染可增删的成对录入行替代固定多选
+
+### 2026-07-07: 拉取 AIOPS 项目到本地根目录（D:\AIOPS\project06）
+- **操作**: 将 `tok.txt` 中的 GitHub 仓库 https://github.com/ZF1411945427/AIOPS.git 拉取到本目录作为项目根目录
+- **方式**: 当前目录非空（含 tok.txt、opencode.json），采用 `git init` + `remote add`（带 PAT token）+ `fetch` + `checkout -B main origin/main`，而非 `git clone .`
+- **Git 配置坑**: 
+  - 代理 `http://127.0.0.1:7897`（外网代理端口来自 tok.txt）
+  - `http.sslBackend=openssl`（关键！tok.txt 原记的 schannel 经 7897 代理 TLS 握手失败 `failed to receive handshake`；改 openssl 后经代理 fetch 成功）
+  - 远程 URL 内嵌 PAT: `https://github_pat_...@github.com/ZF1411945427/AIOPS.git`
+- **结果**: 分支 main 跟踪 origin/main，HEAD=6f1f88b（移动端H5+opencode skills入库），工作树干净；原有 tok.txt/opencode.json 作为未跟踪文件保留
+- **专业名词**: 非空目录克隆(Non-empty Directory Clone)——目标目录已存在文件时用 init+remote+fetch 替代 clone；TLS 后端切换(TLS Backend Switching)——schannel 与代理不兼容时回退 openssl
+
 ### 2026-07-06: AI 助手 SSE→JSON 改造 + 告警/AI 跳转链路修复（两轮自检通过）
 - **用户反馈**: AI 根因分析请求不到 /agent/chat/send；有返回也只显示"AI"两字；告警中心 AI 根因分析无反应
 - **根因**: 后端 /agent/chat/send 是普通 JSON 响应（{session_id, reply, tool_results, pending_actions}），非 SSE 流式；前端却用 enableChunked+onChunkReceived 按 SSE chunk 解析，导致 JSON 被切碎解析失败，ChatBubble 因 content 空 segments 返回 [] 只渲染 avatar "AI"

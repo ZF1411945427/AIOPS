@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import RemediationWorkflow, RemediationLog, Alert
+from app.models import RemediationWorkflow, RemediationLog, Alert, Asset
 from app.services.remediation_service import get_remediation_logs
 from app.template_utils import get_templates
 
@@ -12,10 +12,10 @@ router = APIRouter(prefix="/remediation-workflows", tags=["remediation_workflows
 templates = get_templates()
 
 
-def _run_step(action_type: str, target: str):
+def _run_step(action_type: str, params: dict, asset: Asset):
     """执行修复步骤 — 调用真实修复服务，不使用 random 模拟"""
     from app.services.remediation_service import execute_action
-    return execute_action(action_type, {}, target)
+    return execute_action(action_type, params, asset)
 
 
 # ─── JSON API（供 Vue 前端调用，保留 HTML 路由作 fallback）───
@@ -111,10 +111,19 @@ def api_workflow_run(wf_id: int, db: Session = Depends(get_db)):
     alerts = db.query(Alert).filter(Alert.status == "triggered").order_by(Alert.created_at.desc()).limit(3).all()
     ran = 0
     for alert in alerts:
+        asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
         for step_idx, step in enumerate(steps):
-            action_type = step.get("action", "restart") if isinstance(step, dict) else step
-            target = f"asset_{alert.asset_id}"
-            success, output = _run_step(action_type, target)
+            if isinstance(step, dict):
+                action_type = step.get("action", "restart")
+                params = {k: v for k, v in step.items() if k not in ("step", "action")}
+            else:
+                action_type = step
+                params = {}
+            target = asset.name if asset else f"asset_{alert.asset_id}"
+            if not asset:
+                success, output = False, f"未找到资产 alert.asset_id={alert.asset_id}，无法远程执行"
+            else:
+                success, output = _run_step(action_type, params, asset)
             log = RemediationLog(
                 remediation_id=wf.id,
                 alert_id=alert.id,
