@@ -1,6 +1,7 @@
 import json
+from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Query, Body, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -88,7 +89,7 @@ def api_overview(db: Session = Depends(get_db)):
                 node_rate = round(healthy_nodes / len(nodes) * 100, 1) if nodes else 0
                 pod_rate = round(running_pods / len(pods) * 100, 1) if pods else 0
                 overviews.append({
-                    "name": ds.name, "endpoint": ds.endpoint, "status": ds.last_status,
+                    "name": ds.name, "endpoint": ds.endpoint, "status": "online",
                     "nodes": len(nodes), "healthy_nodes": healthy_nodes, "node_health_rate": node_rate,
                     "pods": len(pods), "running_pods": running_pods, "pod_running_rate": pod_rate,
                     "deployments": len(deployments), "namespaces": ns_count, "services": svc_count,
@@ -101,9 +102,8 @@ def api_overview(db: Session = Depends(get_db)):
                 total_deployments += len(deployments)
                 total_namespaces += ns_count
                 total_services += svc_count
-                if ds.last_status == "online":
-                    healthy_clusters += 1
-                ds.last_status = "healthy"
+                healthy_clusters += 1
+                ds.last_status = "online"
                 ds.last_error = ""
                 db.commit()
             except Exception as e:
@@ -191,6 +191,136 @@ def api_deployment_list(cluster: str = "", namespace: str = "", db: Session = De
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/deployment/{cluster}/{namespace}/{name}/manage")
+def api_deployment_manage(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"error": "K8s data source not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        d = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+        available = d.status.available_replicas or 0
+        total = d.spec.replicas or 0
+        containers = d.spec.template.spec.containers or []
+        return JSONResponse({"deployment": {
+            "name": d.metadata.name, "namespace": d.metadata.namespace, "cluster": cluster,
+            "replicas": total, "available": available,
+            "strategy": (d.spec.strategy.type or "RollingUpdate") if d.spec.strategy else "RollingUpdate",
+            "image": containers[0].image if containers else "-",
+            "attrs": {
+                "replicas": total, "ready_replicas": available,
+                "strategy": (d.spec.strategy.type or "RollingUpdate") if d.spec.strategy else "RollingUpdate",
+                "image": containers[0].image if containers else "-",
+            },
+        }})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/deployment/{cluster}/{namespace}/{name}/rollout")
+def api_deployment_rollout(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "K8s data source not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        from datetime import datetime
+        apps_v1.patch_namespaced_deployment(name=name, namespace=namespace, body={
+            "spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": datetime.now().isoformat()}}}}
+        })
+        return JSONResponse({"ok": True, "message": "rollout triggered"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/deployment/{cluster}/{namespace}/{name}/scale")
+def api_deployment_scale(cluster: str, namespace: str, name: str, body: dict = Body(default={}), db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "K8s data source not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        replicas = int(body.get("replicas", 1))
+        apps_v1.patch_namespaced_deployment_scale(name=name, namespace=namespace, body={"spec": {"replicas": replicas}})
+        return JSONResponse({"ok": True, "message": "scaled", "replicas": replicas})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/deployment/{cluster}/{namespace}/{name}/canary")
+def api_deployment_canary(cluster: str, namespace: str, name: str, body: dict = Body(default={}), db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "K8s data source not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        canary_replicas = int(body.get("canary_replicas", 1))
+        deploy = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+        canary_name = f"{name}-canary"
+        existing = None
+        try:
+            existing = apps_v1.read_namespaced_deployment(name=canary_name, namespace=namespace)
+        except Exception:
+            pass
+        if existing:
+            apps_v1.patch_namespaced_deployment_scale(name=canary_name, namespace=namespace, body={"spec": {"replicas": canary_replicas}})
+        else:
+            deploy.metadata.name = canary_name
+            deploy.metadata.resource_version = None
+            deploy.metadata.uid = None
+            deploy.spec.replicas = canary_replicas
+            if deploy.spec.selector and deploy.spec.selector.match_labels:
+                deploy.spec.selector.match_labels["canary"] = "true"
+            if deploy.spec.template.metadata and deploy.spec.template.metadata.labels:
+                deploy.spec.template.metadata.labels["canary"] = "true"
+            apps_v1.create_namespaced_deployment(namespace=namespace, body=deploy)
+        return JSONResponse({"ok": True, "message": "canary created/updated", "canary_name": canary_name, "canary_replicas": canary_replicas})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/deployment/{cluster}/{namespace}/{name}/promote")
+def api_deployment_promote(cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "K8s data source not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        canary_name = f"{name}-canary"
+        canary = apps_v1.read_namespaced_deployment(name=canary_name, namespace=namespace)
+        main_deploy = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+        new_image = canary.spec.template.spec.containers[0].image
+        apps_v1.patch_namespaced_deployment(name=name, namespace=namespace, body={
+            "spec": {"template": {"spec": {"containers": [{"name": main_deploy.spec.template.spec.containers[0].name, "image": new_image}]}}}
+        })
+        apps_v1.delete_namespaced_deployment(name=canary_name, namespace=namespace)
+        return JSONResponse({"ok": True, "message": "canary promoted", "new_image": new_image})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/deployment/{cluster}/{namespace}/{name}/rollback")
+def api_deployment_rollback(cluster: str, namespace: str, name: str, body: dict = Body(default={}), db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "K8s data source not found"}, status_code=404)
+        _, apps_v1, _ = _get_k8s_client(ds)
+        revision = int(body.get("revision", 0))
+        from datetime import datetime
+        if revision:
+            apps_v1.patch_namespaced_deployment(name=name, namespace=namespace, body={
+                "spec": {"rollbackTo": {"revision": revision}}
+            })
+        else:
+            apps_v1.patch_namespaced_deployment(name=name, namespace=namespace, body={
+                "spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": datetime.now().isoformat()}}}}
+            })
+        return JSONResponse({"ok": True, "message": "rollback triggered", "revision": revision or None})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @router.get("/api/pods")
@@ -984,17 +1114,135 @@ def api_pvc_delete(cluster: str, namespace: str, name: str, db: Session = Depend
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+_K8S_DESCRIBE_READERS = {
+    "pods": lambda v1, apps_v1, net_v1, ns, name: v1.read_namespaced_pod(name, ns),
+    "deployments": lambda v1, apps_v1, net_v1, ns, name: apps_v1.read_namespaced_deployment(name, ns),
+    "statefulsets": lambda v1, apps_v1, net_v1, ns, name: apps_v1.read_namespaced_stateful_set(name, ns),
+    "daemonsets": lambda v1, apps_v1, net_v1, ns, name: apps_v1.read_namespaced_daemon_set(name, ns),
+    "services": lambda v1, apps_v1, net_v1, ns, name: v1.read_namespaced_service(name, ns),
+    "ingresses": lambda v1, apps_v1, net_v1, ns, name: net_v1.read_namespaced_ingress(name, ns),
+    "configmaps": lambda v1, apps_v1, net_v1, ns, name: v1.read_namespaced_config_map(name, ns),
+    "secrets": lambda v1, apps_v1, net_v1, ns, name: v1.read_namespaced_secret(name, ns),
+    "hpas": lambda v1, apps_v1, net_v1, ns, name: __import__("kubernetes").client.AutoscalingV1Api(v1.api_client).read_namespaced_horizontal_pod_autoscaler(name, ns),
+    "pvcs": lambda v1, apps_v1, net_v1, ns, name: v1.read_namespaced_persistent_volume_claim(name, ns),
+    "pvs": lambda v1, apps_v1, net_v1, ns, name: v1.read_persistent_volume(name),
+    "namespaces": lambda v1, apps_v1, net_v1, ns, name: v1.read_namespace(name),
+}
+
+
+@router.get("/api/describe/{resource_type}/{cluster}/{namespace}/{name}")
+def api_describe_resource(resource_type: str, cluster: str, namespace: str, name: str, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"error": "K8s data source not found"}, status_code=404)
+        v1, apps_v1, net_v1 = _get_k8s_client(ds)
+        reader = _K8S_DESCRIBE_READERS.get(resource_type)
+        if not reader:
+            return JSONResponse({"error": f"Unsupported resource type: {resource_type}"}, status_code=400)
+        obj = reader(v1, apps_v1, net_v1, namespace, name)
+        import yaml
+        data = obj.to_dict() if hasattr(obj, 'to_dict') else str(obj)
+        yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        return JSONResponse({"yaml": yaml_str, "resource_type": resource_type, "name": name, "namespace": namespace, "cluster": cluster})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/api/pod/{cluster}/{namespace}/{name}/logs")
-def api_pod_logs(cluster: str, namespace: str, name: str, tail: int = 200, db: Session = Depends(get_db)):
+def api_pod_logs(cluster: str, namespace: str, name: str, tail: int = 500, container: str = "", since_seconds: int = 0, previous: bool = False, db: Session = Depends(get_db)):
     try:
         ds = _get_k8s_ds(db, cluster)
         if not ds:
             return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
         v1, _, _ = _get_k8s_client(ds)
-        log_data = v1.read_namespaced_pod_log(name, namespace, tail_lines=tail)
-        return JSONResponse({"ok": True, "logs": log_data, "pod": name, "namespace": namespace, "cluster": cluster})
+        containers = []
+        try:
+            pod_obj = v1.read_namespaced_pod(name, namespace)
+            containers = [c.name for c in (pod_obj.spec.containers or [])]
+        except Exception:
+            pass
+        if not containers:
+            containers = [name]
+        use_container = container if container and container in containers else containers[0]
+        tail_lines = min(max(tail, 1), 10000)
+        kwargs = {"tail_lines": tail_lines, "_preload_content": False}
+        if since_seconds and since_seconds > 0:
+            kwargs["since_seconds"] = since_seconds
+        if previous:
+            kwargs["previous"] = True
+        try:
+            resp = v1.read_namespaced_pod_log(name, namespace, container=use_container, **kwargs)
+            raw = resp.data if hasattr(resp, "data") else resp
+            if isinstance(raw, bytes):
+                log_data = raw.decode("utf-8", errors="replace")
+            else:
+                log_data = str(raw)
+                if log_data.startswith("b'") or log_data.startswith('b"'):
+                    import ast
+                    try:
+                        log_data = ast.literal_eval(log_data).decode("utf-8", errors="replace")
+                    except Exception:
+                        pass
+        except Exception as le:
+            return JSONResponse({"ok": False, "error": str(le), "containers": containers}, status_code=500)
+        lines = log_data.count("\n") + (1 if log_data and not log_data.endswith("\n") else 0)
+        truncated = lines >= tail_lines
+        max_show = 2000
+        show_data = log_data
+        truncated_display = False
+        if lines > max_show:
+            show_data = "\n".join(log_data.split("\n")[:max_show])
+            truncated_display = True
+        return JSONResponse({
+            "ok": True, "logs": show_data, "full_logs": log_data,
+            "pod": name, "namespace": namespace, "cluster": cluster,
+            "container": use_container, "containers": containers,
+            "lines": lines, "tail": tail_lines, "truncated": truncated,
+            "display_truncated": truncated_display, "max_show": max_show,
+        })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/pod/{cluster}/{namespace}/{name}/logs/download")
+def api_pod_logs_download(cluster: str, namespace: str, name: str, tail: int = 10000, container: str = "", since_seconds: int = 0, previous: bool = False, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return PlainTextResponse("Cluster not found", status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        containers = []
+        try:
+            pod_obj = v1.read_namespaced_pod(name, namespace)
+            containers = [c.name for c in (pod_obj.spec.containers or [])]
+        except Exception:
+            pass
+        if not containers:
+            containers = [name]
+        use_container = container if container and container in containers else containers[0]
+        tail_lines = min(max(tail, 1), 50000)
+        kwargs = {"tail_lines": tail_lines, "_preload_content": False}
+        if since_seconds and since_seconds > 0:
+            kwargs["since_seconds"] = since_seconds
+        if previous:
+            kwargs["previous"] = True
+        resp = v1.read_namespaced_pod_log(name, namespace, container=use_container, **kwargs)
+        raw = resp.data if hasattr(resp, "data") else resp
+        if isinstance(raw, bytes):
+            log_data = raw.decode("utf-8", errors="replace")
+        else:
+            log_data = str(raw)
+            if log_data.startswith("b'") or log_data.startswith('b"'):
+                import ast
+                try:
+                    log_data = ast.literal_eval(log_data).decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+        fname = f"{name}-{use_container}-{datetime.now().strftime('%Y%m%d%H%M%S')}.log"
+        return PlainTextResponse(log_data, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={fname}"})
+    except Exception as e:
+        return PlainTextResponse(str(e), status_code=500)
 
 
 @router.get("/api/pod/{cluster}/{namespace}/{name}/logs-page")
@@ -1047,35 +1295,45 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
             return
 
         v1 = client.CoreV1Api(api_client)
+        from kubernetes import stream as k8s_stream
         try:
-            resp = v1.connect_get_namespaced_pod_exec(
+            kws = k8s_stream.stream(
+                v1.connect_get_namespaced_pod_exec,
                 name, namespace,
                 command=["/bin/sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi"],
                 stderr=True, stdin=True, stdout=True, tty=True,
+                _preload_content=False,
             )
         except Exception:
-            resp = v1.connect_get_namespaced_pod_exec(name, namespace, command=["sh"], stderr=True, stdin=True, stdout=True, tty=True)
-
-        ws_url = resp.url if hasattr(resp, 'url') else str(resp)
-        import websocket as k8s_ws
-        k8s_ws_url = ws_url.replace("https://", "wss://").replace("http://", "ws://")
-        kws = k8s_ws.create_connection(k8s_ws_url, subprotocols=["channel.k8s.io"])
-        kws.settimeout(30)
+            kws = k8s_stream.stream(
+                v1.connect_get_namespaced_pod_exec,
+                name, namespace, command=["sh"],
+                stderr=True, stdin=True, stdout=True, tty=True,
+                _preload_content=False,
+            )
+        kws.sock.settimeout(None)
 
         import asyncio
 
         async def k8s_to_browser():
+            loop = asyncio.get_event_loop()
             try:
                 while True:
-                    data = kws.recv()
+                    data = await loop.run_in_executor(None, kws.sock.recv)
                     if isinstance(data, bytes) and len(data) > 1:
-                        await websocket.send_bytes(data[1:])
-                    elif isinstance(data, str):
+                        channel = data[0]
+                        payload = data[1:]
+                        if channel in (1, 2, 3):
+                            await websocket.send_bytes(payload)
+                        elif channel == 4:
+                            pass
+                    elif isinstance(data, str) and data:
                         await websocket.send_text(data)
             except Exception:
                 pass
 
         async def browser_to_k8s():
+            loop = asyncio.get_event_loop()
             try:
                 while True:
                     data = await websocket.receive()
@@ -1084,9 +1342,9 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
                     msg = data.get("text") or data.get("bytes")
                     if msg:
                         if isinstance(msg, str):
-                            kws.send("\x00" + msg)
+                            await loop.run_in_executor(None, kws.sock.send, "\x00" + msg)
                         else:
-                            kws.send_binary(b"\x00" + msg)
+                            await loop.run_in_executor(None, kws.sock.send_binary, b"\x00" + msg)
             except Exception:
                 pass
 

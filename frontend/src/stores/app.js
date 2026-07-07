@@ -7,6 +7,7 @@ export const useAppStore = defineStore('app', () => {
     const theme = ref(localStorage.getItem('aiops-theme') || 'light')
     const colorScheme = ref(localStorage.getItem('aiops-color-scheme') || 'indigo')
     const dbMode = ref(localStorage.getItem('aiops-db-mode') || 'demo')
+    const k8sCluster = ref(localStorage.getItem('aiops-k8s-cluster') || '')
 
     function toggleSidebar() {
         sidebarCollapsed.value = !sidebarCollapsed.value
@@ -18,6 +19,10 @@ export const useAppStore = defineStore('app', () => {
 
     function setColorScheme(scheme) {
         colorScheme.value = scheme
+    }
+
+    function setK8sCluster(name) {
+        k8sCluster.value = name || ''
     }
 
     async function fetchDbMode() {
@@ -56,9 +61,13 @@ export const useAppStore = defineStore('app', () => {
         localStorage.setItem('aiops-db-mode', val)
     })
 
+    watch(k8sCluster, (val) => {
+        localStorage.setItem('aiops-k8s-cluster', val || '')
+    })
+
     return {
-        sidebarCollapsed, theme, colorScheme, dbMode,
-        toggleSidebar, toggleTheme, setColorScheme,
+        sidebarCollapsed, theme, colorScheme, dbMode, k8sCluster,
+        toggleSidebar, toggleTheme, setColorScheme, setK8sCluster,
         fetchDbMode, switchDbMode,
     }
 })

@@ -42,8 +42,8 @@
             <span class="legend-dot" :style="{ background: color }"></span>{{ type }}
           </div>
           <div class="legend-section">状态</div>
-          <div class="legend-item"><span class="legend-dot green"></span>正常</div>
-          <div class="legend-item"><span class="legend-dot red-border"></span>异常</div>
+          <div class="legend-item"><span class="legend-dot status-normal"></span>正常（无边框）</div>
+          <div class="legend-item"><span class="legend-dot status-abnormal"></span>异常（红色边框）</div>
 
           <div v-if="selectedNode" class="node-detail">
             <div class="legend-section">节点详情</div>
@@ -119,12 +119,33 @@ const chartRef = ref(null)
 let chart = null
 
 const typeColors = {
-  host: '#409EFF',
-  server: '#409EFF',
-  service: '#67C23A',
-  database: '#E6A23C',
-  middleware: '#9B59B6',
-  network: '#00C9A7',
+  host: '#3b82f6',
+  server: '#3b82f6',
+  virtual_machine: '#06b6d4',
+  service: '#8b5cf6',
+  database: '#f59e0b',
+  middleware: '#f97316',
+  network: '#10b981',
+  network_device: '#10b981',
+  switch: '#14b8a6',
+  router: '#0ea5e9',
+  firewall: '#ef4444',
+  load_balancer: '#ec4899',
+  storage: '#64748b',
+  storage_device: '#64748b',
+  kubernetes_cluster: '#6366f1',
+  cluster: '#6366f1',
+  namespace: '#3b82f6',
+  node: '#10b981',
+  deployment: '#f59e0b',
+  statefulset: '#f97316',
+  daemonset: '#ea580c',
+  pod: '#14b8a6',
+  ingress: '#ec4899',
+  pvc: '#64748b',
+  pv: '#475569',
+  configmap: '#06b6d4',
+  secret: '#dc2626',
   default: '#909399',
 }
 
@@ -320,6 +341,8 @@ onBeforeUnmount(() => {
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text, #1e293b); padding: 3px 0; }
 .legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 .legend-dot.green { background: #67C23A; }
+.legend-dot.status-normal { background: #ccc; border: 2px dashed #aaa; }
+.legend-dot.status-abnormal { background: #fff; border: 2px solid #ef4444; }
 .legend-dot.red-border { background: #fff; border: 2px solid #ef4444; }
 .node-detail { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border, rgba(0,0,0,0.07)); }
 .detail-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 3px 0; }

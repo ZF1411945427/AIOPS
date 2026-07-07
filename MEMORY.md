@@ -1,3 +1,213 @@
+### 2026-07-08: 知识库 RAG 双模式架构设计 + RAG 检索接口参数修复 + 测试文档生成
+- **需求1 RAG 现状质疑**: 爸爸问"RAG 到底什么逻辑，用没用 RAG 组件"。经全代码审查确认：当前是**自制版伪 RAG**，只用 TF-IDF 词频统计 + 内存余弦相似度，**没有** sentence-transformers / LangChain / 向量数据库 / LLM 生成，只实现了 RAG 的 Retrieval 环节且是最低配
+- **RAG 三件套缺失分析**:
+  - ❌ 向量化：TF-IDF 稀疏词袋（词频统计），非语义 Embedding（不理解同义词）
+  - ❌ 向量存储：SQLite JSON 字符串，非 PGVector/Milvus（无 ANN 索引）
+  - ❌ LLM 生成：前端检索直接返回切片原文，无 LLM 增强生成
+  - ✅ AI Agent 侧有 LLM 生成（mcp_tools.py 的 query_knowledge_rag 把切片喂 LLM），但检索弱
+- **需求2 架构设计记录**: 爸爸要求"后面做真实 RAG 方案（保留现有低配版），先记录在系统架构设计里"
+- **架构设计更新** `AIOPS系统架构设计.md` 第 10.3 章节完全重写:
+  - 原内容描述的是理想方案（BGE + Rerank + LLM），与实际 TF-IDF 实现不符
+  - 重写为"双模式架构"：模式A 低配 TF-IDF（已实现✅）+ 模式B 高配语义 RAG（规划⏳）
+  - 新增双模式架构总览图（ASCII），展示两套并存 + embedding_mode 切换机制
+  - 10.3.2 当前实现：详细记录 TF-IDF 数据模型/流水线/检索流程/局限
+  - 10.3.3 未来升级：BGE 语义 Embedding + PGVector + Rerank + LLM 生成，6 阶段升级路径
+  - 10.3.4 双模式对比表（11 个维度）
+  - 切换机制：KbChunk.embedding_mode 字段区分 tfidf / semantic，检索时按 mode 选引擎
+- **需求3 检索接口 422 修复**: 前端检索报 422
+  - 根因：前端传 `?q=api`，后端参数名是 `query`（必填），FastAPI Pydantic 校验失败返回 422
+  - 修复 `knowledge_documents.py:doc_search`：加 `q` 别名参数（`query: str = "", q: str = ""`），空值降级返回而非 422
+  - 验证：`?q=api` 200 count=5，`?query=pod` 200 count=5，空参数 200 友好提示
+- **需求4 测试文档生成**: 爸爸要 RAG 上传测试文档
+  - 生成 `功能测试/K8s运维故障排查手册.md`（24.7KB / 16413 字符 / 预计 53 切片 / 45 标题）
+  - 9 章内容：Pod异常/工作负载/网络/存储/节点故障排查 + AIOps联动 + 附录
+  - 覆盖高频检索词（K8s/Pod/Deployment/Service/告警/根因分析），适合 TF-IDF 测试
+- **专业名词**: 伪 RAG（Pseudo-RAG）、词汇匹配 vs 语义匹配（Lexical vs Semantic Matching）、稀疏词袋向量（Sparse BoW Vector）vs 稠密语义向量（Dense Semantic Embedding）、RAG 三件套（Embedding 模型 + 向量数据库 + LLM 生成）、ANN 近似检索（Approximate Nearest Neighbor）、Rerank 重排序（Cross-encoder Re-ranking）、参数别名（Parameter Aliasing）、422 Unprocessable Entity
+
+### 2026-07-07: K8s CMDB 三层纳管模型改造（Dynamic CI + OwnerReference + 弱引用扫描）
+- **需求**: 爸爸质疑 K8s 资产管理为何把 secret/configmap/pvc/service/pod 全量入库，问"把 K8s 整体或节点定义为一个资源 vs 所有 resource 独立纳管"哪个好。经讨论确定采用行业标准的三层纳管模型
+- **行业标准参考**:
+  - ServiceNow Dynamic CI：稳定实体入 CMDB，动态实体（Pod）实时查
+  - OpenTelemetry 资源稳定性分层：稳定资源 vs 工作负载资源
+  - Backstage 服务中心模型：以服务为中心纳管
+  - ITIL CI 受控原则：派生资源（Derived Resource）不纳管
+- **三层纳管模型**:
+  - 第一层 持久化 CI（入库）: cluster/node/namespace/deployment/statefulset/daemonset/service/ingress/pv/pvc
+  - 第二层 弱纳管 CI（入库但只存引用关系）: configmap/secret —— 记录 referenced_by[] + orphan 标记，secret 数据内容不入库（合规），只存 data_keys 键名
+  - 第三层 实时视图（不入库）: pod/replicaset —— 通过 OwnerReference 链判定为派生资源，Pod 概要聚合到工作负载 attrs.pod_summary
+- **改造代码** `assets.py:api_asset_sync_k8s`（完全重写同步逻辑）:
+  - 新增 ReplicaSet 拉取 → 建 `rs_to_deploy` 映射（Pod→RS→Deploy 归属链追溯）
+  - 新增 `_pod_summary_for_workload()`：扫描 Pod 的 ownerReferences，聚合 total/running/pending/failed/restarts 到工作负载 attrs.pod_summary
+  - 新增弱引用扫描：遍历 Pod.spec.volumes 收集 configMap/secret/pvc 引用 → 写入对应 CI 的 referenced_by
+  - 新增孤岛检测：无任何 Pod 引用的 configmap/secret/pvc 标记 orphan=true
+  - Secret 安全化：不存 data 内容，只存 data_keys 键名 + referenced_by + orphan
+  - ConfigMap 安全化：不存 data 内容，只存 data_keys 键名
+  - 旧 Pod/ReplicaSet 记录降级：status="deprecated"，不删除（保留历史审计）
+  - DaemonSet 特殊处理：无 spec.replicas，用 status.desired_number_scheduled/number_ready
+- **改造代码** `topology_service.build_k8s_topo_graph`:
+  - 排除 deprecated 节点（旧 pod/replicaset 记录）
+  - 新增 references 弱引用边：configmap/secret/pvc 的 attrs.referenced_by 反查 deployment asset → 加边
+  - 孤岛标记：attrs.orphan=true 的节点标记 abnormal
+  - 工作负载异常标记：attrs.pod_summary.failed>0 或 running==0 时标记 abnormal
+  - Service selector 关联简化：selector value 包含在 deployment 名中则加 selects 边
+  - tree 构建重写：namespace 下含 workload/service/弱引用CI 三类子节点，用 `_node_obj()` 统一构造
+  - `build_container_topo` 同步过滤 deprecated，container_types 加入 pv/configmap/secret
+- **架构设计更新** `AIOPS系统架构设计.md` CMDB 章节:
+  - 组件表加"孤岛检测"、"OwnerReference 链追溯"组件
+  - 容器 CI 类型表格加"纳管层级"列，标注持久化/弱纳管/实时视图
+  - 新增"K8s 资源三层纳管模型"详细说明（含 ASCII 分层图 + 6 个关键机制）
+  - 关系管理更新为三类：owns/references/selects
+- **验证**: 真实集群 k8s_130 同步成功
+  - synced: namespaces=10, nodes=3, deployments=12, statefulsets=1, daemonsets=5, services=16, pvcs=4, pvs=4, configmaps=31, secrets=9
+  - pods_scanned=39, pods_skipped=39（三层纳管生效，Pod 全部不入库）
+  - orphans=34（孤岛资源检测生效）
+  - stale_cleaned=39（旧 pod 记录降级）
+  - 拓扑图: nodes=97（无 pod 节点）, edges: owns=95/references=6/selects=39, orphans=34, 18 个工作负载带 pod_summary
+  - Secret 验证: HAS_DATA_CONTENT=False, HAS_DATA_KEYS=True, ORPHAN=True（安全化生效）
+- **专业名词**: 三层纳管模型(Tiered Reconciliation Model)、Dynamic CI/Just-in-Time CI(动态配置项)、OwnerReference 链追溯(Owner Reference Chain Tracing)、派生资源(Derived Resource)、弱引用扫描(Weak Reference Scanning)、孤岛检测(Orphan Detection)、配置漂移(Configuration Drift)、联邦 CMDB(Federated CMDB)、关系纳管而非实体纳管(Relationship-only Reconciliation)、CI Churn(配置项抖动)、资源稳定性分层(Resource Stability Tiering)
+- **前端拓扑页改造** `ContainerTopologyView.vue`（完全重写）:
+  - 工作负载卡片改为展示 pod_summary 概要（total/running/pending/failed/restarts 彩色标签），不再列 pod 子节点
+  - 新增弱纳管 CI 节点（configmap/secret/pvc），含 referenced_by 引用数 + 孤岛红色标记
+  - 顶部加图例栏（10 种节点颜色 + 孤岛告警 + 引用关系边数）
+  - 侧边栏加孤岛资源告警卡片（红色提醒"疑似配置漂移"）
+  - 节点详情面板展示 pod_summary/referenced_by/orphan/data_keys/replicas/selector/cluster_ip 等新字段
+  - 节点类型统计扩展到 13 类（加 configmap/secret/pvc/pv）
+  - 异常工作负载红色边框（pod_summary.failed>0 或 running==0）
+- **验证**: 拓扑数据完整——12 deployment 全带 pod_summary、4 pvc 全有 referenced_by、34 孤岛标记、6 references 边 + 39 selects 边；前端构建产物含 pod_summary/referenced_by/orphan/weak-chip/orphan-alert 全部新字段 ✓
+- **资产列表页改造** `AssetsView.vue` + `assets.py:asset_api_list`:
+  - 后端 list 接口新增 ref_count/is_orphan 字段（解析 ci_attributes 的 referenced_by/orphan）
+  - CI 类型筛选下拉新增"🐳 K8s 持久化 CI"组（node/namespace/deployment/sts/ds/service/ingress/pv/pvc）+ "🔒 K8s 弱纳管 CI"组（configmap/secret）
+  - 表格新增列：纳管层级（持久化/弱纳管/标准 badge）、引用/孤岛（"被 N 引用"或红色"孤岛 ⚠"）
+  - 顶部三层纳管统计条：持久化 CI 数 / 弱纳管 CI 数 / 实时视图（deprecated pod）数 / 孤岛资源数（红色告警）
+  - 工具栏加"隐藏已废弃""仅看孤岛"复选框过滤
+  - 状态新增 deprecated 样式（灰色 + 删除线 + 行透明度 0.55）
+  - 孤岛行红色背景高亮
+  - 资产名显示短名 + 灰色全名（如 `prometheus-server` + `k8s_130/monitoring/prometheus-server`）
+  - CI 类型 badge 按类型着色（deployment 橙/configmap 青/secret 红 等）
+  - 同步提示更新：`同步完成 [tiered]: NS 10 · Node 3 · Deploy 12 ... | Pod 跳过 39（不入库），孤岛 34`
+- **验证**: list 接口 configmap 返回 ref_count=0 + is_orphan=True；secret 返回 ref_count=0 + orphan=True；pod 返回 status=deprecated；deployment 返回 status=online ✓
+
+### 2026-07-07: 终端 WebSocket 修复 + Deployment 管理接口迁移 + K8s 资源 describe 查看功能
+- **需求1 终端修复**: 用户反馈终端一直"正在连接-连接错误-连接关闭"
+- **终端根因1**: uvicorn 缺少 WebSocket 协议库！日志显示 `No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'"`。`pip install websockets` 安装 v16.0 后 WS 握手成功。**这是环境依赖问题，非代码问题**
+- **终端根因2**: `v1.connect_get_namespaced_pod_exec()` 直接调用发的是普通 HTTP GET，K8s API 返回 400 `Upgrade request required`（要求 WebSocket 升级）。必须用 `kubernetes.stream.stream()` 包装
+- **终端修复** `k8s_resources.py:api_pod_terminal_ws`:
+  - 改用 `from kubernetes import stream as k8s_stream` + `k8s_stream.stream(v1.connect_get_namespaced_pod_exec, ..., _preload_content=False)` 生成 WSClient
+  - 用 `kws.sock.recv()`/`kws.sock.send()` 操作底层 ws（K8s channel 协议：首字节是 channel 号，0=stdin 1=stdout 2=stderr 3=error 4=resize）
+  - `kws.sock.settimeout(None)` 防空闲断开
+  - 接收逻辑：channel 1/2/3 → 转发 payload 给浏览器；channel 4 忽略
+  - 发送逻辑：浏览器输入加 `\x00` 前缀（channel 0 stdin）
+- **验证**: 真实 pod `ingress-nginx-controller-tt226` 终端连通，收到 bash 提示符 `master1:/etc/nginx$`，发送 `echo HELLO` 收到 `HELLO` ✓
+- **需求2 Deployment 422 修复**: 
+  - **根因**: `/k8s/api/deployments` 返回的 deployment 对象无 `id` 字段（只有 name/namespace/cluster），前端用 `d.id` 调 `/containers/api/deploy/{asset_id}/manage` 传了 `undefined` → FastAPI 路径参数 `asset_id: int` 校验失败 422
+  - **修复**: `k8s_resources.py` 新增 K8s 原生 deployment 管理接口（不经 Asset 表）：
+    - `GET /api/deployment/{cluster}/{namespace}/{name}/manage` — 直连 K8s 读 deployment
+    - `POST /api/deployment/{cluster}/{namespace}/{name}/rollout` — 重启
+    - `POST /api/deployment/{cluster}/{namespace}/{name}/scale` — 扩缩容
+    - `POST /api/deployment/{cluster}/{namespace}/{name}/canary` — 金丝雀
+    - `POST /api/deployment/{cluster}/{namespace}/{name}/promote` — 提升金丝雀
+    - `POST /api/deployment/{cluster}/{namespace}/{name}/rollback` — 回滚
+  - `K8sDeploymentsView.vue` 全部改用新接口（`/k8s/api/deployment/${d.cluster}/${d.namespace}/${d.name}/...`）
+  - 旧的 `/containers/api/deploy/{asset_id}/*` 系列保留未删（向后兼容）
+- **需求3 K8s 各资源 describe 查看**:
+  - **后端** `k8s_resources.py` 新增通用 describe 接口：
+    - `GET /api/describe/{resource_type}/{cluster}/{namespace}/{name}` — 用 `yaml.dump(obj.to_dict())` 输出 YAML
+    - 支持资源类型：pods/deployments/statefulsets/daemonsets/services/ingresses/configmaps/secrets/hpas/pvcs/pvs/namespaces
+    - 用 `_K8S_DESCRIBE_READERS` 字典 + lambda 映射资源类型到对应 K8s client read 方法
+    - HPA 用 `AutoscalingV1Api(v1.api_client)` 动态构造
+  - **前端** 三个视图都加了"查看"按钮 + YAML 弹窗（深色 monospace pre + 复制 YAML 按钮）：
+    - `K8sPodsView.vue` — 操作列加"查看"按钮，describe 弹窗
+    - `K8sDeploymentsView.vue` — 操作列加"查看"按钮，describe 弹窗
+    - `K8sResourceListView.vue` — 所有资源类型操作列统一加"查看"按钮（原有 configmap 的"查看"改为"编辑"避免重复）
+- **验证**: describe pods/deployments/services/configmaps 均返回 YAML ✓；deployment manage 接口返回 deployment 对象 ✓
+- **专业名词**: WebSocket 协议库(WebSocket Protocol Library)、WSClient(K8s Stream WebSocket 客户端)、channel 协议(K8s exec 的多路复用通道)、YAML 序列化(YAML Serialization)、资源描述(Resource Describe)
+
+
+- **需求**: Pod 日志和终端功能不好用，关注大日志量处理
+- **日志 Bug 修复**: kubernetes client 36.0.2 的 `read_namespaced_pod_log` 返回 `b'...'` repr 字符串（非正常解码）。改用 `_preload_content=False` + `resp.data.decode('utf-8')`，并加 `b'` 前缀检测兜底（ast.literal_eval）
+- **日志接口增强** `k8s_resources.py:api_pod_logs`:
+  - 新增参数：`container`（多容器选择）、`since_seconds`（时间范围）、`previous`（上一个崩溃容器日志）
+  - 返回容器列表 `containers`、行数 `lines`、截断标志 `truncated`/`display_truncated`
+  - tail 上限 10000 行，前端显示上限 2000 行（超过截断显示+提示下载）
+- **新增下载接口** `/api/pod/{cluster}/{namespace}/{name}/logs/download`：PlainTextResponse + Content-Disposition，tail 上限 50000
+- **前端日志弹窗重写** `K8sPodsView.vue`:
+  - 工具栏：容器选择、行数(100/500/1000/2000/5000)、时间范围(5min/1h/6h/24h/全部)、搜索过滤、上次崩溃容器、刷新、下载
+  - 元信息栏：容器名/总行数/截断警告/过滤后行数
+  - 大日志处理：超 2000 行只显示前 2000 + "日志过大，仅显示前 N 行，完整日志请下载"
+  - 搜索过滤：computed 实时过滤含关键字的行
+- **终端稳定性修复** `api_pod_terminal_ws`:
+  - `kws.settimeout(30)` → `settimeout(None)` 修复空闲 30s 断开
+  - `kws.recv()`/`kws.send()` 同步阻塞调用 → `run_in_executor` 放线程池，防阻塞 async 事件循环
+- **验证**: 日志接口测试通过——bytes bug 修复(has b-prefix: False)、容器列表返回、行数统计、大日志截断 ✓
+- **遗留**: 终端 WebSocket 404 疑似 `BaseHTTPMiddleware` 对 WebSocket 的已知限制（所有中间件都用 BaseHTTPMiddleware，它把 WS 当 HTTP 处理）。这是历史架构问题非本次改动引起，待后续排查
+- **测试脚本**: tools/test_pod_logs.py（日志）、test_terminal.py（终端WS）、test_log_type.py（日志返回类型）
+
+### 2026-07-07: Helm CLI 内置于项目 bin/ 目录，换环境免安装
+- **需求**: helm.exe 放项目内，换运行环境 git pull 即可用，无需每台机器单独装
+- **实现**: 
+  - 下载 helm v3.16.4 windows-amd64 版到 `bin/helm.exe`（58MB）
+  - `helm.py` 新增 `_helm_bin()`：优先用项目内 `bin/helm.exe`（Windows）/ `bin/helm`（Linux），回退到系统 PATH 的 helm
+  - `_run_helm` 改用 `_helm_bin()` 解析实际路径
+- **验证**: test_helm.py 调 /helm/api/releases?cluster=k8s_130 返回 2 个 release（k8sgpt/prometheus），error=None ✓
+- **注意**: bin/helm.exe 是二进制大文件(58MB)，已提交到 git；Linux 环境需另放 bin/helm（Linux 版二进制）
+- **历史**: 此前 helm.py 用 subprocess 本地执行 helm 命令经 KUBECONFIG 连远程集群，必须在运行环境装 helm CLI；现项目内置解决
+
+### 2026-07-07: K8s 集群选择跨页面共享 + Helm 支持 token 认证
+- **需求**: 在 K8s 任一功能页选择集群后，切换到其他 K8s/Helm 页面默认记住该集群
+- **实现**: `stores/app.js` 加 `k8sCluster`（localStorage 持久化）+ `setK8sCluster()`；各页面初始值取 `appStore.k8sCluster`，load 后同步回 store
+- **覆盖页面**:
+  - K8sPodsView（Pod 列表）
+  - K8sDeploymentsView（Deployment）
+  - K8sResourceListView（**一个组件覆盖 10 类资源**: statefulsets/daemonsets/services/ingresses/configmaps/secrets/hpas/pvcs/pvs/namespaces，通过 resourceType prop 切换）
+  - HelmView（Helm 应用管理）
+- **Helm kubeconfig 修复**: `helm.py:_prepare_kubeconfig` 原只认 `kubeconfig` 字段，资产添加用 `api_server+token` 时报"未配置 kubeconfig"。新增 `_build_kubeconfig_from_token()`：当无 kubeconfig 但有 api_server+token 时，自动用 yaml 生成 kubeconfig YAML（含 server/token/insecure-skip-tls-verify），helm CLI 即可用
+- **验证**: test_helm.py 登录后调 /helm/api/releases?cluster=k8s_130，kubeconfig 错误消失（后续卡在 helm CLI 未安装——环境问题非代码）
+- **遗留**: 服务器未安装 Helm CLI，`where helm` 找不到；如需用 Helm 功能需安装 Helm CLI 并加入 PATH
+
+### 2026-07-07: K8s 功能页问题澄清 — 真因是访问端口不同，非代码差异
+- **用户反馈**: 另一台电脑用相同 github 代码 K8s 页正常
+- **澄清真因**: 另一台访问 **8000 端口**（FastAPI 直接 serve dist，不经 Vite 代理），这台访问 **3000 端口**（Vite dev）→ 原始 vite.config.js 漏配 `/k8s` 前缀导致 404
+- **结论**: 不是代码差异，是访问方式不同。8000 不经 Vite 代理所以无此问题
+- **决策**: 用户选择统一用 8000 端口（与另一台一致），已关掉 3000 Vite dev
+- **已还原**: `git checkout -- frontend/vite.config.js` 恢复原状（不再改代理配置）
+- **保留的改动**: 仅 `k8s_resources.py` overview 状态 bug 修复（overviews status=online、healthy_clusters 正确计数、ds.last_status=online）—— 此修复与端口无关，8000/3000 都受益
+- **教训**: 遇到 dev/prod 行为不一致，先问用户访问方式，不要直接大改配置
+
+### 2026-07-07: 修复 K8s 功能页不显示 k8s_130（Vite 代理漏配 + overview 状态 bug）
+- **现象**: 用户添加 k8s_130 K8s 资产后，K8s 功能页不显示
+- **根因1（主因）**: `vite.config.js` 代理白名单只配了 /api /assets /login /logout /agent /ai /vue-assets，**漏了 /k8s 等大量后端前缀**；3000 端口 /k8s/api/overview 被 Vite 当前端路由返回 index.html（HTML），前端拿不到 JSON → 显示空
+- **根因2**: `k8s_resources.py` overview 代码 bug：overviews.append 用 `ds.last_status` 旧值（error），且成功时设 `"healthy"` 而非 `"online"`，导致①集群卡片显示红色②healthy_clusters 永远 0（判断 == "online" 但设的是 "healthy"）
+- **修复1**: 重写 `vite.config.js` 用 catch-all '/' + bypass 函数：含 `/api/` 或 `/ws/` → 代理；额外后端路径（/containers/topology /agent/sessions /metrics/names 等不含 /api/ 的）→ 代理；Vite 资源（/@ /src /node_modules 模块扩展名）→ Vite；其余 → /index.html（SPA fallback）。**未来新增后端路由无需改配置**
+- **修复2**: `k8s_resources.py` overview 成功分支：overviews status 改 `"online"`、`healthy_clusters += 1`（无条件，成功即健康）、`ds.last_status = "online"`（与前端 statusClass 一致）
+- **验证**: admin/admin123 登录 3000 端口调 /k8s/api/overview 返回 JSON：k8s_130 status=online nodes=3 pods=39 healthy_clusters=1 ✓
+- **遗留**: DataSource id=7「生产 K8s 集群」是种子数据（endpoint=https://k8s-api.prod.local:6443 假地址），永远连不上显示 error，可在数据源管理删除
+- **测试脚本**: tools/test_k8s_conn.py（直连K8s）、test_k8s_overview.py（多集群遍历）、test_overview_auth.py（带登录态调overview）
+- **专业名词**: 开发代理白名单(Dev Proxy Allowlist)、SPA Fallback、bypass 函数(Vite proxy 中决定请求是否代理的钩子)
+
+### 2026-07-07: 修复 Vite dev 代理漏配 /assets 导致 3000 端口 404
+- **现象**: 3000 端口访问 `/assets/api/test-connection` 返回 404，8000 端口正常
+- **根因**: 前端 `AssetsView.vue` 资产接口都在 `/assets/api/...` 下，但 `vite.config.js` 只代理了 `/api`、`/login`、`/agent`、`/ai`、`/vue-assets`，**漏了 `/assets`**；dev 模式 Vite 把 `/assets/api/...` 当静态资源处理直接 404
+- **生产(8000)正常**: FastAPI 直接命中 `APIRouter(prefix="/assets")` + `@router.post("/api/test-connection")` → 完整路径 `/assets/api/test-connection`
+- **修复**: `vite.config.js` server.proxy 增加 `'/assets'` → `http://127.0.0.1:8000`
+- **验证**: 3000 端口 POST `/assets/api/test-connection` 返回 200
+- **教训**: 前端路由前缀(如 `/assets`)必须同步加到 vite 代理白名单，否则 dev 模式必 404
+
+### 2026-07-07: 拉取新代码后必须重建前端 dist (8000 直 serve 构建产物)
+- **关键架构**: `app/main.py:145` 把 `frontend/dist` 挂到 `/vue-assets`，`_VUE_INDEX` 指向 `frontend/dist/index.html` → **8000 端口直接 serve 构建产物**，不是 Jinja2 模板
+- **坑**: `git pull` 拉的是 `frontend/src` 源码，但 8000 看的是 `frontend/dist` 构建产物；只 pull 不 build，8000 仍显示旧页面（dist 还是上次构建的 hash 文件）
+- **正确流程**: `git pull` → `npm run build --prefix frontend` → 浏览器 `Ctrl+Shift+R` 硬刷新
+- **本次构建**: dist hash `index-DsxVwZju.js`(07-06旧) → `index-BCk_tv7I.js`(07-07新)，2409 模块，15s
+- **补充**: dev 模式(3000端口/Vite)走 HMR 不需 build；生产访问走 8000 必须 build
+
+### 2026-07-07: 同步远程最新代码 (6f1f88b → 84d8ee0)
+- `git pull origin main` fast-forward 合并，44 文件变更 (+3545/-509)
+- 主要变更范围:
+  - **后端**: alerts/assets/k8s_resources/mobile/remediation_workflow/sre 路由增强；agent_service/remediation_service/topology_service 服务层扩展；新增 k8s_terminal.html/pod_logs.html 模板
+  - **Vue 前端**: AssetsView 大幅重构(+497/-)、ContainerTopologyView 重写、K8sPodsView/OnCallView/AgentWorkflowEditor 增强
+  - **mobile APP**: 新增 incident(详情+列表)/metrics/tools 页面；新增 api/incident.js/log.js/metrics.js；alert/asset/oncall/agent-chat/index 页面完善
+  - **tools/**: 新增 debug_agent/debug_agent_http/fix_provider_config/gen_tabbar_icons 调试脚本
+- **网络备注**: 代理 clash-verge(端口7897)在运行，首次 git pull 报连接超时，重试后成功（属网络抖动）
+
 ### 2026-07-07: 资产管理重构 — 按 CI 类型动态切换连接配置表单 + 新增 database/SNMP 类型
 - **问题**: 新增资产时表单固定显示 SSH 字段（用户名/密码/端口），但 K8s 子资源（deployment/pod/ingress 等）不需要 SSH，cluster 需要 K8s Token，数据库需要数据库连接信息
 - **重构内容**:

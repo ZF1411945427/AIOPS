@@ -13,26 +13,42 @@
           <option v-for="ct in group.items" :key="ct.value" :value="ct.value">{{ ct.label }}</option>
         </optgroup>
       </select>
+      <label class="filter-chk"><input type="checkbox" v-model="hideDeprecated" @change="applyFilter"> 隐藏已废弃</label>
+      <label class="filter-chk"><input type="checkbox" v-model="onlyOrphan" @change="applyFilter"> 仅看孤岛</label>
       <a href="javascript:void(0)" class="btn btn-primary" @click="openCreate">+ 新增资产</a>
-      <span class="toolbar-hint">K8s Deployment/Service/Ingress 等子资源接入集群后自动发现</span>
+      <span class="toolbar-hint">K8s 子资源接入集群后自动发现（三层纳管：持久化 CI / 弱纳管 CI / 实时视图）</span>
+    </div>
+
+    <div class="tier-bar" v-if="k8sStats.total">
+      <div class="tier-item"><span class="tier-dot" style="background:#10b981"></span><span class="tier-name">持久化 CI</span><span class="tier-num">{{ k8sStats.persistent }}</span><span class="tier-sub">集群/节点/命名空间/工作负载/Service/Ingress/PV/PVC</span></div>
+      <div class="tier-item"><span class="tier-dot" style="background:#06b6d4"></span><span class="tier-name">弱纳管 CI</span><span class="tier-num">{{ k8sStats.weak }}</span><span class="tier-sub">ConfigMap/Secret（只存引用关系）</span></div>
+      <div class="tier-item"><span class="tier-dot" style="background:#94a3b8"></span><span class="tier-name">实时视图</span><span class="tier-num">{{ k8sStats.realtime }}</span><span class="tier-sub">Pod/ReplicaSet（不入库，聚合到工作负载）</span></div>
+      <div class="tier-item tier-warn" v-if="k8sStats.orphan > 0"><span class="tier-warn-icon">⚠</span><span class="tier-name">孤岛资源</span><span class="tier-num">{{ k8sStats.orphan }}</span><span class="tier-sub">未被引用，疑似配置漂移</span></div>
     </div>
 
     <div class="panel">
       <div class="panel-body">
         <div v-if="loading" class="loading-state">加载中...</div>
-        <table v-else-if="assets.length" class="table">
+        <table v-else-if="filteredAssets.length" class="table">
           <thead>
             <tr>
-              <th>名称</th><th>CI 类型</th><th>IP / 地址</th><th>状态</th>
-              <th>连接方式</th><th>标签</th><th>创建时间</th><th>操作</th>
+              <th>名称</th><th>CI 类型</th><th>纳管层级</th><th>IP / 地址</th><th>状态</th>
+              <th>引用/孤岛</th><th>连接方式</th><th>标签</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="a in assets" :key="a.id">
-              <td><span class="asset-name">{{ a.name }}</span></td>
-              <td><span class="badge ci-type">{{ a.ci_type || '-' }}</span></td>
+            <tr v-for="a in filteredAssets" :key="a.id" :class="{ 'row-deprecated': a.status === 'deprecated', 'row-orphan': isOrphan(a) }">
+              <td><span class="asset-name">{{ shortName(a.name) }}</span><div class="asset-fullname" v-if="a.name.includes('/')">{{ a.name }}</div></td>
+              <td><span class="badge ci-type" :style="ciTypeStyle(a.ci_type)">{{ a.ci_type || '-' }}</span></td>
+              <td><span class="tier-badge" :class="tierClass(a.ci_type)">{{ tierLabel(a.ci_type) }}</span></td>
               <td class="text-sm">{{ a.ip || '-' }}</td>
               <td><span class="badge" :class="a.status">{{ statusLabel(a.status) }}</span></td>
+              <td class="text-sm">
+                <span v-if="a.refCount !== null" class="ref-info" :class="{ orphan: a.isOrphan }">
+                  {{ a.refCount > 0 ? `被 ${a.refCount} 引用` : '孤岛 ⚠' }}
+                </span>
+                <span v-else class="text-muted">-</span>
+              </td>
               <td class="text-sm">{{ connectionTypeLabel(a.connection_type) }}</td>
               <td class="text-sm">{{ a.tags || '-' }}</td>
               <td class="text-sm">{{ a.created_at || '-' }}</td>
@@ -248,12 +264,30 @@ const ciTypeGroups = [
   { label: '☁️ 云资源层', items: [
     { value: 'cloud_host', label: '云主机' }, { value: 'kubernetes_cluster', label: 'K8s 集群' },
   ]},
+  { label: '🐳 K8s 持久化 CI', items: [
+    { value: 'node', label: 'Node 节点' }, { value: 'namespace', label: 'Namespace' },
+    { value: 'deployment', label: 'Deployment' }, { value: 'statefulset', label: 'StatefulSet' },
+    { value: 'daemonset', label: 'DaemonSet' }, { value: 'service', label: 'Service' },
+    { value: 'ingress', label: 'Ingress' }, { value: 'pv', label: 'PV 存储卷' },
+    { value: 'pvc', label: 'PVC 存储声明' },
+  ]},
+  { label: '🔒 K8s 弱纳管 CI', items: [
+    { value: 'configmap', label: 'ConfigMap' }, { value: 'secret', label: 'Secret' },
+  ]},
   { label: '📊 业务层', items: [
     { value: 'business_app', label: '业务应用' }, { value: 'api_service', label: 'API 服务' },
     { value: 'ssl_certificate', label: 'SSL 证书' }, { value: 'dns_record', label: 'DNS 记录' },
     { value: 'monitoring_endpoint', label: '监控端点' },
   ]},
 ]
+
+const PERSISTENT_TYPES = new Set(['node','namespace','deployment','statefulset','daemonset','service','ingress','pv','pvc','kubernetes_cluster','cluster'])
+const WEAK_TYPES = new Set(['configmap','secret'])
+const CI_TYPE_COLOR = {
+  kubernetes_cluster:'#6366f1', cluster:'#6366f1', namespace:'#3b82f6', node:'#10b981',
+  deployment:'#f59e0b', statefulset:'#f97316', daemonset:'#ea580c', service:'#8b5cf6',
+  ingress:'#ec4899', pv:'#475569', pvc:'#64748b', configmap:'#06b6d4', secret:'#dc2626',
+}
 
 const sshTypes = ['server', 'virtual_machine', 'cloud_host', 'middleware']
 const snmpTypes = ['network_device', 'switch', 'router', 'firewall', 'load_balancer', 'storage_device']
@@ -323,8 +357,50 @@ const showableFields = {
 
 function showField(key) { return showableFields[form.value.ci_type]?.[key] ?? false }
 
-function statusLabel(s) { return { online: '在线', offline: '离线', degraded: '降级' }[s] || s }
+function statusLabel(s) { return { online: '在线', offline: '离线', degraded: '降级', deprecated: '已废弃' }[s] || s }
 function connectionTypeLabel(t) { return { ssh: 'SSH', agent: 'Agent', kubernetes: 'K8s API', snmp: 'SNMP', http: 'HTTP', database: '数据库' }[t] || t || '-' }
+
+function tierClass(ci_type) {
+  if (PERSISTENT_TYPES.has(ci_type)) return 'tier-persistent'
+  if (WEAK_TYPES.has(ci_type)) return 'tier-weak'
+  return 'tier-default'
+}
+function tierLabel(ci_type) {
+  if (ci_type === 'pod' || ci_type === 'replicaset') return '实时视图'
+  if (PERSISTENT_TYPES.has(ci_type)) return '持久化'
+  if (WEAK_TYPES.has(ci_type)) return '弱纳管'
+  return '标准'
+}
+function ciTypeStyle(ci_type) {
+  const c = CI_TYPE_COLOR[ci_type]
+  return c ? { background: c + '1a', color: c } : {}
+}
+function shortName(full) { return full.includes('/') ? full.split('/').pop() : full }
+function isOrphan(a) { return a.isOrphan === true }
+
+const hideDeprecated = ref(false)
+const onlyOrphan = ref(false)
+
+const filteredAssets = computed(() => {
+  let list = assets.value
+  if (hideDeprecated.value) list = list.filter(a => a.status !== 'deprecated')
+  if (onlyOrphan.value) list = list.filter(a => a.isOrphan === true)
+  return list
+})
+
+function applyFilter() { /* computed 自动响应，无需操作 */ }
+
+const k8sStats = computed(() => {
+  const k8sAssets = assets.value.filter(a => a.k8s_cluster || PERSISTENT_TYPES.has(a.ci_type) || WEAK_TYPES.has(a.ci_type))
+  let persistent = 0, weak = 0, realtime = 0, orphan = 0
+  k8sAssets.forEach(a => {
+    if (a.status === 'deprecated') { realtime++; return }
+    if (PERSISTENT_TYPES.has(a.ci_type)) persistent++
+    else if (WEAK_TYPES.has(a.ci_type)) weak++
+    if (a.isOrphan) orphan++
+  })
+  return { total: k8sAssets.length, persistent, weak, realtime, orphan }
+})
 
 function onCiTypeChange() {
   connTestResult.value = null
@@ -391,7 +467,23 @@ async function syncK8s(asset) {
     const data = await request.post(`/assets/api/${asset.id}/sync-k8s`)
     if (data.ok) {
       const s = data.synced || {}
-      ElMessage.success(`同步完成: Pod ${s.pods}个, Deployment ${s.deployments}个, Service ${s.services}个, Namespace ${s.namespaces}个, StatefulSet ${s.statefulsets}个, DaemonSet ${s.daemonsets}个`)
+      const parts = []
+      if (s.namespaces) parts.push(`NS ${s.namespaces}`)
+      if (s.nodes) parts.push(`Node ${s.nodes}`)
+      if (s.deployments) parts.push(`Deploy ${s.deployments}`)
+      if (s.statefulsets) parts.push(`STS ${s.statefulsets}`)
+      if (s.daemonsets) parts.push(`DS ${s.daemonsets}`)
+      if (s.services) parts.push(`Svc ${s.services}`)
+      if (s.ingresses) parts.push(`Ing ${s.ingresses}`)
+      if (s.pvcs) parts.push(`PVC ${s.pvcs}`)
+      if (s.pvs) parts.push(`PV ${s.pvs}`)
+      if (s.configmaps) parts.push(`CM ${s.configmaps}`)
+      if (s.secrets) parts.push(`Secret ${s.secrets}`)
+      const summary = parts.join(' · ')
+      const extra = []
+      if (s.pods_skipped) extra.push(`Pod 跳过 ${s.pods_skipped}（不入库）`)
+      if (s.orphans) extra.push(`孤岛 ${s.orphans}`)
+      ElMessage.success(`同步完成 [${data.model || 'tiered'}]: ${summary}${extra.length ? ' | ' + extra.join('，') : ''}`)
     } else {
       ElMessage.error('同步失败: ' + (data.message || '未知错误'))
     }
@@ -448,7 +540,14 @@ async function saveAsset() {
 
 async function loadAssets() {
   loading.value = true
-  try { const data = await request.get('/assets/api/list', { params: { search: search.value, ci_type: ciType.value } }); assets.value = data || [] }
+  try {
+    const data = await request.get('/assets/api/list', { params: { search: search.value, ci_type: ciType.value } })
+    assets.value = (data || []).map(a => ({
+      ...a,
+      refCount: a.ref_count !== null && a.ref_count !== undefined ? a.ref_count : null,
+      isOrphan: !!a.is_orphan,
+    }))
+  }
   catch (e) { ElMessage.error('加载失败: ' + e.message) }
   finally { loading.value = false }
 }
@@ -514,4 +613,30 @@ onMounted(() => { loadAssets() })
 .conn-test-msg.suc { color: #10b981; }
 .conn-test-msg.fail { color: #ef4444; }
 .toolbar-hint { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); }
+.filter-chk { font-size: 0.78rem; color: var(--text-secondary, #64748b); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.filter-chk input { cursor: pointer; }
+
+.tier-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; padding: 10px 14px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; }
+.tier-item { display: flex; align-items: center; gap: 6px; font-size: 0.74rem; padding: 4px 10px; border-radius: 5px; background: rgba(99,102,241,0.04); }
+.tier-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.tier-name { font-weight: 600; color: var(--text, #1e293b); }
+.tier-num { font-weight: 700; color: var(--accent, #6366f1); min-width: 18px; }
+.tier-sub { color: var(--text-tertiary, #94a3b8); font-size: 0.66rem; }
+.tier-warn { background: rgba(239,68,68,0.08); }
+.tier-warn-icon { color: #ef4444; font-size: 0.85rem; }
+.tier-warn .tier-num { color: #ef4444; }
+
+.tier-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 0.62rem; font-weight: 600; }
+.tier-badge.tier-persistent { background: rgba(16,185,129,0.1); color: #10b981; }
+.tier-badge.tier-weak { background: rgba(6,182,212,0.1); color: #06b6d4; }
+.tier-badge.tier-default { background: rgba(100,116,139,0.1); color: #64748b; }
+
+.asset-fullname { font-size: 0.62rem; color: var(--text-tertiary, #94a3b8); margin-top: 1px; }
+.ref-info { font-size: 0.72rem; color: #06b6d4; font-weight: 500; }
+.ref-info.orphan { color: #ef4444; font-weight: 600; }
+.text-muted { color: var(--text-tertiary, #94a3b8); }
+.badge.deprecated { background: rgba(100,116,139,0.15); color: #64748b; text-decoration: line-through; }
+tr.row-deprecated td { opacity: 0.55; }
+tr.row-deprecated .asset-name { text-decoration: line-through; }
+tr.row-orphan td { background: rgba(239,68,68,0.03); }
 </style>

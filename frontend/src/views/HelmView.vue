@@ -232,13 +232,15 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const activeTab = ref('releases')
 const clusters = ref([])
 const helmStatus = reactive({ version: '', error: '' })
 const helmError = ref('')
 
-const relCluster = ref('')
+const relCluster = ref(appStore.k8sCluster || '')
 const releases = ref([])
 const relLoading = ref(false)
 const relError = ref('')
@@ -308,6 +310,10 @@ async function loadClusters() {
     const data = await request.get('/datasources/api/list')
     const list = (data.sources || []).filter((s) => s.type === 'kubernetes')
     clusters.value = list.map((s) => ({ name: s.name, endpoint: s.endpoint }))
+    if (clusters.value.length && !clusters.value.some(c => c.name === relCluster.value)) {
+      relCluster.value = clusters.value[0]?.name || ''
+    }
+    appStore.setK8sCluster(relCluster.value)
   } catch (e) {
     helmError.value = '加载集群列表失败: ' + (e.message || e)
   }

@@ -25,16 +25,32 @@ CI_TYPES = [
 @router.get("/api/list")
 def asset_api_list(search: str = "", ci_type: str = "", db: Session = Depends(get_db)):
     assets = asset_service.list_assets(db, search, "", ci_type)
-    return JSONResponse([{
-        "id": a.id, "name": a.name, "type": a.type, "ci_type": getattr(a, 'ci_type', None),
-        "ip": a.ip, "status": a.status,
-        "connection_type": getattr(a, 'connection_type', None),
-        "last_checked": a.last_checked.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, 'last_checked', None) else None,
-        "latency_ms": getattr(a, 'latency_ms', None),
-        "k8s_cluster": getattr(a, 'k8s_cluster', None) or "",
-        "tags": getattr(a, 'tags', None) or "",
-        "created_at": a.created_at.strftime("%Y-%m-%d %H:%M") if getattr(a, 'created_at', None) else None,
-    } for a in assets])
+    result = []
+    for a in assets:
+        # 解析 ci_attributes 取引用关系/孤岛标记（三层纳管模型）
+        ref_count = None
+        is_orphan = False
+        try:
+            attrs = json.loads(a.ci_attributes) if a.ci_attributes else {}
+            if a.ci_type in ("configmap", "secret", "pvc"):
+                refs = attrs.get("referenced_by", []) or []
+                ref_count = len(refs)
+                is_orphan = bool(attrs.get("orphan"))
+        except Exception:
+            pass
+        result.append({
+            "id": a.id, "name": a.name, "type": a.type, "ci_type": getattr(a, 'ci_type', None),
+            "ip": a.ip, "status": a.status,
+            "connection_type": getattr(a, 'connection_type', None),
+            "last_checked": a.last_checked.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, 'last_checked', None) else None,
+            "latency_ms": getattr(a, 'latency_ms', None),
+            "k8s_cluster": getattr(a, 'k8s_cluster', None) or "",
+            "tags": getattr(a, 'tags', None) or "",
+            "created_at": a.created_at.strftime("%Y-%m-%d %H:%M") if getattr(a, 'created_at', None) else None,
+            "ref_count": ref_count,
+            "is_orphan": is_orphan,
+        })
+    return JSONResponse(result)
 
 
 @router.get("/api/ci-types")
@@ -296,9 +312,23 @@ def _sync_k8s_datasource(db: Session, asset, config: dict):
 
 @router.post("/api/{asset_id}/sync-k8s")
 def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
-    """手动触发 K8s 集群同步：从 DataSource 实时拉取资源并写入 Asset 表。"""
+    """手动触发 K8s 集群同步：三层纳管模型（Dynamic CI + OwnerReference + 弱引用扫描）。
+
+    纳管分层（参考 ServiceNow Dynamic CI / OpenTelemetry 资源稳定性分层标准）：
+      第一层 持久化 CI（入库，变更频率天~周）:
+        cluster / node / namespace / deployment / statefulset / daemonset / service / ingress / pv / pvc
+      第二层 弱纳管 CI（入库但只存引用关系，不存内容）:
+        configmap / secret —— 记录 referenced_by 与 orphan 标记；secret 数据内容不入库（合规）
+      第三层 实时视图（不入库，在工作负载 attrs 聚合 Pod 概要）:
+        pod / replicaset —— 通过 OwnerReference 链判定为派生资源，不入 Asset 表
+
+    关键机制:
+      - OwnerReference 链追溯: Pod → ReplicaSet → Deployment，派生资源不纳管
+      - 弱引用扫描: 遍历 Pod.spec.volumes 收集 ConfigMap/Secret/PVC 引用关系
+      - 孤岛检测: 无任何引用的 ConfigMap/Secret/PVC 标记 orphan=true（配置漂移信号）
+      - 工作负载聚合: Pod 概要（total/running/pending/failed/restarts）聚合到 Deployment attrs.pod_summary
+    """
     from kubernetes import client as k8s_client
-    from kubernetes import config as k8s_config
     from kubernetes.client.rest import ApiException
 
     asset = asset_service.get_asset(db, asset_id)
@@ -330,76 +360,255 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
         apps_v1 = k8s_client.AppsV1Api(api_client)
         net_v1 = k8s_client.NetworkingV1Api(api_client)
 
-        # 拉取各种资源
+        # ── 拉取资源 ──
         pods = v1.list_pod_for_all_namespaces().items
         deployments = apps_v1.list_deployment_for_all_namespaces().items
         statefulsets = apps_v1.list_stateful_set_for_all_namespaces().items
         daemonsets = apps_v1.list_daemon_set_for_all_namespaces().items
+        replicasets = apps_v1.list_replica_set_for_all_namespaces().items
         services = v1.list_service_for_all_namespaces().items
         namespaces = v1.list_namespace().items
         ingresses = net_v1.list_ingress_for_all_namespaces().items
         pvcs = v1.list_persistent_volume_claim_for_all_namespaces().items
+        pvs = v1.list_persistent_volume().items
         configmaps = v1.list_config_map_for_all_namespaces().items
         secrets = v1.list_secret_for_all_namespaces().items
+        nodes = v1.list_node().items
 
         now = datetime.now()
-        synced = {"pods": 0, "deployments": 0, "statefulsets": 0, "daemonsets": 0,
-                   "services": 0, "namespaces": 0, "ingresses": 0, "pvcs": 0,
-                   "configmaps": 0, "secrets": 0}
+        synced = {"namespaces": 0, "nodes": 0, "deployments": 0, "statefulsets": 0,
+                  "daemonsets": 0, "services": 0, "ingresses": 0, "pvcs": 0, "pvs": 0,
+                  "configmaps": 0, "secrets": 0, "pods_scanned": 0, "pods_skipped": 0,
+                  "orphans": 0, "stale_cleaned": 0}
 
-        def _upsert_k8s_asset(name, ci_type_val, ns="", extra_attrs=None):
+        def _upsert(name, ci_type_val, ns="", extra_attrs=None, parent=None):
             existing = db.query(Asset).filter(Asset.name == name, Asset.ci_type == ci_type_val).first()
             attrs = {"k8s_cluster": asset.name, "namespace": ns}
             if extra_attrs:
                 attrs.update(extra_attrs)
+            attrs_json = json.dumps(attrs, ensure_ascii=False)
             if existing:
-                existing.ci_attributes = json.dumps(attrs)
+                existing.ci_attributes = attrs_json
                 existing.last_checked = now
                 existing.status = "online"
                 existing.k8s_cluster = asset.name
+                if parent:
+                    existing.parent_id = parent
             else:
                 a = Asset(
                     name=name, type=ci_type_val, ci_type=ci_type_val,
                     ip="", status="online", tags=json.dumps(["k8s", asset.name]),
-                    k8s_cluster=asset.name, parent_id=asset.id,
+                    k8s_cluster=asset.name, parent_id=parent,
                     connection_type="kubernetes",
-                    ci_attributes=json.dumps(attrs),
+                    ci_attributes=attrs_json,
                     created_at=now, last_checked=now,
                 )
                 db.add(a)
-            synced[ci_type_val + "s" if ci_type_val[-1] != 'y' else ci_type_val[:-1] + "ies"] += 1
+            key = ci_type_val + "s" if ci_type_val[-1] != 'y' else ci_type_val[:-1] + "ies"
+            if key in synced:
+                synced[key] += 1
 
+        # ── ReplicaSet → Deployment 映射（用于 Pod ownerRef 链追溯）──
+        rs_to_deploy = {}
+        for rs in replicasets:
+            for r in (rs.metadata.owner_references or []):
+                if r.kind == "Deployment":
+                    rs_to_deploy[f"{rs.metadata.namespace}/{rs.metadata.name}"] = r.name
+                    break
+
+        cluster_id = asset.id
+
+        # ── Namespace（cluster 子节点）──
+        ns_asset_map = {}
         for ns in namespaces:
-            _upsert_k8s_asset(f"{asset.name}/{ns.metadata.name}", "namespace", ns.metadata.name)
+            ns_name = ns.metadata.name
+            full = f"{asset.name}/{ns_name}"
+            _upsert(full, "namespace", ns_name, parent=cluster_id)
+            ns_obj = db.query(Asset).filter(Asset.name == full, Asset.ci_type == "namespace").first()
+            if ns_obj:
+                ns_asset_map[ns_name] = ns_obj.id
+
+        # ── Node（cluster 子节点）──
+        for node in nodes:
+            ni = node.status.node_info
+            node_attrs = {
+                "kubelet_version": ni.kubelet_version if ni else "",
+                "os_image": ni.os_image if ni else "",
+                "cpu": (node.status.capacity.get("cpu", "") if node.status.capacity else ""),
+                "memory": (node.status.capacity.get("memory", "") if node.status.capacity else ""),
+                "node_status": "Ready" if any(
+                    c.type == "Ready" and c.status == "True" for c in (node.status.conditions or [])
+                ) else "NotReady",
+            }
+            _upsert(f"{asset.name}/node/{node.metadata.name}", "node", "", node_attrs, parent=cluster_id)
+
+        # ── 工作负载聚合 Pod 概要（Pod 不入库，扫描聚合到工作负载 attrs.pod_summary）──
+        def _pod_summary_for_workload(wl_name, wl_ns, wl_kind):
+            summary = {"total": 0, "running": 0, "pending": 0, "failed": 0, "restarts": 0}
+            for pod in pods:
+                if pod.metadata.namespace != wl_ns:
+                    continue
+                owner_match = False
+                for r in (pod.metadata.owner_references or []):
+                    if r.kind == "ReplicaSet" and wl_kind == "deployment":
+                        deploy_name = rs_to_deploy.get(f"{pod.metadata.namespace}/{r.name}")
+                        if deploy_name == wl_name:
+                            owner_match = True
+                            break
+                    elif r.kind.lower() == wl_kind and r.name == wl_name:
+                        owner_match = True
+                        break
+                if not owner_match:
+                    continue
+                summary["total"] += 1
+                phase = pod.status.phase or "Unknown"
+                if phase == "Running":
+                    summary["running"] += 1
+                elif phase == "Pending":
+                    summary["pending"] += 1
+                elif phase in ("Failed", "Unknown"):
+                    summary["failed"] += 1
+                summary["restarts"] += sum(s.restart_count for s in (pod.status.container_statuses or []))
+            return summary
+
+        def _upsert_workload(item, kind):
+            ns = item.metadata.namespace
+            name = item.metadata.name
+            parent_id = ns_asset_map.get(ns)
+            summary = _pod_summary_for_workload(name, ns, kind)
+            # 不同工作负载的副本数/就绪数字段不同
+            if kind == "deployment":
+                replicas = item.spec.replicas or 0
+                available = getattr(item.status, "available_replicas", None) or 0
+            elif kind == "statefulset":
+                replicas = item.spec.replicas or 0
+                available = getattr(item.status, "ready_replicas", None) or 0
+            else:  # daemonset 无 replicas，用 desired/ready
+                replicas = getattr(item.status, "desired_number_scheduled", None) or 0
+                available = getattr(item.status, "number_ready", None) or 0
+            extra = {
+                "replicas": replicas,
+                "available": available,
+                "pod_summary": summary,
+            }
+            _upsert(f"{asset.name}/{ns}/{name}", kind, ns, extra, parent=parent_id)
+
         for deploy in deployments:
-            avail = deploy.status.available_replicas or 0
-            total = deploy.spec.replicas or 0
-            _upsert_k8s_asset(f"{asset.name}/{deploy.metadata.namespace}/{deploy.metadata.name}", "deployment", deploy.metadata.namespace, {"replicas": total, "available": avail})
+            _upsert_workload(deploy, "deployment")
         for sts in statefulsets:
-            _upsert_k8s_asset(f"{asset.name}/{sts.metadata.namespace}/{sts.metadata.name}", "statefulset", sts.metadata.namespace)
+            _upsert_workload(sts, "statefulset")
         for ds in daemonsets:
-            _upsert_k8s_asset(f"{asset.name}/{ds.metadata.namespace}/{ds.metadata.name}", "daemonset", ds.metadata.namespace)
-        for pod in pods:
-            phase = pod.status.phase or "Unknown"
-            restarts = sum(s.restart_count for s in (pod.status.container_statuses or []))
-            _upsert_k8s_asset(f"{asset.name}/{pod.metadata.namespace}/{pod.metadata.name}", "pod", pod.metadata.namespace, {"phase": phase, "restarts": restarts})
+            _upsert_workload(ds, "daemonset")
+
+        # ── Service / Ingress（namespace 子节点）──
         for svc in services:
-            _upsert_k8s_asset(f"{asset.name}/{svc.metadata.namespace}/{svc.metadata.name}", "service", svc.metadata.namespace)
+            ns = svc.metadata.namespace
+            extra = {
+                "cluster_ip": svc.spec.cluster_ip or "",
+                "type": svc.spec.type or "ClusterIP",
+                "selector": dict(svc.spec.selector or {}),
+            }
+            _upsert(f"{asset.name}/{ns}/{svc.metadata.name}", "service", ns, extra, parent=ns_asset_map.get(ns))
+
         for ing in ingresses:
-            _upsert_k8s_asset(f"{asset.name}/{ing.metadata.namespace}/{ing.metadata.name}", "ingress", ing.metadata.namespace)
+            ns = ing.metadata.namespace
+            _upsert(f"{asset.name}/{ns}/{ing.metadata.name}", "ingress", ns, parent=ns_asset_map.get(ns))
+
+        # ── 弱引用扫描：遍历 Pod.spec.volumes 收集 ConfigMap/Secret/PVC 引用 ──
+        pvc_refs, cm_refs, secret_refs = {}, {}, {}
+        for pod in pods:
+            ns = pod.metadata.namespace
+            pod_deploy = None
+            for r in (pod.metadata.owner_references or []):
+                if r.kind == "ReplicaSet":
+                    pod_deploy = rs_to_deploy.get(f"{ns}/{r.name}")
+                    break
+                elif r.kind in ("Deployment", "StatefulSet", "DaemonSet"):
+                    pod_deploy = r.name
+                    break
+            for vol in (pod.spec.volumes or []):
+                if vol.config_map and vol.config_map.name:
+                    cm_refs.setdefault(f"{ns}/{vol.config_map.name}", set()).add(pod_deploy or "?")
+                if vol.secret and vol.secret.secret_name:
+                    secret_refs.setdefault(f"{ns}/{vol.secret.secret_name}", set()).add(pod_deploy or "?")
+                if vol.persistent_volume_claim and vol.persistent_volume_claim.claim_name:
+                    pvc_refs.setdefault(f"{ns}/{vol.persistent_volume_claim.claim_name}", set()).add(pod_deploy or "?")
+        synced["pods_scanned"] = len(pods)
+
+        # ── PVC（弱纳管：存引用关系 + 孤岛标记）──
         for pvc in pvcs:
-            _upsert_k8s_asset(f"{asset.name}/{pvc.metadata.namespace}/{pvc.metadata.name}", "pvc", pvc.metadata.namespace)
+            ns = pvc.metadata.namespace
+            key = f"{ns}/{pvc.metadata.name}"
+            refs = sorted(pvc_refs.get(key, []))
+            is_orphan = not refs
+            if is_orphan:
+                synced["orphans"] += 1
+            extra = {
+                "storage_class": pvc.spec.storage_class_name or "",
+                "requested_size": (pvc.spec.resources.requests.get("storage", "")
+                                   if pvc.spec.resources and pvc.spec.resources.requests else ""),
+                "referenced_by": refs,
+                "orphan": is_orphan,
+            }
+            _upsert(f"{asset.name}/{ns}/{pvc.metadata.name}", "pvc", ns, extra, parent=ns_asset_map.get(ns))
+
+        # ── PV（集群级独立 CI）──
+        for pv in pvs:
+            extra = {
+                "capacity": (pv.spec.capacity.get("storage", "") if pv.spec.capacity else ""),
+                "storage_class": pv.spec.storage_class_name or "",
+                "access_modes": list(pv.spec.access_modes or []),
+            }
+            _upsert(f"{asset.name}/pv/{pv.metadata.name}", "pv", "", extra, parent=cluster_id)
+
+        # ── ConfigMap（弱纳管：只存键名 + 引用关系，不存 data 内容）──
         for cm in configmaps:
-            _upsert_k8s_asset(f"{asset.name}/{cm.metadata.namespace}/{cm.metadata.name}", "configmap", cm.metadata.namespace)
+            ns = cm.metadata.namespace
+            key = f"{ns}/{cm.metadata.name}"
+            refs = sorted(cm_refs.get(key, []))
+            is_orphan = not refs
+            if is_orphan:
+                synced["orphans"] += 1
+            extra = {
+                "referenced_by": refs,
+                "orphan": is_orphan,
+                "data_keys": list(cm.data.keys()) if cm.data else [],
+            }
+            _upsert(f"{asset.name}/{ns}/{cm.metadata.name}", "configmap", ns, extra, parent=ns_asset_map.get(ns))
+
+        # ── Secret（弱纳管：只存键名 + 引用关系，不存 data 内容——合规要求）──
         for sec in secrets:
-            _upsert_k8s_asset(f"{asset.name}/{sec.metadata.namespace}/{sec.metadata.name}", "secret", sec.metadata.namespace)
+            ns = sec.metadata.namespace
+            key = f"{ns}/{sec.metadata.name}"
+            refs = sorted(secret_refs.get(key, []))
+            is_orphan = not refs
+            if is_orphan:
+                synced["orphans"] += 1
+            extra = {
+                "type": sec.type or "Opaque",
+                "referenced_by": refs,
+                "orphan": is_orphan,
+                "data_keys": list(sec.data.keys()) if sec.data else [],
+            }
+            _upsert(f"{asset.name}/{ns}/{sec.metadata.name}", "secret", ns, extra, parent=ns_asset_map.get(ns))
+
+        # ── 旧派生资源（pod/replicaset）降级：标记 deprecated，不删除（保留历史审计）──
+        stale = db.query(Asset).filter(
+            Asset.ci_type.in_(["pod", "replicaset"]),
+            Asset.k8s_cluster == asset.name
+        ).all()
+        for s in stale:
+            s.status = "deprecated"
+            s.last_checked = now
+            synced["stale_cleaned"] += 1
+        synced["pods_skipped"] = len(pods)
 
         db.commit()
         ds.last_status = "healthy"
         ds.last_scrape = now
         db.commit()
 
-        return JSONResponse({"ok": True, "synced": synced})
+        return JSONResponse({"ok": True, "synced": synced, "model": "tiered-dynamic-ci"})
     except ApiException as e:
         ds.last_status = "error"
         ds.last_error = str(e)

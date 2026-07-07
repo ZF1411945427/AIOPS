@@ -67,13 +67,17 @@ def _chunk_to_dict(c):
 
 @router.get("/search", response_class=JSONResponse)
 def doc_search(
-    query: str,
+    query: str = "",
+    q: str = "",
     top_k: int = 5,
     asset_type: str = "",
     severity: str = "",
     tags: str = "",
     db: Session = Depends(get_db)):
-    """RAG 语义检索 JSON 接口（供前端 AJAX + MCP 工具调用）."""
+    # 兼容 q 和 query 两种参数名
+    query = query or q
+    if not query:
+        return JSONResponse({"items": [], "total": 0, "message": "缺少检索参数 query/q"})
     results = rag_service.vector_search(
         db, query=query, top_k=min(top_k, 20),
         asset_type=asset_type or None,
