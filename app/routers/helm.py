@@ -14,12 +14,22 @@ from app.models import DataSource
 router = APIRouter(prefix="/helm", tags=["helm"])
 
 
+def _helm_bin():
+    """优先用项目内 bin/helm.exe，回退到系统 PATH 的 helm"""
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    local = os.path.join(here, "bin", "helm.exe") if os.name == "nt" else os.path.join(here, "bin", "helm")
+    if os.path.isfile(local):
+        return local
+    return "helm"
+
+
 def _run_helm(cmd, env=None, timeout=120):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+        full_cmd = [_helm_bin()] + cmd[1:]
+        p = subprocess.run(full_cmd, capture_output=True, text=True, timeout=timeout, env=env)
         return {"ok": p.returncode == 0, "stdout": p.stdout, "stderr": p.stderr, "returncode": p.returncode}
     except FileNotFoundError:
-        return {"ok": False, "stdout": "", "stderr": "未找到 helm 命令，请确认已安装 Helm CLI 并加入 PATH", "returncode": -1, "helm_missing": True}
+        return {"ok": False, "stdout": "", "stderr": "未找到 helm 命令，请确认已安装 Helm CLI 并加入 PATH，或在项目 bin/ 目录放置 helm 可执行文件", "returncode": -1, "helm_missing": True}
     except subprocess.TimeoutExpired:
         return {"ok": False, "stdout": "", "stderr": "Helm 命令执行超时", "returncode": -1, "timeout": True}
     except Exception as e:
@@ -32,6 +42,8 @@ def _prepare_kubeconfig(db: Session, cluster: str):
         return None, None, "未找到集群数据源: " + cluster
     cfg = parse_json_config(ds.auth_config)
     kubeconfig = cfg.get("kubeconfig")
+    if not kubeconfig and cfg.get("api_server") and cfg.get("token"):
+        kubeconfig = _build_kubeconfig_from_token(cfg.get("api_server"), cfg.get("token"), cfg.get("verify_ssl", False))
     if not kubeconfig:
         return None, None, "该集群数据源未配置 kubeconfig"
     if isinstance(kubeconfig, dict):
@@ -45,6 +57,32 @@ def _prepare_kubeconfig(db: Session, cluster: str):
     env = dict(os.environ)
     env["KUBECONFIG"] = f.name
     return env, f.name, None
+
+
+def _build_kubeconfig_from_token(api_server, token, verify_ssl=False):
+    import yaml
+    cluster_name = "aiops-cluster"
+    cfg = {
+        "apiVersion": "v1",
+        "kind": "Config",
+        "clusters": [{
+            "name": cluster_name,
+            "cluster": {
+                "server": api_server,
+                "insecure-skip-tls-verify": not verify_ssl,
+            },
+        }],
+        "contexts": [{
+            "name": cluster_name,
+            "context": {"cluster": cluster_name, "user": "aiops-user"},
+        }],
+        "current-context": cluster_name,
+        "users": [{
+            "name": "aiops-user",
+            "user": {"token": token},
+        }],
+    }
+    return yaml.safe_dump(cfg, default_flow_style=False)
 
 
 def _cleanup(*paths):

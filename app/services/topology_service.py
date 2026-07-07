@@ -21,15 +21,28 @@ def _parse_attrs(a):
 
 
 def build_k8s_topo_graph(db: Session):
-    """构建 K8s 多维关系图：ownership 层级 + pod-node 调度 + 异常标记。
-    返回 {nodes, links, clusters, stats} 供 d3 力导向图渲染。
+    """构建 K8s 多维关系图：ownership 层级 + 弱引用关系 + 孤岛标记 + Pod 实时视图聚合。
+
+    三层纳管模型（参考 ServiceNow Dynamic CI / OpenTelemetry 资源稳定性分层）:
+      - 持久化 CI: cluster/node/namespace/deploy/sts/ds/service/ingress/pv/pvc
+      - 弱纳管 CI: configmap/secret（带 referenced_by / orphan 标记）
+      - 实时视图: pod/replicaset 不入库，Pod 概要聚合到工作负载 attrs.pod_summary
+
+    关系类型:
+      - owns:        父子归属（cluster→namespace→deployment）
+      - references:  弱引用（deployment→configmap/secret/pvc，基于 attrs.referenced_by 反查）
+      - selects:     Service selector → Deployment（基于 selector 匹配 deployment 标签）
+    孤岛标记: configmap/secret/pvc 的 attrs.orphan=true 时节点标记 abnormal
     """
-    container_types = ["cluster", "kubernetes_cluster", "namespace", "node", "deployment", "statefulset",
-                       "daemonset", "pod", "service", "ingress", "pvc"]
+    # 排除 deprecated（旧 pod/replicaset 记录已降级）
+    container_types = ["cluster", "kubernetes_cluster", "namespace", "node",
+                       "deployment", "statefulset", "daemonset",
+                       "service", "ingress", "pvc", "pv",
+                       "configmap", "secret"]
     all_assets = db.query(Asset).filter(Asset.ci_type.in_(container_types)).all()
+    all_assets = [a for a in all_assets if a.status != "deprecated"]
 
     # 只保留：1）kubernetes_cluster/cluster 根节点 2）有 parent_id 且父级在集合中的后代
-    # 过滤掉旧 seed 数据中无 parent_id 的零散 k8s 资产
     cluster_ids = set(a.id for a in all_assets if a.ci_type in ("kubernetes_cluster", "cluster"))
     valid_ids = set(cluster_ids)
     changed = True
@@ -41,17 +54,22 @@ def build_k8s_topo_graph(db: Session):
                 changed = True
     assets = [a for a in all_assets if a.id in valid_ids]
 
-    # 节点按 id 索引，预解析 attrs
     asset_map = {}
     nodes = []
+    # name → id 索引（用于弱引用反查：referenced_by 中的 deployment name → asset id）
+    full_name_to_id = {}
     for a in assets:
         attrs = _parse_attrs(a)
         asset_map[a.id] = {"asset": a, "attrs": attrs}
-        # 异常标记：pod phase 非 Running/未知、status offline
+        full_name_to_id[a.name] = a.id
+        # 异常标记：orphan 资源 / 工作负载 pod 概要异常 / status offline
         is_abnormal = False
-        if a.ci_type == "pod":
-            phase = attrs.get("phase", "")
-            is_abnormal = phase not in ("Running", "")
+        if attrs.get("orphan"):
+            is_abnormal = True
+        if a.ci_type in ("deployment", "statefulset", "daemonset"):
+            ps = attrs.get("pod_summary") or {}
+            if ps.get("failed", 0) > 0 or (ps.get("total", 0) > 0 and ps.get("running", 0) == 0):
+                is_abnormal = True
         elif a.status == "offline":
             is_abnormal = True
         nodes.append({
@@ -63,15 +81,14 @@ def build_k8s_topo_graph(db: Session):
             "cluster": a.k8s_cluster or attrs.get("k8s_cluster", ""),
             "attrs": attrs,
             "abnormal": is_abnormal,
+            "orphan": bool(attrs.get("orphan")),
             "parent_id": a.parent_id,
         })
 
-    # 构建链接
     links = []
     seen_edges = set()
 
     def _add_edge(source_id, target_id, rel_type):
-        """target 指向 source 的拥有关系：cluster owns namespace → edge cluster→namespace"""
         if not source_id or not target_id or source_id == target_id:
             return
         key = (source_id, target_id, rel_type)
@@ -85,37 +102,46 @@ def build_k8s_topo_graph(db: Session):
         if a.parent_id and a.parent_id in asset_map:
             _add_edge(a.parent_id, a.id, "owns")
 
-    # 2. pod → node 调度关系（基于 attrs.node 名称匹配 node 资产）
-    name_to_asset = {}
+    # 2. 弱引用关系：configmap/secret/pvc 的 attrs.referenced_by → deployment
+    #    referenced_by 存的是 deployment 简短 name，构造完整 name 匹配 asset
     for a in assets:
-        if a.ci_type in ("node",):
-            name_to_asset[a.name] = a.id
-    for a in assets:
-        if a.ci_type == "pod":
-            attrs = asset_map[a.id]["attrs"]
-            node_name = attrs.get("node", "")
-            if node_name and node_name in name_to_asset:
-                _add_edge(name_to_asset[node_name], a.id, "scheduled_on")
+        if a.ci_type not in ("configmap", "secret", "pvc"):
+            continue
+        attrs = asset_map[a.id]["attrs"]
+        ns = attrs.get("namespace", "")
+        refs = attrs.get("referenced_by", [])
+        cluster_name = attrs.get("k8s_cluster", "") or a.k8s_cluster or ""
+        for ref_name in refs:
+            if not ref_name or ref_name == "?":
+                continue
+            # 构造 deployment 的完整 name: {cluster}/{ns}/{deploy_name}
+            candidate = f"{cluster_name}/{ns}/{ref_name}"
+            dep_id = full_name_to_id.get(candidate)
+            if dep_id:
+                # 边方向：deployment → configmap（deployment 引用了 configmap）
+                _add_edge(dep_id, a.id, "references")
 
-    # 3. service → pod selector 关联（基于 attrs.selector 匹配 pod attrs.labels，当前 demo 无 labels，跳过；
-    #    退化策略：service.name 含 app 名 → 关联同 namespace 下 name 含同关键词的 pod）
+    # 3. service → deployment selector 关联
+    #    service attrs.selector 匹配 deployment 名称（简化：deployment 名包含 selector value）
+    dep_by_ns = {}
+    for a in assets:
+        if a.ci_type in ("deployment", "statefulset", "daemonset"):
+            ns = asset_map[a.id]["attrs"].get("namespace", "")
+            dep_by_ns.setdefault(ns, []).append(a)
     for a in assets:
         if a.ci_type != "service":
             continue
         svc_attrs = asset_map[a.id]["attrs"]
         selector = svc_attrs.get("selector", {})
         svc_ns = svc_attrs.get("namespace", "")
-        if selector:
-            # 精确 selector 匹配（pod attrs.labels 需存在，当前 demo 无，保留逻辑供真实数据）
-            for a2 in assets:
-                if a2.ci_type != "pod":
-                    continue
-                pod_attrs = asset_map[a2.id]["attrs"]
-                if pod_attrs.get("namespace") != svc_ns:
-                    continue
-                pod_labels = pod_attrs.get("labels", {})
-                if all(pod_labels.get(k) == v for k, v in selector.items()):
-                    _add_edge(a.id, a2.id, "selects")
+        if not selector:
+            continue
+        for dep in dep_by_ns.get(svc_ns, []):
+            # 退化策略：selector app=xxx → deployment 名含 xxx
+            selector_vals = [str(v) for v in selector.values()]
+            dep_short = dep.name.split("/")[-1] if "/" in dep.name else dep.name
+            if any(v and v in dep_short for v in selector_vals):
+                _add_edge(a.id, dep.id, "selects")
 
     # 集群分组
     clusters = sorted(set(n["cluster"] for n in nodes if n["cluster"]))
@@ -166,79 +192,40 @@ def build_k8s_topo_graph(db: Session):
                     return nid
         return child.get("parent_id")
 
-    def find_parent_dep(child, dep_list):
-        """通过名称前缀查找所属 deployment id"""
-        full = child.get("full_name", child["name"])
-        parts = full.split("/")
-        child_name = parts[-1] if len(parts) > 1 else child["name"]
-        for dep in dep_list:
-            dep_full = dep.get("full_name", dep["name"])
-            dep_parts = dep_full.split("/")
-            dep_name = dep_parts[-1]
-            if child_name.startswith(dep_name + "-") or child_name == dep_name:
-                return dep["id"]
-            # daemonset 的 pod 名可能包含 daemonset 名
-            if dep_name in child_name:
-                return dep["id"]
-        return None
+    # 按语义分层构建树（三层纳管：cluster→namespace→[workload|service|弱引用CI]）
+    def _node_obj(n):
+        return {
+            "id": n["id"], "name": n["name"],
+            "full_name": n.get("full_name", ""),
+            "ci_type": n["ci_type"],
+            "status": n["status"],
+            "cluster": n.get("cluster", ""),
+            "attrs": n.get("attrs", {}),
+            "abnormal": n.get("abnormal", False),
+            "orphan": n.get("orphan", False),
+            "children": [],
+        }
 
-    # 按语义分层构建树
     def build_semantic_tree():
         tree_roots = []
         for root in roots:
             cluster_id = root["id"]
-            # 找出所有 namespace 子节点
             ns_nodes = [n for n in nodes if n["ci_type"] == "namespace" and n.get("parent_id") == cluster_id]
             ns_list = []
             for ns in ns_nodes:
                 ns_id = ns["id"]
-                # 找这个 namespace 下的 deployment
-                deps = [n for n in nodes if n["ci_type"] in ("deployment", "statefulset", "daemonset") and (n.get("parent_id") == ns_id or find_ns_for(n) == ns_id)]
-                dep_list = []
-                for dep in deps:
-                    dep_id = dep["id"]
-                    dep_pods = [n for n in nodes if n["ci_type"] == "pod" and (n.get("parent_id") == dep_id or find_parent_dep(n, [dep]) == dep_id)]
-                    dep_list.append({
-                        "id": dep["id"], "name": dep["name"],
-                        "full_name": dep.get("full_name", ""),
-                        "ci_type": dep["ci_type"],
-                        "status": dep["status"],
-                        "cluster": dep.get("cluster", ""),
-                        "attrs": dep.get("attrs", {}),
-                        "abnormal": dep.get("abnormal", False),
-                        "children": dep_pods,
-                    })
-                svcs = [n for n in nodes if n["ci_type"] == "service" and (n.get("parent_id") == ns_id or find_ns_for(n) == ns_id)]
-                dep_list.extend({
-                    "id": s["id"], "name": s["name"],
-                    "full_name": s.get("full_name", ""),
-                    "ci_type": s["ci_type"],
-                    "status": s["status"],
-                    "cluster": s.get("cluster", ""),
-                    "attrs": s.get("attrs", {}),
-                    "abnormal": s.get("abnormal", False),
-                    "children": [],
-                } for s in svcs)
-                ns_list.append({
-                    "id": ns["id"], "name": ns["name"],
-                    "full_name": ns.get("full_name", ""),
-                    "ci_type": ns["ci_type"],
-                    "status": ns["status"],
-                    "cluster": ns.get("cluster", ""),
-                    "attrs": ns.get("attrs", {}),
-                    "abnormal": ns.get("abnormal", False),
-                    "children": dep_list,
-                })
-            tree_roots.append({
-                "id": root["id"], "name": root["name"],
-                "full_name": root.get("full_name", ""),
-                "ci_type": root["ci_type"],
-                "status": root["status"],
-                "cluster": root.get("cluster", ""),
-                "attrs": root.get("attrs", {}),
-                "abnormal": root.get("abnormal", False),
-                "children": ns_list,
-            })
+                # 工作负载（Pod 概要在 attrs.pod_summary，不再有 pod 子节点）
+                deps = [n for n in nodes if n["ci_type"] in ("deployment", "statefulset", "daemonset")
+                        and (n.get("parent_id") == ns_id or find_ns_for(n) == ns_id)]
+                # Service / Ingress
+                svcs = [n for n in nodes if n["ci_type"] in ("service", "ingress")
+                        and (n.get("parent_id") == ns_id or find_ns_for(n) == ns_id)]
+                # 弱纳管 CI（configmap/secret/pvc），含孤岛标记
+                weak = [n for n in nodes if n["ci_type"] in ("configmap", "secret", "pvc")
+                        and (n.get("parent_id") == ns_id or find_ns_for(n) == ns_id)]
+                children = [_node_obj(n) for n in deps + svcs + weak]
+                ns_list.append(_node_obj(ns) | {"children": children})
+            tree_roots.append(_node_obj(root) | {"children": ns_list})
         return tree_roots
 
     trees = build_semantic_tree()
@@ -299,8 +286,10 @@ def build_topo(db: Session):
 
 
 def build_container_topo(db: Session):
-    container_types = ["cluster", "namespace", "node", "deployment", "statefulset", "daemonset", "pod", "service", "ingress", "pvc", "container"]
+    container_types = ["cluster", "namespace", "node", "deployment", "statefulset", "daemonset",
+                       "service", "ingress", "pvc", "pv", "configmap", "secret", "container"]
     assets = db.query(Asset).filter(Asset.ci_type.in_(container_types)).order_by(Asset.ci_type, Asset.name).all()
+    assets = [a for a in assets if a.status != "deprecated"]
     asset_map = {}
     for a in assets:
         try:

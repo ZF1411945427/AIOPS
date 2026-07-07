@@ -33,7 +33,8 @@
                 <td>{{ p.restarts ?? 0 }}</td>
                 <td>{{ p.phase || '-' }}</td>
                 <td @click.stop>
-                  <button class="btn btn-sm" @click.stop="toggleLogs(p)">{{ showLogs && (detailPod?.name === p.name || termPod?.name === p.name) ? '日志' : '日志' }}</button>
+                  <button class="btn btn-sm" @click.stop="openDescribe(p)">查看</button>
+                  <button class="btn btn-sm" @click.stop="toggleLogs(p)">日志</button>
                   <button class="btn btn-sm" @click.stop="toggleTerminal(p)">终端</button>
                 </td>
               </tr>
@@ -90,10 +91,40 @@
     <div v-if="showLogs" class="modal-overlay" @click.self="showLogs = false">
       <div class="modal-box wide log-modal">
         <div class="log-header">
-          <h3>日志 · {{ detailPod?.name || termPod?.name }}</h3>
-          <button class="btn btn-sm" @click="toggleLogs(detailPod || termPod)">✕</button>
+          <h3>日志 · {{ logsPod?.name }}</h3>
+          <button class="btn btn-sm" @click="showLogs = false">✕</button>
         </div>
-        <pre class="log-content">{{ logsLoading ? '加载中...' : logsContent }}</pre>
+        <div class="log-toolbar">
+          <select v-model="logsContainer" class="input log-sel" @change="loadLogs(logsPod)">
+            <option v-for="c in logsContainers" :key="c" :value="c">{{ c }}</option>
+          </select>
+          <select v-model="logsTail" class="input log-sel" @change="loadLogs(logsPod)">
+            <option :value="100">最近 100 行</option>
+            <option :value="500">最近 500 行</option>
+            <option :value="1000">最近 1000 行</option>
+            <option :value="2000">最近 2000 行</option>
+            <option :value="5000">最近 5000 行</option>
+          </select>
+          <select v-model="logsSince" class="input log-sel" @change="loadLogs(logsPod)">
+            <option :value="0">全部时间</option>
+            <option :value="300">近 5 分钟</option>
+            <option :value="3600">近 1 小时</option>
+            <option :value="21600">近 6 小时</option>
+            <option :value="86400">近 24 小时</option>
+          </select>
+          <label class="log-prev"><input type="checkbox" v-model="logsPrevious" @change="loadLogs(logsPod)" /> 上次崩溃容器</label>
+          <input v-model="logsSearch" class="input log-search" placeholder="搜索关键字（过滤含关键字的行）" />
+          <button class="btn btn-sm" @click="loadLogs(logsPod)">刷新</button>
+          <button class="btn btn-sm" @click="downloadLogs">下载</button>
+        </div>
+        <div v-if="logsMeta" class="log-meta">
+          <span>容器: {{ logsMeta.container }}</span>
+          <span>总行数: {{ logsMeta.lines }}</span>
+          <span v-if="logsMeta.truncated" class="log-warn">⚠ 已达 tail 上限</span>
+          <span v-if="logsMeta.display_truncated" class="log-warn">⚠ 日志过大，仅显示前 {{ logsMeta.max_show }} 行，完整日志请下载</span>
+          <span v-if="logsSearch && filteredLogsLines !== logsMeta.lines">过滤后: {{ filteredLogsLines }} 行</span>
+        </div>
+        <pre class="log-content">{{ logsLoading ? '加载中...' : (logsSearch ? filteredLogs : logsContent) }}</pre>
       </div>
     </div>
 
@@ -107,18 +138,35 @@
         <div id="xterm-container" class="xterm-box"></div>
       </div>
     </div>
+
+    <!-- Describe 弹窗 -->
+    <div v-if="showDescribe" class="modal-overlay" @click.self="closeDescribe">
+      <div class="modal-box modal-lg">
+        <div class="log-header">
+          <h3>Pod 详情 (YAML) · {{ describePod?.name }}</h3>
+          <button class="btn btn-sm" @click="closeDescribe">✕</button>
+        </div>
+        <div v-if="describeLoading" class="loading-state">加载中...</div>
+        <div v-else>
+          <button class="btn btn-sm" @click="copyDescribe">{{ copiedDescribe ? '已复制 ✓' : '复制 YAML' }}</button>
+          <pre class="describe-yaml">{{ describeYaml }}</pre>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const loading = ref(false)
 const pods = ref([])
 const clusters = ref([])
-const clusterFilter = ref('')
+const clusterFilter = ref(appStore.k8sCluster || '')
 const namespaceFilter = ref('')
 const showDetail = ref(false)
 const detailLoading = ref(false)
@@ -128,8 +176,32 @@ const showLogs = ref(false)
 const showTerm = ref(false)
 const logsLoading = ref(false)
 const logsContent = ref('')
+const logsPod = ref(null)
+const logsContainers = ref([])
+const logsContainer = ref('')
+const logsTail = ref(500)
+const logsSince = ref(0)
+const logsPrevious = ref(false)
+const logsSearch = ref('')
+const logsMeta = ref(null)
 const termPod = ref(null)
 let termInstance = null
+
+const showDescribe = ref(false)
+const describeLoading = ref(false)
+const describeYaml = ref('')
+const describePod = ref(null)
+const copiedDescribe = ref(false)
+
+const filteredLogs = computed(() => {
+  if (!logsSearch.value || !logsContent.value) return logsContent.value
+  const kw = logsSearch.value.toLowerCase()
+  return logsContent.value.split('\n').filter(l => l.toLowerCase().includes(kw)).join('\n')
+})
+const filteredLogsLines = computed(() => {
+  if (!logsSearch.value || !logsContent.value) return logsMeta.value?.lines || 0
+  return filteredLogs.value.split('\n').filter(l => l.trim()).length
+})
 
 function phaseOf(p) { return p?.attrs?.phase || p?.status || 'Unknown' }
 function phaseClass(phase) {
@@ -158,6 +230,10 @@ async function loadPods() {
     const data = await request.get('/k8s/api/pods', { params: { cluster: clusterFilter.value, namespace: namespaceFilter.value } })
     pods.value = data.items || []
     clusters.value = data.clusters || []
+    if (clusters.value.length && !clusters.value.some(c => c.name === clusterFilter.value)) {
+      clusterFilter.value = clusters.value[0]?.name || ''
+    }
+    appStore.setK8sCluster(clusterFilter.value)
   } catch (e) {
     ElMessage.error('加载失败: ' + (e.message || e))
   } finally {
@@ -187,22 +263,64 @@ async function toggleLogs(p) {
   if (!p) return
   if (showLogs.value) { showLogs.value = false; return }
   showLogs.value = true
+  logsPod.value = p
+  logsContainers.value = []
+  logsContainer.value = ''
+  logsMeta.value = null
+  logsSearch.value = ''
+  await loadLogs(p)
+}
+
+async function loadLogs(p) {
+  if (!p) return
   logsLoading.value = true
   logsContent.value = '加载中...'
   const cluster = p.cluster || clusters.value[0]?.name || ''
-  if (!cluster) { logsContent.value = '无法确定集群'; return }
+  if (!cluster) { logsContent.value = '无法确定集群'; logsLoading.value = false; return }
   try {
-    const data = await request.get(`/k8s/api/pod/${cluster}/${p.namespace}/${p.name}/logs?tail=200`)
+    const params = { tail: logsTail.value, since_seconds: logsSince.value }
+    if (logsPrevious.value) params.previous = true
+    if (logsContainer.value) params.container = logsContainer.value
+    const data = await request.get(`/k8s/api/pod/${cluster}/${p.namespace}/${p.name}/logs`, { params })
     if (data.ok) {
       logsContent.value = data.logs || '(无日志输出)'
+      logsContainers.value = data.containers || [p.name]
+      if (!logsContainer.value && logsContainers.value.length) logsContainer.value = data.container || logsContainers.value[0]
+      logsMeta.value = {
+        container: data.container, lines: data.lines, truncated: data.truncated,
+        display_truncated: data.display_truncated, max_show: data.max_show,
+      }
     } else {
       logsContent.value = '获取日志失败: ' + (data.error || '未知错误')
+      if (data.containers) { logsContainers.value = data.containers; if (!logsContainer.value && logsContainers.value.length) logsContainer.value = logsContainers.value[0] }
     }
   } catch (e) {
     logsContent.value = '请求异常: ' + (e.message || e)
   } finally {
     logsLoading.value = false
   }
+}
+
+function downloadLogs() {
+  if (!logsPod.value) return
+  const cluster = logsPod.value.cluster || clusters.value[0]?.name || ''
+  if (!cluster) return
+  const p = new URLSearchParams({ tail: String(logsTail.value), since_seconds: String(logsSince.value) })
+  if (logsPrevious.value) p.append('previous', 'true')
+  if (logsContainer.value) p.append('container', logsContainer.value)
+  const token = localStorage.getItem('aiops-token')
+  const url = `${request.defaults.baseURL || ''}/k8s/api/pod/${cluster}/${logsPod.value.namespace}/${logsPod.value.name}/logs/download?${p.toString()}`
+  fetch(url, { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+    .then(r => r.ok ? r.text() : Promise.reject(r.statusText))
+    .then(txt => {
+      const blob = new Blob([txt], { type: 'text/plain' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${logsPod.value.name}-${logsContainer.value || 'container'}.log`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    })
+    .catch(e => ElMessage.error('下载失败: ' + e))
 }
 
 function toggleTerminal(p) {
@@ -258,6 +376,45 @@ function doInitTerm(el, p) {
   termInstance.onData(data => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(data) })
 }
 
+async function openDescribe(p) {
+  describePod.value = p
+  showDescribe.value = true
+  describeLoading.value = true
+  describeYaml.value = ''
+  copiedDescribe.value = false
+  try {
+    const cluster = p.cluster || clusters.value[0]?.name || ''
+    const data = await request.get(`/k8s/api/describe/pods/${cluster}/${p.namespace}/${p.name}`)
+    if (data.error) {
+      describeYaml.value = '# 加载失败: ' + data.error
+      ElMessage.error('加载详情失败: ' + data.error)
+    } else {
+      describeYaml.value = data.yaml || '# 无内容'
+    }
+  } catch (e) {
+    describeYaml.value = '# 加载失败: ' + (e.message || e)
+    ElMessage.error('加载详情失败: ' + (e.message || e))
+  } finally {
+    describeLoading.value = false
+  }
+}
+
+function closeDescribe() {
+  showDescribe.value = false
+  describeYaml.value = ''
+  describePod.value = null
+}
+
+async function copyDescribe() {
+  try {
+    await navigator.clipboard.writeText(describeYaml.value)
+    copiedDescribe.value = true
+    setTimeout(() => { copiedDescribe.value = false }, 2000)
+  } catch {
+    ElMessage.warning('复制失败，请手动选择文本复制')
+  }
+}
+
 onMounted(loadPods)
 </script>
 
@@ -310,10 +467,18 @@ onMounted(loadPods)
 .event-msg { font-size: 0.78rem; color: var(--text, #1e293b); margin-bottom: 4px; }
 .event-time { font-size: 0.7rem; color: var(--text-tertiary, #94a3b8); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.log-modal { max-width: 800px; }
+.log-modal { max-width: 900px; }
 .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .log-header h3 { margin: 0; font-size: 0.95rem; }
-.log-content { background: #1e293b; color: #e2e8f0; padding: 14px; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow: auto; max-height: 60vh; white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace; }
+.log-toolbar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+.log-sel { min-width: 120px; padding: 4px 8px; font-size: 0.78rem; }
+.log-search { min-width: 180px; padding: 4px 8px; font-size: 0.78rem; flex: 1; }
+.log-prev { font-size: 0.75rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.log-prev input { cursor: pointer; }
+.log-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.72rem; color: var(--text-secondary, #64748b); margin-bottom: 6px; padding: 4px 8px; background: var(--bg-hover, rgba(0,0,0,0.03)); border-radius: 4px; }
+.log-warn { color: #f59e0b; font-weight: 600; }
+.log-content { background: #1e293b; color: #e2e8f0; padding: 14px; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow: auto; max-height: 56vh; white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace; }
 .term-modal { max-width: 800px; }
 .xterm-box { height: 50vh; background: #1e1e1e; border-radius: 6px; overflow: hidden; }
+.describe-yaml { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 0.78rem; line-height: 1.5; max-height: 62vh; overflow: auto; white-space: pre; margin-top: 10px; }
 </style>

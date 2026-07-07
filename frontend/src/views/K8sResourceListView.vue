@@ -39,7 +39,8 @@
                 <template v-else>{{ it[col.key] ?? '-' }}</template>
               </td>
               <td v-if="hasAction" class="action-cell">
-                <button v-if="resourceType === 'configmaps'" class="btn btn-sm" @click="openCmDetail(it)">查看</button>
+                <button class="btn btn-sm" @click="openDescribe(it)">查看</button>
+                <button v-if="resourceType === 'configmaps'" class="btn btn-sm" @click="openCmDetail(it)">编辑</button>
                 <template v-if="resourceType === 'hpas'">
                   <button class="btn btn-sm" @click="openEditHpa(it)">编辑</button>
                   <button class="btn btn-sm btn-danger" @click="deleteHpa(it)">删除</button>
@@ -53,6 +54,25 @@
           <div style="font-size:32px;margin-bottom:8px;">📦</div>
           <div>暂无{{ title }}数据</div>
           <div class="text-muted" style="margin-top:4px;">请确认已选择集群或检查命名空间</div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showDescribe" class="modal-overlay" @click.self="closeDescribe">
+      <div class="modal-box modal-lg">
+        <h3>{{ title }} 详情 · {{ describeMeta.name }}</h3>
+        <div class="cm-meta">
+          <span class="badge count">集群: {{ describeMeta.cluster }}</span>
+          <span class="badge count">命名空间: {{ describeMeta.namespace }}</span>
+          <span class="badge count">类型: {{ describeMeta.resourceType }}</span>
+        </div>
+        <div v-if="describeLoading" class="loading-state">加载中...</div>
+        <div v-else>
+          <button class="btn btn-sm" @click="copyDescribe">{{ copiedDescribe ? '已复制 ✓' : '复制 YAML' }}</button>
+          <pre class="describe-yaml">{{ describeYaml }}</pre>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="closeDescribe">关闭</button>
         </div>
       </div>
     </div>
@@ -272,6 +292,9 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
+import { useAppStore } from '@/stores/app'
+
+const appStore = useAppStore()
 
 const props = defineProps({
   resourceType: { type: String, required: true },
@@ -368,13 +391,19 @@ const loading = ref(false)
 const items = ref([])
 const clusters = ref([])
 const errorMsg = ref('')
-const filters = reactive({ cluster: '', namespace: '' })
+const filters = reactive({ cluster: appStore.k8sCluster || '', namespace: '' })
 
 const showCmDialog = ref(false)
 const cmLoading = ref(false)
 const cmSaving = ref(false)
 const cmMeta = reactive({ cluster: '', namespace: '', name: '' })
 const cmRows = ref([])
+
+const showDescribe = ref(false)
+const describeLoading = ref(false)
+const describeYaml = ref('')
+const describeMeta = reactive({ cluster: '', namespace: '', name: '', resourceType: '' })
+const copiedDescribe = ref(false)
 
 const showHpaDialog = ref(false)
 const hpaDialogMode = ref('create')
@@ -433,6 +462,10 @@ async function loadList() {
     items.value = data.items || []
     clusters.value = data.clusters || []
     if (data.error) errorMsg.value = data.error
+    if (clusters.value.length && !clusters.value.some(c => c.name === filters.cluster)) {
+      filters.cluster = clusters.value[0]?.name || ''
+    }
+    appStore.setK8sCluster(filters.cluster)
   } catch (e) {
     errorMsg.value = e.message || String(e)
     items.value = []
@@ -445,6 +478,47 @@ function resetFilters() {
   filters.cluster = ''
   filters.namespace = ''
   loadList()
+}
+
+async function openDescribe(it) {
+  describeMeta.cluster = filters.cluster
+  describeMeta.namespace = it.namespace || ''
+  describeMeta.name = it.name
+  describeMeta.resourceType = props.resourceType
+  showDescribe.value = true
+  describeLoading.value = true
+  describeYaml.value = ''
+  copiedDescribe.value = false
+  try {
+    const url = `/k8s/api/describe/${props.resourceType}/${describeMeta.cluster}/${describeMeta.namespace}/${describeMeta.name}`
+    const data = await request.get(url)
+    if (data.error) {
+      ElMessage.error('加载详情失败: ' + data.error)
+      describeYaml.value = '# 加载失败: ' + data.error
+    } else {
+      describeYaml.value = data.yaml || '# 无内容'
+    }
+  } catch (e) {
+    ElMessage.error('加载详情失败: ' + (e.message || e))
+    describeYaml.value = '# 加载失败: ' + (e.message || e)
+  } finally {
+    describeLoading.value = false
+  }
+}
+
+function closeDescribe() {
+  showDescribe.value = false
+  describeYaml.value = ''
+}
+
+async function copyDescribe() {
+  try {
+    await navigator.clipboard.writeText(describeYaml.value)
+    copiedDescribe.value = true
+    setTimeout(() => { copiedDescribe.value = false }, 2000)
+  } catch {
+    ElMessage.warning('复制失败，请手动选择文本复制')
+  }
 }
 
 async function openCmDetail(it) {
@@ -755,4 +829,5 @@ onMounted(loadList)
 .req { color: #ef4444; margin-left: 2px; }
 .data-block { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border, rgba(0,0,0,0.07)); }
 .data-block-title { font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 8px; }
+.describe-yaml { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 0.78rem; line-height: 1.5; max-height: 60vh; overflow: auto; white-space: pre; margin-top: 10px; }
 </style>

@@ -33,7 +33,10 @@
                 <td>{{ d.strategy || 'RollingUpdate' }}</td>
                 <td class="img-cell">{{ d.image || '-' }}</td>
                 <td>{{ (d.available ?? 0) + '/' + (d.replicas ?? '?') }}</td>
-                <td @click.stop><button class="btn btn-sm btn-primary" @click="openManage(d)">管理</button></td>
+                <td @click.stop>
+                  <button class="btn btn-sm" @click="openDescribe(d)">查看</button>
+                  <button class="btn btn-sm btn-primary" @click="openManage(d)">管理</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -67,6 +70,20 @@
         </div>
         <div class="modal-actions">
           <button class="btn" @click="showManage = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showDescribe" class="modal-overlay" @click.self="closeDescribe">
+      <div class="modal-box modal-lg">
+        <div class="log-header">
+          <h3>Deployment 详情 (YAML) · {{ describeDep?.name }}</h3>
+          <button class="btn btn-sm" @click="closeDescribe">✕</button>
+        </div>
+        <div v-if="describeLoading" class="loading-state">加载中...</div>
+        <div v-else>
+          <button class="btn btn-sm" @click="copyDescribe">{{ copiedDescribe ? '已复制 ✓' : '复制 YAML' }}</button>
+          <pre class="describe-yaml">{{ describeYaml }}</pre>
         </div>
       </div>
     </div>
@@ -139,11 +156,13 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const loading = ref(false)
 const deployments = ref([])
 const clusters = ref([])
-const clusterFilter = ref('')
+const clusterFilter = ref(appStore.k8sCluster || '')
 const namespaceFilter = ref('')
 
 const showManage = ref(false)
@@ -153,6 +172,12 @@ const manageDep = ref(null)
 const showCreate = ref(false)
 const creating = ref(false)
 const createForm = ref({ cluster: '', namespace: 'default', name: '', image: '', replicas: 1, container_port: 80, cpu_request: '100m', cpu_limit: '500m', mem_request: '128Mi', mem_limit: '512Mi' })
+
+const showDescribe = ref(false)
+const describeLoading = ref(false)
+const describeYaml = ref('')
+const describeDep = ref(null)
+const copiedDescribe = ref(false)
 
 const showScale = ref(false)
 const scaleForm = ref({ replicas: 1 })
@@ -169,6 +194,10 @@ async function loadDeployments() {
     const data = await request.get('/k8s/api/deployments', { params: { cluster: clusterFilter.value, namespace: namespaceFilter.value } })
     deployments.value = data.items || []
     clusters.value = data.clusters || []
+    if (clusters.value.length && !clusters.value.some(c => c.name === clusterFilter.value)) {
+      clusterFilter.value = clusters.value[0]?.name || ''
+    }
+    appStore.setK8sCluster(clusterFilter.value)
   } catch (e) {
     ElMessage.error('加载失败: ' + (e.message || e))
   } finally {
@@ -183,7 +212,7 @@ async function openManage(d) {
   manageLoading.value = true
   manageDep.value = d
   try {
-    const data = await request.get(`/containers/api/deploy/${d.id}/manage`)
+    const data = await request.get(`/k8s/api/deployment/${d.cluster}/${d.namespace}/${d.name}/manage`)
     manageDep.value = data.deployment || d
   } catch (e) {
     ElMessage.error('详情加载失败: ' + (e.message || e))
@@ -216,7 +245,7 @@ async function doCreate() {
 async function doRollout() {
   try {
     await ElMessageBox.confirm('确认重新部署该 Deployment？', '提示', { type: 'warning' })
-    const res = await request.post(`/containers/api/deploy/${manageDep.value.id}/rollout`, {})
+    const res = await request.post(`/k8s/api/deployment/${manageDep.value.cluster}/${manageDep.value.namespace}/${manageDep.value.name}/rollout`, {})
     if (res.ok) { ElMessage.success('已触发重新部署'); loadDeployments() }
     else ElMessage.error(res.error || '失败')
   } catch (e) { if (e !== 'cancel') ElMessage.error('操作失败: ' + (e.message || e)) }
@@ -229,7 +258,7 @@ function openScale() {
 
 async function doScale() {
   try {
-    const res = await request.post(`/containers/api/deploy/${manageDep.value.id}/scale`, { replicas: scaleForm.value.replicas })
+    const res = await request.post(`/k8s/api/deployment/${manageDep.value.cluster}/${manageDep.value.namespace}/${manageDep.value.name}/scale`, { replicas: scaleForm.value.replicas })
     if (res.ok) { ElMessage.success(`已扩缩容到 ${scaleForm.value.replicas}`); showScale.value = false; loadDeployments() }
     else ElMessage.error(res.error || '失败')
   } catch (e) {
@@ -244,7 +273,7 @@ function openCanary() {
 
 async function doCanary() {
   try {
-    const res = await request.post(`/containers/api/deploy/${manageDep.value.id}/canary`, { canary_replicas: canaryForm.value.canary_replicas })
+    const res = await request.post(`/k8s/api/deployment/${manageDep.value.cluster}/${manageDep.value.namespace}/${manageDep.value.name}/canary`, { canary_replicas: canaryForm.value.canary_replicas })
     if (res.ok) { ElMessage.success(`金丝雀已创建/更新 (${res.canary_name})`); showCanary.value = false }
     else ElMessage.error(res.error || '失败')
   } catch (e) {
@@ -255,7 +284,7 @@ async function doCanary() {
 async function doPromote() {
   try {
     await ElMessageBox.confirm('确认提升金丝雀版本为主版本？此操作将用金丝雀镜像替换主 Deployment 并删除金丝雀。', '危险操作', { type: 'warning' })
-    const res = await request.post(`/containers/api/deploy/${manageDep.value.id}/promote`, {})
+    const res = await request.post(`/k8s/api/deployment/${manageDep.value.cluster}/${manageDep.value.namespace}/${manageDep.value.name}/promote`, {})
     if (res.ok) { ElMessage.success(`已提升金丝雀 (新镜像: ${res.new_image || '-'})`); loadDeployments() }
     else ElMessage.error(res.error || '失败')
   } catch (e) { if (e !== 'cancel') ElMessage.error('操作失败: ' + (e.message || e)) }
@@ -268,11 +297,49 @@ function openRollback() {
 
 async function doRollback() {
   try {
-    const res = await request.post(`/containers/api/deploy/${manageDep.value.id}/rollback`, { revision: rollbackForm.value.revision })
+    const res = await request.post(`/k8s/api/deployment/${manageDep.value.cluster}/${manageDep.value.namespace}/${manageDep.value.name}/rollback`, { revision: rollbackForm.value.revision })
     if (res.ok) { ElMessage.success('已触发回滚'); showRollback.value = false; loadDeployments() }
     else ElMessage.error(res.error || '失败')
   } catch (e) {
     ElMessage.error('操作失败: ' + (e.message || e))
+  }
+}
+
+async function openDescribe(d) {
+  describeDep.value = d
+  showDescribe.value = true
+  describeLoading.value = true
+  describeYaml.value = ''
+  copiedDescribe.value = false
+  try {
+    const data = await request.get(`/k8s/api/describe/deployments/${d.cluster}/${d.namespace}/${d.name}`)
+    if (data.error) {
+      describeYaml.value = '# 加载失败: ' + data.error
+      ElMessage.error('加载详情失败: ' + data.error)
+    } else {
+      describeYaml.value = data.yaml || '# 无内容'
+    }
+  } catch (e) {
+    describeYaml.value = '# 加载失败: ' + (e.message || e)
+    ElMessage.error('加载详情失败: ' + (e.message || e))
+  } finally {
+    describeLoading.value = false
+  }
+}
+
+function closeDescribe() {
+  showDescribe.value = false
+  describeYaml.value = ''
+  describeDep.value = null
+}
+
+async function copyDescribe() {
+  try {
+    await navigator.clipboard.writeText(describeYaml.value)
+    copiedDescribe.value = true
+    setTimeout(() => { copiedDescribe.value = false }, 2000)
+  } catch {
+    ElMessage.warning('复制失败，请手动选择文本复制')
   }
 }
 
@@ -320,4 +387,7 @@ onMounted(loadDeployments)
 .dual-input .input { min-width: 0; flex: 1; }
 .tip { font-size: 0.75rem; color: var(--text-secondary, #64748b); margin-top: 4px; line-height: 1.5; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.describe-yaml { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 0.78rem; line-height: 1.5; max-height: 62vh; overflow: auto; white-space: pre; margin-top: 10px; }
+.loading-state { text-align: center; padding: 24px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 </style>

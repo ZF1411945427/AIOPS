@@ -122,30 +122,69 @@
 | **CI 模型定义** | CI 类型、属性、关系元模型 |
 | **CI 模型元管理** | 动态 CRUD CI 类型、属性定义（字段类型、必填、默认值、枚举选项） |
 | **资产发现（传统）** | SSH / Agent / API 自动发现服务器、网络设备 |
-| **资产发现（容器）** | K8s API 自动发现 Cluster/Node/Namespace/Pod/Service/Deployment/StatefulSet/DaemonSet/PVC/PV |
-| **关系管理** | 拓扑依赖（应用→服务→Pod→Node，Deployment→ReplicaSet→Pod） |
+| **资产发现（容器）** | K8s API 自动发现，采用三层纳管模型：持久化 CI（Cluster/Node/Namespace/Deployment/StatefulSet/DaemonSet/Service/Ingress/PV/PVC）+ 弱纳管 CI（ConfigMap/Secret 仅存引用关系）+ 实时视图（Pod/ReplicaSet 不入库，聚合到工作负载 attrs.pod_summary） |
+| **关系管理** | 三类关系：ownership（parent_id 父子归属）、references（弱引用，Deployment→ConfigMap/Secret/PVC）、selects（Service selector→Deployment） |
+| **孤岛检测** | 无任何 Pod 引用的 ConfigMap/Secret/PVC 标记 `orphan=true`，作为配置漂移信号触发告警 |
+| **OwnerReference 链追溯** | 通过 Pod.metadata.ownerReferences → ReplicaSet → Deployment 判定派生资源，派生资源不入库 |
 | **标签管理** | 标签聚合、按标签筛选、批量分配/移除 |
 | **变更跟踪** | 字段级 diff（旧值/新值/操作人/时间） |
 | **调用链视图** | BFS 遍历 parent-child + AssetRelation 边 → 资产依赖树 |
 | **健康评分** | 加权评分 = 资产在线率 − 告警扣分 − 故障单扣分 + 确认加分 |
-| **生命周期管理** | 资产从上线到退役全生命周期 |
+| **生命周期管理** | 资产从上线到退役全生命周期；旧派生资源（Pod/ReplicaSet）降级为 `deprecated` 状态保留历史审计 |
 
-**容器 CI 类型：**
+**容器 CI 类型（三层纳管模型）：**
 
-| CI 类型 | 属性示例 | 父级关系 |
-|---------|---------|---------|
-| **Cluster** | k8s_version, api_endpoint, region | — |
-| **Node** | cpu, memory, kubelet_version, os_image | 属于 Cluster |
-| **Namespace** | name, labels, status | 属于 Cluster |
-| **Deployment** | replicas, strategy, image | 属于 Namespace |
-| **StatefulSet** | replicas, service_name | 属于 Namespace |
-| **DaemonSet** | node_selector | 属于 Namespace |
-| **Service** | cluster_ip, type, ports | 属于 Namespace |
-| **Ingress** | rules, tls | 属于 Namespace |
-| **Pod** | phase, node, restarts, qos_class, ip | 属于 Deployment / 直接创建 |
-| **Container** | image, resources, ports, state | 属于 Pod |
-| **PersistentVolume** | capacity, storage_class, access_modes | 属于 Cluster |
-| **PersistentVolumeClaim** | requested_size, storage_class | 属于 Namespace |
+| CI 类型 | 纳管层级 | 属性示例 | 父级关系 |
+|---------|---------|---------|---------|
+| **Cluster** | 持久化 CI | k8s_version, api_endpoint, region | — |
+| **Node** | 持久化 CI | cpu, memory, kubelet_version, os_image, node_status | 属于 Cluster |
+| **Namespace** | 持久化 CI | name, labels, status | 属于 Cluster |
+| **Deployment** | 持久化 CI | replicas, available, pod_summary{total/running/pending/failed/restarts} | 属于 Namespace |
+| **StatefulSet** | 持久化 CI | replicas, available, pod_summary | 属于 Namespace |
+| **DaemonSet** | 持久化 CI | node_selector, pod_summary | 属于 Namespace |
+| **Service** | 持久化 CI | cluster_ip, type, selector, ports | 属于 Namespace |
+| **Ingress** | 持久化 CI | rules, tls | 属于 Namespace |
+| **PersistentVolume** | 持久化 CI | capacity, storage_class, access_modes | 属于 Cluster |
+| **PersistentVolumeClaim** | 弱纳管 CI | storage_class, requested_size, referenced_by[], orphan | 属于 Namespace |
+| **ConfigMap** | 弱纳管 CI | data_keys[], referenced_by[], orphan（不存 data 内容） | 属于 Namespace |
+| **Secret** | 弱纳管 CI | type, data_keys[], referenced_by[], orphan（不存 data 内容，合规要求） | 属于 Namespace |
+| **Pod** | 实时视图（不入库） | phase, node, restarts, qos_class, ip | 派生资源，聚合到工作负载 attrs.pod_summary |
+| **ReplicaSet** | 实时视图（不入库） | replicas, available | 派生资源，OwnerReference 链中间层 |
+| **Container** | 实时视图（不入库） | image, resources, ports, state | 派生资源，Pod 内部 |
+
+**K8s 资源三层纳管模型（Dynamic CI + OwnerReference + 弱引用扫描）：**
+
+参考 ServiceNow Dynamic CI、OpenTelemetry 资源稳定性分层、Backstage 服务中心模型等行业标准，采用三层纳管策略解决细粒度全量同步的 CI Churn、派生资源纳管反模式与敏感数据合规问题：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 第一层 持久化 CI（入库，变更频率天~周）                        │
+│   cluster / node / namespace / deployment / statefulset /    │
+│   daemonset / service / ingress / pv / pvc                  │
+│   → Asset 表，parent_id 建 ownership 层级                    │
+├─────────────────────────────────────────────────────────────┤
+│ 第二层 弱纳管 CI（入库但只存引用关系，不存内容）                │
+│   configmap / secret / pvc                                  │
+│   → ci_attributes 记录 referenced_by[] + orphan 标记         │
+│   → secret 数据内容不入库（合规），只存 data_keys 键名        │
+│   → 孤岛资源（无引用）标记 orphan=true 触发配置漂移告警       │
+├─────────────────────────────────────────────────────────────┤
+│ 第三层 实时视图（不入库，聚合到工作负载 attrs.pod_summary）    │
+│   pod / replicaset / container                              │
+│   → OwnerReference 链追溯判定派生资源                        │
+│   → Pod 概要（total/running/pending/failed/restarts）聚合    │
+│   → 旧记录降级为 deprecated 状态保留历史审计                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**关键机制：**
+
+1. **OwnerReference 链追溯**：`Pod.metadata.ownerReferences → ReplicaSet → Deployment`，派生资源（Pod/ReplicaSet）不入 Asset 表，避免 CI Churn
+2. **弱引用扫描**：遍历 `Pod.spec.volumes` 收集 ConfigMap/Secret/PVC 引用关系，写入对应 CI 的 `ci_attributes.referenced_by`
+3. **孤岛检测**：无任何 Pod 引用的 ConfigMap/Secret/PVC 标记 `orphan=true`，作为配置漂移/废弃资源信号
+4. **工作负载聚合**：Pod 概要（total/running/pending/failed/restarts）聚合到 Deployment 的 `attrs.pod_summary`，前端实时视图展现
+5. **Secret 安全化**：不存 Secret 的 data 内容，只存键名 + 引用关系，满足合规要求
+6. **拓扑关系三类型**：`owns`（parent_id 父子归属）、`references`（弱引用，Deployment→ConfigMap/Secret/PVC）、`selects`（Service selector→Deployment）
 
 **传统资产类型：**
 
@@ -156,7 +195,7 @@
 | **网络设备** | switch/router, ports, vlan |
 | **中间件** | type, version, port, config |
 
-**建议**：优先对接已有 CMDB，如需自建则从最小 CI 模型开始，逐步扩展。
+**建议**：优先对接已有 CMDB，如需自建则从最小 CI 模型开始，逐步扩展。K8s 纳管采用三层模型平衡拓扑完整性与维护成本，避免派生资源纳管反模式与敏感数据合规风险。
 
 ### 8. 容器运维控制面
 
@@ -774,150 +813,246 @@ Phase 4 (可选)
 └───────────────────────┘      └────────────────────────────────┘
 ```
 
-### 10.3 知识库 RAG 化设计
+### 10.3 知识库 RAG 设计（双模式：低配 TF-IDF + 高配语义 Embedding）
 
-#### 10.3.1 数据模型扩展
+> **当前状态**：已实现低配版（TF-IDF 词频匹配 + 内存余弦相似度），作为零依赖的基线方案保留。
+> **升级方向**：未来接入真实 RAG 三件套（sentence-transformers 语义 Embedding + 向量数据库 + LLM 增强生成），与低配版并存，按场景选择检索模式。
 
-在现有 `KnowledgeBase` 基础上新增文档管理与向量索引模型：
+#### 10.3.1 双模式架构总览
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    知识库 RAG 双模式架构                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  模式 A：低配版（已实现 ✅，零外部依赖）                   │    │
+│  │  ──────────────────────────────────────────────────────  │    │
+│  │  文档 → TF-IDF 词频统计 → JSON 存 SQLite → 内存余弦相似度│    │
+│  │                                                         │    │
+│  │  · 向量化：TF-IDF 稀疏词袋向量（中英文按字/词分词）       │    │
+│  │  · 存储：KbChunk.embedding 存 JSON 字符串               │    │
+│  │  · 检索：全量加载切片到内存，逐条计算余弦相似度          │    │
+│  │  · 生成：无 LLM 生成环节，直接返回切片原文              │    │
+│  │  · 适用：知识库 <1 万切片，关键词匹配场景                │    │
+│  │  · 优点：零依赖、零成本、开箱即用                        │    │
+│  │  · 缺点：无语义理解（同义词/近义词匹配不到）             │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                          ↓ 共存                                  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  模式 B：高配版（规划中 ⏳，真实 RAG 三件套）              │    │
+│  │  ──────────────────────────────────────────────────────  │    │
+│  │  文档 → 语义 Embedding → 向量数据库 → ANN 检索 → LLM 生成│    │
+│  │                                                         │    │
+│  │  · 向量化：sentence-transformers 稠密语义向量（768维）   │    │
+│  │  · 存储：PGVector / Milvus / FAISS（ANN 近似检索）      │    │
+│  │  · 检索：向量索引毫秒级检索 + Rerank 重排序             │    │
+│  │  · 生成：LLM 把 Top-N 切片拼 prompt 生成自然语言回答    │    │
+│  │  · 适用：大规模知识库（>1 万切片）、语义近似查询         │    │
+│  │  · 优点：理解同义词/近义词、检索质量高、生成式回答       │    │
+│  │  · 缺点：需安装 sentence-transformers + 向量库依赖       │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  切换机制：KbChunk.embedding_mode 字段区分 tfidf / semantic     │
+│  检索时按 embedding_mode 选择检索引擎，两套索引独立维护          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 10.3.2 当前实现：低配版 TF-IDF（已实现 ✅）
+
+**数据模型**（`KbDocument` + `KbChunk`，已落地）：
 
 ```python
-# ─── 文档管理（支持上传 markdown/pdf/word/txt）───
 class KbDocument(Base):
     __tablename__ = "kb_documents"
-
     id = Column(Integer, primary_key=True, index=True)
-    kb_id = Column(Integer, ForeignKey("knowledge_base.id"), nullable=True)  # 可关联到知识条目，也可独立
+    kb_id = Column(Integer, ForeignKey("knowledge_base.id"), nullable=True)
     title = Column(String(256), nullable=False)
-    source_type = Column(String(32), default="manual")  # manual / upload / alert_case / incident_case
-    file_path = Column(String(512), default="")         # 上传文件原始路径
-    content = Column(Text, default="")                  # 全文内容
-    chunk_count = Column(Integer, default=0)            # 切片数量
-    status = Column(String(32), default="pending")      # pending / indexed / failed
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now())
-    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
-
-
-# ─── 文档切片 + 向量索引 ───
-class KbChunk(Base):
-    __tablename__ = "kb_chunks"
-
-    id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("kb_documents.id"), nullable=False)
-    chunk_index = Column(Integer, nullable=False)       # 切片序号
-    content = Column(Text, nullable=False)              # 切片文本
-    embedding = Column(Text, default="")                # 向量 JSON 字符串（SQLite 兼容）；pgvector 用 vector 类型
-    token_count = Column(Integer, default=0)
-    # 元数据用于过滤检索
+    source_type = Column(String(32), default="manual")   # manual / upload / alert_case / incident_case
+    file_path = Column(String(512), default="")
+    file_ext = Column(String(16), default="")            # md/txt/pdf/docx
+    content = Column(Text, default="")                   # 全文内容
+    chunk_count = Column(Integer, default=0)
+    status = Column(String(32), default="pending")       # pending / indexed / failed
     tags = Column(String(256), default="")
     asset_type = Column(String(32), default="")
-    severity = Column(String(32, default="warning"))
-    created_at = Column(DateTime, default=lambda: datetime.now())
+    severity = Column(String(32), default="warning")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+class KbChunk(Base):
+    __tablename__ = "kb_chunks"
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("kb_documents.id"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)               # 切片文本
+    embedding = Column(Text, default="")                 # TF-IDF 向量 JSON 字符串
+    embedding_mode = Column(String(32), default="tfidf") # tfidf / semantic（未来）
+    token_count = Column(Integer, default=0)
+    tags = Column(String(256), default="")
+    asset_type = Column(String(32), default="")
+    severity = Column(String(32), default="warning")
 ```
 
-**字段设计要点：**
-- `KbDocument.source_type` 区分手工录入、文件上传、告警自动归档、故障单自动归档，支持知识库自动沉淀
-- `KbChunk.embedding` 在 SQLite 阶段用 JSON 字符串存储向量（兼容现有架构）；升级 PostgreSQL 后改用 `pgvector` 原生类型，提升检索性能
-- `KbChunk` 保留 `tags/asset_type/severity` 元数据，支持检索时按业务维度过滤
-
-#### 10.3.2 文档处理流水线
+**文档处理流水线（已实现）**：
 
 ```
-上传文档 (md/pdf/word/txt)
+上传文档 (md/txt/pdf/docx)
    │
    ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ 文档解析     │ →  │ 文本切片     │ →  │ Embedding   │ →  │ 向量入库     │
-│ (unstructured│    │ (Chunking)  │    │ (向量化)    │    │ (持久化)    │
-│  /pypdf)     │    │ 512 token   │    │ BGE/OpenAI  │    │ SQLite/     │
-└─────────────┘    │ 128 重叠    │    │ /本地模型    │    │ pgvector    │
-                   └─────────────┘    └─────────────┘    └─────────────┘
+│ 文档解析     │ →  │ 文本切片     │ →  │ TF-IDF     │ →  │ 向量入库     │
+│ pypdf/      │    │ 500 字符    │    │ 向量化      │    │ SQLite      │
+│ python-docx │    │ 100 重叠    │    │ 稀疏词袋    │    │ JSON 字符串 │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+```
+
+| 阶段 | 实现 | 说明 |
+|------|------|------|
+| **文档解析** | `pypdf`（PDF）/ `python-docx`（Word）/ 原生读取（md/txt） | 零依赖，已支持 4 种格式 |
+| **文本切片** | 段落优先 + 字符长度硬切（500 字符 / 100 重叠） | 中文友好（按字符而非单词） |
+| **向量化** | TF-IDF（`tokenize` 中英文分词 + IDF 全局缓存） | 稀疏词袋向量，非语义向量 |
+| **向量存储** | `KbChunk.embedding` 存 JSON 字符串 | 兼容 SQLite，<1 万切片可接受 |
+| **检索** | 全量加载 → 内存余弦相似度 → Top-K | 阈值 0.05 过滤噪音 |
+
+**检索流程（已实现）**：
+
+```
+用户提问 / 告警触发
+   │
+   ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ Query       │ →  │ TF-IDF      │ →  │ 余弦相似度   │
+│ 分词向量化   │    │ 向量构建    │    │ Top-K=5     │
+│ (同 IDF 缓存)│    │ (稀疏词袋)  │    │ 阈值≥0.05   │
+└─────────────┘    └─────────────┘    └─────────────┘
+                                            │
+                                            ▼
+                                    ┌─────────────┐
+                                    │ 返回切片原文 │
+                                    │ (无 LLM 生成)│
+                                    └─────────────┘
+```
+
+**MCP 工具集成（已实现）**：
+
+`query_knowledge_rag` MCP 工具（`mcp_tools.py:319`）已落地，AI 助手排查故障时调用此工具检索知识库切片，作为 LLM 上下文。检索环节是 TF-IDF，但生成环节由 LLM 完成（检索弱 + 生成强）。
+
+**低配版局限**：
+- ❌ **无语义理解**：搜"接口故障"匹配不到"API 异常"（无同义词词典）
+- ❌ **无 LLM 生成**：前端检索页直接返回切片原文，用户需自行阅读
+- ❌ **全量内存检索**：每次查询加载所有切片，<1 万切片可接受，超过即性能瓶颈
+- ✅ **零依赖零成本**：不需要 sentence-transformers / 向量数据库 / GPU，开箱即用
+
+#### 10.3.3 未来升级：高配版语义 RAG（规划中 ⏳）
+
+> 保留低配版作为基线，新增语义 RAG 模式，通过 `embedding_mode` 字段切换，两套索引独立维护。
+
+**升级目标**：补齐 RAG 三件套——语义 Embedding + 向量数据库 + LLM 增强生成
+
+**升级流水线**：
+
+```
+上传文档 (md/txt/pdf/docx)
+   │
+   ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ 文档解析     │ →  │ 文本切片     │ →  │ 语义        │ →  │ 向量入库     │
+│ unstructured│    │ Recursive   │    │ Embedding   │    │ PGVector /  │
+│ /pypdf      │    │ 512 token   │    │ BGE/OpenAI  │    │ Milvus      │
+│             │    │ 128 重叠    │    │ 768 维稠密  │    │ ANN 索引    │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
 | 阶段 | 技术选型 | 说明 |
 |------|---------|------|
-| **文档解析** | `unstructured` / `pypdf` / `python-docx` | 支持 markdown/pdf/word/txt，提取纯文本 |
-| **文本切片** | 递归字符切分（LangChain `RecursiveCharacterTextSplitter`） | 512 token / 128 重叠，保留语义完整性 |
-| **Embedding** | `BAAI/bge-small-zh-v1.5`（本地 sentence-transformers）或 OpenAI `text-embedding-3-small` | 本地模型零成本、数据不出域；OpenAI 效果更优 |
-| **向量入库** | SQLite（JSON 字符串）→ pgvector（升级路径） | 阶段一兼容现有架构，阶段二升级 |
+| **文档解析** | `unstructured`（统一解析） / 保留 `pypdf`+`python-docx` | 升级为 unstructured 支持更多格式（HTML/PPT/邮件） |
+| **文本切片** | LangChain `RecursiveCharacterTextSplitter`（512 token / 128 重叠） | 递归切分保留语义完整性，优于硬切 |
+| **语义 Embedding** | `BAAI/bge-small-zh-v1.5`（本地，768 维，零成本）或 OpenAI `text-embedding-3-small`（1536 维） | 稠密语义向量，理解同义词/近义词 |
+| **向量存储** | PGVector（PostgreSQL 扩展，IVFFlat 索引）或 Milvus（独立向量数据库） | ANN 近似检索，毫秒级百万向量 |
+| **重排序** | `BAAI/bge-reranker-base`（cross-encoder） | 对 Top-K 重排取 Top-N，提升精度 |
+| **LLM 生成** | 已接入的 LLM Provider（通义/GPT/Ollama） | 把 Top-N 切片拼 prompt 生成自然语言回答 |
 
-#### 10.3.3 语义检索流程
+**语义检索流程（规划）**：
 
 ```
 用户提问 / 告警触发
    │
    ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ Query       │ →  │ 向量检索     │ →  │ 重排序       │ →  │ 上下文构造   │
-│ Embedding   │    │ Top-K=10    │    │ (Rerank)    │    │ 注入 LLM     │
-│             │    │ 余弦相似度   │    │ Top-N=3     │    │              │
+│ Query       │ →  │ 向量检索     │ →  │ 重排序       │ →  │ LLM 生成     │
+│ Embedding   │    │ Top-K=10    │    │ Rerank      │    │ 上下文注入   │
+│ (768 维)    │    │ ANN 余弦    │    │ Top-N=3     │    │ 自然语言回答 │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
-1. **Query 向量化**：把用户问题或告警描述用同一 Embedding 模型转向量
-2. **向量检索**：在 `KbChunk` 表中按余弦相似度检索 Top-K（默认 10），支持按 `tags/asset_type/severity` 元数据过滤
-3. **重排序**（可选）：用 cross-encoder 模型对 Top-K 重排序取 Top-N（默认 3），提升精度
-4. **上下文构造**：把 Top-N 切片内容拼接到 LLM prompt，生成回答
+1. **Query 向量化**：用同一 Embedding 模型把用户问题转为 768 维稠密向量
+2. **向量检索**：PGVector/Milvus ANN 检索 Top-K（默认 10），支持 `tags/asset_type/severity` 元数据过滤
+3. **重排序**：cross-encoder 对 Top-K 重排取 Top-N（默认 3），提升精度
+4. **LLM 生成**：Top-N 切片 + 用户问题拼 prompt，调 LLM 生成自然语言回答
 
-**SQLite 阶段的检索实现**（无原生向量索引，用 Python 内存计算）：
+**PGVector 检索实现（规划）**：
 ```python
-def vector_search(query_embedding: List[float], top_k: int = 10, filters: dict = None) -> List[KbChunk]:
-    chunks = db.query(KbChunk).all()
-    # 元数据过滤
-    if filters:
-        chunks = [c for c in chunks if matches_filters(c, filters)]
-    # 余弦相似度排序
-    scored = [(cosine_sim(query_embedding, json.loads(c.embedding)), c) for c in chunks]
-    scored.sort(key=lambda x: -x[0])
-    return [c for _, c in scored[:top_k]]
+# 升级后 embedding_mode="semantic" 的切片用 PGVector 原生检索
+def semantic_search(query_embedding: List[float], top_k: int = 10, filters: dict = None):
+    # PGVector 原生余弦距离检索（利用 IVFFlat 索引）
+    chunks = db.query(KbChunk).filter(
+        KbChunk.embedding_mode == "semantic",
+        # PGVector cosine distance operator
+        text("embedding <=> :query_vec < 0.5")
+    ).params(query_vec=str(query_embedding)).order_by(
+        text("embedding <=> :query_vec")
+    ).limit(top_k).all()
+    return chunks
 ```
 
-> 注：此方案适合知识库 <1 万切片。超过后建议升级 pgvector + IVFFlat 索引。
-
-#### 10.3.4 MCP 工具集成
-
-新增 `query_knowledge_rag` MCP 工具替代现有 `query_knowledge` 的 `ilike` 匹配：
+**双模式切换机制**：
 
 ```python
-@register_mcp_tool(
-    name="query_knowledge_rag",
-    description="语义检索运维知识库（RAG）。支持按症状、故障类型、资产类型语义匹配历史处置经验与运维文档，返回最相关的知识条目与文档切片。",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "检索问题或故障描述"},
-            "asset_type": {"type": "string", "description": "资产类型过滤（可选）"},
-            "severity": {"type": "string", "description": "严重级别过滤（可选）"},
-            "top_k": {"type": "integer", "description": "返回数量", "default": 5},
-        },
-        "required": ["query"],
-    },
-    risk_level="read_only",
-)
-def query_knowledge_rag(db, user_id=None, **kwargs):
-    query = kwargs["query"]
-    top_k = kwargs.get("top_k", 5)
-    filters = {k: kwargs[k] for k in ("asset_type", "severity") if kwargs.get(k)}
-    # 1. Query 向量化
-    query_emb = embed_text(query)
-    # 2. 向量检索
-    chunks = vector_search(query_emb, top_k=top_k, filters=filters)
-    # 3. 返回结果（含原文 + 来源文档 + 相似度）
-    return {
-        "count": len(chunks),
-        "items": [
-            {
-                "document_title": chunk.document.title,
-                "content": chunk.content,
-                "similarity": round(chunk._score, 3),
-                "tags": chunk.tags,
-            }
-            for chunk in chunks
-        ],
-    }
+# KbChunk.embedding_mode 区分两套索引
+# - "tfidf"：低配版，TF-IDF 稀疏向量，JSON 存 SQLite
+# - "semantic"：高配版，BGE 稠密向量，存 PGVector
+
+# 检索时按 mode 选择引擎
+def rag_search(query, mode="auto", top_k=5):
+    if mode == "auto":
+        # 自动选择：semantic 切片数 > 100 用语义，否则用 TF-IDF
+        semantic_count = db.query(KbChunk).filter_by(embedding_mode="semantic").count()
+        mode = "semantic" if semantic_count > 100 else "tfidf"
+    if mode == "semantic":
+        return semantic_search(embed_text(query), top_k)
+    else:
+        return tfidf_search(query, top_k)  # 现有实现
 ```
 
-**与告警自动关联**：告警触发时自动用告警 `metric_name + message` 调 `query_knowledge_rag`，把匹配的处置经验推送通知，实现"告警即推荐"。
+**升级路径（分阶段）**：
+
+| 阶段 | 内容 | 依赖 |
+|------|------|------|
+| Phase 1 | 安装 `sentence-transformers` + `BAAI/bge-small-zh-v1.5` 本地模型 | `pip install sentence-transformers` |
+| Phase 2 | `KbChunk` 新增 `embedding_mode="semantic"` 索引，BGE 向量化入库 | 模型下载（~100MB） |
+| Phase 3 | 检索接口加 `mode` 参数，支持语义检索 | 保留 TF-IDF 作为 fallback |
+| Phase 4 | 升级 PostgreSQL + PGVector，向量存 `vector` 类型 | PGVector 扩展 |
+| Phase 5 | 接入 cross-encoder Rerank | `BAAI/bge-reranker-base` |
+| Phase 6 | 前端检索页加"语义检索"开关 + LLM 生成回答 | LLM Provider 已就绪 |
+
+**与告警自动关联**：告警触发时自动用告警 `metric_name + message` 调 `query_knowledge_rag`，把匹配的处置经验推送通知，实现"告警即推荐"。升级后语义检索能匹配同义词（如"磁盘满"匹配"存储空间不足"），告警推荐命中率显著提升。
+
+#### 10.3.4 双模式对比
+
+| 维度 | 低配版 TF-IDF（已实现） | 高配版语义 RAG（规划） |
+|------|----------------------|---------------------|
+| **向量化** | TF-IDF 稀疏词袋（词频统计） | BGE 稠密语义向量（768 维） |
+| **语义理解** | ❌ 只匹配相同词 | ✅ 理解同义词/近义词 |
+| **向量存储** | SQLite JSON 字符串 | PGVector vector 类型 / Milvus |
+| **检索方式** | 内存全量余弦相似度 | ANN 近似检索（IVFFlat） |
+| **检索性能** | <1 万切片可用 | 百万级毫秒检索 |
+| **重排序** | 无 | cross-encoder Rerank |
+| **LLM 生成** | ❌ 返回切片原文 | ✅ 生成自然语言回答 |
+| **外部依赖** | 零 | sentence-transformers + PGVector |
+| **部署成本** | 零 | 模型 ~100MB + PG 扩展 |
+| **适用场景** | 小规模知识库、关键词明确 | 大规模知识库、语义近似查询 |
+| **保留策略** | ✅ 作为基线保留 | 新增，与低配并存 |
 
 ### 10.4 SOP 工作流引擎设计
 
