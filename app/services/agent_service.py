@@ -612,6 +612,67 @@ def process_chat_message(
         else:
             content = "❌ 操作提议失败：AI 未正确调用 propose_action 工具。请刷新页面重新发起。"
 
+    # 兜底：LLM 回复太短（<100字）或只说"让我检查"但工具数>=3时，追加数据摘要
+    try:
+        _exec_msgs = []
+        for tr in tool_results:
+            r = tr.get("result", {})
+            if r.get("status") == "success":
+                _rr = r.get("result", {}) or {}
+                msg = _rr.get("message", "") if isinstance(_rr, dict) else ""
+                if not msg:
+                    msg = r.get("message", "")
+            else:
+                msg = r.get("message", "")
+            if msg and ("执行" in msg or "远程" in msg):
+                _exec_msgs.append(msg[:1500])
+        _has_exec_action = bool(_exec_msgs)
+        _has_intent = any(kw in content for kw in ["让我确认", "让我检查", "让我验证", "让我看看", "让我查查", "正在确认", "正在检查", "正在验证"])
+        _too_short = len(content.strip()) < 100 and len(tool_results) >= 3
+        if (_has_exec_action and (len(content.strip()) < 200 or _has_intent)) or _too_short:
+            if _exec_msgs:
+                content = "✅ 诊断检查执行完成，结果摘要：\n" + "".join(f"  {p}\n" for p in _exec_msgs)
+            else:
+                _summaries = []
+                for tr in tool_results:
+                    _r = tr.get("result", {}).get("result", {}) or {}
+                    if isinstance(_r, dict):
+                        name = tr["tool_name"]
+                        if name == "query_alerts":
+                            a_list = _r.get("alerts", [])
+                            active_n = sum(1 for a in a_list if a.get("status") == "triggered")
+                            _summaries.append(f"{name}: {len(a_list)}条({active_n}条待处理)")
+                        elif name == "query_assets":
+                            _summaries.append(f"{name}: {_r.get('count', 0)}台")
+                        elif name == "query_metrics":
+                            v_list = _r.get("values", [])
+                            if v_list:
+                                _summaries.append(f"{name}({_r.get('metric_name','')}): avg={_r.get('avg', 0)}")
+                        elif name == "get_alert_detail":
+                            _summaries.append(f"{name}: {_r.get('metric_name','')}={_r.get('actual_value','')}")
+                        elif name == "query_incidents":
+                            _summaries.append(f"{name}: {_r.get('count', 0)}条")
+                        elif name == "query_knowledge_rag":
+                            _summaries.append(f"{name}: {len(_r.get('documents', []))}条")
+                        elif name == "list_k8s_pods":
+                            _summaries.append(f"{name}: {len(_r.get('pods', []))}个Pod")
+                if _summaries:
+                    content = "📊 查询结果摘要：\n" + "\n".join(f"  {s}" for s in _summaries) + "\n"
+            for tr in tool_results:
+                if tr.get("tool_name") == "query_assets":
+                    _ra = tr.get("result", {}).get("result", {})
+                    _assets = _ra.get("assets", [])
+                    if _assets:
+                        content += f"\n📋 资产: {_assets[0].get('name', '')} ({_assets[0].get('ip', '')})\n"
+                elif tr.get("tool_name") == "query_alerts":
+                    _ra = tr.get("result", {}).get("result", {})
+                    _alerts = _ra.get("alerts", [])
+                    _active = [a for a in _alerts if a.get("status") == "triggered"]
+                    if _active and "告警" not in content:
+                        content += f"\n⚠️ 当前告警: {len(_active)} 条待处理\n"
+    except Exception:
+        pass
+
     # Save assistant reply
     assistant_msg = add_message(
         db, session.id, "assistant", content,

@@ -171,12 +171,61 @@ async function rejectAction(action) {
 
 function startVoice() {
     voiceRecording = true
-    uni.showToast({ title: '语音功能开发中', icon: 'none' })
-    voiceRecording = false
+    recorderManager.start({ duration: 60000, format: 'mp3', sampleRate: 16000, numberOfChannels: 1 })
 }
 
 function endVoice() {
+    if (!voiceRecording) return
     voiceRecording = false
+    recorderManager.stop()
+}
+
+recorderManager.onStop((res) => {
+    if (!res || !res.tempFilePath) {
+        uni.showToast({ title: '录音失败', icon: 'none' })
+        return
+    }
+    const fs = uni.getFileSystemManager()
+    try {
+        const base64 = fs.readFileSync(res.tempFilePath, 'base64')
+        transcribeAndSend(base64, res.duration || 0)
+    } catch (e) {
+        uni.showToast({ title: '读取录音失败', icon: 'none' })
+    }
+})
+
+async function transcribeAndSend(audioBase64, duration) {
+    if (duration < 800) {
+        uni.showToast({ title: '说话太短', icon: 'none' })
+        return
+    }
+    uni.showLoading({ title: '识别中...' })
+    try {
+        const { buildUrl, commonHeaders } = await import('@/api/config.js')
+        const res = await new Promise((resolve, reject) => {
+            uni.request({
+                url: buildUrl('/mobile/voice/transcribe'),
+                method: 'POST',
+                header: commonHeaders(),
+                data: { audio_base64: audioBase64 },
+                success: (r) => { r.statusCode >= 200 && r.statusCode < 300 ? resolve(r.data) : reject(r) },
+                fail: reject,
+            })
+        })
+        const text = (res && (res.text || res.transcript || res.message)) || ''
+        if (!text) {
+            uni.hideLoading()
+            uni.showToast({ title: '未识别到语音', icon: 'none' })
+            return
+        }
+        inputText.value = text
+        uni.hideLoading()
+        doSend(text)
+    } catch (e) {
+        uni.hideLoading()
+        const msg = (e && e.data && (e.data.detail || e.data.message)) || '语音识别失败'
+        uni.showToast({ title: String(msg).slice(0, 50), icon: 'none' })
+    }
 }
 
 async function loadPending() {

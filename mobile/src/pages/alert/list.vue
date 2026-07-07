@@ -37,7 +37,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { onPullDownRefresh } from '@dcloudio/uni-app'
+import { onLoad, onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { getList } from '@/api/alert.js'
 import { useOfflineStore } from '@/store/offline.js'
 import AlertCard from '@/components/AlertCard.vue'
@@ -118,12 +118,36 @@ function goDetail(item) {
     uni.navigateTo({ url: '/pages/alert/detail?id=' + item.id })
 }
 
+const TAB_MAP = { all: 'all', triggered: 'triggered', acknowledged: 'acknowledged', resolved: 'resolved', suppressed: 'all' }
+
+function readAlertTab() {
+    try {
+        const app = typeof getApp === 'function' ? getApp() : null
+        const tab = app && app.globalData && app.globalData.alertTab
+        if (tab && TAB_MAP[tab]) {
+            activeTab.value = TAB_MAP[tab]
+            app.globalData.alertTab = null
+            return true
+        }
+    } catch (e) {}
+    return false
+}
+
+onLoad(() => {
+    readAlertTab()
+    fetchList(true)
+})
+
+onShow(() => {
+    if (readAlertTab()) {
+        fetchList(true)
+    }
+})
+
 onPullDownRefresh(async () => {
     await fetchList(true)
     uni.stopPullDownRefresh()
 })
-
-fetchList(true)
 </script>
 
 <style lang="scss" scoped>

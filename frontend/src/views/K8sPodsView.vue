@@ -23,18 +23,18 @@
           <table class="table">
             <thead><tr><th>名称</th><th>命名空间</th><th>集群</th><th>Phase</th><th>节点</th><th>Pod IP</th><th>重启</th><th>状态</th><th>操作</th></tr></thead>
             <tbody>
-              <tr v-for="p in pods" :key="p.id" class="row-click" @click="openDetail(p)">
+              <tr v-for="p in pods" :key="p.name" class="row-click" @click="openDetail(p)">
                 <td class="name-cell">{{ p.name }}</td>
                 <td>{{ p.namespace || '-' }}</td>
                 <td>{{ p.cluster || '-' }}</td>
-                <td><span class="badge" :class="phaseClass(phaseOf(p))">{{ phaseOf(p) }}</span></td>
-                <td>{{ p.attrs?.node || '-' }}</td>
-                <td>{{ p.attrs?.pod_ip || p.ip || '-' }}</td>
-                <td>{{ p.attrs?.restart_count || p.attrs?.restarts || 0 }}</td>
-                <td>{{ p.status || '-' }}</td>
+                <td><span class="badge" :class="phaseClass(p.phase || '')">{{ p.phase || '-' }}</span></td>
+                <td>{{ p.node || '-' }}</td>
+                <td>{{ p.pod_ip || '-' }}</td>
+                <td>{{ p.restarts ?? 0 }}</td>
+                <td>{{ p.phase || '-' }}</td>
                 <td @click.stop>
-                  <button class="btn btn-sm" @click="openLogs(p)">日志</button>
-                  <button class="btn btn-sm" @click="openTerminal(p)">终端</button>
+                  <button class="btn btn-sm" @click.stop="toggleLogs(p)">{{ showLogs && (detailPod?.name === p.name || termPod?.name === p.name) ? '日志' : '日志' }}</button>
+                  <button class="btn btn-sm" @click.stop="toggleTerminal(p)">终端</button>
                 </td>
               </tr>
             </tbody>
@@ -80,16 +80,38 @@
         </div>
         <div class="modal-actions">
           <button class="btn" @click="showDetail = false">关闭</button>
-          <button class="btn btn-primary" @click="openLogs(detailPod)">查看日志</button>
-          <button class="btn btn-primary" @click="openTerminal(detailPod)">打开终端</button>
+          <button class="btn btn-primary" @click="toggleLogs(detailPod)">{{ showLogs ? '关闭日志' : '查看日志' }}</button>
+          <button class="btn btn-primary" @click="toggleTerminal(detailPod)">{{ showTerm ? '关闭终端' : '打开终端' }}</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 日志弹窗 -->
+    <div v-if="showLogs" class="modal-overlay" @click.self="showLogs = false">
+      <div class="modal-box wide log-modal">
+        <div class="log-header">
+          <h3>日志 · {{ detailPod?.name || termPod?.name }}</h3>
+          <button class="btn btn-sm" @click="toggleLogs(detailPod || termPod)">✕</button>
+        </div>
+        <pre class="log-content">{{ logsLoading ? '加载中...' : logsContent }}</pre>
+      </div>
+    </div>
+
+    <!-- 终端弹窗 -->
+    <div v-if="showTerm" class="modal-overlay" @click.self="showTerm = false">
+      <div class="modal-box wide term-modal">
+        <div class="log-header">
+          <h3>终端 · {{ termPod?.name }}</h3>
+          <button class="btn btn-sm" @click="toggleTerminal(termPod)">✕</button>
+        </div>
+        <div id="xterm-container" class="xterm-box"></div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 
@@ -102,6 +124,12 @@ const showDetail = ref(false)
 const detailLoading = ref(false)
 const detailPod = ref(null)
 const anomalies = ref([])
+const showLogs = ref(false)
+const showTerm = ref(false)
+const logsLoading = ref(false)
+const logsContent = ref('')
+const termPod = ref(null)
+let termInstance = null
 
 function phaseOf(p) { return p?.attrs?.phase || p?.status || 'Unknown' }
 function phaseClass(phase) {
@@ -127,7 +155,7 @@ function formatVal(v) {
 async function loadPods() {
   loading.value = true
   try {
-    const data = await request.get('/containers/api/pods', { params: { cluster: clusterFilter.value, namespace: namespaceFilter.value } })
+    const data = await request.get('/k8s/api/pods', { params: { cluster: clusterFilter.value, namespace: namespaceFilter.value } })
     pods.value = data.items || []
     clusters.value = data.clusters || []
   } catch (e) {
@@ -149,19 +177,85 @@ async function openDetail(p) {
     detailPod.value = data.pod || p
     anomalies.value = data.anomalies || []
   } catch (e) {
-    ElMessage.error('详情加载失败: ' + (e.message || e))
+    detailPod.value = p
   } finally {
     detailLoading.value = false
   }
 }
 
-function openLogs(p) {
+async function toggleLogs(p) {
   if (!p) return
-  window.open(`/containers/pod/${p.id}/logs`, '_blank')
+  if (showLogs.value) { showLogs.value = false; return }
+  showLogs.value = true
+  logsLoading.value = true
+  logsContent.value = '加载中...'
+  const cluster = p.cluster || clusters.value[0]?.name || ''
+  if (!cluster) { logsContent.value = '无法确定集群'; return }
+  try {
+    const data = await request.get(`/k8s/api/pod/${cluster}/${p.namespace}/${p.name}/logs?tail=200`)
+    if (data.ok) {
+      logsContent.value = data.logs || '(无日志输出)'
+    } else {
+      logsContent.value = '获取日志失败: ' + (data.error || '未知错误')
+    }
+  } catch (e) {
+    logsContent.value = '请求异常: ' + (e.message || e)
+  } finally {
+    logsLoading.value = false
+  }
 }
-function openTerminal(p) {
+
+function toggleTerminal(p) {
   if (!p) return
-  window.open(`/containers/pod/${p.id}/terminal`, '_blank')
+  if (showTerm.value) { showTerm.value = false; disposeTerm(); return }
+  showTerm.value = true
+  termPod.value = p
+  nextTick(() => initTerminal(p))
+}
+
+function disposeTerm() {
+  if (termInstance) { termInstance.dispose(); termInstance = null }
+}
+
+function initTerminal(p) {
+  nextTick(() => {
+    const el = document.getElementById('xterm-container')
+    if (!el) return
+    if (typeof Terminal === 'undefined') {
+      el.textContent = '终端组件加载中...'
+      const script = document.createElement('script')
+      script.src = '/static/js/xterm.min.js'
+      script.onload = () => {
+        const fitScript = document.createElement('script')
+        fitScript.src = '/static/js/xterm-addon-fit.min.js'
+        fitScript.onload = () => doInitTerm(el, p)
+        document.body.appendChild(fitScript)
+      }
+      document.body.appendChild(script)
+    } else {
+      doInitTerm(el, p)
+    }
+  })
+}
+
+function doInitTerm(el, p) {
+  if (termInstance) try { termInstance.dispose() } catch {}
+  termInstance = new Terminal({
+    cursorBlink: true, fontSize: 13,
+    fontFamily: "'Consolas','Courier New',monospace",
+    theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+  })
+  termInstance.open(el)
+  termInstance.write('正在连接...\r\n')
+  const cluster = p.cluster || clusters.value[0]?.name || ''
+  if (!cluster) { termInstance.write('无法确定集群\r\n'); return }
+  const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://'
+  const ws = new WebSocket(protocol + location.host + '/k8s/ws/pod/' + cluster + '/' + p.namespace + '/' + p.name + '/terminal')
+  ws.onopen = () => { termInstance.clear(); termInstance.focus() }
+  ws.onmessage = e => { termInstance.write(e.data) }
+  ws.onerror = () => { termInstance.write('\r\n[连接错误]\r\n') }
+  ws.onclose = () => { termInstance.write('\r\n[连接关闭]\r\n') }
+  termInstance.onData(data => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(data) })
 }
 
 onMounted(loadPods)
@@ -216,4 +310,10 @@ onMounted(loadPods)
 .event-msg { font-size: 0.78rem; color: var(--text, #1e293b); margin-bottom: 4px; }
 .event-time { font-size: 0.7rem; color: var(--text-tertiary, #94a3b8); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.log-modal { max-width: 800px; }
+.log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.log-header h3 { margin: 0; font-size: 0.95rem; }
+.log-content { background: #1e293b; color: #e2e8f0; padding: 14px; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow: auto; max-height: 60vh; white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace; }
+.term-modal { max-width: 800px; }
+.xterm-box { height: 50vh; background: #1e1e1e; border-radius: 6px; overflow: hidden; }
 </style>

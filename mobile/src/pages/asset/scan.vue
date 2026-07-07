@@ -77,7 +77,73 @@ async function queryAsset(c) {
 }
 
 function handleNfc() {
-    uni.showToast({ title: 'NFC 功能开发中', icon: 'none' })
+    // #ifdef APP-PLUS
+    if (uni.getSystemInfoSync().platform === 'android') {
+        try {
+            const main = plus.android.runtimeMainActivity()
+            const Intent = plus.android.importClass('android.content.Intent')
+            const NfcAdapter = plus.android.importClass('android.nfc.NfcAdapter')
+            const adapter = NfcAdapter.getDefaultAdapter(main)
+            if (!adapter) {
+                uni.showToast({ title: '设备不支持 NFC', icon: 'none' })
+                return
+            }
+            if (!adapter.isEnabled()) {
+                uni.showModal({ title: 'NFC 未开启', content: '请先在系统设置中开启 NFC', showCancel: false })
+                return
+            }
+            uni.showToast({ title: '请将 NFC 标签靠近手机背面', icon: 'none', duration: 3000 })
+            // 启用 NFC 读取调度，读取后回调处理
+            const tagIntent = new Intent('android.nfc.action.TAG_DISCOVERED')
+            main.startActivity(tagIntent)
+            // 轮询读取 NFC 标签内容（5秒超时）
+            let nfcTimer = null
+            nfcTimer = setTimeout(() => {
+                uni.showToast({ title: 'NFC 读取超时', icon: 'none' })
+            }, 5000)
+            // 监听 NFC intent
+            plus.globalEvent.addEventListener('newintent', function(e) {
+                clearTimeout(nfcTimer)
+                const intent = main.getIntent()
+                const action = intent.getAction()
+                if (action === 'android.nfc.action.TAG_DISCOVERED' || action === 'android.nfc.action.NDEF_DISCOVERED') {
+                    const parcelable = intent.getParcelableExtra('android.nfc.extra.TAG')
+                    if (parcelable) {
+                        const Ndef = plus.android.importClass('android.nfc.tech.Ndef')
+                        const ndef = Ndef.get(parcelable)
+                        if (ndef) {
+                            ndef.connect()
+                            const ndefMessage = ndef.getNdefMessage()
+                            if (ndefMessage) {
+                                const records = ndefMessage.getRecords()
+                                if (records && records.length > 0) {
+                                    const payload = records[0].getPayload()
+                                    const bytes = plus.android.importClass('java.lang.String')
+                                    const text = bytes.$new(payload, 'UTF-8')
+                                    const code = text.toString().trim()
+                                    ndef.close()
+                                    if (code) {
+                                        queryAsset(code)
+                                        return
+                                    }
+                                }
+                            }
+                            ndef.close()
+                        }
+                    }
+                    uni.showToast({ title: 'NFC 标签无可用数据', icon: 'none' })
+                }
+            }, { once: true })
+        } catch (err) {
+            uni.showToast({ title: 'NFC 读取失败', icon: 'none' })
+        }
+    } else {
+        uni.showToast({ title: 'iOS 暂不支持 NFC 读取', icon: 'none' })
+    }
+    // #endif
+    // #ifndef APP-PLUS
+    uni.showToast({ title: '请在 App 中使用 NFC 功能', icon: 'none' })
+    // #endif
 }
 </script>
 

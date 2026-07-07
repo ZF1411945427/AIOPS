@@ -49,6 +49,56 @@
                 </view>
             </view>
 
+            <view class="card" v-if="showMetrics">
+                <view class="flex-between">
+                    <text class="card-title">指标监控</text>
+                    <text class="close-btn" @tap="showMetrics = false">✕</text>
+                </view>
+                <view v-if="metricsLoading" class="loading-mini">
+                    <text class="text-muted">加载指标中...</text>
+                </view>
+                <template v-else>
+                    <view v-if="metricsNames.length === 0" class="empty-mini">
+                        <text class="text-muted">暂无指标数据</text>
+                    </view>
+                    <view v-else>
+                        <scroll-view scroll-x class="metric-tabs">
+                            <view
+                                v-for="name in metricsNames"
+                                :key="name"
+                                class="metric-tab"
+                                :class="{ active: currentMetric === name }"
+                                @tap="switchMetric(name)"
+                            >
+                                <text class="metric-tab-text">{{ name }}</text>
+                            </view>
+                        </scroll-view>
+                        <view v-if="currentMetric" class="metric-chart">
+                            <view class="metric-latest">
+                                <text class="metric-name">{{ currentMetric }}</text>
+                                <text class="metric-value">{{ latestValue }}</text>
+                            </view>
+                            <view class="chart-bars">
+                                <view
+                                    v-for="(pt, idx) in chartData"
+                                    :key="idx"
+                                    class="bar-col"
+                                >
+                                    <view
+                                        class="bar"
+                                        :style="{ height: barHeight(pt.value) + 'rpx' }"
+                                    ></view>
+                                </view>
+                            </view>
+                            <view class="chart-x">
+                                <text class="chart-x-label">{{ chartStartTime }}</text>
+                                <text class="chart-x-label">{{ chartEndTime }}</text>
+                            </view>
+                        </view>
+                    </view>
+                </template>
+            </view>
+
             <view class="card">
                 <text class="card-title">快捷操作</text>
                 <view class="quick-grid">
@@ -79,10 +129,21 @@ import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { getAssetDetail } from '@/api/asset.js'
 import { getList } from '@/api/alert.js'
+import { buildUrl, commonHeaders } from '@/api/config.js'
 
 const asset = ref(null)
 const recentAlerts = ref([])
 const loading = ref(true)
+
+// 指标相关
+const showMetrics = ref(false)
+const metricsLoading = ref(false)
+const metricsNames = ref([])
+const currentMetric = ref('')
+const chartData = ref([])
+const latestValue = ref('-')
+const chartStartTime = ref('')
+const chartEndTime = ref('')
 
 const online = computed(() => {
     const s = (asset.value && (asset.value.status || asset.value.health_status || '')).toLowerCase()
@@ -124,7 +185,97 @@ function goScript() {
 }
 
 function goMetrics() {
-    uni.showToast({ title: '指标视图开发中', icon: 'none' })
+    if (showMetrics.value) {
+        showMetrics.value = false
+        return
+    }
+    showMetrics.value = true
+    metricsLoading.value = true
+    metricsNames.value = []
+    currentMetric.value = ''
+    chartData.value = []
+    latestValue.value = '-'
+    fetchMetricsNames()
+}
+
+async function fetchMetricsNames() {
+    const id = asset.value && asset.value.id
+    if (!id) {
+        metricsLoading.value = false
+        return
+    }
+    try {
+        const data = await new Promise((resolve, reject) => {
+            uni.request({
+                url: buildUrl('/metrics/names'),
+                method: 'GET',
+                header: commonHeaders(),
+                success: (r) => { r.statusCode >= 200 && r.statusCode < 300 ? resolve(r.data) : reject(r) },
+                fail: reject,
+            })
+        })
+        const names = Array.isArray(data) ? data : []
+        metricsNames.value = names
+        if (names.length > 0) {
+            switchMetric(names[0])
+        } else {
+            metricsLoading.value = false
+        }
+    } catch (e) {
+        metricsLoading.value = false
+        uni.showToast({ title: '获取指标列表失败', icon: 'none' })
+    }
+}
+
+async function switchMetric(name) {
+    currentMetric.value = name
+    metricsLoading.value = true
+    const id = asset.value && asset.value.id
+    if (!id) { metricsLoading.value = false; return }
+    try {
+        const data = await new Promise((resolve, reject) => {
+            uni.request({
+                url: buildUrl(`/metrics/data?asset_id=${id}&name=${encodeURIComponent(name)}&hours=6`),
+                method: 'GET',
+                header: commonHeaders(),
+                success: (r) => { r.statusCode >= 200 && r.statusCode < 300 ? resolve(r.data) : reject(r) },
+                fail: reject,
+            })
+        })
+        const arr = Array.isArray(data) ? data : []
+        // 按时间正序
+        arr.sort((a, b) => new Date(a.time) - new Date(b.time))
+        chartData.value = arr.slice(-60)  // 最近60个点
+        if (arr.length > 0) {
+            const last = arr[arr.length - 1]
+            latestValue.value = (last.value !== undefined ? last.value : '-') + (last.unit ? ' ' + last.unit : '')
+            chartStartTime.value = formatTime(arr[0].time)
+            chartEndTime.value = formatTime(last.time)
+        } else {
+            latestValue.value = '暂无数据'
+            chartStartTime.value = ''
+            chartEndTime.value = ''
+        }
+    } catch (e) {
+        chartData.value = []
+        latestValue.value = '加载失败'
+    } finally {
+        metricsLoading.value = false
+    }
+}
+
+function formatTime(t) {
+    if (!t) return ''
+    const d = new Date(t)
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2)
+}
+
+function barHeight(val) {
+    if (val === undefined || val === null) return 2
+    const vals = chartData.value.map((p) => Math.abs(p.value || 0))
+    const maxV = Math.max(...vals, 0.001)
+    const h = Math.abs(val) / maxV * 200
+    return Math.max(4, Math.min(200, h))
 }
 
 function goRestart() {
@@ -302,5 +453,99 @@ onLoad((opts) => {
 .quick-label {
     font-size: $font-sm;
     color: $text;
+}
+
+.close-btn {
+    font-size: 36rpx;
+    color: $text-muted;
+    padding: 8rpx 16rpx;
+}
+
+.loading-mini {
+    padding: 32rpx 0;
+    text-align: center;
+}
+
+.metric-tabs {
+    white-space: nowrap;
+    padding: 16rpx 0;
+}
+
+.metric-tab {
+    display: inline-block;
+    padding: 12rpx 28rpx;
+    margin-right: 16rpx;
+    background: $bg-card;
+    border-radius: 32rpx;
+}
+
+.metric-tab.active {
+    background: $primary;
+}
+
+.metric-tab-text {
+    font-size: $font-xs;
+    color: $text-secondary;
+}
+
+.metric-tab.active .metric-tab-text {
+    color: #fff;
+}
+
+.metric-chart {
+    margin-top: 24rpx;
+}
+
+.metric-latest {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 24rpx;
+}
+
+.metric-name {
+    font-size: $font-md;
+    font-weight: 600;
+    color: $text;
+}
+
+.metric-value {
+    font-size: $font-lg;
+    font-weight: 700;
+    color: $primary;
+}
+
+.chart-bars {
+    display: flex;
+    align-items: flex-end;
+    height: 220rpx;
+    gap: 4rpx;
+    padding: 0 8rpx;
+}
+
+.bar-col {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    height: 200rpx;
+}
+
+.bar {
+    width: 100%;
+    background: linear-gradient(to top, $primary, rgba($primary, 0.4));
+    border-radius: 4rpx 4rpx 0 0;
+    min-height: 4rpx;
+}
+
+.chart-x {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8rpx;
+}
+
+.chart-x-label {
+    font-size: $font-xs;
+    color: $text-muted;
 }
 </style>

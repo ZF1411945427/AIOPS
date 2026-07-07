@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}日志 - {{ pod }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>日志: {{ pod }}</h1>
+    <span style="color:#64748b;font-size:0.85rem">{{ cluster }} / {{ namespace }}</span>
+    <a href="javascript:location.reload()" class="link" style="margin-left:12px">刷新</a>
+</div>
+
+<pre id="log-content" style="background:#1e293b;color:#e2e8f0;padding:16px;border-radius:6px;font-size:13px;line-height:1.6;overflow:auto;max-height:75vh;white-space:pre-wrap;word-break:break-all;font-family:Consolas,monospace;">加载中...</pre>
+
+<script>
+fetch('/k8s/api/pod/{{ cluster }}/{{ namespace }}/{{ pod }}/logs?tail={{ tail }}')
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            document.getElementById('log-content').textContent = data.logs || '(无日志输出)';
+        } else {
+            document.getElementById('log-content').textContent = '获取日志失败: ' + (data.error || '未知错误');
+        }
+    })
+    .catch(e => {
+        document.getElementById('log-content').textContent = '请求异常: ' + e.message;
+    });
+</script>
+{% endblock %}

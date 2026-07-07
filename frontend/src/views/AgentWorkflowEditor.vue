@@ -12,6 +12,7 @@
         <button class="btn btn-primary" @click="publishWorkflow">{{ workflow.published ? '取消发布' : '发布' }}</button>
         <button class="btn" @click="autoArrange">自动排列</button>
         <button class="btn btn-success" @click="runTest">运行测试</button>
+        <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
       </div>
     </div>
 
@@ -26,7 +27,7 @@
           </div>
         </div>
         <div class="panel-title" style="margin-top:16px;">使用说明</div>
-        <div class="help-text">1. 拖拽节点到画布<br>2. 拖拽节点边缘连线<br>3. 点击节点配置属性<br>4. 运行测试输入参数<br>5. 点击连线选中，按 Backspace 删除，或右键"删除此连线"</div>
+        <div class="help-text">从左侧拖拽节点到画布，拖拽节点边缘连线。<br>点击顶部「📖 操作说明」查看完整向导。</div>
       </div>
 
       <!-- Vue Flow 画布 -->
@@ -250,6 +251,158 @@
         </div>
       </div>
     </div>
+    <!-- 操作说明书抽屉 -->
+    <transition name="slide">
+      <div v-if="showGuide" class="guide-overlay" @click.self="showGuide = false">
+        <div class="guide-drawer">
+          <div class="guide-header">
+            <span class="guide-title">📖 智能体工作流 · 操作说明</span>
+            <button class="guide-close" @click="showGuide = false">✕</button>
+          </div>
+          <div class="guide-body">
+            <section class="guide-section">
+              <h4>1. 工作流是什么？</h4>
+              <p>智能体工作流是一个<strong>可视化编排工具</strong>，把多个 AI 调用、知识检索、工具执行、条件判断、代码处理按 DAG（有向无环图）连接起来，形成一个<strong>自动化的多步处理流程</strong>。</p>
+              <p>每个节点执行一个原子步骤，节点间的连线表示数据流向。工作流运行时会按拓扑顺序自动执行每个节点，上一个节点的输出传递给下一个节点。</p>
+            </section>
+
+            <section class="guide-section">
+              <h4>2. 节点类型总览</h4>
+              <div class="node-type-table">
+                <div class="nt-row" v-for="nt in nodeTypes" :key="nt.type">
+                  <span class="nt-icon" :style="{background: nt.color}">{{ nt.icon }}</span>
+                  <span class="nt-name">{{ nt.label }}</span>
+                  <span class="nt-desc">{{ nodeTypeDesc(nt.type) }}</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="guide-section">
+              <h4>3. 基本操作步骤</h4>
+              <div class="step-list">
+                <div class="step-item"><span class="step-num">1</span><span><strong>拖拽添加节点</strong> — 从左侧「节点类型」面板拖拽任意节点到画布空白区域，松开即创建。</span></div>
+                <div class="step-item"><span class="step-num">2</span><span><strong>连接节点</strong> — 拖拽节点边缘的圆形手柄（handle）到另一个节点，松开即建立连线，数据将沿连线方向流动。</span></div>
+                <div class="step-item"><span class="step-num">3</span><span><strong>配置节点</strong> — 点击画布上的节点，右侧弹出属性面板，可设置节点名称、参数、提示词等。</span></div>
+                <div class="step-item"><span class="step-num">4</span><span><strong>删除节点/连线</strong> — 选中节点或连线后按 <kbd>Backspace</kbd> 键，或右键连线选「删除此连线」。也可在右侧属性面板点击「删除」按钮。</span></div>
+                <div class="step-item"><span class="step-num">5</span><span><strong>保存与发布</strong> — 点击顶部工具栏「保存」按钮保存草稿，点击「发布」使工作流可用于正式执行。</span></div>
+                <div class="step-item"><span class="step-num">6</span><span><strong>运行测试</strong> — 点击「运行测试」输入参数，即可在本页面直接执行工作流并查看每一步的输出结果。</span></div>
+              </div>
+            </section>
+
+            <section class="guide-section">
+              <h4>4. 各节点配置详解</h4>
+
+              <h5>🔹 开始节点 (Start)</h5>
+              <p>工作流的入口，定义<strong>输入参数</strong>的 JSON Schema。后续节点可通过 <code v-pre>{{ inputs.xxx }}</code> 引用输入参数。</p>
+              <pre v-pre class="guide-code">[
+  {"key": "question", "type": "string", "required": true},
+  {"key": "alert_id", "type": "integer"}
+]</pre>
+
+              <h5>🔹 结束节点 (End)</h5>
+              <p>工作流的出口，定义<strong>输出映射</strong>。把前面节点的输出映射为最终结果。可使用 Jinja2 模板语法引用节点输出。</p>
+              <pre v-pre class="guide-code">[
+  {"key": "answer", "value": "{{ nodes.llm1.output.text }}"}
+]</pre>
+
+              <h5>🔹 LLM 节点</h5>
+              <p>调用大语言模型，是最核心的节点。配置要点：</p>
+              <ul>
+                <li><strong>AI Provider</strong> — 选择已配置的 LLM 提供商，留空使用系统默认</li>
+                <li><strong>System Prompt</strong> — AI 的角色设定和行为指令，如"你是一个运维专家"</li>
+                <li><strong>User Prompt</strong> — 具体的提问内容，可引用前面节点的输出：<code v-pre>{{ nodes.knowledge1.output.text }}</code></li>
+                <li><strong>温度</strong> — 越低越保守（0.1），越高越有创造力（0.8+）</li>
+                <li><strong>Max Tokens</strong> — 回复的最大 token 数</li>
+              </ul>
+
+              <h5>🔹 知识检索节点 (Knowledge)</h5>
+              <p>从知识库中检索相关文档。配置要点：</p>
+              <ul>
+                <li><strong>查询语句</strong> — 搜索关键词，可引用输入：<code v-pre>{{ inputs.question }}</code></li>
+                <li><strong>知识库 ID</strong> — 指定要检索的知识库（留空检索全部）</li>
+                <li><strong>Top K</strong> — 返回最相关的 K 条结果</li>
+                <li><strong>分数阈值</strong> — 低于此相关度的结果被过滤（0~1）</li>
+              </ul>
+
+              <h5>🔹 工具节点 (Tool)</h5>
+              <p>执行 MCP 注册的运维工具（查询告警、执行命令、操作资产等）。配置要点：</p>
+              <ul>
+                <li><strong>工具名称</strong> — 从下拉列表选择要执行的工具（如 execute_run_command、query_alerts）</li>
+                <li><strong>执行模式</strong> — <span class="tag-safe">等待确认</span> 安全模式，运行到该节点暂停等待人工确认；<span class="tag-risky">自动执行</span> 直接执行不暂停（高危操作会被强制降级为等待确认）</li>
+                <li><strong>参数</strong> — 工具的输入参数 JSON，支持模板语法：<code v-pre>{"alert_id": "{{ inputs.alert_id }}"}</code></li>
+              </ul>
+
+              <h5>🔹 条件分支节点 (Condition)</h5>
+              <p>根据条件判断走哪个分支，实现 if/else 逻辑。配置要点：</p>
+              <ul>
+                <li>定义多个条件表达式，每个条件指定目标节点 ID</li>
+                <li>条件表达式可使用 Jinja2 模板，引用前序节点输出</li>
+                <li><code>default</code> 条件作为兜底分支（必须配置一条 default）</li>
+              </ul>
+              <pre v-pre class="guide-code">[
+  {"condition": "{{ nodes.llm1.output.text contains 严重 }}", "target": "escalate"},
+  {"condition": "default", "target": "notify"}
+]</pre>
+
+              <h5>🔹 代码节点 (Code)</h5>
+              <p>执行自定义 Python 代码，处理或转换数据。配置要点：</p>
+              <ul>
+                <li><strong>输入映射</strong> — 把前序节点输出映射为 inputs 变量：<code v-pre>{"data": "{{ nodes.tool1.output | tojson }}"}</code></li>
+                <li><strong>Python 代码</strong> — 写一段 Python 代码，<code>inputs</code> 变量包含输入数据，<code>result</code> 变量作为输出传给后续节点</li>
+              </ul>
+              <pre v-pre class="guide-code">result = {'count': len(inputs.get('data', [])), 'items': inputs.get('data', [])[:5]}</pre>
+
+              <h5>🔹 HTTP 请求节点</h5>
+              <p>发送 HTTP 请求调用外部 API。配置要点：</p>
+              <ul>
+                <li><strong>方法</strong> — GET/POST/PUT/DELETE</li>
+                <li><strong>URL</strong> — 请求地址，支持模板语法</li>
+                <li><strong>Headers/Body</strong> — 请求头和请求体 JSON</li>
+                <li><strong>超时</strong> — 请求超时时间（秒）</li>
+              </ul>
+            </section>
+
+            <section class="guide-section">
+              <h4>5. 模板语法参考</h4>
+              <p>工作流使用 <strong>Jinja2</strong> 模板引擎进行节点间的数据传递。</p>
+              <table class="syntax-table">
+                <thead><tr><th>语法</th><th>说明</th><th>示例</th></tr></thead>
+                <tbody>
+                  <tr><td><code v-pre>{{ inputs.xxx }}</code></td><td>引用工作流的输入参数</td><td><code v-pre>{{ inputs.question }}</code></td></tr>
+                  <tr><td><code v-pre>{{ nodes.xxx.output }}</code></td><td>引用前序节点的输出</td><td><code v-pre>{{ nodes.llm1.output.text }}</code></td></tr>
+                  <tr><td><code v-pre>{{ ... | tojson }}</code></td><td>过滤器：转为 JSON 字符串</td><td><code v-pre>{{ nodes.tool1.output | tojson }}</code></td></tr>
+                  <tr><td><code v-pre>{{ ... contains ... }}</code></td><td>条件判断：是否包含子串</td><td><code v-pre>{{ text contains 严重 }}</code></td></tr>
+                  <tr><td><code v-pre>{% if ... %}</code></td><td>Code 节点中可用 Jinja2 控制流</td><td><code v-pre>{% if x &gt; 5 %}...{% endif %}</code></td></tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="guide-section">
+              <h4>6. 执行与调试</h4>
+              <ul>
+                <li><strong>运行测试</strong> — 编辑器内点击「运行测试」，实时查看每个节点的执行状态和输出内容</li>
+                <li><strong>等待确认</strong> — 工具节点设为「等待确认」时，执行到该节点会暂停，在弹出的确认框中点击「确认」继续</li>
+                <li><strong>自动执行</strong> — 工具节点设为「自动执行」时，如无高危风险则自动运行。高危工具（执行命令、删除资产等）会被系统<strong>强制降级为等待确认</strong></li>
+                <li><strong>执行记录</strong> — 可在「智能体工作流 → 运行记录」中查看所有历史执行详情，包括节点耗时、输出、错误信息等</li>
+                <li><strong>重试失败节点</strong> — 执行失败的节点可在运行记录中点击「重试」重新执行</li>
+              </ul>
+            </section>
+
+            <section class="guide-section">
+              <h4>7. 最佳实践</h4>
+              <ul>
+                <li><strong>从简单开始</strong> — 先搭一个 LLM → End 的两节点流程，跑通后再逐步加 Knowledge 和 Tool 节点</li>
+                <li><strong>命名规范</strong> — 给每个节点一个有意义的名称（如"查告警"、"分析根因"），方便后续维护</li>
+                <li><strong>善用条件分支</strong> — 用 Condition 节点实现告警分级处理：严重告警走升级流程，普通告警通知即可</li>
+                <li><strong>Code 节点做数据清洗</strong> — Tool 节点的输出往往包含大量字段，用 Code 节点提取关键字段后再传给 LLM，减少 Token 消耗</li>
+                <li><strong>先保存再运行</strong> — 运行测试前先点击「保存」，避免意外丢失更改</li>
+                <li><strong>监控执行日志</strong> — 生产环境的工作流建议定期查看运行记录，及时发现失败节点</li>
+              </ul>
+            </section>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -298,6 +451,20 @@ const runPolling = ref(false)
 const editorConfirmingId = ref(null)
 const expandedNodes = ref(new Set())
 let pollingTimer = null
+const showGuide = ref(false)
+function nodeTypeDesc(type) {
+  const map = {
+    start: '定义工作流的输入参数，每个工作流有且只有一个开始节点',
+    end: '定义工作流的输出映射，每个工作流有且只有一个结束节点',
+    llm: '调用大语言模型进行文本生成、分析、总结等',
+    knowledge: '从知识库中检索相关文档，为 LLM 提供上下文',
+    tool: '执行 MCP 注册的运维工具（告警、资产、命令等）',
+    condition: '根据条件判断走哪个分支（if/else 逻辑）',
+    code: '执行自定义 Python 代码，处理或转换数据',
+    http: '发送 HTTP 请求调用外部 API',
+  }
+  return map[type] || ''
+}
 
 const outputsToShow = computed(() => {
   return runResult.value?.outputs ? Object.keys(runResult.value.outputs) : []
@@ -962,4 +1129,107 @@ onMounted(() => {
 .btn-outline { background: transparent; color: var(--text, #1e293b); border: 1px solid var(--border, rgba(0,0,0,0.2)); }
 .btn-outline:hover { background: rgba(0,0,0,0.04); }
 .badge.st-awaiting { background: rgba(245,158,11,0.12); color: #d97706; }
+.btn-guide {
+  padding: 5px 14px; border: 1px solid #6366f1; border-radius: 6px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
+  cursor: pointer; font-size: 0.8rem; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: all 0.15s; box-shadow: 0 1px 3px rgba(99,102,241,0.3);
+}
+.btn-guide:hover { background: linear-gradient(135deg, #4f46e5, #7c3aed); box-shadow: 0 2px 8px rgba(99,102,241,0.4); transform: translateY(-1px); }
+
+/* 说明书抽屉 */
+.guide-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.3);
+  display: flex; justify-content: flex-end;
+}
+.guide-drawer {
+  width: 520px; max-width: 90vw; height: 100%;
+  background: var(--bg-card-solid, #fff);
+  box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  display: flex; flex-direction: column;
+  animation: guide-slide-in 0.2s ease-out;
+}
+@keyframes guide-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.guide-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07));
+}
+.guide-title { font-size: 1rem; font-weight: 700; color: var(--text, #1e293b); }
+.guide-close {
+  width: 28px; height: 28px; border: none; background: transparent;
+  cursor: pointer; font-size: 1.1rem; color: var(--text-tertiary, #94a3b8);
+  border-radius: 6px; display: flex; align-items: center; justify-content: center;
+}
+.guide-close:hover { background: rgba(0,0,0,0.05); color: var(--text, #1e293b); }
+.guide-body {
+  flex: 1; overflow-y: auto; padding: 16px 20px 60px;
+}
+.guide-section { margin-bottom: 28px; }
+.guide-section h4 {
+  font-size: 0.9rem; font-weight: 700; color: var(--text, #1e293b);
+  margin: 0 0 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.07));
+}
+.guide-section h5 {
+  font-size: 0.84rem; font-weight: 600; color: var(--text, #1e293b);
+  margin: 14px 0 6px;
+}
+.guide-section p { font-size: 0.8rem; line-height: 1.7; color: var(--text-secondary, #475569); margin: 0 0 8px; }
+.guide-section ul { margin: 4px 0 10px; padding-left: 18px; }
+.guide-section li { font-size: 0.8rem; line-height: 1.7; color: var(--text-secondary, #475569); margin-bottom: 3px; }
+.guide-section code {
+  background: rgba(99,102,241,0.08); padding: 1px 5px; border-radius: 3px;
+  font-size: 0.78rem; color: #6366f1; font-family: Consolas, monospace;
+}
+.guide-section kbd {
+  background: rgba(0,0,0,0.05); padding: 1px 6px; border-radius: 3px;
+  border: 1px solid rgba(0,0,0,0.1); font-size: 0.76rem;
+  font-family: inherit; box-shadow: 0 1px 0 rgba(0,0,0,0.08);
+}
+.node-type-table { display: flex; flex-direction: column; gap: 6px; }
+.nt-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  background: rgba(0,0,0,0.02); border: 1px solid var(--border, rgba(0,0,0,0.06));
+}
+.nt-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 5px; color: #fff;
+  font-size: 0.65rem; font-weight: 600; flex-shrink: 0;
+}
+.nt-name { font-size: 0.82rem; font-weight: 600; color: var(--text, #1e293b); min-width: 60px; }
+.nt-desc { font-size: 0.76rem; color: var(--text-secondary, #64748b); line-height: 1.5; }
+.step-list { display: flex; flex-direction: column; gap: 8px; }
+.step-item { display: flex; gap: 10px; align-items: flex-start; font-size: 0.8rem; color: var(--text-secondary, #475569); line-height: 1.6; }
+.step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent, #6366f1); color: #fff;
+  font-size: 0.72rem; font-weight: 700;
+}
+.guide-code {
+  background: #1e293b; color: #e2e8f0; border-radius: 6px;
+  padding: 10px 14px; font-size: 0.74rem; font-family: Consolas, monospace;
+  white-space: pre-wrap; margin: 4px 0 12px; line-height: 1.6;
+  overflow-x: auto;
+}
+.syntax-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin: 6px 0; }
+.syntax-table th { text-align: left; padding: 6px 10px; font-weight: 600; color: var(--text-secondary, #64748b); border-bottom: 1px solid var(--border-strong, rgba(0,0,0,0.12)); }
+.syntax-table td { padding: 6px 10px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); color: var(--text-secondary, #475569); }
+.syntax-table code { font-size: 0.72rem; }
+.tag-safe {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  background: rgba(16,185,129,0.12); color: #10b981;
+  font-size: 0.72rem; font-weight: 600;
+}
+.tag-risky {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  background: rgba(239,68,68,0.12); color: #ef4444;
+  font-size: 0.72rem; font-weight: 600;
+}
 </style>

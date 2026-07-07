@@ -51,6 +51,20 @@ python run.py
 
 **不要依赖** `npx kill-port 8000` 或 `taskkill`，它们常杀不干净。
 
+### ⚠️ uni-app switchTab 不能传参（重要！）
+`uni.switchTab({ url })` 会忽略所有 query 参数（`?tab=xxx` 无效）。
+**跨 tab 页传参必须用 `getApp().globalData`。**
+示例：
+```js
+// 发
+const app = getApp(); app.globalData.alertTab = 'triggered'
+uni.switchTab({ url: '/pages/alert/list' })
+// 收（在目标页 onLoad 里读）
+const app = typeof getApp === 'function' ? getApp() : null
+const tab = app && app.globalData && app.globalData.alertTab
+if (tab) { activeTab.value = tab; app.globalData.alertTab = null }
+```
+
 ### ⚠️ 后端启动方式（重要！）
 在 opencode 的 bash 工具中直接运行 `python run.py` 会**随 bash 会话超时而终止进程**。
 必须使用 Windows `start` 命令在新窗口中启动：
@@ -59,7 +73,23 @@ python run.py
 start "AIOps Backend" python run.py
 ```
 
-### ⚠️ 登录页路由（重要！）
+### ⚠️ uni-app H5 页面组件缓存大坑（重要！）
+**uni-app 的 Vite 插件对 `src/pages/` 下的页面组件（如 `oncall/my.vue`）有深层编译缓存**
+- 修改 `.vue` 页面文件（模板/脚本/样式）后，即使重启 dev server，改动**可能不生效**
+- `curl` 验证 Vite 返回的是新文件，但浏览器 DOM 仍渲染旧版本（CSS 背景色、调试条全不显示）
+- **`src/main.js` 的改动总是生效**（因为它是入口模块，Vite 每次都重新加载）
+- 用 `document.addEventListener('click', ...)` 捕获阶段监听可以全局拦截组件内事件
+
+**遇到页面组件改动不生效时：**
+1. 先把补丁逻辑写在 `main.js` 里验证（入口文件改动一定生效）
+2. 确认逻辑正确后，再排查页面组件缓存问题（可能需 `npm run build:h5` 全量构建）
+3. 绕过方案：通过全局事件拦截 + 直接调 API 来实现功能，不依赖页面组件内的代码
+
+### ⚠️ @tap 事件的 DOM 拦截
+- uni-app 的 `@tap` 事件在 H5 中同时触发 `touchstart` 和 `click` 事件
+- `<view>` 渲染为 `<uni-view>` 自定义元素
+- 全局拦截应用 `document.addEventListener('click', handler, true)`（捕获阶段）
+- 通过文本内容匹配（如 `el.textContent.trim() === '拨号'`）比类名匹配更可靠
 **登录页由 Vue SPA 渲染，不是 Jinja2 模板！**
 - 路由 `GET /login` → `auth.py:_serve_vue()` → `frontend/dist/index.html`
 - **真正的登录页组件**: `frontend/src/views/LoginView.vue`

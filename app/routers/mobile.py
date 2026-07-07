@@ -175,6 +175,8 @@ def scan_asset(code: str, user_id: int = Depends(require_user), db: Session = De
     if not code:
         return JSONResponse({"ok": False, "error": "code 不能为空"}, status_code=400)
     asset = db.query(Asset).filter(Asset.name == code).first()
+    if not asset and code.isdigit():
+        asset = db.query(Asset).filter(Asset.id == int(code)).first()
     if not asset:
         asset = db.query(Asset).filter(Asset.tags.like(f"%{code}%")).first()
     if not asset:
@@ -313,19 +315,33 @@ def dashboard(user_id: int = Depends(require_user), db: Session = Depends(get_db
         OnCallSchedule.current_period_start <= now,
         OnCallSchedule.current_period_end >= now,
     ).order_by(OnCallSchedule.team_name).all()
-    oncall_list = [
-        {
+    import json as _json
+    oncall_list = []
+    for o in oncalls:
+        phone = ""
+        try:
+            mems = _json.loads(o.members) if o.members else []
+            for m in mems:
+                if isinstance(m, dict) and m.get("name") == o.current_oncall:
+                    phone = m.get("phone") or ""
+                    break
+                elif isinstance(m, str) and m == o.current_oncall:
+                    break
+        except (ValueError, TypeError):
+            pass
+        oncall_list.append({
             "team_name": o.team_name,
             "current_oncall": o.current_oncall,
+            "phone": phone,
             "period_start": o.current_period_start.strftime("%Y-%m-%d %H:%M") if o.current_period_start else None,
             "period_end": o.current_period_end.strftime("%Y-%m-%d %H:%M") if o.current_period_end else None,
-        }
-        for o in oncalls
-    ]
+        })
 
     running_sop = db.query(WorkflowRun).filter(WorkflowRun.status == WorkflowRun.STATUS_RUNNING).count()
     running_agent = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.status == AgentWorkflowRun.STATUS_RUNNING).count()
-    workflows = {"running_sop": running_sop, "running_agent": running_agent}
+    failed_sop = db.query(WorkflowRun).filter(WorkflowRun.status == WorkflowRun.STATUS_FAILED).count()
+    failed_agent = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.status == AgentWorkflowRun.STATUS_FAILED).count()
+    workflows = {"running_sop": running_sop, "running_agent": running_agent, "failed_sop": failed_sop, "failed_agent": failed_agent}
 
     asset_total = db.query(Asset).count()
     asset_online = db.query(Asset).filter(Asset.status == "online").count()
@@ -371,3 +387,75 @@ def push_logs(user_id: int = Depends(require_user), db: Session = Depends(get_db
         q = q.filter(MobileDevice.user_id == user_id)
     items = q.order_by(PushRecord.created_at.desc()).limit(50).all()
     return {"items": [_push_record_to_dict(r) for r in items], "total": len(items), "is_admin": admin}
+
+
+# ==================== 语音转写 ====================
+
+class VoiceTranscribeRequest(BaseModel):
+    audio_base64: str
+    format: str = "mp3"
+
+@router.post("/voice/transcribe")
+def voice_transcribe(req: VoiceTranscribeRequest, user_id: int = Depends(require_user), db: Session = Depends(get_db)):
+    """接收移动端录音 base64，调用 AI provider 的语音识别接口转为文字。"""
+    try:
+        audio_bytes = base64.b64decode(req.audio_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="音频数据解码失败")
+
+    if len(audio_bytes) < 500:
+        raise HTTPException(status_code=400, detail="音频太短，请说话至少1秒")
+
+    # 查找支持语音的 AI provider（OpenAI Whisper 兼容接口）
+    try:
+        provider = db.query(AIProvider).filter(
+            AIProvider.enabled == True,
+            AIProvider.provider_type.in_(["openai", "azure", "custom"])
+        ).first()
+        if not provider:
+            raise HTTPException(status_code=503, detail="未配置可用的 AI 语音识别服务")
+
+        import urllib.request
+        import urllib.error
+
+        audio_mime = "audio/mpeg" if req.format == "mp3" else "audio/wav"
+        boundary = "----aiops-voice-" + uuid.uuid4().hex
+        CR = chr(13)
+        LF = chr(10)
+        CRLF = CR + LF
+        parts = []
+        parts.append(("--" + boundary + CRLF).encode())
+        parts.append(('Content-Disposition: form-data; name="file"; filename="voice.' + req.format + '"' + CRLF).encode())
+        parts.append(("Content-Type: " + audio_mime + CRLF + CRLF).encode())
+        parts.append(audio_bytes)
+        parts.append((CRLF + "--" + boundary + CRLF).encode())
+        parts.append(('Content-Disposition: form-data; name="model"' + CRLF + CRLF).encode())
+        parts.append(("whisper-1" + CRLF).encode())
+        parts.append(("--" + boundary + "--" + CRLF).encode())
+        body = b"".join(parts)
+
+        base_url = (provider.base_url or "https://api.openai.com/v1").rstrip("/")
+        url = base_url + "/audio/transcriptions"
+        api_key = provider.api_key or ""
+        req_obj = urllib.request.Request(url, data=body, method="POST")
+        req_obj.add_header("Content-Type", "multipart/form-data; boundary=" + boundary)
+        req_obj.add_header("Authorization", "Bearer " + api_key)
+
+        resp = urllib.request.urlopen(req_obj, timeout=60)
+        result = json.loads(resp.read().decode())
+        text = result.get("text", "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="语音识别返回空结果")
+        return {"text": text}
+    except HTTPException:
+        raise
+    except urllib.error.HTTPError as e:
+        detail = f"语音识别服务返回 {e.code}"
+        try:
+            err_body = json.loads(e.read().decode())
+            detail = err_body.get("error", {}).get("message", detail) if isinstance(err_body, dict) else detail
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"语音识别失败: {str(e)}")

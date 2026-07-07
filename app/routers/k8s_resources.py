@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, Depends, Request, Query, Body
+from fastapi import APIRouter, Depends, Request, Query, Body, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -16,11 +16,17 @@ def _get_k8s_client(ds: DataSource):
     cfg = parse_json_config(ds.auth_config)
     if cfg.get("kubeconfig"):
         config.load_kube_config_from_dict(cfg["kubeconfig"])
+    elif cfg.get("api_server") and cfg.get("token"):
+        configuration = client.Configuration()
+        configuration.host = cfg["api_server"]
+        configuration.api_key = {"authorization": f"Bearer {cfg['token']}"}
+        configuration.verify_ssl = cfg.get("verify_ssl", False)
+        configuration.timeout = 10
+        client.Configuration.set_default(configuration)
     else:
         config.load_kube_config()
-    # 设置请求超时，避免连不通的集群卡死整个请求
     api_client = client.ApiClient()
-    api_client.configuration.timeout = 2
+    api_client.configuration.timeout = 10
     return client.CoreV1Api(api_client=api_client), client.AppsV1Api(api_client=api_client), client.NetworkingV1Api(api_client=api_client)
 
 
@@ -54,17 +60,14 @@ def api_overview(db: Session = Depends(get_db)):
         total_services = 0
         healthy_clusters = 0
         for ds in clusters:
-            if ds.last_status == "error" or not ds.endpoint:
+            if not ds.endpoint:
                 overviews.append({
                     "name": ds.name, "endpoint": ds.endpoint,
-                    "status": "error" if ds.last_status == "error" else "unknown",
-                    "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
-                    "pods": 0, "running_pods": 0, "pod_running_rate": 0,
-                    "deployments": 0, "namespaces": 0, "services": 0,
-                    "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
+                    "status": "unknown", "nodes": 0, "healthy_nodes": 0,
+                    "node_health_rate": 0, "pods": 0, "running_pods": 0,
+                    "pod_running_rate": 0, "deployments": 0, "namespaces": 0,
+                    "services": 0, "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
                 })
-                if ds.last_status == "error":
-                    errors.append(f"{ds.name}: 数据源状态为 error，跳过探测")
                 continue
             try:
                 from kubernetes import client
@@ -100,8 +103,14 @@ def api_overview(db: Session = Depends(get_db)):
                 total_services += svc_count
                 if ds.last_status == "online":
                     healthy_clusters += 1
+                ds.last_status = "healthy"
+                ds.last_error = ""
+                db.commit()
             except Exception as e:
                 errors.append(f"{ds.name}: {e}")
+                ds.last_status = "error"
+                ds.last_error = str(e)
+                db.commit()
                 overviews.append({
                     "name": ds.name, "endpoint": ds.endpoint, "status": "error",
                     "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
@@ -142,6 +151,71 @@ def api_statefulset_list(cluster: str = "", namespace: str = "", db: Session = D
                         "replicas": s.spec.replicas, "ready": s.status.ready_replicas or 0,
                         "service": s.spec.service_name or "-",
                         "image": s.spec.template.spec.containers[0].image if s.spec.template.spec.containers else "-",
+                    })
+            except Exception as e:
+                error = str(e)
+        return JSONResponse({
+            "items": items, "cluster": cluster, "namespace": namespace, "error": error,
+            "clusters": [{"name": c.name, "endpoint": c.endpoint, "status": c.last_status} for c in clusters],
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/deployments")
+def api_deployment_list(cluster: str = "", namespace: str = "", db: Session = Depends(get_db)):
+    try:
+        clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
+        items = []
+        error = None
+        ds = _get_k8s_ds(db, cluster) if cluster else None
+        if ds:
+            try:
+                _, apps_v1, _ = _get_k8s_client(ds)
+                raw = apps_v1.list_namespaced_deployment(namespace) if namespace else apps_v1.list_deployment_for_all_namespaces().items
+                for d in raw:
+                    available = d.status.available_replicas or 0
+                    total = d.spec.replicas or 0
+                    items.append({
+                        "name": d.metadata.name, "namespace": d.metadata.namespace,
+                        "cluster": ds.name,
+                        "replicas": total, "available": available,
+                        "strategy": (d.spec.strategy.type or "RollingUpdate") if d.spec.strategy else "RollingUpdate",
+                        "image": d.spec.template.spec.containers[0].image if d.spec.template.spec.containers else "-",
+                    })
+            except Exception as e:
+                error = str(e)
+        return JSONResponse({
+            "items": items, "cluster": cluster, "namespace": namespace, "error": error,
+            "clusters": [{"name": c.name, "endpoint": c.endpoint, "status": c.last_status} for c in clusters],
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/pods")
+def api_pod_list(cluster: str = "", namespace: str = "", db: Session = Depends(get_db)):
+    try:
+        clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
+        items = []
+        error = None
+        ds = _get_k8s_ds(db, cluster) if cluster else None
+        if ds:
+            try:
+                v1, _, _ = _get_k8s_client(ds)
+                raw = v1.list_namespaced_pod(namespace) if namespace else v1.list_pod_for_all_namespaces().items
+                for p in raw:
+                    container_images = [c.image for c in (p.spec.containers or [])]
+                    items.append({
+                        "name": p.metadata.name, "namespace": p.metadata.namespace,
+                        "cluster": ds.name,
+                        "node": p.spec.node_name or "-",
+                        "phase": p.status.phase or "Unknown",
+                        "pod_ip": p.status.pod_ip or "-",
+                        "host_ip": p.status.host_ip or "-",
+                        "restarts": sum(s.restart_count for s in (p.status.container_statuses or [])),
+                        "age": str(p.metadata.creation_timestamp)[:19] if p.metadata.creation_timestamp else "",
+                        "images": ", ".join(container_images),
                     })
             except Exception as e:
                 error = str(e)
@@ -908,3 +982,127 @@ def api_pvc_delete(cluster: str, namespace: str, name: str, db: Session = Depend
         return JSONResponse({"ok": True, "cluster": cluster, "namespace": namespace, "name": name})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/pod/{cluster}/{namespace}/{name}/logs")
+def api_pod_logs(cluster: str, namespace: str, name: str, tail: int = 200, db: Session = Depends(get_db)):
+    try:
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "error": "Cluster not found"}, status_code=404)
+        v1, _, _ = _get_k8s_client(ds)
+        log_data = v1.read_namespaced_pod_log(name, namespace, tail_lines=tail)
+        return JSONResponse({"ok": True, "logs": log_data, "pod": name, "namespace": namespace, "cluster": cluster})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/pod/{cluster}/{namespace}/{name}/logs-page")
+def api_pod_logs_page(request: Request, cluster: str, namespace: str, name: str, tail: int = 200):
+    return templates.TemplateResponse("pod_logs.html", {
+        "request": request, "cluster": cluster,
+        "namespace": namespace, "pod": name, "tail": tail,
+    })
+
+
+@router.get("/api/pod/{cluster}/{namespace}/{name}/terminal-page")
+def api_pod_terminal_page(request: Request, cluster: str, namespace: str, name: str):
+    return templates.TemplateResponse("k8s_terminal.html", {
+        "request": request, "cluster": cluster,
+        "namespace": namespace, "pod": name,
+    })
+
+
+@router.websocket("/ws/pod/{cluster}/{namespace}/{name}/terminal")
+async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str, name: str):
+    await websocket.accept()
+    from app.database import get_session_for, get_db_mode
+    try:
+        db = get_session_for(get_db_mode())()
+        ds = db.query(DataSource).filter(DataSource.type == "kubernetes", DataSource.name == cluster).first()
+        db.close()
+        if not ds:
+            await websocket.send_text("K8s data source not found")
+            await websocket.close()
+            return
+
+        from kubernetes import client
+        from app.services.connection_service import ConnectionTester
+        cfg = parse_json_config(ds.auth_config)
+
+        configuration = client.Configuration()
+        if cfg.get("kubeconfig"):
+            from kubernetes import config
+            config.load_kube_config_from_dict(cfg["kubeconfig"])
+            api_client = client.ApiClient()
+        elif cfg.get("api_server") and cfg.get("token"):
+            configuration.host = cfg["api_server"]
+            configuration.api_key = {"authorization": f"Bearer {cfg['token']}"}
+            configuration.verify_ssl = cfg.get("verify_ssl", False)
+            configuration.timeout = 30
+            api_client = client.ApiClient(configuration)
+        else:
+            await websocket.send_text("K8s 连接配置不完整")
+            await websocket.close()
+            return
+
+        v1 = client.CoreV1Api(api_client)
+        try:
+            resp = v1.connect_get_namespaced_pod_exec(
+                name, namespace,
+                command=["/bin/sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi"],
+                stderr=True, stdin=True, stdout=True, tty=True,
+            )
+        except Exception:
+            resp = v1.connect_get_namespaced_pod_exec(name, namespace, command=["sh"], stderr=True, stdin=True, stdout=True, tty=True)
+
+        ws_url = resp.url if hasattr(resp, 'url') else str(resp)
+        import websocket as k8s_ws
+        k8s_ws_url = ws_url.replace("https://", "wss://").replace("http://", "ws://")
+        kws = k8s_ws.create_connection(k8s_ws_url, subprotocols=["channel.k8s.io"])
+        kws.settimeout(30)
+
+        import asyncio
+
+        async def k8s_to_browser():
+            try:
+                while True:
+                    data = kws.recv()
+                    if isinstance(data, bytes) and len(data) > 1:
+                        await websocket.send_bytes(data[1:])
+                    elif isinstance(data, str):
+                        await websocket.send_text(data)
+            except Exception:
+                pass
+
+        async def browser_to_k8s():
+            try:
+                while True:
+                    data = await websocket.receive()
+                    if data.get("type") == "websocket.disconnect":
+                        break
+                    msg = data.get("text") or data.get("bytes")
+                    if msg:
+                        if isinstance(msg, str):
+                            kws.send("\x00" + msg)
+                        else:
+                            kws.send_binary(b"\x00" + msg)
+            except Exception:
+                pass
+
+        t1 = asyncio.create_task(k8s_to_browser())
+        t2 = asyncio.create_task(browser_to_k8s())
+        await asyncio.gather(t1, t2)
+        kws.close()
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(f"连接异常: {e}")
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass

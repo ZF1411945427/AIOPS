@@ -13,18 +13,18 @@
                 :totalCount="totalAssets"
             />
 
-            <view class="card stat-card" @tap="goAlerts">
+            <view class="card stat-card">
                 <view class="card-title">告警统计</view>
                 <view class="stat-grid">
-                    <view class="stat-item">
+                    <view class="stat-item" @tap="goAlerts('all')">
                         <text class="stat-value">{{ alertsTotal }}</text>
                         <text class="stat-label">今日告警</text>
                     </view>
-                    <view class="stat-item">
+                    <view class="stat-item" @tap="goAlerts('triggered')">
                         <text class="stat-value warn">{{ alertsTriggered }}</text>
                         <text class="stat-label">待处理</text>
                     </view>
-                    <view class="stat-item">
+                    <view class="stat-item" @tap="goAlerts('suppressed')">
                         <text class="stat-value">{{ alertsSuppressed }}</text>
                         <text class="stat-label">已静默</text>
                     </view>
@@ -131,8 +131,15 @@ async function loadData() {
     try {
         dashboard.value = await getDashboard()
     } catch (e) {
-        if (!userStore.token) return
-        uni.showToast({ title: '加载失败', icon: 'none' })
+        if (!userStore.token) {
+            loading.value = false
+            return
+        }
+        uni.showModal({
+            title: '连接失败',
+            content: '无法连接到服务器，请检查网络或服务器状态',
+            showCancel: false,
+        })
     } finally {
         loading.value = false
     }
@@ -163,7 +170,14 @@ function goWorkflow() {
     uni.navigateTo({ url: '/pages/workflow/list' })
 }
 
-function goAlerts() {
+function goAlerts(tab) {
+    try {
+        const app = getApp()
+        if (app) {
+            app.globalData = app.globalData || {}
+            app.globalData.alertTab = tab
+        }
+    } catch (e) {}
     uni.switchTab({ url: '/pages/alert/list' })
 }
 

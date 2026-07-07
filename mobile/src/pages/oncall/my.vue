@@ -63,7 +63,6 @@ import { ref, computed } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
 import { getCurrentOncall, listOncall } from '@/api/oncall.js'
 import { useUserStore } from '@/store/user.js'
-
 const userStore = useUserStore()
 const currentData = ref(null)
 const oncallList = ref([])
@@ -100,7 +99,23 @@ async function fetchData() {
     try {
         const [cur, list] = await Promise.all([getCurrentOncall(), listOncall()])
         currentData.value = cur
-        oncallList.value = Array.isArray(list) ? list : (list.items || [])
+        let raw = Array.isArray(list) ? list : (list.items || [])
+        // 从 members 中提取 phone 挂到 item 顶层，供 callMember 直接取 item.phone
+        raw = raw.map((o) => {
+            if (!o) return o
+            const list = parseMembers(o.members)
+            let p = ''
+            if (Array.isArray(list)) {
+                for (const m of list) {
+                    if (typeof m === 'object' && m && (m.phone || m.mobile)) {
+                        p = m.phone || m.mobile
+                        break
+                    }
+                }
+            }
+            return { ...o, phone: p }
+        })
+        oncallList.value = raw
         const username = userStore.userInfo && (userStore.userInfo.username || userStore.userInfo.name)
         const currentOncallName = (cur && cur.current_oncall) || ''
         myOncall.value = null
@@ -180,13 +195,26 @@ function nextMonth() {
     }
 }
 
-function callMember(item) {
-    const phone = (item && (item.phone || item.mobile)) || extractPhone(item)
+async function callMember(item) {
+    let phone = (item && (item.phone || item.mobile)) || extractPhone(item) || findPhoneFromCurrent(item)
+    if (!phone) {
+        try {
+            const cur = await getCurrentOncall()
+            phone = (cur && cur.phone) || ''
+        } catch (e) {}
+    }
     if (!phone) {
         uni.showToast({ title: '暂无联系电话', icon: 'none' })
         return
     }
     uni.makePhoneCall({ phoneNumber: phone })
+}
+
+
+function findPhoneFromCurrent(item) {
+    if (!item || !currentData.value || !currentData.value.items) return ''
+    const match = currentData.value.items.find(c => c.current_oncall === item.current_oncall)
+    return (match && match.phone) || ''
 }
 
 function extractPhone(item) {
@@ -219,6 +247,10 @@ fetchData()
 </script>
 
 <style lang="scss" scoped>
+.page-wrap {
+    background: #ff00ff !important;
+    min-height: 100vh;
+}
 
 .card-title {
     font-size: $font-lg;
