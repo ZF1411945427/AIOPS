@@ -3,6 +3,10 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-08: 修复 docs 登录截图（之前误放了仪表盘截图）
+- `docs/screenshots/login.png` 实际显示的是仪表盘而非登录页
+- 用 Playwright 重新截图正确的 Vue SPA 登录页并替换
+
 ### 2026-07-08: 修复 mobile chat 输入栏固定底部（第四次尝试）
 - 根本原因：`uni-page-body` 无明确高度，`height: 100%` 解析为 `auto`，flex 布局无法正确分配空间
 - 修复方案：`onShow` 中用 JS 计算 `window.innerHeight - navBar - tabBar`，给 `uni-page-body` 设置精确像素高度
