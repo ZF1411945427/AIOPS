@@ -40,7 +40,7 @@ def api_path_find(payload: dict = Body(...), db: Session = Depends(get_db)):
         rel_list = [(r.parent_id, r.child_id) for r in relations]
         path_ids = bfs_path(rel_list, source_id, target_id)
         if not path_ids:
-            return JSONResponse({"ok": False, "error": "未发现连通路径", "path": [], "nodes": []}, status_code=404)
+            return JSONResponse({"ok": False, "error": "未发现连通路径", "path": [], "nodes": []}, status_code=200)
         asset_map = {a.id: a for a in db.query(Asset).all()}
         nodes = []
         for pid in path_ids:

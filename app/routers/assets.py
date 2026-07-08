@@ -7,7 +7,7 @@ from app.database import get_db
 from app.template_utils import get_templates
 from app.services import asset_service
 from app.services.connection_service import ConnectionTester
-from app.models import Asset, DataSource
+from app.models import Asset, DataSource, AssetLifecycle
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 templates = get_templates()
@@ -25,6 +25,12 @@ CI_TYPES = [
 @router.get("/api/list")
 def asset_api_list(search: str = "", ci_type: str = "", db: Session = Depends(get_db)):
     assets = asset_service.list_assets(db, search, "", ci_type)
+    # 查询所有资产的最新生命周期状态
+    all_lcs = db.query(AssetLifecycle).order_by(AssetLifecycle.asset_id, AssetLifecycle.created_at.desc()).all()
+    lc_map = {}
+    for lc in all_lcs:
+        if lc.asset_id not in lc_map:
+            lc_map[lc.asset_id] = lc.status
     result = []
     for a in assets:
         # 解析 ci_attributes 取引用关系/孤岛标记（三层纳管模型）
@@ -38,9 +44,11 @@ def asset_api_list(search: str = "", ci_type: str = "", db: Session = Depends(ge
                 is_orphan = bool(attrs.get("orphan"))
         except Exception:
             pass
+        lifecycle_status = lc_map.get(a.id, "provisioning")
         result.append({
             "id": a.id, "name": a.name, "type": a.type, "ci_type": getattr(a, 'ci_type', None),
             "ip": a.ip, "status": a.status,
+            "lifecycle_status": lifecycle_status,
             "connection_type": getattr(a, 'connection_type', None),
             "last_checked": a.last_checked.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, 'last_checked', None) else None,
             "latency_ms": getattr(a, 'latency_ms', None),

@@ -66,6 +66,7 @@
           <div class="detail-actions">
             <button v-if="detail.incident.status === 'open'" class="btn btn-primary" @click="resolveFromDetail">解决故障单</button>
             <button class="btn" @click="doRca">根因分析</button>
+            <button class="btn btn-ai" :disabled="aiRcaLoading" @click="doAiRca">{{ aiRcaLoading ? 'AI 分析中...' : 'AI 深度分析' }}</button>
           </div>
           <h4 class="sub-title">关联告警 ({{ detail.alerts.length }})</h4>
           <table class="table inner-table">
@@ -86,6 +87,10 @@
             <h4>根因分析</h4>
             <pre>{{ rcaResult }}</pre>
           </div>
+          <div v-if="aiRcaResult" class="rca-box ai-rca-box">
+            <h4>🤖 AI 深度分析</h4>
+            <div class="ai-rca-content">{{ aiRcaResult }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -104,6 +109,8 @@ const filters = reactive({ status: '' })
 const detailVisible = ref(false)
 const detail = ref(null)
 const rcaResult = ref('')
+const aiRcaResult = ref('')
+const aiRcaLoading = ref(false)
 
 async function loadIncidents() {
   loading.value = true
@@ -120,6 +127,7 @@ async function loadIncidents() {
 
 async function showDetail(id) {
   rcaResult.value = ''
+  aiRcaResult.value = ''
   try {
     const data = await request.get(`/incidents/api/${id}`)
     detail.value = data
@@ -159,6 +167,21 @@ async function doRca() {
     rcaResult.value = typeof data.analysis === 'string' ? data.analysis : JSON.stringify(data.analysis, null, 2)
   } catch (e) {
     ElMessage.error('根因分析失败: ' + e.message)
+  }
+}
+
+async function doAiRca() {
+  if (!detail.value) return
+  aiRcaLoading.value = true
+  aiRcaResult.value = ''
+  try {
+    const data = await request.post(`/incidents/api/${detail.value.incident.id}/ai-rca`)
+    if (data.ok === false) { ElMessage.error(data.error || 'AI 分析失败'); return }
+    aiRcaResult.value = data.analysis
+  } catch (e) {
+    ElMessage.error('AI 深度分析失败: ' + (e.message || e))
+  } finally {
+    aiRcaLoading.value = false
   }
 }
 
@@ -214,4 +237,14 @@ onMounted(loadIncidents)
 .rca-box { margin-top: 16px; background: var(--bg-hover, rgba(0,0,0,0.03)); border-radius: 8px; padding: 12px; }
 .rca-box h4 { margin: 0 0 8px; font-size: 0.9rem; }
 .rca-box pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 0.78rem; color: var(--text, #1e293b); }
+.btn-ai { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; }
+.btn-ai:hover:not(:disabled) { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+.btn-ai:disabled { opacity: 0.6; cursor: wait; }
+.ai-rca-box { background: linear-gradient(135deg, rgba(99,102,241,0.04), rgba(139,92,246,0.08)); border: 1px solid rgba(99,102,241,0.15); }
+.ai-rca-box h4 { color: #6366f1; }
+.ai-rca-content { font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); white-space: pre-wrap; word-break: break-word; }
+.ai-rca-content h1, .ai-rca-content h2, .ai-rca-content h3 { margin: 12px 0 6px; font-size: 1rem; color: var(--text, #1e293b); }
+.ai-rca-content ul, .ai-rca-content ol { padding-left: 20px; margin: 6px 0; }
+.ai-rca-content li { margin-bottom: 4px; }
+.ai-rca-content strong { color: #6366f1; }
 </style>
