@@ -1,6 +1,7 @@
 import hashlib
 import json
 import mimetypes
+import os as _os
 import threading
 import time
 from datetime import datetime
@@ -10,7 +11,7 @@ mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/javascript", ".mjs")
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi.staticfiles import StaticFiles as _FastStaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -21,6 +22,25 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
+
+
+class _MultiStaticFiles(_FastStaticFiles):
+    """StaticFiles that tries multiple directories in order."""
+    def __init__(self, directories, *args, **kwargs):
+        dirs = [str(d) for d in directories]
+        kwargs["directory"] = dirs[0]
+        super().__init__(*args, **kwargs)
+        self._dirs = dirs
+
+    def lookup_path(self, path: str):
+        for d in self._dirs:
+            fp = _os.path.normpath(_os.path.join(d, path))
+            if _os.path.isfile(fp):
+                return fp, _os.stat(fp)
+        return super().lookup_path(path)
+
+
+StaticFiles = _FastStaticFiles  # alias so existing mounts keep working
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
 from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license, mobile
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
@@ -96,7 +116,7 @@ for _eng in get_all_engines().values():
 
 app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/ansible"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/mobile-assets", "/mobile-app", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/ansible"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -141,16 +161,36 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CacheControlMiddleware)
 
+# 公共 assets: mobile 优先，frontend 兜底（两者都用 /assets/ 路径）
+_MOBILE_ASSETS = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/assets"
+_FRONTEND_ASSETS = Path(__file__).resolve().parent.parent / "frontend/dist/assets"
+if _MOBILE_ASSETS.is_dir() or _FRONTEND_ASSETS.is_dir():
+    dirs = [d for d in [_MOBILE_ASSETS, _FRONTEND_ASSETS] if d.is_dir()]
+    app.mount("/assets", _MultiStaticFiles(dirs), name="shared_assets")
+
+# Mobile tab 图标（需在 /static 之前挂载，Starlette 优先匹配精确路径）
+_MOBILE_STATIC_TAB = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/static/tab"
+if _MOBILE_STATIC_TAB.is_dir():
+    app.mount("/static/tab", StaticFiles(directory=str(_MOBILE_STATIC_TAB)), name="mobile_static_tab")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.mount("/vue-assets", StaticFiles(directory="frontend/dist"), name="vue_assets")
+app.mount("/mobile-assets", StaticFiles(directory="mobile/dist/build/h5"), name="mobile_assets")
 
 _VUE_INDEX = Path(__file__).resolve().parent.parent / "frontend/dist/index.html"
+_MOBILE_INDEX = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/index.html"
 
 
 @app.get("/", response_class=HTMLResponse)
 def serve_spa():
     content = _VUE_INDEX.read_text(encoding="utf-8")
     content = content.replace('/assets/', '/vue-assets/assets/')
+    return HTMLResponse(content=content)
+
+
+@app.get("/mobile-app", response_class=HTMLResponse)
+def serve_mobile():
+    content = _MOBILE_INDEX.read_text(encoding="utf-8")
+    content = content.replace('/assets/', '/mobile-assets/assets/')
     return HTMLResponse(content=content)
 
 

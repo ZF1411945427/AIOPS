@@ -190,7 +190,13 @@ cd frontend && npm install && npm run dev
 
 > 🔐 **默认账号**：`admin` / `admin123`
 >
-> 🖥️ Vue SPA → http://localhost:3000 &nbsp;|&nbsp; 📄 Jinja2 → http://localhost:8000
+> 🖥️ Vue SPA → http://localhost:3000 &nbsp;|&nbsp; 📄 Jinja2 → http://localhost:8000 &nbsp;|&nbsp; 📱 Mobile H5 → http://localhost:8000/mobile-app
+
+```bash
+# 4️⃣ 新终端 — 启动移动端 H5（UniApp，端口 8000，由 FastAPI 托管）
+cd mobile && npm install && npm run build:h5
+```
+> 移动端构建产物由 FastAPI 的 `/mobile-app` 路由托管，无需单独启动 dev server。
 
 ### 🗄️ 双数据库模式
 
@@ -221,11 +227,19 @@ AIOPS/
 │   ├── templates/                 # 117 个 Jinja2 模板
 │   ├── static/                    # 静态资源
 │   └── seed_data.py               # Demo 种子数据
-├── frontend/                      # Vue 3 + Vite
+├── frontend/                      # Vue 3 + Vite (桌面 SPA)
 │   ├── src/views/                 # 14+ 页面视图
 │   ├── src/layout/                # 主布局 (悬浮药丸侧边栏)
 │   ├── src/stores/                # Pinia 状态管理
 │   └── dist/                      # 构建产物
+├── mobile/                        # UniApp + Vue3 (移动端 H5)
+│   ├── src/pages/                 # 17 个移动端页面
+│   ├── src/api/                   # API 适配层 (token 登录 + Axios)
+│   ├── src/components/            # 通用组件 (ChatBubble 等)
+│   ├── src/static/                # Tab 图标等静态资源
+│   └── dist/build/h5/             # 移动端构建产物
+├── tools/                         # 运维工具
+│   └── deploy.py                  # 一键部署 (all/backend/frontend/mobile)
 ├── db/                            # SQLite 数据库 (demo + real)
 ├── tests/
 │   └── e2e/                       # Playwright E2E 测试 (147 用例)
@@ -241,22 +255,47 @@ AIOPS/
 ## 📐 部署架构
 
 ```
-┌───────────────────────────────────────────┐
-│               浏览器                       │
-│    :3000  Vue SPA     :8000  Jinja2        │
-└─────────────────┬─────────────────────────┘
-                  │
-┌─────────────────▼─────────────────────────┐
-│           FastAPI + Uvicorn                │
-│     AuthMiddleware · SessionMiddleware      │
-│     DEMO/REAL 双数据库自动切换               │
-└────┬──────────┬──────────┬────────────────┘
+┌──────────────────────────────────────────────────┐
+│                    浏览器                         │
+│  :3000 Vue SPA  │  :8000 Jinja2  │  /mobile-app  │
+└────────────────────────┬─────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────┐
+│              FastAPI + Uvicorn                     │
+│    AuthMiddleware · SessionMiddleware               │
+│    DEMO/REAL 双数据库自动切换                       │
+│    /assets/ 自动合并 mobile + frontend 构建产物     │
+└────┬──────────┬──────────┬───────────────────────┘
      │          │          │
-┌────▼───┐ ┌───▼────┐ ┌──▼────────┐
-│ SQLite │ │   ES   │ │  SSH/K8s  │
-│ (WAL)  │ │ :9200  │ │   Agent   │
-└────────┘ └────────┘ └───────────┘
+┌────▼───┐ ┌───▼────┐ ┌──▼────────────┐
+│ SQLite │ │   ES   │ │  SSH/K8s      │
+│ (WAL)  │ │ :9200  │ │  Agent        │
+└────────┘ └────────┘ └───────────────┘
+
+> **移动端 H5**：UniApp 构建 → FastAPI `/mobile-app` 路由托管
+> `/assets/` 路径同时查找 mobile 和 frontend 构建产物（`_MultiStaticFiles` 多目录回退）
 ```
+
+---
+
+## 🚢 一键部署
+
+使用 `tools/deploy.py` 将任意组件部署到远程服务器：
+
+```bash
+# 查看帮助
+python tools/deploy.py --help
+
+# 部署全部（自动备份 + 上传 + 重启）
+python tools/deploy.py all
+
+# 单独部署组件
+python tools/deploy.py backend    # 仅后端 Python 代码
+python tools/deploy.py frontend   # 仅 Vue SPA 构建产物
+python tools/deploy.py mobile     # 仅 UniApp H5 构建产物
+```
+
+> 部署脚本支持：远程 SSH 连接、自动备份 `tar.gz`、`setsid` 重启（防 PTY 断开后进程退出）、端口释放检测。
 
 ---
 

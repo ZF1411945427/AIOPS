@@ -71,7 +71,7 @@ const sessionId = ref('')
 const aiPending = ref(false)
 const pendingActions = ref([])
 const scrollAnchor = ref('')
-const recorderManager = uni.getRecorderManager()
+const recorderManager = (typeof uni !== 'undefined' && uni.getRecorderManager) ? uni.getRecorderManager() : null
 let voiceRecording = false
 let msgSeq = 0
 
@@ -170,16 +170,21 @@ async function rejectAction(action) {
 }
 
 function startVoice() {
+    if (!recorderManager) {
+        uni.showToast({ title: '当前环境不支持语音', icon: 'none' })
+        return
+    }
     voiceRecording = true
     recorderManager.start({ duration: 60000, format: 'mp3', sampleRate: 16000, numberOfChannels: 1 })
 }
 
 function endVoice() {
-    if (!voiceRecording) return
+    if (!recorderManager || !voiceRecording) return
     voiceRecording = false
     recorderManager.stop()
 }
 
+if (recorderManager) {
 recorderManager.onStop((res) => {
     if (!res || !res.tempFilePath) {
         uni.showToast({ title: '录音失败', icon: 'none' })
@@ -193,6 +198,7 @@ recorderManager.onStop((res) => {
         uni.showToast({ title: '读取录音失败', icon: 'none' })
     }
 })
+}
 
 async function transcribeAndSend(audioBase64, duration) {
     if (duration < 800) {

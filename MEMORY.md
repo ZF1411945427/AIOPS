@@ -3,6 +3,16 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-08: 修复 mobile 全量 404（图片 + JS chunk + CSS）
+- **根因**: mobile 和 frontend 都用 `/assets/` 路径引用 Vite 构建产物，但后端只挂载了一个目录
+  - 解决: 自定义 `_MultiStaticFiles`（继承 StaticFiles），按序尝试 `[mobile, frontend]` 两个 assets 目录
+  - `GET /assets/xxx.js` 先查 `mobile/dist/build/h5/assets/`，找不到再查 `frontend/dist/assets/`
+- **tab 图标 404**: `mobile/dist/build/h5/static/tab/tools.png` 文件本身缺失（项目遗漏）
+  - 从 `mine.png` 复制创建 `tools.png` / `tools_on.png`
+- **部署重启不可靠**: `_run()` 用 `get_pty=True`，PTY 关闭时后台进程被 SIGHUP 杀掉
+  - 解决: `_step_restart()` 中后台启动改用 `transport.open_session()` + `setsid`，避免 PTY
+- **最终验证**: 14 条关键路由全部 200 ✅
+
 ### 2026-07-08: 拓扑视图新增异常筛选 + 关联资产面板
 - **需求**: 爸爸要求拓扑视图能筛选出异常资产（红色边框高亮），并能查看选中节点的关联资产
 - **异常筛选按钮**: toolbar 新增「仅异常」toggle 按钮，激活后只显示异常节点 + 其直接关联节点/边，异常节点放大至 48px + 5px 红色边框 + 发光阴影
