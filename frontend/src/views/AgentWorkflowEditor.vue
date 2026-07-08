@@ -1129,15 +1129,6 @@ onMounted(() => {
 .btn-outline { background: transparent; color: var(--text, #1e293b); border: 1px solid var(--border, rgba(0,0,0,0.2)); }
 .btn-outline:hover { background: rgba(0,0,0,0.04); }
 .badge.st-awaiting { background: rgba(245,158,11,0.12); color: #d97706; }
-.btn-guide {
-  padding: 5px 14px; border: 1px solid #6366f1; border-radius: 6px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
-  cursor: pointer; font-size: 0.8rem; font-weight: 500;
-  display: inline-flex; align-items: center; gap: 4px;
-  transition: all 0.15s; box-shadow: 0 1px 3px rgba(99,102,241,0.3);
-}
-.btn-guide:hover { background: linear-gradient(135deg, #4f46e5, #7c3aed); box-shadow: 0 2px 8px rgba(99,102,241,0.4); transform: translateY(-1px); }
-
 /* 说明书抽屉 */
 .guide-overlay {
   position: fixed; inset: 0; z-index: 500;

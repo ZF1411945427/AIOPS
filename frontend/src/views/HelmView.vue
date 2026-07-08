@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>Helm 应用管理</h1>
       <p>通过 Helm CLI 管理 Release · 仓库 · 安装 · 升级 · 回滚</p>
+      <button class="btn btn-guide" @click="showGuide = !showGuide" style="margin-left:auto">📖 操作说明</button>
     </div>
 
     <div v-if="helmError" class="error-banner">⚠️ {{ helmError }}</div>
@@ -56,7 +57,91 @@
       </div>
     </div>
 
-    <div v-show="activeTab === 'repos'" class="tab-panel">
+    <GuideDrawer v-model="showGuide" title="📖 Helm · 操作说明">
+  <section class="guide-section">
+    <h4>1. Helm 是什么？</h4>
+    <p><strong>Helm</strong> 是 Kubernetes 的包管理工具，相当于 K8s 界的"npm"或"apt-get"。它把一组 K8s 资源（Deployment、Service、ConfigMap 等）打包成<strong>Chart</strong>，可以一键安装、升级、回滚。</p>
+  </section>
+  <section class="guide-section">
+    <h4>2. 三大核心概念</h4>
+    <div class="key-value-list">
+      <div class="kv-row">
+        <span class="kv-key">Chart</span>
+        <span class="kv-val">应用的<strong>安装包</strong>，包含所有 K8s 资源 YAML 模板和默认值。Chart 可以存在仓库里供别人下载</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Release</span>
+        <span class="kv-val">Chart 在集群中的<strong>一次安装实例</strong>。同一个 Chart 可以安装多次，每次是一个独立的 Release</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Repository</span>
+        <span class="kv-val">Chart 的<strong>存储仓库</strong>，类似 Docker Hub。常用的有 Bitnami、稳定版仓库等</span>
+      </div>
+    </div>
+  </section>
+  <section class="guide-section">
+    <h4>3. 页面功能说明</h4>
+    <ul>
+      <li><strong>Release 列表</strong> — 查看集群中已安装的所有 Helm 应用（Release），支持查看详情、回滚到历史版本、卸载</li>
+      <li><strong>仓库管理</strong> — 添加/删除 Chart 仓库源，添加后才能从该仓库搜索和安装 Chart</li>
+      <li><strong>安装应用</strong> — 选择仓库 → 搜索 Chart → 配置 values.yaml → 一键部署到指定命名空间</li>
+    </ul>
+  </section>
+  <section class="guide-section">
+    <h4>4. 快速入门：安装 Nginx</h4>
+    <p>以安装 Nginx 为例，完整操作流程：</p>
+    <div class="step-list">
+      <div class="step-item"><span class="step-num">1</span><span>先到<strong>仓库管理</strong> Tab，添加 Bitnami 仓库：<code>https://charts.bitnami.com/bitnami</code></span></div>
+      <div class="step-item"><span class="step-num">2</span><span>切换到<strong>安装应用</strong> Tab，选择刚才添加的仓库，搜索 <code>nginx</code></span></div>
+      <div class="step-item"><span class="step-num">3</span><span>选择 Chart 后，填写 Release 名称（如 <code>my-nginx</code>）和目标命名空间</span></div>
+      <div class="step-item"><span class="step-num">4</span><span>可选的：在 values.yaml 编辑框中自定义参数（见下方示例）</span></div>
+      <div class="step-item"><span class="step-num">5</span><span>点击安装，等待 Release 出现在列表中即部署成功</span></div>
+    </div>
+  </section>
+  <section class="guide-section">
+    <h4>5. values.yaml 配置示例</h4>
+    <p>安装时可以通过自定义 values 覆盖默认参数。以下是 Nginx Chart 的常见配置：</p>
+    <pre class="guide-code"># 副本数
+replicaCount: 3
+
+# 镜像配置
+image:
+  registry: docker.io
+  repository: bitnami/nginx
+  tag: 1.25
+
+# 服务类型
+service:
+  type: ClusterIP
+  port: 8080
+
+# 资源限制
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 250m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+# 持久化
+persistence:
+  enabled: true
+  size: 8Gi</pre>
+  </section>
+  <section class="guide-section">
+    <h4>6. 回滚操作</h4>
+    <p>Helm 每次升级都会保存一个<strong>历史版本（Revision）</strong>。如果新版本出问题了：</p>
+    <ol style="margin:4px 0 10px;padding-left:18px;font-size:0.8rem;line-height:1.7;color:#475569;">
+      <li>在 Release 列表中点击操作列的「回滚」按钮</li>
+      <li>选择要回退到的目标 Revision 版本号</li>
+      <li>确认后，Helm 自动将 K8s 资源恢复到指定版本</li>
+    </ol>
+    <div class="tip-box">💡 回滚不是"删除重装"，Helm 会自动计算差异并增量恢复，保持 Service 等基础设施不变。</div>
+  </section>
+</GuideDrawer>
+
+<div v-show="activeTab === 'repos'" class="tab-panel">
       <div class="repo-status" v-if="helmStatus.version">
         <span class="badge green">Helm {{ helmStatus.version }}</span>
       </div>
@@ -233,6 +318,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 import { useAppStore } from '@/stores/app'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const appStore = useAppStore()
 const activeTab = ref('releases')
@@ -601,11 +687,13 @@ onMounted(() => {
   loadClusters()
   loadHelmStatus()
 })
+
+const showGuide = ref(false)
 </script>
 
 <style scoped>
 .helm-page { padding: 4px; }
-.page-header { margin-bottom: 16px; }
+.page-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }

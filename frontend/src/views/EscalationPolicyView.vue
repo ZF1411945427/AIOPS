@@ -4,7 +4,10 @@
       <template #header>
         <div class="card-header">
           <span class="title">升级策略管理</span>
-          <el-button type="primary" @click="showCreateDialog">+ 新建策略</el-button>
+          <div>
+            <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+            <el-button type="primary" @click="showCreateDialog">+ 新建策略</el-button>
+          </div>
         </div>
       </template>
 
@@ -60,6 +63,55 @@
         <el-button type="primary" @click="createPolicy">确定</el-button>
       </template>
     </el-dialog>
+
+    <GuideDrawer v-model="showGuide" title="📖 升级策略 · 概念说明">
+      <section class="guide-section">
+        <h4>1. 什么是升级策略？</h4>
+        <p><strong>升级策略（Escalation Policy）</strong>定义了：当告警发生且没人处理时，<strong>事情会如何一步步升级</strong>，直到有人响应为止。</p>
+        <p>简单的说就是：<strong>L1 没人看 → 找 L2 → L2 也没看 → 找 L3 → ...</strong></p>
+      </section>
+      <section class="guide-section">
+        <h4>2. 升级流程示例</h4>
+        <p>一条典型的升级链：</p>
+        <div class="guide-code" style="color:#e2e8f0; padding:10px 14px; margin:6px 0;">
+告警触发
+  ↓ (等待 5 分钟)
+L1 值班人收到短信通知
+  ↓ (5 分钟内未确认)
+L2 技术主管收到电话通知
+  ↓ (15 分钟内未确认)
+L3 运维经理收到电话 + 邮件通知
+  ↓ (30 分钟内未确认)
+L4 总监 → 启动应急响应流程
+        </div>
+      </section>
+      <section class="guide-section">
+        <h4>3. 三个关键配置</h4>
+        <div class="key-value-list">
+          <div class="kv-row">
+            <span class="kv-key">升级级别</span>
+            <span class="kv-val">定义了哪些角色参与（如 L1=值班工程师, L2=技术主管, L3=运维经理）。级别越高，处理问题的人资历越深（但也越贵、人数越少）</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">等待时间</span>
+            <span class="kv-val">在每个级别等待多久。通常在 L1 等短一点（5分钟），L2 等长一点（15分钟）。等待时间决定了"多快能联系到人"</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">通知渠道</span>
+            <span class="kv-val">不同级别用不同渠道通知。L1 用短信/App 推送（便宜但容易错过），L3 用电话（成本高但必达）</span>
+          </div>
+        </div>
+      </section>
+      <section class="guide-section">
+        <h4>4. 为什么要设计升级策略？</h4>
+        <ul>
+          <li><strong>避免告警无人处理</strong> — 值班人可能在忙/睡觉/没信号</li>
+          <li><strong>确保及时响应</strong> — 升级链保证事情总有人兜底</li>
+          <li><strong>分层处理</strong> — 简单问题 L1 解决，复杂问题升级到更专业的人</li>
+          <li><strong>可审计</strong> — 每次升级都有记录，方便事后复盘</li>
+        </ul>
+      </section>
+    </GuideDrawer>
   </div>
 </template>
 
@@ -67,7 +119,9 @@
 import { ref, onMounted, reactive } from "vue"
 import { ElMessage } from "element-plus"
 import axios from "axios"
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
+const showGuide = ref(false)
 const policyList = ref([])
 const dialogVisible = ref(false)
 const levelsStr = ref("")

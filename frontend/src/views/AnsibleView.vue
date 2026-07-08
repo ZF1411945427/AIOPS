@@ -6,6 +6,7 @@
           <h1>Ansible 运维操作</h1>
           <p>主机清单 · Playbook 模板 · 远程执行 · 执行历史</p>
         </div>
+        <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
         <div class="status-tag" :class="ansibleInstalled ? 'ok' : 'warn'">
           <span class="dot"></span>
           <span v-if="statusLoading">检测中...</span>
@@ -282,10 +283,105 @@
       </div>
     </div>
   </div>
+
+  <GuideDrawer v-model="showGuide" title="📖 Ansible · 操作说明">
+    <section class="guide-section">
+      <h4>1. Ansible 是什么？</h4>
+      <p><strong>Ansible</strong> 是 Red Hat 出品的自动化运维工具。它通过 SSH 连接到远程服务器，执行你定义好的任务，不需要在目标机器上装 Agent。</p>
+      <p>简单说：Ansible 让你<strong>一次写好，到处执行</strong>——批量改配置、部署应用、重启服务等。</p>
+    </section>
+    <section class="guide-section">
+      <h4>2. 三个核心概念</h4>
+      <div class="key-value-list">
+        <div class="kv-row">
+          <span class="kv-key">Inventory（清单）</span>
+          <span class="kv-val">你要管理的服务器列表，可以分组（如 web_servers、db_servers）。每个主机可以定义变量（IP、端口、用户名）</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">Playbook</span>
+          <span class="kv-val">用 YAML 写的"剧本"，定义了一系列任务（安装软件→复制配置→启动服务）。Playbook 是 Ansible 的核心</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">Module（模块）</span>
+          <span class="kv-val">Ansible 内置的"工具"，每个模块做一件事（copy=复制文件, yum=安装包, service=管理服务）。Playbook 就是按顺序调用模块</span>
+        </div>
+      </div>
+    </section>
+    <section class="guide-section">
+      <h4>3. 页面三 Tab 说明</h4>
+      <ul>
+        <li><strong>执行历史</strong> — 查看所有 Ansible 任务的执行记录，包括状态、退出码、输出日志。支持重新执行或删除</li>
+        <li><strong>主机清单</strong> — 管理你的服务器列表（Inventory），每个清单包含多个主机和连接信息</li>
+        <li><strong>Playbook 模板</strong> — 编写和管理 Playbook 内容，执行时选择要用的 Playbook</li>
+      </ul>
+      <div class="tip-box">💡 完整的工作流：<strong>创建清单 → 编写 Playbook → 选择清单+Playbook → 执行 → 查看结果</strong></div>
+    </section>
+    <section class="guide-section">
+      <h4>4. 快速入门：Ping 测试</h4>
+      <p>从零开始测试一台服务器连通性：</p>
+      <div class="step-list">
+        <div class="step-item"><span class="step-num">1</span><span>在<strong>主机清单</strong> Tab，创建新清单，填入服务器 IP、SSH 端口、用户名</span></div>
+        <div class="step-item"><span class="step-num">2</span><span>在<strong>Playbook 模板</strong> Tab，创建以下内容：</span></div>
+      </div>
+      <pre class="guide-code">---
+- name: Ping test
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: ping
+      ping:</pre>
+      <div class="step-list">
+        <div class="step-item"><span class="step-num">3</span><span>点击「执行」，选择刚才的清单和模板，点击确定</span></div>
+        <div class="step-item"><span class="step-num">4</span><span>执行完成后在<strong>执行历史</strong>中查看结果，<code>pong</code> 返回值代表连通成功 ✅</span></div>
+      </div>
+    </section>
+    <section class="guide-section">
+      <h4>5. 常用 Playbook 示例</h4>
+      <h5>🔹 批量修改配置</h5>
+      <pre class="guide-code">---
+- name: 更新 nginx 配置
+  hosts: web_servers
+  tasks:
+    - name: 复制配置文件
+      copy:
+        src: /local/nginx.conf
+        dest: /etc/nginx/nginx.conf
+    - name: 重载 nginx
+      service:
+        name: nginx
+        state: reloaded</pre>
+      <h5>🔹 安装软件包</h5>
+      <pre class="guide-code">---
+- name: 安装 Redis
+  hosts: db_servers
+  tasks:
+    - name: 安装 redis
+      yum:
+        name: redis
+        state: present
+    - name: 启动服务
+      service:
+        name: redis
+        state: started
+        enabled: yes</pre>
+    </section>
+    <section class="guide-section">
+      <h4>6. 执行流程</h4>
+      <p>点击「执行」后：</p>
+      <ol style="margin:4px 0 10px;padding-left:18px;font-size:0.8rem;line-height:1.7;color:#475569;">
+        <li>选择要操作的主机清单（Inventory）</li>
+        <li>选择要执行的 Playbook</li>
+        <li>可选：传入额外的变量（Extra Vars，JSON 格式）</li>
+        <li>Ansible 通过 SSH 连接到目标机器，按 Playbook 步骤执行</li>
+        <li>执行完成后可以查看 STDOUT/STDERR 输出日志</li>
+      </ol>
+    </section>
+  </GuideDrawer>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
@@ -576,12 +672,14 @@ onMounted(() => {
   loadInventories()
   loadPlaybooks()
 })
+
+const showGuide = ref(false)
 </script>
 
 <style scoped>
 .ansible-page { padding: 4px; }
 .page-header { margin-bottom: 16px; }
-.title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.title-row { display: flex; align-items: center; gap: 16px; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 .status-tag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 16px; font-size: 0.78rem; font-weight: 500; }

@@ -13,6 +13,7 @@
       <el-menu
         :default-active="activeMenu"
         :collapse="appStore.sidebarCollapsed"
+        :collapse-transition="false"
         class="sidebar-nav"
         @select="handleMenuSelect"
       >

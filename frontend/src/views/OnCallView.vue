@@ -4,7 +4,10 @@
       <template #header>
         <div class="card-header">
           <span class="title">值班表</span>
-          <el-button type="primary" @click="showCreateDialog">+ 新建值班表</el-button>
+          <div>
+            <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+            <el-button type="primary" @click="showCreateDialog">+ 新建值班表</el-button>
+          </div>
         </div>
       </template>
 
@@ -122,6 +125,49 @@
         <el-button type="primary" @click="saveOncall">确定</el-button>
       </template>
     </el-dialog>
+
+    <GuideDrawer v-model="showGuide" title="📖 值班表 · 概念说明">
+      <section class="guide-section">
+        <h4>1. 什么是值班表？</h4>
+        <p><strong>值班表（On-Call Schedule）</strong>定义了：什么时候由<strong>谁</strong>来负责处理告警和故障。</p>
+        <p>值班人需要 7×24 小时响应——非工作时间出问题时，值班人是第一响应人。</p>
+      </section>
+      <section class="guide-section">
+        <h4>2. 轮值方式</h4>
+        <div class="key-value-list">
+          <div class="kv-row">
+            <span class="kv-key">周轮值</span>
+            <span class="kv-val">每周轮换一次。值班人值一周班，下周换另一个人。适合团队成员较多的场景</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">月轮值</span>
+            <span class="kv-val">每月轮换一次。值班人值一个月班。适合人少的团队，但值班压力较大</span>
+          </div>
+        </div>
+      </section>
+      <section class="guide-section">
+        <h4>3. 成员管理</h4>
+        <p>每个值班表可以配置多个成员的姓名和联系电话。支持从已有成员快速复用，避免重复录入。</p>
+        <p>成员定义后，可以在"当前值班人"中选择本轮由谁值班。</p>
+      </section>
+      <section class="guide-section">
+        <h4>4. 排班自动计算</h4>
+        <p>系统会根据<strong>轮值方式 + 开始日期</strong>自动计算结束日期：</p>
+        <ul>
+          <li>周轮值：开始日期 + 7 天 = 结束日期</li>
+          <li>月轮值：开始日期 + 30 天 = 结束日期</li>
+        </ul>
+        <p>在下个轮值周期，会按成员列表顺序切换值班人。</p>
+      </section>
+      <section class="guide-section">
+        <h4>5. 值班表的作用</h4>
+        <ul>
+          <li><strong>明确责任</strong> — 任何时候都知道"现在该谁处理问题"</li>
+          <li><strong>避免遗漏</strong> — 结合升级策略，值班人未响应时自动通知上级</li>
+          <li><strong>公平轮换</strong> — 系统化管理值班安排，避免人为分配不均</li>
+        </ul>
+      </section>
+    </GuideDrawer>
   </div>
 </template>
 
@@ -129,7 +175,9 @@
 import { ref, onMounted, reactive, computed, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 import axios from "axios"
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
+const showGuide = ref(false)
 const oncallList = ref([])
 const currentOncall = ref({})
 const memberCandidates = ref([])
