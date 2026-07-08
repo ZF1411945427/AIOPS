@@ -29,20 +29,21 @@
     <div class="panel">
       <div class="panel-body">
         <div v-if="loading" class="loading-state">加载中...</div>
-        <table v-else-if="filteredAssets.length" class="table">
+        <table v-else-if="pagedAssets.length" class="table">
           <thead>
             <tr>
-              <th>名称</th><th>CI 类型</th><th>纳管层级</th><th>IP / 地址</th><th>状态</th>
+              <th>名称</th><th>CI 类型</th><th>纳管层级</th><th>IP / 地址</th><th>状态</th><th>生命周期</th>
               <th>引用/孤岛</th><th>连接方式</th><th>标签</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="a in filteredAssets" :key="a.id" :class="{ 'row-deprecated': a.status === 'deprecated', 'row-orphan': isOrphan(a) }">
+            <tr v-for="a in pagedAssets" :key="a.id" :class="{ 'row-deprecated': a.status === 'deprecated', 'row-orphan': isOrphan(a) }">
               <td><span class="asset-name">{{ shortName(a.name) }}</span><div class="asset-fullname" v-if="a.name.includes('/')">{{ a.name }}</div></td>
               <td><span class="badge ci-type" :style="ciTypeStyle(a.ci_type)">{{ a.ci_type || '-' }}</span></td>
               <td><span class="tier-badge" :class="tierClass(a.ci_type)">{{ tierLabel(a.ci_type) }}</span></td>
               <td class="text-sm">{{ a.ip || '-' }}</td>
               <td><span class="badge" :class="a.status">{{ statusLabel(a.status) }}</span></td>
+              <td><span class="badge lc-badge" :class="lifecycleClass(a.lifecycle_status)">{{ a.lifecycle_status }}</span></td>
               <td class="text-sm">
                 <span v-if="a.refCount !== null" class="ref-info" :class="{ orphan: a.isOrphan }">
                   {{ a.refCount > 0 ? `被 ${a.refCount} 引用` : '孤岛 ⚠' }}
@@ -54,6 +55,7 @@
               <td class="text-sm">{{ a.created_at || '-' }}</td>
               <td>
                 <button v-if="a.ci_type === 'kubernetes_cluster'" class="btn btn-sm btn-sync" :disabled="syncingId === a.id" @click="syncK8s(a)">{{ syncingId === a.id ? '同步中...' : '同步' }}</button>
+                <button class="btn btn-sm btn-lifecycle" @click="openTransition(a)">流转</button>
                 <a href="javascript:void(0)" class="btn btn-sm" @click="openEdit(a.id)">编辑</a>
                 <button class="btn btn-sm btn-danger" @click="deleteAsset(a.id, a.name)">删除</button>
               </td>
@@ -63,6 +65,43 @@
         <div v-else class="empty-state">
           <div style="font-size:32px;margin-bottom:8px;">📦</div>
           <div>暂无资产数据</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pagination" v-if="filteredAssets.length > 0">
+      <div class="pg-info">共 <b>{{ filteredAssets.length }}</b> 项</div>
+      <div class="pg-pages">
+        <button class="pg-btn" :disabled="currentPage === 1" @click="goPage(currentPage - 1)">‹ 上一页</button>
+        <template v-for="(p, idx) in pageNumbers" :key="idx">
+          <span v-if="p === '...'" class="pg-ellipsis">…</span>
+          <button v-else class="pg-btn" :class="{ active: p === currentPage }" @click="goPage(p)">{{ p }}</button>
+        </template>
+        <button class="pg-btn" :disabled="currentPage === totalPages" @click="goPage(currentPage + 1)">下一页 ›</button>
+      </div>
+      <div class="pg-size">
+        <select v-model.number="pageSize" class="pg-select">
+          <option v-for="s in pageSizeOptions" :key="s" :value="s">{{ s }} 条/页</option>
+        </select>
+        <span class="pg-jump">跳至 <input class="pg-input" @keyup.enter="jumpPage($event)" placeholder="页"> 页</span>
+      </div>
+    </div>
+
+    <div v-if="showTransition" class="modal-overlay" @click.self="showTransition = false">
+      <div class="modal-box">
+        <h3>资产流转 · {{ transAsset.name }}</h3>
+        <div class="form-row"><label>当前生命周期</label>
+          <span class="badge lc-badge" :class="lifecycleClass(transAsset.lifecycle_status)">{{ transAsset.lifecycle_status }}</span>
+        </div>
+        <div class="form-row"><label>流转至</label>
+          <select v-model="transForm.to_status" class="input">
+            <option v-for="s in (LIFECYCLE_TRANSITIONS[transAsset.lifecycle_status] || [])" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </div>
+        <div class="form-row"><label>备注（可选）</label><input v-model="transForm.comment" class="input" placeholder="变更说明"></div>
+        <div class="modal-actions">
+          <button class="btn" @click="showTransition = false">取消</button>
+          <button class="btn btn-primary" :disabled="transitioning" @click="doTransition">{{ transitioning ? '流转中...' : '确认流转' }}</button>
         </div>
       </div>
     </div>
@@ -238,7 +277,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
@@ -358,6 +397,38 @@ const showableFields = {
 function showField(key) { return showableFields[form.value.ci_type]?.[key] ?? false }
 
 function statusLabel(s) { return { online: '在线', offline: '离线', degraded: '降级', deprecated: '已废弃' }[s] || s }
+function lifecycleClass(s) {
+  if (s === 'active') return 'lc-active'
+  if (s === 'maintenance') return 'lc-maintenance'
+  if (s === 'retired') return 'lc-retired'
+  return 'lc-provisioning'
+}
+const LIFECYCLE_TRANSITIONS = { provisioning: ['active'], active: ['maintenance', 'retired'], maintenance: ['active', 'retired'], retired: [] }
+const showTransition = ref(false)
+const transAsset = ref({})
+const transForm = ref({ to_status: '', comment: '' })
+const transitioning = ref(false)
+function openTransition(a) {
+  transAsset.value = a
+  const allowed = LIFECYCLE_TRANSITIONS[a.lifecycle_status] || []
+  transForm.value = { to_status: allowed[0] || '', comment: '' }
+  if (!allowed.length) { ElMessage.warning('该资产已是终态（retired），无法继续流转'); return }
+  showTransition.value = true
+}
+async function doTransition() {
+  if (!transForm.value.to_status) { ElMessage.warning('请选择目标状态'); return }
+  transitioning.value = true
+  try {
+    const data = await request.post(`/lifecycle/api/transition/${transAsset.value.id}`, {
+      to_status: transForm.value.to_status, comment: transForm.value.comment,
+    })
+    if (data.ok === false) { ElMessage.error(data.error || '流转失败'); return }
+    ElMessage.success(`流转成功: ${transAsset.value.lifecycle_status} → ${transForm.value.to_status}`)
+    showTransition.value = false
+    loadAssets()
+  } catch (e) { ElMessage.error('流转失败: ' + (e.message || e)) }
+  finally { transitioning.value = false }
+}
 function connectionTypeLabel(t) { return { ssh: 'SSH', agent: 'Agent', kubernetes: 'K8s API', snmp: 'SNMP', http: 'HTTP', database: '数据库' }[t] || t || '-' }
 
 function tierClass(ci_type) {
@@ -389,6 +460,40 @@ const filteredAssets = computed(() => {
 })
 
 function applyFilter() { /* computed 自动响应，无需操作 */ }
+
+const currentPage = ref(1)
+const pageSize = ref(20)
+const pageSizeOptions = [10, 20, 50, 100]
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredAssets.value.length / pageSize.value)))
+const pagedAssets = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredAssets.value.slice(start, start + pageSize.value)
+})
+const pageNumbers = computed(() => {
+  const tp = totalPages.value
+  const cp = currentPage.value
+  const arr = []
+  if (tp <= 7) { for (let i = 1; i <= tp; i++) arr.push(i) }
+  else {
+    arr.push(1)
+    if (cp > 4) arr.push('...')
+    for (let i = Math.max(2, cp - 1); i <= Math.min(tp - 1, cp + 1); i++) arr.push(i)
+    if (cp < tp - 3) arr.push('...')
+    arr.push(tp)
+  }
+  return arr
+})
+function goPage(p) {
+  if (p === '...' || p < 1 || p > totalPages.value) return
+  currentPage.value = p
+}
+function jumpPage(e) {
+  const n = parseInt(e.target.value)
+  if (!isNaN(n) && n >= 1 && n <= totalPages.value) currentPage.value = n
+  e.target.value = ''
+}
+watch([search, ciType, hideDeprecated, onlyOrphan, pageSize], () => { currentPage.value = 1 })
+watch(() => filteredAssets.value.length, () => { if (currentPage.value > totalPages.value) currentPage.value = totalPages.value })
 
 const k8sStats = computed(() => {
   const k8sAssets = assets.value.filter(a => a.k8s_cluster || PERSISTENT_TYPES.has(a.ci_type) || WEAK_TYPES.has(a.ci_type))
@@ -546,6 +651,7 @@ async function loadAssets() {
       ...a,
       refCount: a.ref_count !== null && a.ref_count !== undefined ? a.ref_count : null,
       isOrphan: !!a.is_orphan,
+      lifecycle_status: a.lifecycle_status || 'provisioning',
     }))
   }
   catch (e) { ElMessage.error('加载失败: ' + e.message) }
@@ -639,4 +745,25 @@ onMounted(() => { loadAssets() })
 tr.row-deprecated td { opacity: 0.55; }
 tr.row-deprecated .asset-name { text-decoration: line-through; }
 tr.row-orphan td { background: rgba(239,68,68,0.03); }
+
+.pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding: 10px 16px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; flex-wrap: wrap; gap: 8px; }
+.pg-info { font-size: 0.8rem; color: var(--text-secondary, #64748b); }
+.pg-info b { color: var(--accent, #6366f1); }
+.pg-pages { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.pg-btn { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.76rem; cursor: pointer; transition: all 0.15s; }
+.pg-btn:hover:not(:disabled):not(.active) { background: var(--bg-hover, rgba(0,0,0,0.03)); border-color: var(--accent, #6366f1); }
+.pg-btn.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+.pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pg-ellipsis { color: var(--text-tertiary, #94a3b8); padding: 0 4px; font-size: 0.8rem; }
+.pg-size { display: flex; align-items: center; gap: 10px; font-size: 0.76rem; color: var(--text-secondary, #64748b); }
+.pg-select { padding: 4px 8px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.76rem; cursor: pointer; }
+.pg-jump { display: flex; align-items: center; gap: 4px; }
+.pg-input { width: 42px; height: 24px; padding: 0 4px; text-align: center; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 4px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.76rem; }
+.btn-lifecycle { background: rgba(99,102,241,0.08); color: #6366f1; border-color: rgba(99,102,241,0.25); }
+.btn-lifecycle:hover { background: rgba(99,102,241,0.15); }
+.lc-badge { font-size: 0.68rem; padding: 2px 7px; }
+.lc-badge.lc-provisioning { background: rgba(148,163,184,0.15); color: #475569; }
+.lc-badge.lc-active { background: rgba(34,197,94,0.15); color: #16a34a; }
+.lc-badge.lc-maintenance { background: rgba(245,158,11,0.15); color: #d97706; }
+.lc-badge.lc-retired { background: rgba(107,114,128,0.15); color: #4b5563; }
 </style>

@@ -1,3 +1,75 @@
+### 2026-07-08: 故障单 AI 深度分析——分层 RCA 架构（算法基线 + AI 增强）
+- **需求**: 爸爸问故障单详情→根因分析结果是怎么来的（纯算法评分），按行业标准应该配 AI 分析
+- **实现**: 故障单详情 modal 新增**「AI 深度分析」**按钮（紫色渐变），调 `POST /incidents/api/{id}/ai-rca`
+- **后端** `incidents.py:api_incident_ai_rca`:
+  - 复用已有 `incident_service.get_incident_detail` + `rca_service.analyze_incident` 获取算法 RCA 结论和告警明细
+  - 构造结构化 prompt 传给 AI（含故障单概况、算法 RCA 结论、涉事资产排序、传播路径、告警明细）
+  - 调用 `agent_service.call_llm` 向已配置的 AI provider 发请求（timeout=60s）
+  - 返回自然语言分析：根因推测→传播链→修复建议（前3条）→风险提示
+  - 无可用 AI provider 时返回 400 + 引导配置信息
+- **前端** `IncidentsView.vue`:
+  - 新增 `aiRcaResult`/`aiRcaLoading` ref
+  - 新增 `doAiRca()` 异步函数（loading 态按钮 disable）
+  - 紫色渐变「AI 深度分析」按钮 + 紫色边框分析结果卡片（`white-space: pre-wrap` 保留换行格式）
+- **多轮测试验证**（4 个故障单全部通过）:
+  - id=13: 磁盘压力 → ImagePullBackOff + BackOff + 调度失败，AI 准确定位 DiskPressure 为根因 ✅
+  - id=9: web-prod-02 慢查询（66.9 超阈值 50），AI 推断数据库连接池耗尽导致级联故障 ✅
+  - id=1: es-cluster-01 慢查询（71.46 超阈值 50），AI 推断请求积压→下游资源耗尽 ✅
+  - id=2: 网络故障单，AI 按拓扑评分排序分析传播链 ✅
+  - `npm run build` 通过（dist hash index-xgUB0VRL.js）✅
+- **分层 RCA 架构**: 算法基线(秒级/自动/可解释) + AI 增强(自然语言/修复建议/可操作) 双轨并行，符合 ServiceNow/Dynatrace 等行业标准
+- **专业名词**: 分层 RCA(Layered Root Cause Analysis)——算法层快速定位概率根因，AI 层解释上下文和给出修复动作；Prompt Engineering——构造结构化 prompt 把算法结论+告警明细打包喂给 LLM 做语义分析
+
+### 2026-07-08: 事件中心菜单名澄清——"集群事件"实为"故障单管理"
+- **需求**: 爸爸问事件中心的"集群事件"为什么打开显示"故障单管理"，集群事件和故障单是否同一概念
+- **根因**: `menu_config.json:137` 子菜单 label 为"集群事件"，但 `path: "/incidents"` 渲染 `IncidentsView.vue`（页面标题"故障单管理"）。两者概念不同：
+  - **事件（Event）**：K8s 集群产生的原始事件（Pod 拉镜像失败、节点 NotReady、OOM 等），通过 `GET /events/api/stats` 和 `GET /events/api/list` 获取
+  - **故障单（Incident）**：AIOps 系统根据告警关联归并生成的工单，通过 `GET /incidents/api/list` 获取
+- **修复**: `menu_config.json` 中 `label: "集群事件"` → `label: "故障单管理"`，菜单名与页面标题一致
+- **验证**: 重启后 `GET /api/menu` 返回 `key=incident label=故障单管理 path=/incidents` ✓（不需要 rebuild 前端，菜单 API 动态读取 JSON）
+- **后续规划**: 如需真正的"集群事件"页面（展示 K8s 原始 Event 列表），需新建页面组件 + 路由注册，当前"事件统计"页面可查看 K8s 事件聚合分析
+
+### 2026-07-08: 资产生命周期状态接入资产列表——表格加生命周期列+行内流转操作
+- **需求**: 爸爸问资产生命周期流转只看到 active，没看到其他状态
+- **根因**: `AssetsView.vue` 资产列表只显示 `status`（运行态 online/offline/degraded），不显示生命周期状态（provisioning/active/maintenance/retired）；生命周期功能单独在 `LifecycleView.vue` 页面，资产列表无入口
+- **后端修复** `assets.py:asset_api_list`:
+  - 导入 `AssetLifecycle` 模型
+  - 新增 `lc_map`：查所有 `AssetLifecycle` 按 `asset_id` 聚合最新 `status`（`ORDER BY asset_id, created_at DESC`，Python dict 只保留首次遇见的条目）
+  - 每个 asset 注入 `lifecycle_status: lc_map.get(a.id, "provisioning")`（无生命周期记录时默认 provisioning）
+- **前端修复** `AssetsView.vue`:
+  - 表格新增"生命周期"列（在"状态"列之后），彩色 badge（provisioning灰色/active绿色/maintenance橙色/retired灰色）
+  - 操作列新增"流转"按钮（紫色），点开弹窗选目标状态+备注→确认→POST `/lifecycle/api/transition/{id}`
+  - 流转规则硬编码：provisioning→active / active→maintenance|retired / maintenance→active|retired / retired→终态（不可流转）
+  - `loadAssets` 保留 `lifecycle_status` 字段
+  - 生命周期的 badge 样式 + 流转按钮样式 + 流转弹窗复用项目设计系统
+- **验证**: 后端重启→`/assets/api/list` 返回 `lifecycle_status` ✓（167 provisioning + 11 running 旧数据）
+  - 前端 `npm run build` 通过（dist hash index-CtqduS7S.js）✓
+- **使用说明**: 资产列表每行可见生命周期阶段，点「流转」按钮可做状态机切换；也可在侧边栏的独立"资产生命周期"页查看完整列表和历史时间线
+- **专业名词**: 状态机(State Machine)——provisioning→active→maintenance→retired 四态有限状态机，流转受 `ALLOWED_TRANSITIONS` 约束；生命周期与运行态解耦(Lifecycle vs Runtime Status)——生命周期管理资产从创建到退役的全流程，运行态反映当前可用性，二者独立
+
+### 2026-07-08: 资产列表分页 + 路径查询 404 修复
+- **需求1 资产列表分页**: 爸爸要求资产管理列表加翻页（原一次性渲染全部 178 条无分页）
+- **实现** `AssetsView.vue` 客户端分页（后端 `/assets/api/list` 仍全量返回，前端切片）:
+  - 新增 `currentPage`/`pageSize`(默认20)/`pageSizeOptions`[10,20,50,100]/`totalPages`/`pagedAssets`(切片)/`pageNumbers`(省略号折叠)
+  - `goPage`/`jumpPage`(回车跳页) 函数；`watch` 搜索/类型/过滤/pageSize 变化自动回第1页
+  - 表格 `v-for` 从 `filteredAssets` 改 `pagedAssets`；底部加分页栏：共N项 + 上一页/页码/下一页 + 条/页下拉 + 跳至输入框
+  - 分页栏样式与项目设计系统一致（CSS 变量 + 主题色 active 页码）
+- **需求2 路径查询 404**: 爸爸反馈路径查询结果都是 `Request failed with status code 404`
+- **根因**: `topology_path.py:43` 在"未发现连通路径"时返回 `status_code=404`（业务无结果，非 HTTP 错误）；axios 拦截器只提取 `detail`/`message` 字段不认后端的 `error` 字段 → 前端 catch 只拿到 axios 默认的 `"Request failed with status code 404"`
+- **修复**:
+  - 后端 `topology_path.py:43`: 未发现路径改 `status_code=200` + `{ok:false, error:"未发现连通路径"}`（业务语义正确，无路径≠服务器错误）
+  - 前端 `api/request.js` 拦截器: 错误消息提取顺序加 `error.response?.data?.error`（通用修复，所有用 `error` 字段的后端接口受益）
+- **验证**:
+  - 后端重启 → 无连通路径查询返回 `HTTP 200` + `{"ok":false,"error":"未发现连通路径"}` ✓
+  - 有连通路径（如 28→14）返回 `HTTP 200` + `{"ok":true,"path":[28,14],...}` ✓
+  - 前端 `npm run build` 通过（dist hash 更新为 index-CZ4cbk0S.js）✓
+- **路径查询使用说明**（回答爸爸"怎么使用"）:
+  - 进入「路径查询」页（侧边栏），源节点/目标节点下拉从 `/topology/api/list` 加载所有资产节点
+  - 选择起止节点 → 点「查找路径」→ 后端 BFS 算法在 AssetRelation 边表上找最短连通路径
+  - 结果区：路径长度 + 节点链列表（带 CI 类型/状态/IP）+ ECharts 力导向图可视化
+  - **前提**: 资产间需先在「拓扑视图」页建立关系（depends/owns/selects 等），否则无连通路径
+- **专业名词**: 客户端分页(Client-side Pagination)——后端全量返回前端切片，适合数据量小的场景；服务端分页(Server-side Pagination)——后端 LIMIT/OFFSET 适合大数据量；HTTP 语义化状态码(HTTP Semantic Status Code)——200=成功(含业务无结果 ok:false) vs 404=资源不存在 vs 500=服务器错误；BFS 最短路径(Breadth-First Search Shortest Path)——广度优先遍历无权图找最少跳数路径
+
 ### 2026-07-08: 知识库 RAG 双模式架构设计 + RAG 检索接口参数修复 + 测试文档生成
 - **需求1 RAG 现状质疑**: 爸爸问"RAG 到底什么逻辑，用没用 RAG 组件"。经全代码审查确认：当前是**自制版伪 RAG**，只用 TF-IDF 词频统计 + 内存余弦相似度，**没有** sentence-transformers / LangChain / 向量数据库 / LLM 生成，只实现了 RAG 的 Retrieval 环节且是最低配
 - **RAG 三件套缺失分析**:

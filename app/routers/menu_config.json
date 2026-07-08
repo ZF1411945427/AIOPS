@@ -135,7 +135,7 @@
     "items": [
       {
         "key": "incident",
-        "label": "集群事件",
+        "label": "故障单管理",
         "type": "vue",
         "path": "/incidents"
       },

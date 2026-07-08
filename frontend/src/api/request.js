@@ -17,6 +17,7 @@ request.interceptors.response.use(
         }
         const message = error.response?.data?.detail
             || error.response?.data?.message
+            || error.response?.data?.error
             || error.message
             || '请求失败'
         return Promise.reject(new Error(message))
