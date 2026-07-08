@@ -7,12 +7,12 @@
 
     <div class="stat-row">
       <div class="stat-card">
-        <div class="stat-num">{{ nodes.length }}</div>
-        <div class="stat-label">节点数</div>
+        <div class="stat-num">{{ displayNodeCount }}</div>
+        <div class="stat-label">{{ showAbnormalOnly ? '筛选中节点' : '节点数' }}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-num">{{ relations.length }}</div>
-        <div class="stat-label">关系数</div>
+        <div class="stat-num">{{ displayEdgeCount }}</div>
+        <div class="stat-label">{{ showAbnormalOnly ? '筛选中关系' : '关系数' }}</div>
       </div>
       <div class="stat-card">
         <div class="stat-num">{{ abnormalCount }}</div>
@@ -21,6 +21,15 @@
     </div>
 
     <div class="toolbar">
+      <button
+        class="btn"
+        :class="{ 'btn-abnormal': showAbnormalOnly }"
+        @click="toggleAbnormalFilter"
+      >
+        <span class="filter-dot"></span>
+        仅异常
+        <span v-if="showAbnormalOnly && abnormalCount" class="filter-badge">{{ abnormalCount }}</span>
+      </button>
       <button class="btn btn-primary" @click="openCreate">+ 新增关系</button>
       <button class="btn" @click="loadAll">刷新</button>
     </div>
@@ -52,7 +61,13 @@
             <div class="detail-row"><span class="dlabel">状态</span><span class="dvalue">{{ selectedNode.status || '-' }}</span></div>
             <div class="detail-row"><span class="dlabel">IP</span><span class="dvalue">{{ selectedNode.ip || '-' }}</span></div>
             <div class="detail-row"><span class="dlabel">ID</span><span class="dvalue">{{ selectedNode.id }}</span></div>
-            <button class="btn btn-sm" @click="selectedNode = null" style="margin-top:8px;">关闭</button>
+            <div v-if="connectedNodes.length" class="legend-section" style="margin-top:10px;">关联资产 ({{ connectedNodes.length }})</div>
+            <div v-for="cn in connectedNodes" :key="cn.id" class="related-item">
+              <span class="related-dot" :class="{ 'related-abnormal': isAbnormal(cn) }"></span>
+              <span class="related-name">{{ cn.name }}</span>
+              <span class="related-status">{{ cn.status || '-' }}</span>
+            </div>
+            <button class="btn btn-sm" @click="clearSelection" style="margin-top:8px;">关闭</button>
           </div>
         </div>
       </div>
@@ -112,6 +127,8 @@ const loading = ref(false)
 const nodes = ref([])
 const relations = ref([])
 const selectedNode = ref(null)
+const selectedNodeId = ref(null)
+const showAbnormalOnly = ref(false)
 const showCreate = ref(false)
 const createForm = ref({ source_id: 0, target_id: 0, relation_type: 'depends_on' })
 
@@ -161,6 +178,54 @@ function isAbnormal(n) {
 
 const abnormalCount = computed(() => nodes.value.filter(isAbnormal).length)
 
+const connectedNodes = computed(() => {
+  if (!selectedNode.value) return []
+  const neighborIds = new Set()
+  relations.value.forEach(r => {
+    if (r.source_id === selectedNode.value.id) neighborIds.add(r.target_id)
+    if (r.target_id === selectedNode.value.id) neighborIds.add(r.source_id)
+  })
+  return nodes.value.filter(n => neighborIds.has(n.id))
+})
+
+function toggleAbnormalFilter() {
+  showAbnormalOnly.value = !showAbnormalOnly.value
+  renderChart()
+}
+
+function clearSelection() {
+  selectedNode.value = null
+  selectedNodeId.value = null
+  renderChart()
+}
+
+function isConnectedTo(id, targetId) {
+  return relations.value.some(r =>
+    (r.source_id === id && r.target_id === targetId) ||
+    (r.source_id === targetId && r.target_id === id)
+  )
+}
+
+function getDisplayData() {
+  let dn = nodes.value
+  let de = relations.value
+  if (showAbnormalOnly.value) {
+    const abnormalIds = new Set(dn.filter(isAbnormal).map(n => n.id))
+    const connectedIds = new Set()
+    de.forEach(r => {
+      if (abnormalIds.has(r.source_id)) connectedIds.add(r.target_id)
+      if (abnormalIds.has(r.target_id)) connectedIds.add(r.source_id)
+    })
+    const keepIds = new Set([...abnormalIds, ...connectedIds])
+    dn = dn.filter(n => keepIds.has(n.id))
+    de = de.filter(r => keepIds.has(r.source_id) && keepIds.has(r.target_id))
+  }
+  return { displayNodes: dn, displayEdges: de }
+}
+
+const displayNodeCount = computed(() => getDisplayData().displayNodes.length)
+const displayEdgeCount = computed(() => getDisplayData().displayEdges.length)
+
 function nodeName(id) {
   const n = nodes.value.find(x => x.id === id)
   return n ? n.name : `#${id}`
@@ -185,26 +250,43 @@ function renderChart() {
   if (!chartRef.value) return
   if (!chart) chart = echarts.init(chartRef.value)
   const nodeMap = new Map(nodes.value.map(n => [n.id, n]))
+  const { displayNodes, displayEdges } = getDisplayData()
   const categories = Object.keys(typeColors).filter(k => k !== 'default')
-  const graphNodes = nodes.value.map(n => ({
-    id: String(n.id),
-    name: n.name,
-    symbolSize: 38,
-    category: categories.indexOf((n.ci_type || n.type || '').toLowerCase()) >= 0
-      ? (n.ci_type || n.type || '').toLowerCase() : 'default',
-    itemStyle: {
-      color: nodeColor(n),
-      borderColor: isAbnormal(n) ? '#ef4444' : 'transparent',
-      borderWidth: isAbnormal(n) ? 3 : 0,
-    },
-    label: { show: true, position: 'bottom', fontSize: 10 },
-    raw: n,
-  }))
-  const graphEdges = relations.value.map(r => ({
-    source: String(r.source_id),
-    target: String(r.target_id),
-    label: { show: false, formatter: r.relation_type, fontSize: 9 },
-  }))
+  const graphNodes = displayNodes.map(n => {
+    const abnormal = isAbnormal(n)
+    const selected = selectedNodeId.value === n.id
+    const connected = selectedNodeId.value && selectedNodeId.value !== n.id && isConnectedTo(n.id, selectedNodeId.value)
+    const emph = showAbnormalOnly.value && abnormal
+    return {
+      id: String(n.id),
+      name: n.name,
+      symbolSize: emph ? 48 : (selected || connected ? 44 : 38),
+      category: categories.indexOf((n.ci_type || n.type || '').toLowerCase()) >= 0
+        ? (n.ci_type || n.type || '').toLowerCase() : 'default',
+      itemStyle: {
+        color: nodeColor(n),
+        borderColor: abnormal ? '#ef4444' : (connected ? '#f59e0b' : 'transparent'),
+        borderWidth: emph ? 5 : (abnormal ? 3 : (connected ? 3 : 0)),
+        shadowBlur: emph ? 12 : 0,
+        shadowColor: 'rgba(239,68,68,0.45)',
+      },
+      label: { show: true, position: 'bottom', fontSize: emph ? 11 : 10 },
+      raw: n,
+    }
+  })
+  const graphEdges = displayEdges.map(r => {
+    const connected = selectedNodeId.value && (
+      r.source_id === selectedNodeId.value || r.target_id === selectedNodeId.value
+    )
+    return {
+      source: String(r.source_id),
+      target: String(r.target_id),
+      label: { show: false, formatter: r.relation_type, fontSize: 9 },
+      lineStyle: connected
+        ? { color: '#f59e0b', width: 3, curveness: 0.1 }
+        : { color: '#aaa', curveness: 0.1 },
+    }
+  })
   chart.setOption({
     tooltip: {
       formatter: (p) => {
@@ -238,6 +320,8 @@ function renderChart() {
   chart.on('click', (p) => {
     if (p.dataType === 'node' && p.data.raw) {
       selectedNode.value = p.data.raw
+      selectedNodeId.value = p.data.raw.id
+      renderChart()
     }
   })
 }
@@ -361,4 +445,13 @@ onBeforeUnmount(() => {
 .form-row label { display: block; font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 4px; }
 .input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn-abnormal { background: rgba(239,68,68,0.12); color: #ef4444; border-color: rgba(239,68,68,0.35); }
+.btn-abnormal:hover { background: rgba(239,68,68,0.22); }
+.filter-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; display: inline-block; margin-right: 4px; }
+.filter-badge { background: #ef4444; color: #fff; border-radius: 8px; padding: 0 6px; font-size: 0.7rem; font-weight: 700; line-height: 1.5; margin-left: 4px; }
+.related-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; padding: 3px 0; }
+.related-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; flex-shrink: 0; }
+.related-dot.related-abnormal { background: #ef4444; box-shadow: 0 0 4px rgba(239,68,68,0.5); }
+.related-name { color: var(--text, #1e293b); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-status { color: var(--text-secondary, #64748b); font-size: 0.7rem; margin-left: auto; }
 </style>

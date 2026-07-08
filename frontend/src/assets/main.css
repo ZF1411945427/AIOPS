@@ -79,6 +79,7 @@ body {
   background: var(--sidebar-bg);
   box-shadow: 0 8px 32px rgba(0,0,0,0.06);
   border: none;
+  will-change: width;
 }
 
 .sidebar.collapsed {
@@ -160,6 +161,7 @@ body {
 .sidebar .el-sub-menu__title .el-icon {
   color: var(--sidebar-text);
   margin-right: 8px;
+  font-size: 14px;
 }
 
 .sidebar .el-menu-item.is-active .el-icon,

@@ -13,6 +13,10 @@ templates = get_templates()
 
 
 def _get_k8s_client(ds: DataSource):
+    if ds.enabled is False:
+        raise Exception(f"K8s 集群 [{ds.name}] 已被禁用")
+    if ds.last_status in ("offline", "error", "failed"):
+        raise Exception(f"K8s 集群 [{ds.name}] 当前不可用 (status={ds.last_status})")
     from kubernetes import config, client
     cfg = parse_json_config(ds.auth_config)
     if cfg.get("kubeconfig"):

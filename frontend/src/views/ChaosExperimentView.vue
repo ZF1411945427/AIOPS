@@ -43,7 +43,10 @@
       <template #header>
         <div class="card-header">
           <span class="title">混沌实验管理</span>
-          <el-button type="primary" @click="showCreateDialog">+ 新建实验</el-button>
+          <div>
+            <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+            <el-button type="primary" @click="showCreateDialog">+ 新建实验</el-button>
+          </div>
         </div>
       </template>
 
@@ -214,6 +217,43 @@
       </template>
     </el-drawer>
   </div>
+
+  <GuideDrawer v-model="showGuide" title="📖 混沌工程 · 操作说明">
+    <section class="guide-section">
+      <h4>1. 混沌工程是什么？</h4>
+      <p><strong>混沌工程（Chaos Engineering）</strong>是通过<strong>主动制造故障</strong>来验证系统稳定性的方法。说白了就是：故意搞破坏，看系统会不会挂，挂了能不能自动恢复。</p>
+      <p>Netflix 是混沌工程的鼻祖——他们写了 Chaos Monkey 随机杀死生产环境的实例，迫使团队必须做出高可用的系统。</p>
+      <div class="tip-box">💡 核心思想：与其等故障来找你，不如你主动去找故障。先发现、先修复，避免真正的重大事故。</div>
+    </section>
+    <section class="guide-section">
+      <h4>2. 这个页面的功能</h4>
+      <ul>
+        <li><strong>新建实验</strong> — 选择故障类型、目标服务、参数配置，创建一个混沌实验</li>
+        <li><strong>执行实验</strong> — 启动实验后系统会注入指定故障（CPU 打满、网络延迟、杀掉 Pod 等）</li>
+        <li><strong>SLO 验证</strong> — 实验期间监控 SLO 是否达标，判断系统是否足够稳健</li>
+        <li><strong>结果分析</strong> — 实验通过（passed）说明系统扛住了；失败（failed）说明有改进空间</li>
+      </ul>
+    </section>
+    <section class="guide-section">
+      <h4>3. 故障类型说明</h4>
+      <div class="key-value-list">
+        <div class="kv-row"><span class="kv-key">CPU 压力</span><span class="kv-val">打满 CPU，测试服务在高负载下的表现和自动扩缩容能力</span></div>
+        <div class="kv-row"><span class="kv-key">内存压力</span><span class="kv-val">消耗内存，测试 OOM Kill 和内存限制是否配置正确</span></div>
+        <div class="kv-row"><span class="kv-key">磁盘填满</span><span class="kv-val">写满磁盘，测试磁盘告警和日志轮转机制</span></div>
+        <div class="kv-row"><span class="kv-key">网络延迟</span><span class="kv-val">增加网络延迟，测试超时重试和熔断机制</span></div>
+        <div class="kv-row"><span class="kv-key">网络丢包</span><span class="kv-val">模拟网络不稳定，测试重试和降级逻辑</span></div>
+        <div class="kv-row"><span class="kv-key">Pod 杀死</span><span class="kv-val">随机杀掉 Pod，测试 K8s Deployment 自动恢复和滚动更新能力</span></div>
+      </div>
+    </section>
+    <section class="guide-section">
+      <h4>4. 目标层级</h4>
+      <ul>
+        <li><strong>主机层</strong> — 对物理机/虚拟机注入故障（CPU、内存、磁盘、网络）</li>
+        <li><strong>容器层</strong> — 对 Docker 容器注入故障（资源限制、杀死容器）</li>
+        <li><strong>K8s 层</strong> — 对 Pod、Deployment 注入故障（Pod 杀死、配置变更）</li>
+      </ul>
+    </section>
+  </GuideDrawer>
 </template>
 
 <script setup>
@@ -221,7 +261,9 @@ import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import axios from 'axios'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
+const showGuide = ref(false)
 const API = '/api/chaos'
 
 const summary = ref({})

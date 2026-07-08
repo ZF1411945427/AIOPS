@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>变更审批</h1>
       <p>变更工单全流程：草稿 → 待审批 → 已批准 → 进行中 → 完成/回滚 · 共 {{ total }} 条</p>
+      <button class="btn btn-guide" @click="showGuide = !showGuide" style="margin-left:auto">📖 操作说明</button>
     </div>
 
     <div class="toolbar">
@@ -182,10 +183,66 @@
       </div>
     </div>
   </div>
+
+  <GuideDrawer v-model="showGuide" title="📖 变更审批 · 操作说明">
+    <section class="guide-section">
+      <h4>1. 什么是变更管理？</h4>
+      <p><strong>变更管理（Change Management）</strong>是对运维操作（升级、配置修改、重启、迁移等）进行<strong>规范化审批</strong>的流程。目的是减少变更引发的故障，确保每次变更都经过评估和授权。</p>
+      <p>ITIL 里有个数据：<strong>80% 的故障由变更引起</strong>。所以规范的变更流程不是"走形式"，而是保护系统稳定的第一道防线。</p>
+    </section>
+    <section class="guide-section">
+      <h4>2. 状态流转</h4>
+      <div class="guide-code">草稿 → 待审批 → 已批准 → 进行中 → 已完成
+                                 ↘ 已驳回        ↘ 已回滚</div>
+      <ul>
+        <li><strong>草稿</strong> — 创建人还在填写信息，未提交审批</li>
+        <li><strong>待审批</strong> — 已提交，等待审批人审核</li>
+        <li><strong>已批准 / 已驳回</strong> — 审批结果</li>
+        <li><strong>进行中</strong> — 审批通过，正在执行变更操作</li>
+        <li><strong>已完成 / 已回滚</strong> — 变更执行完成，或出现问题回滚到变更前状态</li>
+      </ul>
+    </section>
+    <section class="guide-section">
+      <h4>3. 变更类型</h4>
+      <div class="key-value-list">
+        <div class="kv-row"><span class="kv-key">标准变更</span><span class="kv-val">预先批准的常规操作（如例行重启），走简化流程</span></div>
+        <div class="kv-row"><span class="kv-key">正常变更</span><span class="kv-val">普通变更，需要审批。比如数据库迁移、版本升级</span></div>
+        <div class="kv-row"><span class="kv-key">紧急变更</span><span class="kv-val">需要立即执行的变更（如修复安全漏洞），加急审批</span></div>
+      </div>
+    </section>
+    <section class="guide-section">
+      <h4>4. 风险等级</h4>
+      <ul>
+        <li><span class="tag-demo" style="background:rgba(16,185,129,0.12);color:#10b981;">低</span> — 影响范围小，失败风险低（如修改日志级别）</li>
+        <li><span class="tag-demo" style="background:rgba(245,158,11,0.12);color:#d97706;">中</span> — 有一定影响（如更新非核心服务）</li>
+        <li><span class="tag-demo" style="background:rgba(239,68,68,0.12);color:#ef4444;">高</span> — 影响核心业务，变更失败可能导致重大故障（如数据库主从切换）</li>
+      </ul>
+    </section>
+    <section class="guide-section">
+      <h4>5. 创建变更示例</h4>
+      <p>以"升级 nginx 到 1.26"为例：</p>
+      <div class="step-list">
+        <div class="step-item"><span class="step-num">1</span><span>点击「新建变更」，填写标题<code>生产环境 nginx 升级到 1.26</code>、描述变更原因</span></div>
+        <div class="step-item"><span class="step-num">2</span><span>选择<strong>变更类型</strong>：正常变更；<strong>风险等级</strong>：中（影响线上流量）</span></div>
+        <div class="step-item"><span class="step-num">3</span><span>添加<strong>执行步骤</strong>：<br>① 备份当前配置 /etc/nginx/<br>② 下载 nginx 1.26 二进制<br>③ 替换二进制并执行 nginx -t 检查语法<br>④ 执行 nginx -s reload 重新加载</span></div>
+        <div class="step-item"><span class="step-num">4</span><span>提交后等待审批 → 批准后开始执行 → 完成后点「完成变更」</span></div>
+      </div>
+    </section>
+    <section class="guide-section">
+      <h4>6. 回滚操作</h4>
+      <p>如果已「完成」的变更出现问题：</p>
+      <ol style="margin:4px 0 10px;padding-left:18px;font-size:0.8rem;line-height:1.7;color:#475569;">
+        <li>在变更详情中点击「回滚」按钮</li>
+        <li>确认后，状态变更为"已回滚"</li>
+      </ol>
+      <div class="tip-box">💡 回滚只是标记状态，实际的回滚操作（如恢复旧版本）需要人工或通过 Ansible 等工具执行。建议在变更步骤中提前写好回滚步骤。</div>
+    </section>
+  </GuideDrawer>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
@@ -328,11 +385,13 @@ function formatTime(s) {
 }
 
 onMounted(loadChanges)
+
+const showGuide = ref(false)
 </script>
 
 <style scoped>
 .cw-page { padding: 4px; }
-.page-header { margin-bottom: 16px; }
+.page-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }

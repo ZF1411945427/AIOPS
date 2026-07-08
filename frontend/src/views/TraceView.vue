@@ -6,6 +6,7 @@
         <span class="toolbar-desc">分布式调用链查询与可视化</span>
       </div>
       <div class="workbench-card-actions">
+        <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
         <el-button size="small" @click="loadTraces" :loading="loading">刷新</el-button>
       </div>
     </div>
@@ -181,12 +182,58 @@
       </div>
     </div>
   </div>
+
+  <GuideDrawer v-model="showGuide" title="📖 链路追踪 · 操作说明">
+    <section class="guide-section">
+      <h4>1. 什么是链路追踪？</h4>
+      <p>当用户请求一个 API 时，后端通常会<strong>调用多个服务</strong>才能返回结果（比如 网关→认证→订单→支付→库存）。<strong>链路追踪（Tracing）</strong>就是把这些调用串联起来，形成一个完整的<strong>调用链</strong>，让你一眼看出哪里慢、哪里出错。</p>
+      <div class="tip-box">💡 类比：一个快递从发货到签收经过多个中转站。链路追踪就是给每个快递贴一张"追踪单"，记录每个中转站的到达和离开时间。</div>
+    </section>
+    <section class="guide-section">
+      <h4>2. 核心概念</h4>
+      <div class="key-value-list">
+        <div class="kv-row">
+          <span class="kv-key">Trace</span>
+          <span class="kv-val">一次完整请求的<strong>调用链</strong>，包含所有经过的服务和耗时。每个 Trace 有一个唯一的 trace_id</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">Span</span>
+          <span class="kv-val">调用链中的<strong>一个步骤</strong>（比如"查数据库"这个操作就是一个 Span）。Span 会记录开始时间、结束时间、状态、标签等</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">Waterfall（瀑布图）</span>
+          <span class="kv-val">Span 的<strong>可视化展示</strong>，每个 Span 是一条横条，横条越长说明越慢。父 Span 在上，子 Span 在下缩进，形成瀑布一样的层次结构</span>
+        </div>
+      </div>
+    </section>
+    <section class="guide-section">
+      <h4>3. 怎么看瀑布图？</h4>
+      <ul>
+        <li><strong>横条长度</strong> = 该操作的耗时，越长越慢</li>
+        <li><strong>颜色</strong> = 不同服务用不同颜色区分</li>
+        <li><strong>层级缩进</strong> = 调用深度，缩进越多说明调用链越长</li>
+        <li><strong>红色横条</strong> = 该 Span 执行出错，需要重点关注</li>
+        <li>把最长的横条和红色的横条找出来，就找到了性能瓶颈和错误点</li>
+      </ul>
+    </section>
+    <section class="guide-section">
+      <h4>4. 这个页面怎么用？</h4>
+      <ul>
+        <li><strong>过滤</strong> — 按服务名、关键词、状态、最小时长筛选关注的调用链</li>
+        <li><strong>结果列表</strong> — 每条 Trace 显示根服务、操作名、耗时、状态。点开查看详情</li>
+        <li><strong>瀑布图</strong> — 可视化展示每个 Span 的调用关系和耗时</li>
+        <li><strong>服务拓扑</strong> — 展示服务之间的调用关系图，看哪些服务依赖哪些服务</li>
+      </ul>
+    </section>
+  </GuideDrawer>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import request from '@/api/request'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
+const showGuide = ref(false)
 const loading = ref(false)
 const traces = ref([])
 const totalCount = ref(0)

@@ -4,7 +4,10 @@
       <template #header>
         <div class="card-header">
           <span class="title">SLA 协议管理</span>
-          <el-button type="primary" @click="showCreateDialog">+ 新建 SLA</el-button>
+          <div>
+            <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+            <el-button type="primary" @click="showCreateDialog">+ 新建 SLA</el-button>
+          </div>
         </div>
       </template>
 
@@ -61,6 +64,45 @@
         <el-button type="primary" @click="createSla">确定</el-button>
       </template>
     </el-dialog>
+
+    <GuideDrawer v-model="showGuide" title="📖 SLA · 概念说明">
+      <section class="guide-section">
+        <h4>1. 什么是 SLA？</h4>
+        <p><strong>SLA</strong>（Service Level Agreement，服务级别协议）是你跟客户或业务方签订的<strong>正式合同</strong>，里面写明了"我保证这个服务达到什么水平，如果达不到，我承担什么后果"。</p>
+        <div class="tip-box">💡 简单区分：<strong>SLO</strong> 是你给自己定的目标，<strong>SLA</strong> 是你对外签的合同。</div>
+      </section>
+      <section class="guide-section">
+        <h4>2. SLO vs SLA 的核心区别</h4>
+        <div class="key-value-list">
+          <div class="kv-row">
+            <span class="kv-key">SLO</span>
+            <span class="kv-val"><strong>内部指标</strong>，技术团队自己定的目标。没达到→改进，没有赔偿。<br>例：我们团队希望支付服务可用性达到 99.95%</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">SLA</span>
+            <span class="kv-val"><strong>外部合同</strong>，对客户/业务的正式承诺。没达到→赔偿/罚款。<br>例：合同写支付服务可用性不低于 99.9%，否则退还 10% 月费</span>
+          </div>
+        </div>
+        <p>一般 SLA 的目标会比 SLO 低一些（给自己留缓冲），内部先报警处理，避免触发 SLA 违约。</p>
+      </section>
+      <section class="guide-section">
+        <h4>3. 可用性怎么算？</h4>
+        <div class="formula">可用性 = 运行时间 / (运行时间 + 停机时间)</div>
+        <p>例如：一个月（30天=2592000秒）内，服务停机了 2 小时（7200秒）：</p>
+        <ul>
+          <li>可用性 = (2592000 - 7200) / 2592000 = <strong>99.72%</strong></li>
+          <li>如果 SLA 目标是 99.9%，那这个月就<strong>违约了</strong></li>
+        </ul>
+      </section>
+      <section class="guide-section">
+        <h4>4. 处罚等级</h4>
+        <ul>
+          <li><span class="tag-demo" style="background:rgba(16,185,129,0.12);color:#10b981;">无</span> — 未触发 SLA 违约，服务正常</li>
+          <li><span class="tag-demo" style="background:rgba(245,158,11,0.12);color:#d97706;">警告</span> — 接近违约阈值，需关注</li>
+          <li><span class="tag-demo" style="background:rgba(239,68,68,0.12);color:#ef4444;">处罚</span> — 已触发 SLA 违约，可能产生财务赔偿或商务影响</li>
+        </ul>
+      </section>
+    </GuideDrawer>
   </div>
 </template>
 
@@ -68,7 +110,9 @@
 import { ref, onMounted, reactive } from "vue"
 import { ElMessage } from "element-plus"
 import axios from "axios"
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
+const showGuide = ref(false)
 const slaList = ref([])
 const dialogVisible = ref(false)
 const form = reactive({
