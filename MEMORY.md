@@ -3,6 +3,12 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-08: 修复 mobile chat 输入栏固定底部（第四次尝试）
+- 根本原因：`uni-page-body` 无明确高度，`height: 100%` 解析为 `auto`，flex 布局无法正确分配空间
+- 修复方案：`onShow` 中用 JS 计算 `window.innerHeight - navBar - tabBar`，给 `uni-page-body` 设置精确像素高度
+- 同时配合 `overflow: hidden` 防止页面整体滚动
+- `onHide` 时清理样式，避免影响其他页面
+
 ### 2026-07-08: 修复 mobile 全量 404（图片 + JS chunk + CSS）
 - **根因**: mobile 和 frontend 都用 `/assets/` 路径引用 Vite 构建产物，但后端只挂载了一个目录
   - 解决: 自定义 `_MultiStaticFiles`（继承 StaticFiles），按序尝试 `[mobile, frontend]` 两个 assets 目录

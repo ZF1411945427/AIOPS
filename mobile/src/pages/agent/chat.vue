@@ -7,7 +7,7 @@
             </view>
         </view>
 
-        <scroll-view scroll-y class="msg-list" :scroll-into-view="scrollAnchor" scroll-with-animation>
+        <view class="msg-list" id="msg-list">
             <view v-if="messages.length === 0" class="welcome">
                 <text class="welcome-title">AI 运维助手</text>
                 <text class="welcome-desc">我可以帮你分析告警、生成巡检报告、定位根因</text>
@@ -35,7 +35,7 @@
             </view>
 
             <view :id="'anchor-bottom'" class="anchor"></view>
-        </scroll-view>
+        </view>
 
         <view class="quick-bar">
             <view class="quick-item" @tap="sendQuick('分析告警')">
@@ -61,7 +61,7 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onHide } from '@dcloudio/uni-app'
 import { sendMessage, confirmPending, cancelPending, listPending, takePendingPreset } from '@/api/agent.js'
 import ChatBubble from '@/components/ChatBubble.vue'
 
@@ -70,17 +70,14 @@ const inputText = ref('')
 const sessionId = ref('')
 const aiPending = ref(false)
 const pendingActions = ref([])
-const scrollAnchor = ref('')
 const recorderManager = (typeof uni !== 'undefined' && uni.getRecorderManager) ? uni.getRecorderManager() : null
 let voiceRecording = false
 let msgSeq = 0
 
 function scrollToBottom() {
     nextTick(() => {
-        scrollAnchor.value = ''
-        nextTick(() => {
-            scrollAnchor.value = 'anchor-bottom'
-        })
+        const el = document.getElementById('msg-list')
+        if (el) el.scrollTop = el.scrollHeight
     })
 }
 
@@ -245,9 +242,28 @@ async function loadPending() {
 }
 
 onShow(() => {
+    try {
+        const pb = document.querySelector('uni-page-body')
+        if (pb) {
+            const navH = document.querySelector('uni-page-head')?.offsetHeight || 44
+            const tabH = document.querySelector('uni-tabbar')?.offsetHeight || 50
+            pb.style.height = (window.innerHeight - navH - tabH) + 'px'
+            pb.style.overflow = 'hidden'
+        }
+    } catch (e) {}
     loadPending()
     const preset = takePendingPreset()
     if (preset) doSend(preset)
+})
+
+onHide(() => {
+    try {
+        const pb = document.querySelector('uni-page-body')
+        if (pb) {
+            pb.style.height = ''
+            pb.style.overflow = ''
+        }
+    } catch (e) {}
 })
 </script>
 
@@ -256,7 +272,8 @@ onShow(() => {
 .chat-page {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
+    overflow: hidden;
     background: $bg;
 }
 
@@ -285,6 +302,9 @@ onShow(() => {
 
 .msg-list {
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     padding: 24rpx;
 }
 
@@ -365,6 +385,7 @@ onShow(() => {
 
 .quick-bar {
     display: flex;
+    flex-shrink: 0;
     padding: 16rpx 24rpx;
     gap: 16rpx;
     background: $bg-card-solid;
@@ -383,6 +404,7 @@ onShow(() => {
 
 .input-bar {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     padding: 16rpx 24rpx;
     background: $bg-card-solid;
