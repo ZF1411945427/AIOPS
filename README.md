@@ -1,12 +1,12 @@
 <div align="center">
 
-<br/>
+**监控 · 告警 · 根因分析 · 自动化运维 · AI Agent · 值班 · SRE**
 
-<img src="https://img.shields.io/badge/AIOps-智能运维平台-6366f1?style=for-the-badge&logo=&labelColor=1a1a2e" />
+<h1>
+  <img src="https://img.shields.io/badge/AIOps-智能运维平台-6366f1?style=for-the-badge&logo=&labelColor=1a1a2e" alt="AIOps"/>
+</h1>
 
-**监控 · 告警 · 根因分析 · 自动化运维 · AI Agent · SRE 可靠性**
-
-*从「到处查系统」到「看态势、找证据、问系统、做动作」*
+*从碎片化救火→一站式智能运维*
 
 <br/>
 
@@ -16,24 +16,33 @@
 <img src="https://img.shields.io/badge/Python-3.13+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
 <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vue.js&logoColor=white" alt="Vue"/>
 <img src="https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"/>
-<img src="https://img.shields.io/badge/Routers-81-ff6b6b?style=flat-square" alt="Routers"/>
-<img src="https://img.shields.io/badge/E2E%20Tests-147-f59e0b?style=flat-square" alt="Tests"/>
+<img src="https://img.shields.io/badge/81%20Routes-ff6b6b?style=flat-square" alt="Routes"/>
+<img src="https://img.shields.io/badge/147%20E2E%20Tests-f59e0b?style=flat-square" alt="Tests"/>
+<img src="https://img.shields.io/badge/3%20端-4FC08D?style=flat-square" alt="3 Clients"/>
 
-<br/><br/>
+<br/>
+
+**⭐ 觉得有用？点个 Star 支持一下 →**
 
 </div>
 
 ---
 
-> ## 💡 这是什么？
->
-> **AIOps** 是一个面向 SRE / DevOps 团队的 **智能运维一体化平台**。
->
-> 它把碎片化的运维能力收敛成一条完整链路：
->
-> ```
-> 📊 可观测性取证 → 🚨 事件中心复盘 → 🤖 AI Agent 智能分析 → ⚡ 自动化动作 → 📈 SRE 持续度量
-> ```
+<div align="center">
+
+### SRE 团队的日常是这样吗？
+
+</div>
+
+| 😫 痛点 | ✅ AIOps 解法 |
+|---------|--------------|
+| 日志、指标、告警、K8s 散落在 N 个系统 | **一个平台**收敛可观测性全栈数据 |
+| 故障排查靠经验翻文档 | **AI Agent** 自然语言对话排障 + 6 种根因算法 |
+| 告警轰炸，真假难辨 | **风暴检测 + 自动归并**，降噪 90% |
+| 发现问题→手动修复→值班被叫醒 | **自愈规则 + Runbook**，告警触发自动修复 |
+| 团队忙却难量化 | **SLO / Error Budget / 值班表**，SRE 完整闭环 |
+
+> **一条链路走完运维全流程：** `📊 可观测性 → 🚨 告警 → 🧠 AI 分析 → ⚡ 自动化 → 📈 SRE 度量`
 
 ---
 
@@ -299,24 +308,45 @@ python tools/deploy.py mobile     # 仅 UniApp H5 构建产物
 
 ---
 
+## 🎯 适用场景
+
+| 场景 | 一句话 |
+|------|--------|
+| 👨‍💻 **SRE 值班** | 一个页面看清所有服务健康度，告警实时推送，点击即 AI 分析 |
+| 🔍 **故障排查** | 输入 "看看 orders 服务最近怎么了"，AI Agent 自动查指标+日志+拓扑 |
+| 📊 **团队度量** | SLO 仪表盘、Error Budget 消耗、值班表、可用性报表一键生成 |
+| ⚡ **日常运维** | SSH 批量执行脚本、K8s 资源管理、自愈规则编排，全在浏览器完成 |
+| 📱 **手机巡检** | UniApp 移动端 H5，扫码识别资产、AI 对话、告警确认，随时随地 |
+| 🧪 **Demo 演示** | 内置种子数据 + 双数据库一键切换，随时演示 / 真实测试互不影响 |
+
+---
+
 ## 📸 系统截图
 
 <table>
   <tr>
+    <td><img src="docs/screenshots/login.png" alt="登录页" width="400"/></td>
     <td><img src="docs/screenshots/dashboard.png" alt="仪表盘" width="400"/></td>
+  </tr>
+  <tr>
+    <td align="center">🔐 登录页 — Vue SPA 渲染</td>
+    <td align="center">📊 仪表盘 — 全局健康总览</td>
+  </tr>
+  <tr>
     <td><img src="docs/screenshots/topology.png" alt="拓扑视图" width="400"/></td>
-  </tr>
-  <tr>
-    <td align="center">📊 仪表盘 — 7 卡片 + 4 图表</td>
-    <td align="center">🔗 拓扑视图 — 服务依赖关系</td>
-  </tr>
-  <tr>
     <td><img src="docs/screenshots/agent.png" alt="AI 智能助手" width="400"/></td>
-    <td><img src="docs/screenshots/aiops-demo.png" alt="AIOps 概览" width="400"/></td>
   </tr>
   <tr>
-    <td align="center">🤖 AI 智能助手 — 自然语言排障</td>
-    <td align="center">🌡️ 系统态势 — 热力图 + SLA</td>
+    <td align="center">🔗 拓扑视图 — 服务依赖关系</td>
+    <td align="center">🤖 AI Agent — 自然语言排障</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/posture.png" alt="系统态势" width="400"/></td>
+    <td></td>
+  </tr>
+  <tr>
+    <td align="center">🌡️ 系统态势 — SLO + 热力图</td>
+    <td></td>
   </tr>
 </table>
 

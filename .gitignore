@@ -43,9 +43,10 @@ backend.log
 backend_new.log
 
 # ===== 截图 / 运行时产物 =====
-screenshots/
-.codebuddy/
-*.png
+/screenshots/
+# 忽略根目录和日志目录的 png，但 docs/screenshots/ 需要入库
+/*.png
+logs/*.png
 nul
 
 # ===== 根目录临时测试脚本 / 临时依赖 =====
