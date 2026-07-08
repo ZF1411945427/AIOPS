@@ -3,6 +3,35 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-08: 拓扑视图新增异常筛选 + 关联资产面板
+- **需求**: 爸爸要求拓扑视图能筛选出异常资产（红色边框高亮），并能查看选中节点的关联资产
+- **异常筛选按钮**: toolbar 新增「仅异常」toggle 按钮，激活后只显示异常节点 + 其直接关联节点/边，异常节点放大至 48px + 5px 红色边框 + 发光阴影
+- **关联资产面板**: 点击任意节点 → 右侧图例面板显示节点详情 + 「关联资产(N)」列表（名称+状态），关联边在图中高亮为橙色 3px
+- **辅助函数**: `getDisplayData()` 计算筛选后的节点/边集，`isConnectedTo()` 判断两节点是否连通，`toggleAbnormalFilter()` 切换筛选
+- **el-menu 性能**: `:collapse-transition="false"` + sidebar `will-change: width` + el-icon `font-size: 14px`（规避 Setting 图标 Chrome bug）
+- **build 验证**: 2411 modules / 15.08s / 0 errors ✅
+
+### 2026-07-08: 12 个概念型功能页统一加「📖 概念说明」——GuideDrawer 可复用组件 + 小白友好科普
+- **需求**: 爸爸说 SRE 可靠性下的功能页（SLO/错误预算/消耗速率/SLA/可用性报表/升级策略/值班表）对小白来说不知道是干嘛的、什么逻辑，要求都加操作说明。并扩展到所有概念型页面
+- **统一方案**: 抽取 AgentWorkflowEditor.vue 现有的 guide-drawer 样式为可复用组件 `GuideDrawer.vue`
+  - 组件位置: `frontend/src/components/GuideDrawer.vue`
+  - 支持 v-model 控制显隐、title prop、默认 slot 填充内容
+  - 内置 guide-section / key-value-list / formula / tip-box / guide-code 等样式类
+  - 预置浅色主题、动画滑入、520px 侧边抽屉
+- **已添加概念说明的 12 个页面**:
+  - **SRE 可靠性（7页）**: SLO配置(什么是SLO/几个9/窗口期/状态判定) / 错误预算(计算公式/三态含义/SRE理念) / 消耗速率(Burn Rate>1含义/三窗口意义) / SLA协议(SLO vs SLA区别/可用性计算/处罚等级) / 可用性报表(可用性定义/年停机对照) / 升级策略(升级链机制/三级配置说明) / 值班表(轮值方式/排班计算)
+  - **混沌工程（1页）**: 混沌工程概念/6种故障类型说明/目标层级(SLO验证)
+  - **Helm（1页）**: Chart/Release/Repository 三大概念 / 回滚机制 / values.yaml
+  - **Ansible（1页）**: Inventory/Playbook/Module 核心概念 / 三Tab功能说明 / 执行流程
+  - **链路追踪（1页）**: Trace/Span/瀑布图概念 / 怎么看瀑布图 / 页面使用指南
+  - **变更审批（1页）**: 变更管理目的 / 状态流转(草稿→待审批→已批准→进行中→完成/回滚) / 变更类型 / 风险等级
+- **入口按钮位置**:
+  - el-card 类页面(7个SRE+混沌) → card-header 内加小型「📖 概念说明」按钮
+  - 自定义 header 类(Helm/Ansible/ChangeWorkflow) → page-header 内右侧加 btn-guide 按钮
+  - TraceView → section-toolbar 内加 el-button
+- **build 验证**: `npm run build` → 2411 模块 / 16.19s / 0 errors ✅
+- **专业名词**: 新手引导体验(Onboarding UX)、上下文帮助(Contextual Help)、概念科普(Conceptual Onboarding)、微文案(Microcopy)、UI 复杂度审计(UI Complexity Audit)
+
 ### 2026-07-08: 修复 3 个线上 bug（SQLite NULLS LAST / PDF 字体 / PointerEvent 传参）
 - **bug1 `notifications/api/recent` 500**: SQLite 不支持 `NULLS LAST` 语法，移除 `.nullslast()` → 恢复 200
 - **bug2 `agent-workflow/api/runs/2/pdf` 500**: 硬编码 `C:\Windows\Fonts\msyh.ttc`（Windows 路径），Linux 上无此字体。
@@ -47,22 +76,6 @@
   - `_find_ansible_bin()` 去掉 `.cmd`/`.bat` 探测，Windows 只认 `.exe`
   - `bin/` 最终文件：`helm.exe` / `helm` / `ansible-playbook` / `ansible`（4 个）
 - **Ansible Windows 限制**: Ansible 依赖 `grp` 等 Linux 专有模块，Windows 上 `--version` 和实际执行都会失败（`ansible/cli/__init__.py:52 check_blocking_io()` → `import grp` → ModuleNotFoundError）。这是 Ansible 自身的平台限制，部署到 Linux 正常
-- **三步流程验证（API 级别）**:
-  1. `POST /ansible/api/inventories` → 200（创建主机清单 `39.96.51.45-db`）
-  2. `POST /ansible/api/playbooks` → 200（创建 Playbook `ping-test`）
-  3. `POST /ansible/api/run` → 200（执行返回 `exit_code:1, status:failed`，Windows 异常）
-- **Linux 部署后**: `bin/ansible-playbook`（shebang 包装脚本）+ pip 安装的 ansible 包 → 三步全部正常
-- **需求**: 爸爸要求 `bin/` 下 helm 和 ansible-playbook 都要支持 Linux 和 Windows
-- **变更**:
-  - 下载 helm v3.16.4 Linux amd64 二进制，提取 `helm` 放入 `bin/`（17MB tar.gz → 57MB 二进制）
-  - Windows: `bin/helm.exe` ✓ ；Linux: `bin/helm` ✓
-  - Ansible 双平台包装脚本已完备：
-    - Windows: `bin/ansible-playbook.cmd` / `bin/ansible.cmd`（→ `python -m ansible`）
-    - Linux: `bin/ansible-playbook` / `bin/ansible`（shebang → `python3 -m ansible`）
-  - `_helm_bin()` 已原生支持双平台（`bin/helm.exe` vs `bin/helm`），无需改动
-  - `_find_ansible_bin()` 已原生支持双平台（Windows 优先 exe→cmd→bat, Linux 直接找脚本名）
-- **验证**: Helm status 200/installed ✓，Ansible status 200/installed:false（wrapper 在但本机无 ansible 包）✓
-- **离线部署**: 把 `bin/` 目录整个拷贝到目标服务器，Helm 可直接运行，Ansible 需服务器 `pip install ansible` 一次
 
 ### 2026-07-08: Ansible 使用 bin/ 包装脚本，删除一键安装
 - **决策**: 爸爸否决一键安装按钮方案，要求只靠 `bin/` 目录放可执行文件，断网也能用
