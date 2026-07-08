@@ -10,7 +10,7 @@
           <span class="dot"></span>
           <span v-if="statusLoading">检测中...</span>
           <span v-else-if="ansibleInstalled">Ansible 已安装 · {{ ansibleVersion }}</span>
-          <span v-else>Ansible 未安装</span>
+            <span v-else>Ansible 未安装</span>
         </div>
       </div>
     </div>

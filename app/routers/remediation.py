@@ -66,6 +66,7 @@ def api_remediation_create(
     params_target: str = Form(""),
     params_count: int = Form(2),
     params_script: str = Form(""),
+    params_command: str = Form(""),
     db: Session = Depends(get_db)):
     """创建自愈规则 JSON API."""
     import json as _json
@@ -74,6 +75,8 @@ def api_remediation_create(
         params["count"] = params_count
     if action_type == "script":
         params["script"] = params_script
+    if action_type == "run_command":
+        params["command"] = params_command
     r = remediation_service.create_remediation(db, {
         "name": name,
         "rule_id": rule_id if rule_id > 0 else None,

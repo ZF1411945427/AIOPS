@@ -96,7 +96,7 @@ for _eng in get_all_engines().values():
 
 app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/ansible"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

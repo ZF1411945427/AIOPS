@@ -75,6 +75,7 @@
           <div class="form-group"><label>目标</label><input v-model="form.params_target" placeholder="如：nginx 或 asset_5" /></div>
           <div v-if="form.action_type === 'scale'" class="form-group"><label>实例数</label><input v-model.number="form.params_count" type="number" /></div>
           <div v-if="form.action_type === 'script'" class="form-group"><label>脚本路径</label><input v-model="form.params_script" placeholder="/opt/scripts/fix.sh" /></div>
+          <div v-if="form.action_type === 'run_command'" class="form-group"><label>执行命令</label><input v-model="form.params_command" placeholder="如：hostname 或 uptime（危险命令会被拦截）" /></div>
           <div class="form-actions"><button class="btn" @click="createVisible = false">取消</button><button class="btn btn-primary" @click="createRule" :disabled="creating">{{ creating ? '创建中...' : '创建' }}</button></div>
         </div>
       </div>
@@ -95,7 +96,7 @@ const actions = ref({})
 const total = ref(0)
 const createVisible = ref(false)
 const creating = ref(false)
-const form = reactive({ name: '', rule_id: 0, action_type: 'restart', params_target: '', params_count: 2, params_script: '' })
+const form = reactive({ name: '', rule_id: 0, action_type: 'restart', params_target: '', params_count: 2, params_script: '', params_command: '' })
 
 async function loadData() {
   loading.value = true
@@ -124,7 +125,7 @@ function actionLabel(type) {
 function onActionChange() {}
 
 function openCreate() {
-  Object.assign(form, { name: '', rule_id: 0, action_type: 'restart', params_target: '', params_count: 2, params_script: '' })
+  Object.assign(form, { name: '', rule_id: 0, action_type: 'restart', params_target: '', params_count: 2, params_script: '', params_command: '' })
   createVisible.value = true
 }
 
@@ -139,6 +140,7 @@ async function createRule() {
     fd.append('params_target', form.params_target)
     fd.append('params_count', form.params_count)
     fd.append('params_script', form.params_script)
+    fd.append('params_command', form.params_command)
     await request.post('/remediation/api/create', fd)
     ElMessage.success('创建成功')
     createVisible.value = false

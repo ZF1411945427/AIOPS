@@ -12,3 +12,4 @@ requests==2.34.2
 statsmodels==0.14.6
 kubernetes==36.0.2
 fpdf2==2.8.7
+ansible==12.3.0

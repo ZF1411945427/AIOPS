@@ -2,6 +2,7 @@ import os
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime
 
@@ -14,6 +15,30 @@ from app.database import get_db
 from app.models import AnsibleInventory, AnsiblePlaybook, AnsibleRun
 
 router = APIRouter(prefix="/ansible", tags=["ansible"])
+
+
+def _find_ansible_bin(name="ansible-playbook"):
+    """优先用项目 bin/ → 当前 Python 环境 Scripts/ → 系统 PATH"""
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if os.name == "nt":
+        local = os.path.join(here, "bin", name + ".exe")
+        if os.path.isfile(local):
+            return local
+    else:
+        local = os.path.join(here, "bin", name)
+        if os.path.isfile(local):
+            return local
+    py_dir = os.path.dirname(sys.executable)
+    if os.name == "nt":
+        venv_bin = os.path.join(py_dir, "Scripts", name + ".exe")
+    else:
+        venv_bin = os.path.join(py_dir, name)
+    if os.path.isfile(venv_bin):
+        return venv_bin
+    path = shutil.which(name)
+    if path:
+        return path
+    return None
 
 
 def _inventory_to_dict(inv) -> dict:
@@ -229,27 +254,33 @@ def run_playbook(body: RunCreate, db: Session = Depends(get_db)):
             error = f"写入 playbook 临时文件失败: {e}"
             raise
 
-        cmd = ["ansible-playbook", "-i", inv_file.name, pb_file.name]
-        if extra_vars_str:
-            cmd += ["-e", extra_vars_str]
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, encoding="utf-8", errors="ignore")
-            output = r.stdout or ""
-            error = r.stderr or ""
-            exit_code = r.returncode if r.returncode is not None else -1
-            status = "completed" if exit_code == 0 else "failed"
-        except FileNotFoundError:
+        cmd_bin = _find_ansible_bin("ansible-playbook")
+        if not cmd_bin:
             error = "未找到 ansible-playbook 命令，请先安装 Ansible"
             exit_code = -2
             status = "failed"
-        except subprocess.TimeoutExpired:
-            error = "执行超时（300s）"
-            exit_code = -3
-            status = "failed"
-        except Exception as e:
-            error = f"执行异常: {e}"
-            exit_code = -4
-            status = "failed"
+        else:
+            cmd = [cmd_bin, "-v", "-i", inv_file.name, pb_file.name]
+            if extra_vars_str:
+                cmd += ["-e", extra_vars_str]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, encoding="utf-8", errors="ignore")
+                output = r.stdout or ""
+                error = r.stderr or ""
+                exit_code = r.returncode if r.returncode is not None else -1
+                status = "completed" if exit_code == 0 else "failed"
+            except FileNotFoundError:
+                error = "未找到 ansible-playbook 命令，请先安装 Ansible"
+                exit_code = -2
+                status = "failed"
+            except subprocess.TimeoutExpired:
+                error = "执行超时（300s）"
+                exit_code = -3
+                status = "failed"
+            except Exception as e:
+                error = f"执行异常: {e}"
+                exit_code = -4
+                status = "failed"
     finally:
         for f in (inv_file, pb_file):
             if f and hasattr(f, "name") and os.path.exists(f.name):
@@ -302,16 +333,19 @@ def delete_run(run_id: int, db: Session = Depends(get_db)):
 
 @router.get("/api/status")
 def ansible_status():
-    installed = shutil.which("ansible-playbook") is not None
+    bin_path = _find_ansible_bin("ansible-playbook")
+    installed = False
     version = ""
-    if installed:
+    if bin_path:
         try:
-            r = subprocess.run(["ansible-playbook", "--version"], capture_output=True, text=True, timeout=10, encoding="utf-8", errors="ignore")
-            first_line = (r.stdout or "").splitlines()[0] if (r.stdout or "").strip() else ""
-            version = first_line
+            r = subprocess.run([bin_path, "--version"], capture_output=True, text=True, timeout=10, encoding="utf-8", errors="ignore")
+            if r.returncode == 0 and (r.stdout or "").strip():
+                installed = True
+                first_line = (r.stdout or "").splitlines()[0] if (r.stdout or "").strip() else ""
+                version = first_line
         except Exception:
-            version = ""
-    return JSONResponse({"installed": installed, "version": version})
+            pass
+    return JSONResponse({"installed": installed, "version": version, "bin_path": bin_path})
 
 
 @router.post("/api/test-inventory")
@@ -330,25 +364,31 @@ def test_inventory(body: TestInventoryReq, db: Session = Depends(get_db)):
         except Exception as e:
             return JSONResponse({"ok": False, "output": "", "error": f"写入临时文件失败: {e}", "exit_code": -1, "status": "failed"})
 
-        cmd = ["ansible", "all", "-i", inv_file.name, "-m", "ping"]
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, encoding="utf-8", errors="ignore")
-            output = r.stdout or ""
-            error = r.stderr or ""
-            exit_code = r.returncode if r.returncode is not None else -1
-            status = "completed" if exit_code == 0 else "failed"
-        except FileNotFoundError:
+        cmd_bin = _find_ansible_bin("ansible")
+        if not cmd_bin:
             error = "未找到 ansible 命令，请先安装 Ansible"
             exit_code = -2
             status = "failed"
-        except subprocess.TimeoutExpired:
-            error = "测试超时（120s）"
-            exit_code = -3
-            status = "failed"
-        except Exception as e:
-            error = f"测试异常: {e}"
-            exit_code = -4
-            status = "failed"
+        else:
+            cmd = [cmd_bin, "all", "-i", inv_file.name, "-m", "ping"]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, encoding="utf-8", errors="ignore")
+                output = r.stdout or ""
+                error = r.stderr or ""
+                exit_code = r.returncode if r.returncode is not None else -1
+                status = "completed" if exit_code == 0 else "failed"
+            except FileNotFoundError:
+                error = "未找到 ansible 命令，请先安装 Ansible"
+                exit_code = -2
+                status = "failed"
+            except subprocess.TimeoutExpired:
+                error = "测试超时（120s）"
+                exit_code = -3
+                status = "failed"
+            except Exception as e:
+                error = f"测试异常: {e}"
+                exit_code = -4
+                status = "failed"
     finally:
         if inv_file and hasattr(inv_file, "name") and os.path.exists(inv_file.name):
             try:
@@ -363,3 +403,5 @@ def test_inventory(body: TestInventoryReq, db: Session = Depends(get_db)):
         "exit_code": exit_code,
         "status": status,
     })
+
+

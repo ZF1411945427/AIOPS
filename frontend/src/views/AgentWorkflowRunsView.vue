@@ -268,7 +268,7 @@ const detailNodeList = computed(() => {
 })
 
 async function exportPdf(runId) {
-  const id = runId || detail.value?.id
+  const id = typeof runId === 'number' ? runId : detail.value?.id
   if (!id) return
   try {
     const blob = await request.get(`/agent-workflow/api/runs/${id}/pdf`, { responseType: 'blob' })

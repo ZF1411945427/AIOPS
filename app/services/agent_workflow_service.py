@@ -1045,8 +1045,17 @@ def export_run_pdf(db: Session, run_id: int) -> Optional[bytes]:
 
     # A4 纵向，统一边距
     pdf = FPDF(format="A4")
-    pdf.add_font("YaHei", "", r"C:\Windows\Fonts\msyh.ttc")
-    pdf.add_font("YaHei", "B", r"C:\Windows\Fonts\msyhbd.ttc")
+    import os as _os
+    _proj = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    _fonts_dir = _os.path.join(_proj, "fonts")
+    _regular = _os.path.join(_fonts_dir, "msyh.ttc")
+    _bold = _os.path.join(_fonts_dir, "msyhbd.ttc")
+    if _os.path.isfile(_regular) and _os.path.isfile(_bold):
+        pdf.add_font("YaHei", "", _regular)
+        pdf.add_font("YaHei", "B", _bold)
+    else:
+        pdf.add_font("YaHei", "", r"C:\Windows\Fonts\msyh.ttc")
+        pdf.add_font("YaHei", "B", r"C:\Windows\Fonts\msyhbd.ttc")
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.set_margins(20, 20, 20)
     _page_w = pdf.w - pdf.l_margin - pdf.r_margin  # 可用宽度

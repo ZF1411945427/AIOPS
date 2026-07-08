@@ -32,15 +32,15 @@
         <table v-else-if="pagedAssets.length" class="table">
           <thead>
             <tr>
-              <th>名称</th><th>CI 类型</th><th>纳管层级</th><th>IP / 地址</th><th>状态</th><th>生命周期</th>
-              <th>引用/孤岛</th><th>连接方式</th><th>标签</th><th>创建时间</th><th>操作</th>
+              <th class="col-id">ID</th><th>名称</th><th>CI 类型</th><th>IP / 地址</th><th>状态</th><th>生命周期</th>
+              <th>引用/孤岛</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="a in pagedAssets" :key="a.id" :class="{ 'row-deprecated': a.status === 'deprecated', 'row-orphan': isOrphan(a) }">
+              <td class="col-id text-sm">{{ a.id }}</td>
               <td><span class="asset-name">{{ shortName(a.name) }}</span><div class="asset-fullname" v-if="a.name.includes('/')">{{ a.name }}</div></td>
               <td><span class="badge ci-type" :style="ciTypeStyle(a.ci_type)">{{ a.ci_type || '-' }}</span></td>
-              <td><span class="tier-badge" :class="tierClass(a.ci_type)">{{ tierLabel(a.ci_type) }}</span></td>
               <td class="text-sm">{{ a.ip || '-' }}</td>
               <td><span class="badge" :class="a.status">{{ statusLabel(a.status) }}</span></td>
               <td><span class="badge lc-badge" :class="lifecycleClass(a.lifecycle_status)">{{ a.lifecycle_status }}</span></td>
@@ -50,12 +50,11 @@
                 </span>
                 <span v-else class="text-muted">-</span>
               </td>
-              <td class="text-sm">{{ connectionTypeLabel(a.connection_type) }}</td>
-              <td class="text-sm">{{ a.tags || '-' }}</td>
               <td class="text-sm">{{ a.created_at || '-' }}</td>
               <td>
                 <button v-if="a.ci_type === 'kubernetes_cluster'" class="btn btn-sm btn-sync" :disabled="syncingId === a.id" @click="syncK8s(a)">{{ syncingId === a.id ? '同步中...' : '同步' }}</button>
-                <button class="btn btn-sm btn-lifecycle" @click="openTransition(a)">流转</button>
+                <a v-if="a.tags" href="javascript:void(0)" class="btn btn-sm btn-tag" @click="showTags(a)">标签</a>
+                <a href="javascript:void(0)" class="btn btn-sm btn-lifecycle" @click="goLifecycle(a.id)">生命周期</a>
                 <a href="javascript:void(0)" class="btn btn-sm" @click="openEdit(a.id)">编辑</a>
                 <button class="btn btn-sm btn-danger" @click="deleteAsset(a.id, a.name)">删除</button>
               </td>
@@ -84,25 +83,6 @@
           <option v-for="s in pageSizeOptions" :key="s" :value="s">{{ s }} 条/页</option>
         </select>
         <span class="pg-jump">跳至 <input class="pg-input" @keyup.enter="jumpPage($event)" placeholder="页"> 页</span>
-      </div>
-    </div>
-
-    <div v-if="showTransition" class="modal-overlay" @click.self="showTransition = false">
-      <div class="modal-box">
-        <h3>资产流转 · {{ transAsset.name }}</h3>
-        <div class="form-row"><label>当前生命周期</label>
-          <span class="badge lc-badge" :class="lifecycleClass(transAsset.lifecycle_status)">{{ transAsset.lifecycle_status }}</span>
-        </div>
-        <div class="form-row"><label>流转至</label>
-          <select v-model="transForm.to_status" class="input">
-            <option v-for="s in (LIFECYCLE_TRANSITIONS[transAsset.lifecycle_status] || [])" :key="s" :value="s">{{ s }}</option>
-          </select>
-        </div>
-        <div class="form-row"><label>备注（可选）</label><input v-model="transForm.comment" class="input" placeholder="变更说明"></div>
-        <div class="modal-actions">
-          <button class="btn" @click="showTransition = false">取消</button>
-          <button class="btn btn-primary" :disabled="transitioning" @click="doTransition">{{ transitioning ? '流转中...' : '确认流转' }}</button>
-        </div>
       </div>
     </div>
 
@@ -403,31 +383,10 @@ function lifecycleClass(s) {
   if (s === 'retired') return 'lc-retired'
   return 'lc-provisioning'
 }
-const LIFECYCLE_TRANSITIONS = { provisioning: ['active'], active: ['maintenance', 'retired'], maintenance: ['active', 'retired'], retired: [] }
-const showTransition = ref(false)
-const transAsset = ref({})
-const transForm = ref({ to_status: '', comment: '' })
-const transitioning = ref(false)
-function openTransition(a) {
-  transAsset.value = a
-  const allowed = LIFECYCLE_TRANSITIONS[a.lifecycle_status] || []
-  transForm.value = { to_status: allowed[0] || '', comment: '' }
-  if (!allowed.length) { ElMessage.warning('该资产已是终态（retired），无法继续流转'); return }
-  showTransition.value = true
-}
-async function doTransition() {
-  if (!transForm.value.to_status) { ElMessage.warning('请选择目标状态'); return }
-  transitioning.value = true
-  try {
-    const data = await request.post(`/lifecycle/api/transition/${transAsset.value.id}`, {
-      to_status: transForm.value.to_status, comment: transForm.value.comment,
-    })
-    if (data.ok === false) { ElMessage.error(data.error || '流转失败'); return }
-    ElMessage.success(`流转成功: ${transAsset.value.lifecycle_status} → ${transForm.value.to_status}`)
-    showTransition.value = false
-    loadAssets()
-  } catch (e) { ElMessage.error('流转失败: ' + (e.message || e)) }
-  finally { transitioning.value = false }
+function goLifecycle(assetId) {
+  if (typeof window !== 'undefined') window._lifecycleFocusId = assetId
+  if (typeof window !== 'undefined' && typeof window._navigateTo === 'function') window._navigateTo('lifecycle')
+  else ElMessage.warning('请从左侧菜单进入「资产生命周期」进行流转')
 }
 function connectionTypeLabel(t) { return { ssh: 'SSH', agent: 'Agent', kubernetes: 'K8s API', snmp: 'SNMP', http: 'HTTP', database: '数据库' }[t] || t || '-' }
 
@@ -448,6 +407,9 @@ function ciTypeStyle(ci_type) {
 }
 function shortName(full) { return full.includes('/') ? full.split('/').pop() : full }
 function isOrphan(a) { return a.isOrphan === true }
+function showTags(a) {
+  ElMessageBox.alert(a.tags, `${shortName(a.name)} 的标签`, { confirmButtonText: '关闭', customClass: 'tags-modal' })
+}
 
 const hideDeprecated = ref(false)
 const onlyOrphan = ref(false)
@@ -554,6 +516,8 @@ async function testConnection() {
     let cfg = {}
     if (form.value.ci_type === 'kubernetes_cluster') {
       cfg = { api_server: form.value.k8s_api_server, token: form.value.k8s_token }
+    } else if (isSshType.value) {
+      cfg = { ssh_user: form.value.ssh_user, ssh_password: form.value.ssh_password, ssh_port: form.value.ssh_port }
     }
     const p = new URLSearchParams()
     p.append('connection_type', form.value.connection_type || 'ssh')
@@ -626,6 +590,9 @@ function buildPayload() {
   } else if (form.value.ci_type === 'storage_device') {
     p.storage_type = form.value.storage_type; p.storage_mount = form.value.storage_mount; p.storage_capacity = form.value.storage_capacity
   }
+  if (isSshType.value) {
+    p.ssh_user = form.value.ssh_user; p.ssh_password = form.value.ssh_password; p.ssh_port = form.value.ssh_port
+  }
   if (form.value.id) p.id = form.value.id
   return p
 }
@@ -693,6 +660,8 @@ onMounted(() => { loadAssets() })
 .table td { padding: 10px 12px; font-size: 0.85rem; color: var(--text, #1e293b); border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); white-space: nowrap; }
 .table tr:hover td { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .asset-name { font-weight: 500; }
+.col-id { width: 52px; font-variant-numeric: tabular-nums; }
+.col-id.text-sm, td.col-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text-tertiary, #94a3b8); font-size: 0.74rem; }
 .text-sm { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
 .badge.ci-type { background: rgba(59,130,246,0.1); color: #3b82f6; }
@@ -761,6 +730,8 @@ tr.row-orphan td { background: rgba(239,68,68,0.03); }
 .pg-input { width: 42px; height: 24px; padding: 0 4px; text-align: center; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 4px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.76rem; }
 .btn-lifecycle { background: rgba(99,102,241,0.08); color: #6366f1; border-color: rgba(99,102,241,0.25); }
 .btn-lifecycle:hover { background: rgba(99,102,241,0.15); }
+.btn-tag { background: rgba(245,158,11,0.08); color: #d97706; border-color: rgba(245,158,11,0.25); }
+.btn-tag:hover { background: rgba(245,158,11,0.15); }
 .lc-badge { font-size: 0.68rem; padding: 2px 7px; }
 .lc-badge.lc-provisioning { background: rgba(148,163,184,0.15); color: #475569; }
 .lc-badge.lc-active { background: rgba(34,197,94,0.15); color: #16a34a; }
