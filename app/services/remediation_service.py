@@ -245,7 +245,7 @@ def check_and_remediate(db: Session):
             db.add(log)
             logs.append(log)
             alert.status = "acknowledged"
-            alert.message += f" [已触发自动响应: {action}]"
+            alert.message += f" [已触发自动响应: {rem.action_type}]"
 
     if logs:
         db.commit()

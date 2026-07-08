@@ -66,7 +66,7 @@ def recent_notifications(db: Session = Depends(get_db)):
     offline_assets = (
         db.query(Asset)
         .filter(Asset.status != "online")
-        .order_by(Asset.last_checked.desc().nullslast())
+        .order_by(Asset.last_checked.desc())
         .limit(3)
         .all()
     )

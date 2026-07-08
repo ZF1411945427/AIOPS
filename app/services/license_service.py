@@ -230,16 +230,6 @@ def check_license() -> dict:
         return result
 
     payload = parsed["payload"]
-    lic_fp = payload.get("fingerprint", "")
-    if lic_fp and lic_fp != fingerprint:
-        result = {
-            **base,
-            "status": "invalid",
-            "reason": f"机器指纹不匹配（许可证绑定其他机器）",
-            "info": payload,
-        }
-        _cache.update({"ts": now_ts, "result": result})
-        return result
 
     expire_date = _parse_expire(payload.get("expire_at"))
     today = date.today()
@@ -287,14 +277,6 @@ def save_license(license_text: str) -> dict:
     if not parsed["valid"]:
         return {"ok": False, "message": parsed["reason"], "info": None}
     payload = parsed["payload"]
-    lic_fp = payload.get("fingerprint", "")
-    current_fp = get_machine_fingerprint()
-    if lic_fp and lic_fp != current_fp:
-        return {
-            "ok": False,
-            "message": f"机器指纹不匹配，本机指纹为 {current_fp}，许可证绑定指纹为 {lic_fp}",
-            "info": payload,
-        }
     expire_date = _parse_expire(payload.get("expire_at"))
     if expire_date is None:
         return {"ok": False, "message": "授权文件缺少到期时间", "info": payload}

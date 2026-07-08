@@ -43,7 +43,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="it in items" :key="it.id">
+            <tr v-for="it in pagedItems" :key="it.id" :data-lc-id="it.id" :class="{ 'row-focus': focusId === it.id }">
               <td>{{ it.name }}</td>
               <td><span class="badge ci-type">{{ it.ci_type || it.type || '-' }}</span></td>
               <td><span class="badge" :class="statusBadge(it.status)">{{ it.status || '-' }}</span></td>
@@ -57,6 +57,24 @@
           </tbody>
         </table>
         <div v-else class="empty-state"><div style="font-size:32px;margin-bottom:8px;">♻️</div><div>暂无资产数据</div></div>
+      </div>
+    </div>
+
+    <div class="pagination" v-if="items.length > pageSize">
+      <div class="pg-info">共 <b>{{ items.length }}</b> 项</div>
+      <div class="pg-pages">
+        <button class="pg-btn" :disabled="currentPage === 1" @click="goPage(currentPage - 1)">‹ 上一页</button>
+        <template v-for="(p, idx) in pageNumbers" :key="idx">
+          <span v-if="p === '...'" class="pg-ellipsis">…</span>
+          <button v-else class="pg-btn" :class="{ active: p === currentPage }" @click="goPage(p)">{{ p }}</button>
+        </template>
+        <button class="pg-btn" :disabled="currentPage === totalPages" @click="goPage(currentPage + 1)">下一页 ›</button>
+      </div>
+      <div class="pg-size">
+        <select v-model.number="pageSize" class="pg-select">
+          <option v-for="s in pageSizeOptions" :key="s" :value="s">{{ s }} 条/页</option>
+        </select>
+        <span class="pg-jump">跳至 <input class="pg-input" @keyup.enter="jumpPage($event)" placeholder="页"> 页</span>
       </div>
     </div>
 
@@ -107,13 +125,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
 const loading = ref(false)
 const items = ref([])
 const states = ['provisioning', 'active', 'maintenance', 'retired']
+const focusId = ref(null)
 
 const showTransition = ref(false)
 const showHistory = ref(false)
@@ -121,6 +140,40 @@ const historyLoading = ref(false)
 const historyItems = ref([])
 const current = ref({})
 const transForm = ref({ to_status: '', comment: '' })
+
+const currentPage = ref(1)
+const pageSize = ref(20)
+const pageSizeOptions = [10, 20, 50, 100]
+const totalPages = computed(() => Math.max(1, Math.ceil(items.value.length / pageSize.value)))
+const pagedItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return items.value.slice(start, start + pageSize.value)
+})
+const pageNumbers = computed(() => {
+  const tp = totalPages.value
+  const cp = currentPage.value
+  const arr = []
+  if (tp <= 7) { for (let i = 1; i <= tp; i++) arr.push(i) }
+  else {
+    arr.push(1)
+    if (cp > 4) arr.push('...')
+    for (let i = Math.max(2, cp - 1); i <= Math.min(tp - 1, cp + 1); i++) arr.push(i)
+    if (cp < tp - 3) arr.push('...')
+    arr.push(tp)
+  }
+  return arr
+})
+function goPage(p) {
+  if (p === '...' || p < 1 || p > totalPages.value) return
+  currentPage.value = p
+}
+function jumpPage(e) {
+  const n = parseInt(e.target.value)
+  if (!isNaN(n) && n >= 1 && n <= totalPages.value) currentPage.value = n
+  e.target.value = ''
+}
+watch(pageSize, () => { currentPage.value = 1 })
+watch(() => items.value.length, () => { if (currentPage.value > totalPages.value) currentPage.value = totalPages.value })
 
 function stateClass(s) {
   return `state-${s}`
@@ -200,7 +253,29 @@ async function openHistory(it) {
   }
 }
 
-onMounted(loadList)
+onMounted(async () => {
+  await loadList()
+  const fid = (typeof window !== 'undefined') ? window._lifecycleFocusId : null
+  if (fid !== null && fid !== undefined && fid !== '') {
+    window._lifecycleFocusId = null
+    const idx = items.value.findIndex(x => x.id === fid)
+    const it = idx >= 0 ? items.value[idx] : null
+    if (it) {
+      focusId.value = it.id
+      currentPage.value = Math.floor(idx / pageSize.value) + 1
+      nextTick(() => {
+        nextTick(() => {
+          const el = document.querySelector(`tr[data-lc-id="${it.id}"]`)
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        })
+        if (it.allowed_transitions && it.allowed_transitions.length) openTransition(it)
+        else ElMessage.info(`「${it.name}」当前为终态(${it.lifecycle_status})，无法流转，可查看历史记录`)
+      })
+    } else {
+      ElMessage.warning('未找到目标资产')
+    }
+  }
+})
 </script>
 
 <style scoped>
@@ -237,6 +312,7 @@ onMounted(loadList)
 .table th { text-align: left; padding: 10px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary, #64748b); border-bottom: 1px solid var(--border-strong, rgba(0,0,0,0.12)); text-transform: uppercase; letter-spacing: 0.3px; }
 .table td { padding: 10px 12px; font-size: 0.85rem; color: var(--text, #1e293b); border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
 .table tr:hover td { background: var(--bg-hover, rgba(0,0,0,0.03)); }
+.table tr.row-focus td { background: rgba(99,102,241,0.10); box-shadow: inset 3px 0 0 var(--accent, #6366f1); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.72rem; font-weight: 600; }
 .badge.sm { padding: 1px 6px; font-size: 0.68rem; }
 .badge.ci-type { background: rgba(59,130,246,0.1); color: #3b82f6; }
@@ -269,4 +345,18 @@ onMounted(loadList)
 .tl-arrow { color: var(--text-secondary, #64748b); }
 .tl-meta { font-size: 0.75rem; color: var(--text-secondary, #64748b); }
 .tl-comment { margin-top: 4px; font-size: 0.8rem; color: var(--text, #1e293b); background: var(--bg-hover, rgba(0,0,0,0.03)); padding: 4px 8px; border-radius: 4px; }
+
+.pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding: 10px 16px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; flex-wrap: wrap; gap: 8px; }
+.pg-info { font-size: 0.8rem; color: var(--text-secondary, #64748b); }
+.pg-info b { color: var(--accent, #6366f1); }
+.pg-pages { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.pg-btn { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.76rem; cursor: pointer; transition: all 0.15s; }
+.pg-btn:hover:not(:disabled):not(.active) { background: var(--bg-hover, rgba(0,0,0,0.03)); border-color: var(--accent, #6366f1); }
+.pg-btn.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+.pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pg-ellipsis { color: var(--text-tertiary, #94a3b8); padding: 0 4px; font-size: 0.8rem; }
+.pg-size { display: flex; align-items: center; gap: 10px; font-size: 0.76rem; color: var(--text-secondary, #64748b); }
+.pg-select { padding: 4px 8px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.76rem; cursor: pointer; }
+.pg-jump { display: flex; align-items: center; gap: 4px; }
+.pg-input { width: 42px; height: 24px; padding: 0 4px; text-align: center; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 4px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.76rem; }
 </style>
