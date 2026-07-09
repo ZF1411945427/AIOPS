@@ -3,6 +3,36 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-09: 记录正确部署方式（弃用 tools/deploy.py）
+- **不要用** `tools/deploy.py`（本地打包上传 565MB 太慢，且包含 helm 等服务器已有的大文件）
+- **正确方式**：本地 `git push` → SSH 到服务器 → 服务器上操作：
+
+```bash
+# 1. 备份
+cd /data && tar -czf AIOPS.bak.$(date +%Y%m%d_%H%M%S).tar.gz AIOPS/
+
+# 2. 拉取最新代码
+cd /data/AIOPS
+git config --global --add safe.directory /data/AIOPS  # 首次需执行
+git fetch --all && git reset --hard origin/main
+
+# 3. 构建前端
+cd /data/AIOPS/frontend && npm run build
+
+# 4. 构建移动端
+cd /data/AIOPS/mobile && npm run build:h5
+
+# 5. 安装 Python 依赖
+cd /data/AIOPS && pip3 install -r requirements.txt
+
+# 6. 重启后端
+pkill -f 'python.*run\\.py' 2>/dev/null
+sleep 2
+cd /data/AIOPS && setsid python3 run.py > /tmp/aiops_backend.log 2>&1 &
+sleep 5
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/
+```
+
 ### 2026-07-09: 修复 /assets/api/* 路由 404（静态文件挂载冲突）
 - `app/main.py:169` 的 `app.mount("/assets", _MultiStaticFiles(...))` 与 `assets.router`（prefix=/assets）冲突
 - 静态挂载在 Starlette 中优先级高于路由，所有 `/assets/*` API 请求被拦截返回 404
