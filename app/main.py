@@ -116,7 +116,7 @@ for _eng in get_all_engines().values():
 
 app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/mobile-assets", "/mobile-app", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/ansible"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/ansible"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -171,7 +171,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.mount("/vue-assets", StaticFiles(directory="frontend/dist"), name="vue_assets")
 _MOBILE_DIST = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5"
 if _MOBILE_DIST.is_dir():
-    app.mount("/mobile-assets", StaticFiles(directory=str(_MOBILE_DIST)), name="mobile_assets")
+    app.mount("/mobile-app", StaticFiles(directory=str(_MOBILE_DIST), html=True), name="mobile_app")
 
 _VUE_INDEX = Path(__file__).resolve().parent.parent / "frontend/dist/index.html"
 _MOBILE_INDEX = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/index.html"
@@ -181,15 +181,6 @@ _MOBILE_INDEX = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/i
 def serve_spa():
     content = _VUE_INDEX.read_text(encoding="utf-8")
     content = content.replace('/assets/', '/vue-assets/assets/')
-    return HTMLResponse(content=content)
-
-
-@app.get("/mobile-app", response_class=HTMLResponse)
-def serve_mobile():
-    if not _MOBILE_INDEX.is_file():
-        return HTMLResponse(content="<h1>Mobile app not built yet</h1><p>Run <code>cd mobile && npm run build:h5</code></p>", status_code=404)
-    content = _MOBILE_INDEX.read_text(encoding="utf-8")
-    content = content.replace('/assets/', '/mobile-assets/assets/')
     return HTMLResponse(content=content)
 
 
