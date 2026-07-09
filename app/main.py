@@ -161,12 +161,7 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CacheControlMiddleware)
 
-# 公共 assets: mobile 优先，frontend 兜底（两者都用 /assets/ 路径）
-_MOBILE_ASSETS = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/assets"
-_FRONTEND_ASSETS = Path(__file__).resolve().parent.parent / "frontend/dist/assets"
-if _MOBILE_ASSETS.is_dir() or _FRONTEND_ASSETS.is_dir():
-    dirs = [d for d in [_MOBILE_ASSETS, _FRONTEND_ASSETS] if d.is_dir()]
-    app.mount("/assets", _MultiStaticFiles(dirs), name="shared_assets")
+# 公共 assets 由 /vue-assets 和 /mobile-assets 各自承载，不在此挂载（避免与 /assets API 路由冲突）
 
 # Mobile tab 图标（需在 /static 之前挂载，Starlette 优先匹配精确路径）
 _MOBILE_STATIC_TAB = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/static/tab"
@@ -174,7 +169,9 @@ if _MOBILE_STATIC_TAB.is_dir():
     app.mount("/static/tab", StaticFiles(directory=str(_MOBILE_STATIC_TAB)), name="mobile_static_tab")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.mount("/vue-assets", StaticFiles(directory="frontend/dist"), name="vue_assets")
-app.mount("/mobile-assets", StaticFiles(directory="mobile/dist/build/h5"), name="mobile_assets")
+_MOBILE_DIST = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5"
+if _MOBILE_DIST.is_dir():
+    app.mount("/mobile-assets", StaticFiles(directory=str(_MOBILE_DIST)), name="mobile_assets")
 
 _VUE_INDEX = Path(__file__).resolve().parent.parent / "frontend/dist/index.html"
 _MOBILE_INDEX = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/index.html"
@@ -189,6 +186,8 @@ def serve_spa():
 
 @app.get("/mobile-app", response_class=HTMLResponse)
 def serve_mobile():
+    if not _MOBILE_INDEX.is_file():
+        return HTMLResponse(content="<h1>Mobile app not built yet</h1><p>Run <code>cd mobile && npm run build:h5</code></p>", status_code=404)
     content = _MOBILE_INDEX.read_text(encoding="utf-8")
     content = content.replace('/assets/', '/mobile-assets/assets/')
     return HTMLResponse(content=content)

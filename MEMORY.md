@@ -3,6 +3,11 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-09: 修复 /assets/api/* 路由 404（静态文件挂载冲突）
+- `app/main.py:169` 的 `app.mount("/assets", _MultiStaticFiles(...))` 与 `assets.router`（prefix=/assets）冲突
+- 静态挂载在 Starlette 中优先级高于路由，所有 `/assets/*` API 请求被拦截返回 404
+- 修复：移除该静态挂载（前端资源已由 `/vue-assets` 和 `/mobile-assets` 分别承载）
+
 ### 2026-07-08: 修复 docs 登录截图（之前误放了仪表盘截图）
 - `docs/screenshots/login.png` 实际显示的是仪表盘而非登录页
 - 用 Playwright 重新截图正确的 Vue SPA 登录页并替换
