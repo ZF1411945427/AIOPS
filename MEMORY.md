@@ -3,6 +3,25 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-10: Runbook 三场景集成 — 智能推荐/知识图谱/AI Agent
+- **核心问题**: Runbook(运维手册)是纯手动知识库，没有自动化集成
+- **解决方案**: 打通三个行业标准场景
+  1. **智能推荐**: 告警触发时推荐相关操作流程(_runbook_recommend)
+  2. **知识图谱**: Runbook节点 + 按asset_type关联资产(covers关系)
+  3. **AI Agent**: 新增query_runbook MCP工具(标题/症状/步骤检索)
+- **前端**: Runbook推荐卡片(青绿色主题) + 操作步骤展示
+- **测试**: alert_id=122返回2条Runbook, 知识图谱3个Runbook节点+18条边
+
+### 2026-07-10: AI 助手工具选择引导 — 修复 query_runbook 未被调用问题
+- **核心问题**: 用户问"web 服务重启的操作步骤"，AI 助手只调了 query_knowledge_rag(0条) 和 query_assets，没调 query_runbook
+- **根因**: DEFAULT_SYSTEM_PROMPT 没有说明什么时候用 query_runbook vs query_knowledge_rag，LLM 默认用知识库检索
+- **解决方案**: 在系统提示词中新增"工具选择指南"，明确：
+  - 用户问"怎么操作/操作步骤" → 优先调 query_runbook
+  - 用户问"知识库有没有/历史案例" → 调 query_knowledge_rag
+  - 用户问"资产信息" → 调 query_assets
+  - 多个工具可并行调用
+- **验证**: 重启后测试"帮我查一下 web 服务重启的操作步骤"，AI 正确调用 query_runbook 并返回完整 5 步流程
+
 ### 2026-07-10: 智能推荐多源融合 — 规则 + RAG 语义检索打通
 - **核心问题**: 智能推荐只查 knowledge_base 结构化表，RAG 文档无法被推荐
 - **解决方案**: 在 smart_recommend API 中新增 RAG 语义检索，两路结果分数融合
