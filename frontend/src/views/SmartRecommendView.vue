@@ -61,6 +61,9 @@
               <span class="rec-label">RAG 片段</span>
               <div class="rec-text rag-content">{{ r.content }}</div>
             </div>
+            <div v-if="r.reasons && r.reasons.length" class="rec-reasons">
+              <span v-for="(reason, ri) in r.reasons" :key="ri" class="reason-tag">{{ reasonLabel(reason) }}</span>
+            </div>
             <div v-if="r.kb?.symptom" class="rec-block"><span class="rec-label">症状</span><div class="rec-text">{{ r.kb.symptom }}</div></div>
             <div v-if="r.kb?.root_cause" class="rec-block"><span class="rec-label">根因</span><div class="rec-text">{{ r.kb.root_cause }}</div></div>
             <div v-if="r.kb?.solution" class="rec-block"><span class="rec-label">解决方案</span><div class="rec-text">{{ r.kb.solution }}</div></div>
@@ -87,6 +90,18 @@ const sources = ref(null)
 function sourceLabel(s) {
   const m = { rule: '规则', rag: 'RAG', both: '融合' }
   return m[s] || s
+}
+
+function reasonLabel(r) {
+  if (!r) return ''
+  if (r.startsWith('metric_tag:')) return '指标标签: ' + r.split(':')[1]
+  if (r === 'metric_in_title') return '标题匹配'
+  if (r === 'severity_exact') return '级别一致'
+  if (r === 'severity_adjacent') return '级别相邻'
+  if (r === 'asset_type_match') return '资产类型匹配'
+  if (r.startsWith('text_overlap:')) return '关键词: ' + r.split(':')[1]
+  if (r === 'rag_semantic') return '语义匹配'
+  return r
 }
 
 function tagList(tags) {
@@ -181,5 +196,7 @@ async function runRecommend() {
 .rec-label { font-size: 0.72rem; color: var(--text-secondary, #64748b); font-weight: 600; }
 .rec-text { margin-top: 4px; font-size: 0.82rem; color: var(--text, #1e293b); line-height: 1.5; white-space: pre-wrap; }
 .rag-content { background: rgba(168,85,247,0.04); border-left: 3px solid #a855f7; padding: 8px 10px; border-radius: 0 6px 6px 0; font-size: 0.8rem; color: #475569; }
+.rec-reasons { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.reason-tag { font-size: 0.68rem; padding: 1px 6px; border-radius: 4px; background: rgba(59,130,246,0.08); color: #3b82f6; font-weight: 500; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 </style>
