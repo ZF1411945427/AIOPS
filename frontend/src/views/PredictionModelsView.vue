@@ -71,41 +71,68 @@
       </div>
     </div>
 
-    <el-dialog v-model="showLogic" title="预测模型 - 逻辑说明" width="600px">
+    <el-dialog v-model="showLogic" title="预测模型 - 逻辑说明" width="650px">
       <div style="font-size:13px;line-height:1.8">
-        <h4 style="margin:0 0 8px">什么是预测模型？</h4>
-        <p>预测模型是基于历史时序数据，通过数学算法<strong>预测未来趋势</strong>的工具。在 AIOps 中用于异常检测、容量规划、故障预警等场景。</p>
+        <h4 style="margin:0 0 8px">一、什么是预测模型？</h4>
+        <p>预测模型是基于历史时序数据，通过数学算法<strong>预测未来趋势</strong>的工具。简单说就是：根据过去 7 天的数据，预测未来 7 天会发生什么。</p>
+        <p style="background:#f0f9ff;padding:8px 12px;border-radius:6px;border-left:3px solid #3b82f6;margin:8px 0">
+          <strong>大白话：</strong>就像天气预报一样，根据过去的天气数据预测明天会不会下雨。这里是根据过去的 CPU/内存/磁盘数据，预测未来会不会爆满。
+        </p>
         
-        <h4 style="margin:16px 0 8px">在 AIOps 中的作用</h4>
-        <ul style="margin:0;padding-left:20px">
-          <li><strong>异常检测</strong>：预测正常范围，超出即告警（如 CPU 突增）</li>
-          <li><strong>趋势预测</strong>：预测未来 N 小时的指标走势（如磁盘使用率）</li>
-          <li><strong>容量规划</strong>：预测资源何时耗尽，提前扩容</li>
-          <li><strong>故障预警</strong>：基于历史模式预测潜在故障</li>
-        </ul>
-
-        <h4 style="margin:16px 0 8px">模型类型说明</h4>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">类型</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">原理</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">适用场景</td></tr>
-          <tr><td style="padding:6px;border:1px solid #ddd">线性回归</td><td style="padding:6px;border:1px solid #ddd">用直线拟合数据趋势</td><td style="padding:6px;border:1px solid #ddd">稳定增长/下降的指标</td></tr>
-          <tr><td style="padding:6px;border:1px solid #ddd">多项式</td><td style="padding:6px;border:1px solid #ddd">用曲线拟合非线性趋势</td><td style="padding:6px;border:1px solid #ddd">波动较大的指标</td></tr>
-          <tr><td style="padding:6px;border:1px solid #ddd">移动平均</td><td style="padding:6px;border:1px solid #ddd">计算滑动窗口均值</td><td style="padding:6px;border:1px solid #ddd">消除噪声、平滑数据</td></tr>
+        <h4 style="margin:16px 0 8px">二、在 AIOps 中哪里用？</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">
+          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">使用场景</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">具体效果</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">容量规划</td><td style="padding:6px;border:1px solid #ddd">预测磁盘什么时候满、内存什么时候不够，提前扩容</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">异常检测</td><td style="padding:6px;border:1px solid #ddd">预测正常范围，超出即告警（如 CPU 突然从 20% 跳到 80%）</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">故障预警</td><td style="padding:6px;border:1px solid #ddd">基于历史模式预测潜在故障，如"预计 3 天后磁盘满"</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">趋势分析</td><td style="padding:6px;border:1px solid #ddd">在监控图表上叠加预测曲线，直观看到未来走势</td></tr>
         </table>
 
-        <h4 style="margin:16px 0 8px">操作流程</h4>
+        <h4 style="margin:16px 0 8px">三、创建步骤</h4>
         <ol style="margin:0;padding-left:20px">
-          <li><strong>新建模型</strong>：选择指标、模型类型、配置参数</li>
-          <li><strong>启用模型</strong>：激活后开始实时计算预测值</li>
-          <li><strong>查看结果</strong>：在监控图表中叠加预测曲线</li>
-          <li><strong>调优参数</strong>：根据预测准确度调整窗口大小等参数</li>
+          <li><strong>点击"+ 新建模型"</strong>按钮</li>
+          <li><strong>填写名称</strong>：如"磁盘使用率预测"</li>
+          <li><strong>填写指标名</strong>：要预测的指标，如 <code>cpu_usage</code>、<code>disk_usage</code>、<code>memory_usage</code></li>
+          <li><strong>选择模型类型</strong>：根据指标特性选择（见下方模型类型说明）</li>
+          <li><strong>填写参数 JSON</strong>：如 <code>{"window": 24, "threshold": 90}</code></li>
+          <li><strong>点击"创建"</strong>：模型出现在列表中，默认启用</li>
+          <li><strong>点击"预测"按钮</strong>：执行预测，查看结果</li>
         </ol>
 
-        <h4 style="margin:16px 0 8px">参数说明</h4>
-        <ul style="margin:0;padding-left:20px">
-          <li><code>window</code>：移动平均的窗口大小（如 20 表示取最近 20 个点的均值）</li>
-          <li><code>degree</code>：多项式的阶数（如 2 表示二次曲线）</li>
-          <li><code>threshold</code>：异常判定阈值（如 2.0 表示超过 2 倍标准差为异常）</li>
-        </ul>
+        <h4 style="margin:16px 0 8px">四、模型类型说明</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">类型</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">原理</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">适用场景</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">参数</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">线性回归</td><td style="padding:6px;border:1px solid #ddd">用直线拟合数据趋势</td><td style="padding:6px;border:1px solid #ddd">稳定增长/下降的指标</td><td style="padding:6px;border:1px solid #ddd">threshold</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">ARIMA</td><td style="padding:6px;border:1px solid #ddd">差分后做线性回归</td><td style="padding:6px;border:1px solid #ddd">时序数据预测</td><td style="padding:6px;border:1px solid #ddd">window, threshold</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">多项式</td><td style="padding:6px;border:1px solid #ddd">用曲线拟合非线性趋势</td><td style="padding:6px;border:1px solid #ddd">波动较大的指标</td><td style="padding:6px;border:1px solid #ddd">degree, threshold</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">移动平均</td><td style="padding:6px;border:1px solid #ddd">计算滑动窗口均值</td><td style="padding:6px;border:1px solid #ddd">消除噪声、平滑数据</td><td style="padding:6px;border:1px solid #ddd">window</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">Prophet</td><td style="padding:6px;border:1px solid #ddd">加权趋势预测</td><td style="padding:6px;border:1px solid #ddd">季节性数据</td><td style="padding:6px;border:1px solid #ddd">window, threshold</td></tr>
+        </table>
+
+        <h4 style="margin:16px 0 8px">五、参数说明</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">参数</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">含义</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">示例值</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd"><code>window</code></td><td style="padding:6px;border:1px solid #ddd">移动平均的窗口大小</td><td style="padding:6px;border:1px solid #ddd">24（取最近 24 小时均值）</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd"><code>degree</code></td><td style="padding:6px;border:1px solid #ddd">多项式的阶数</td><td style="padding:6px;border:1px solid #ddd">2（二次曲线）</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd"><code>threshold</code></td><td style="padding:6px;border:1px solid #ddd">告警阈值</td><td style="padding:6px;border:1px solid #ddd">90（超过 90% 告警）</td></tr>
+        </table>
+
+        <h4 style="margin:16px 0 8px">六、预测结果解读</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">字段</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">含义</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">当前值</td><td style="padding:6px;border:1px solid #ddd">指标的最新实际值</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">趋势</td><td style="padding:6px;border:1px solid #ddd">上升↑ / 下降↓ / 稳定→</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">R²</td><td style="padding:6px;border:1px solid #ddd">拟合度，越接近 1 越准（0.7 以上算好）</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">特征数据</td><td style="padding:6px;border:1px solid #ddd">从特征仓库读取的上下文信息</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">预计达到阈值</td><td style="padding:6px;border:1px solid #ddd">按当前趋势，预计多少天后超过阈值</td></tr>
+        </table>
+
+        <h4 style="margin:16px 0 8px">七、实际效果示例</h4>
+        <div style="background:#f0fdf4;padding:8px 12px;border-radius:6px;border-left:3px solid #22c55e;margin:8px 0">
+          <strong>场景：</strong>创建"磁盘使用率预测"模型，选择 linear 类型，threshold=90<br>
+          <strong>结果：</strong>当前磁盘使用率 65%，趋势上升，预计 15 天后达到 90%<br>
+          <strong>行动：</strong>提前安排磁盘扩容，避免业务中断
+        </div>
       </div>
     </el-dialog>
 

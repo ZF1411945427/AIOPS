@@ -82,35 +82,55 @@
       </div>
     </div>
 
-    <el-dialog v-model="showLogic" title="特征仓库 - 逻辑说明" width="600px">
+    <el-dialog v-model="showLogic" title="特征仓库 - 逻辑说明" width="650px">
       <div style="font-size:13px;line-height:1.8">
-        <h4 style="margin:0 0 8px">什么是特征仓库？</h4>
+        <h4 style="margin:0 0 8px">一、什么是特征仓库？</h4>
         <p>特征仓库（Feature Store）是机器学习中用于存储和管理<strong>特征数据</strong>的系统。特征是从原始数据中提取的、用于训练和预测模型的数值化属性。</p>
+        <p style="background:#f0f9ff;padding:8px 12px;border-radius:6px;border-left:3px solid #3b82f6;margin:8px 0">
+          <strong>大白话：</strong>就像一个"数据字典"，把散落在各处的关键数据收集起来，给预测模型用。比如预测 CPU 会不会爆，需要知道"过去 1 小时平均 CPU"、"内存大小"这些数据，特征仓库就是存这些数据的地方。
+        </p>
         
-        <h4 style="margin:16px 0 8px">在 AIOps 中的作用</h4>
-        <ul style="margin:0;padding-left:20px">
-          <li><strong>资产特征</strong>：如 CPU 核数、内存大小、磁盘类型等静态属性</li>
-          <li><strong>指标特征</strong>：如过去 1 小时的平均 CPU 使用率、内存峰值等</li>
-          <li><strong>告警特征</strong>：如告警频率、严重级别、影响范围等</li>
-          <li><strong>全局特征</strong>：如当前时间（工作日/节假日）、集群负载等级等</li>
-        </ul>
+        <h4 style="margin:16px 0 8px">二、在 AIOps 中哪里用？</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">
+          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">使用场景</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">具体效果</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">预测模型</td><td style="padding:6px;border:1px solid #ddd">预测模型从特征仓库读取特征作为输入，提高预测准确度</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">智能推荐</td><td style="padding:6px;border:1px solid #ddd">推荐算法根据资产特征判断关联性</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">异常检测</td><td style="padding:6px;border:1px solid #ddd">根据历史特征建立基线，超出即告警</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">根因分析</td><td style="padding:6px;border:1px solid #ddd">分析告警时参考资产特征，缩小排查范围</td></tr>
+        </table>
 
-        <h4 style="margin:16px 0 8px">操作流程</h4>
+        <h4 style="margin:16px 0 8px">三、创建/添加步骤</h4>
         <ol style="margin:0;padding-left:20px">
-          <li><strong>添加特征</strong>：手动或通过采集器添加特征数据</li>
-          <li><strong>查询特征</strong>：按特征名、实体类型、实体 ID 筛选</li>
-          <li><strong>模型训练</strong>：预测模型从特征仓库读取特征进行训练</li>
-          <li><strong>实时预测</strong>：预测时实时查询最新特征值</li>
+          <li><strong>填写特征名</strong>：如 <code>cpu_avg_1h</code>（过去 1 小时平均 CPU）</li>
+          <li><strong>选择实体类型</strong>：asset（资产）、metric（指标）、alert（告警）、global（全局）</li>
+          <li><strong>填写实体 ID</strong>：对应资产的 ID，如 1 表示第一台服务器</li>
+          <li><strong>填写特征值</strong>：数值，如 CPU 使用率 50.26</li>
+          <li><strong>填写来源</strong>：manual（手动）、collector（采集器）、seed（种子数据）</li>
+          <li><strong>点击"添加"</strong>：数据保存到特征仓库</li>
         </ol>
 
-        <h4 style="margin:16px 0 8px">实体类型说明</h4>
+        <h4 style="margin:16px 0 8px">四、实体类型说明</h4>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">类型</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">说明</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">示例</td></tr>
-          <tr><td style="padding:6px;border:1px solid #ddd">asset</td><td style="padding:6px;border:1px solid #ddd">资产（服务器、容器等）</td><td style="padding:6px;border:1px solid #ddd">CPU 核数、内存大小</td></tr>
-          <tr><td style="padding:6px;border:1px solid #ddd">metric</td><td style="padding:6px;border:1px solid #ddd">监控指标</td><td style="padding:6px;border:1px solid #ddd">CPU 使用率、QPS</td></tr>
-          <tr><td style="padding:6px;border:1px solid #ddd">alert</td><td style="padding:6px;border:1px solid #ddd">告警事件</td><td style="padding:6px;border:1px solid #ddd">告警频率、严重级别</td></tr>
-          <tr><td style="padding:6px;border:1px solid #ddd">global</td><td style="padding:6px;border:1px solid #ddd">全局上下文</td><td style="padding:6px;border:1px solid #ddd">时间、集群负载</td></tr>
+          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">类型</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">说明</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">示例特征</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">asset</td><td style="padding:6px;border:1px solid #ddd">资产（服务器、容器等）</td><td style="padding:6px;border:1px solid #ddd">cpu_avg_1h, mem_avg_1h, disk_avg_1h</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">metric</td><td style="padding:6px;border:1px solid #ddd">监控指标</td><td style="padding:6px;border:1px solid #ddd">qps, latency_p99, error_rate</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">alert</td><td style="padding:6px;border:1px solid #ddd">告警事件</td><td style="padding:6px;border:1px solid #ddd">alert_count_24h, severity_avg</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">global</td><td style="padding:6px;border:1px solid #ddd">全局上下文</td><td style="padding:6px;border:1px solid #ddd">cluster_load, time_of_day</td></tr>
         </table>
+
+        <h4 style="margin:16px 0 8px">五、查询和使用</h4>
+        <ul style="margin:0;padding-left:20px">
+          <li><strong>按特征名筛选</strong>：选择特定特征查看所有资产的值</li>
+          <li><strong>按实体类型筛选</strong>：只看资产特征或只看告警特征</li>
+          <li><strong>按实体 ID 筛选</strong>：查看某台服务器的所有特征</li>
+          <li><strong>预测模型自动使用</strong>：创建预测模型后，系统会自动读取相关特征作为预测上下文</li>
+        </ul>
+
+        <h4 style="margin:16px 0 8px">六、实际效果示例</h4>
+        <div style="background:#f0fdf4;padding:8px 12px;border-radius:6px;border-left:3px solid #22c55e;margin:8px 0">
+          <strong>场景：</strong>为服务器 1 添加特征 cpu_avg_1h=50.26<br>
+          <strong>效果：</strong>当预测模型预测 cpu_usage 时，会自动读取这个特征作为上下文，知道"当前平均 CPU 是 50.26%"，从而给出更准确的预测
+        </div>
       </div>
     </el-dialog>
   </div>
