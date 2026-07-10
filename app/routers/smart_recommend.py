@@ -144,10 +144,12 @@ def _merge_results(rule_recs, rag_results, rule_weight=0.5, rag_weight=0.5):
         merged.append(item)
         seen[entry.title] = item
 
+    rag_only = []
+    rule_seen = set(seen.keys())
     for r in rag_results:
         title = r.get("doc_title", "")
         rag_s = min(r.get("score", 0), 1.0)
-        if title and title in seen:
+        if title and title in rule_seen:
             old = seen[title]
             old["score"] = min(round(old["score"] + rag_s * rag_weight, 4), 1.0)
             old["source"] = "both"
@@ -170,12 +172,23 @@ def _merge_results(rule_recs, rag_results, rule_weight=0.5, rag_weight=0.5):
             "doc_title": title,
             "reasons": ["rag_semantic"],
         }
-        merged.append(item)
-        if title:
-            seen[title] = item
+        rag_only.append(item)
 
-    merged.sort(key=lambda x: x["score"], reverse=True)
-    return merged
+    rule_only = [m for m in merged if m["source"] != "both"]
+    both_items = [m for m in merged if m["source"] == "both"]
+
+    rule_only.sort(key=lambda x: x["score"], reverse=True)
+
+    rag_dedup = {}
+    for item in rag_only:
+        t = item["doc_title"] or item["title"]
+        if t not in rag_dedup or item["score"] > rag_dedup[t]["score"]:
+            rag_dedup[t] = item
+    rag_only = sorted(rag_dedup.values(), key=lambda x: x["score"], reverse=True)
+
+    both_items.sort(key=lambda x: x["score"], reverse=True)
+
+    return both_items + rule_only + rag_only
 
 
 @router.get("/api/recommend")
