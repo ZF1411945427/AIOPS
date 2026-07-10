@@ -129,7 +129,13 @@ def query_assets(db: Optional[Session] = None, user_id: Optional[int] = None, **
         if kwargs.get("status"):
             query = query.filter(Asset.status == kwargs["status"])
         if kwargs.get("search"):
-            query = query.filter(Asset.name.ilike(f"%{kwargs['search']}%"))
+            from sqlalchemy import or_
+            search = kwargs["search"]
+            query = query.filter(or_(
+                Asset.name.ilike(f"%{search}%"),
+                Asset.ip.ilike(f"%{search}%"),
+                Asset.tags.ilike(f"%{search}%"),
+            ))
         limit = kwargs.get("limit", 20)
         assets = query.order_by(Asset.name).limit(limit).all()
         return {
