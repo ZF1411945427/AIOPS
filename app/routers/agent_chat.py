@@ -129,29 +129,34 @@ def cancel_action(action_id: int, request: Request, db: Session = Depends(get_db
 
 
 @router.get("/invocations")
-def tool_invocations(request: Request, db: Session = Depends(get_db)):
+def tool_invocations(request: Request, db: Session = Depends(get_db), page: int = 1, page_size: int = 20):
     user_id = request.session.get("user_id", 1)
-    invocations = (
+    query = (
         db.query(ToolInvocation)
         .join(ChatSession, ToolInvocation.session_id == ChatSession.id)
         .filter(ChatSession.user_id == user_id)
         .order_by(ToolInvocation.created_at.desc())
-        .limit(100)
-        .all()
     )
-    return JSONResponse([
-        {
-            "id": t.id,
-            "session_id": t.session_id,
-            "tool_name": t.tool_name,
-            "status": t.status,
-            "latency_ms": t.latency_ms,
-            "request_payload": json.loads(t.request_payload) if isinstance(t.request_payload, str) else {},
-            "response_summary": json.loads(t.response_summary) if isinstance(t.response_summary, str) else {},
-            "created_at": t.created_at.isoformat(),
-        }
-        for t in invocations
-    ])
+    total = query.count()
+    invocations = query.offset((page - 1) * page_size).limit(page_size).all()
+    return JSONResponse({
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [
+            {
+                "id": t.id,
+                "session_id": t.session_id,
+                "tool_name": t.tool_name,
+                "status": t.status,
+                "latency_ms": t.latency_ms,
+                "request_payload": json.loads(t.request_payload) if isinstance(t.request_payload, str) else {},
+                "response_summary": json.loads(t.response_summary) if isinstance(t.response_summary, str) else {},
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in invocations
+        ]
+    })
 
 
 @router.get("/api/pending")

@@ -44,6 +44,18 @@
       <div v-if="!loading && !invocations.length" style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px">
         暂无工具调用记录
       </div>
+      <div v-if="total > 0" style="display:flex;justify-content:flex-end;padding:12px 0">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100]"
+          :total="total"
+          layout="total, sizes, prev, pager, next"
+          small
+          @size-change="loadData"
+          @current-change="loadData"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -54,6 +66,9 @@ import request from '@/api/request'
 
 const loading = ref(false)
 const invocations = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
 
 function formatTime(iso) {
   if (!iso) return ''
@@ -70,8 +85,9 @@ function formatJson(obj) {
 async function loadData() {
   loading.value = true
   try {
-    const data = await request.get('/agent/invocations')
-    invocations.value = Array.isArray(data) ? data : []
+    const data = await request.get('/agent/invocations', { params: { page: page.value, page_size: pageSize.value } })
+    invocations.value = data.items || []
+    total.value = data.total || 0
   } catch (e) {
     console.error(e)
   } finally {
