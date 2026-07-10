@@ -2,11 +2,12 @@
   <div class="pm-page">
     <div class="page-header">
       <h1>预测模型</h1>
-      <p>时序预测模型配置 · 共 {{ models.length }} 个模型</p>
+      <p>时序预测模型配置 · 共 {{ total }} 个模型</p>
     </div>
 
     <div class="toolbar">
       <button class="btn btn-primary" @click="openCreate">+ 新建模型</button>
+      <button class="btn" @click="showLogic = true">逻辑说明</button>
       <button class="btn" @click="loadModels">刷新</button>
     </div>
 
@@ -32,6 +33,18 @@
           </div>
         </div>
         <div v-else class="empty-state"><div style="font-size:32px;margin-bottom:8px;">📈</div><div>暂无预测模型</div></div>
+        <div v-if="total > 0" style="display:flex;justify-content:flex-end;padding:12px 0">
+          <el-pagination
+            v-model:current-page="page"
+            v-model:page-size="pageSize"
+            :page-sizes="[20, 50, 100]"
+            :total="total"
+            layout="total, sizes, prev, pager, next"
+            small
+            @size-change="loadModels"
+            @current-change="loadModels"
+          />
+        </div>
       </div>
     </div>
 
@@ -55,6 +68,44 @@
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="showLogic" title="预测模型 - 逻辑说明" width="600px">
+      <div style="font-size:13px;line-height:1.8">
+        <h4 style="margin:0 0 8px">什么是预测模型？</h4>
+        <p>预测模型是基于历史时序数据，通过数学算法<strong>预测未来趋势</strong>的工具。在 AIOps 中用于异常检测、容量规划、故障预警等场景。</p>
+        
+        <h4 style="margin:16px 0 8px">在 AIOps 中的作用</h4>
+        <ul style="margin:0;padding-left:20px">
+          <li><strong>异常检测</strong>：预测正常范围，超出即告警（如 CPU 突增）</li>
+          <li><strong>趋势预测</strong>：预测未来 N 小时的指标走势（如磁盘使用率）</li>
+          <li><strong>容量规划</strong>：预测资源何时耗尽，提前扩容</li>
+          <li><strong>故障预警</strong>：基于历史模式预测潜在故障</li>
+        </ul>
+
+        <h4 style="margin:16px 0 8px">模型类型说明</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <tr style="background:#f5f5f5"><td style="padding:6px;border:1px solid #ddd;font-weight:600">类型</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">原理</td><td style="padding:6px;border:1px solid #ddd;font-weight:600">适用场景</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">线性回归</td><td style="padding:6px;border:1px solid #ddd">用直线拟合数据趋势</td><td style="padding:6px;border:1px solid #ddd">稳定增长/下降的指标</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">多项式</td><td style="padding:6px;border:1px solid #ddd">用曲线拟合非线性趋势</td><td style="padding:6px;border:1px solid #ddd">波动较大的指标</td></tr>
+          <tr><td style="padding:6px;border:1px solid #ddd">移动平均</td><td style="padding:6px;border:1px solid #ddd">计算滑动窗口均值</td><td style="padding:6px;border:1px solid #ddd">消除噪声、平滑数据</td></tr>
+        </table>
+
+        <h4 style="margin:16px 0 8px">操作流程</h4>
+        <ol style="margin:0;padding-left:20px">
+          <li><strong>新建模型</strong>：选择指标、模型类型、配置参数</li>
+          <li><strong>启用模型</strong>：激活后开始实时计算预测值</li>
+          <li><strong>查看结果</strong>：在监控图表中叠加预测曲线</li>
+          <li><strong>调优参数</strong>：根据预测准确度调整窗口大小等参数</li>
+        </ol>
+
+        <h4 style="margin:16px 0 8px">参数说明</h4>
+        <ul style="margin:0;padding-left:20px">
+          <li><code>window</code>：移动平均的窗口大小（如 20 表示取最近 20 个点的均值）</li>
+          <li><code>degree</code>：多项式的阶数（如 2 表示二次曲线）</li>
+          <li><code>threshold</code>：异常判定阈值（如 2.0 表示超过 2 倍标准差为异常）</li>
+        </ul>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -65,7 +116,11 @@ import request from '@/api/request'
 
 const loading = ref(false)
 const models = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
 const showDialog = ref(false)
+const showLogic = ref(false)
 const form = ref({ name: '', metric_name: '', asset_id: 0, model_type: 'linear', params: '{"window": 20}' })
 
 function typeLabel(t) {
@@ -75,8 +130,9 @@ function typeLabel(t) {
 async function loadModels() {
   loading.value = true
   try {
-    const data = await request.get('/prediction-models/api/list')
+    const data = await request.get('/prediction-models/api/list', { params: { page: page.value, page_size: pageSize.value } })
     models.value = data.models || []
+    total.value = data.total || 0
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
   } finally {

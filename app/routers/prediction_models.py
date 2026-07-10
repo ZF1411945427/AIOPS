@@ -7,9 +7,14 @@ router = APIRouter(prefix="/prediction-models", tags=["prediction_models"])
 
 
 @router.get("/api/list")
-def api_model_list(db: Session = Depends(get_db)):
-    models = db.query(PredictionModel).order_by(PredictionModel.created_at.desc()).all()
+def api_model_list(db: Session = Depends(get_db), page: int = 1, page_size: int = 20):
+    query = db.query(PredictionModel).order_by(PredictionModel.created_at.desc())
+    total = query.count()
+    models = query.offset((page - 1) * page_size).limit(page_size).all()
     return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
         "models": [
             {
                 "id": m.id, "name": m.name, "metric_name": m.metric_name,
@@ -19,7 +24,6 @@ def api_model_list(db: Session = Depends(get_db)):
             }
             for m in models
         ],
-        "count": len(models),
     }
 
 
