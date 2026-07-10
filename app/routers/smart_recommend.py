@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Alert, KnowledgeBase, AlertKbLink, Asset
+from app.models import Alert, KnowledgeBase, AlertKbLink, Asset, Runbook
 import json
 import re
 
@@ -31,6 +31,20 @@ def _kb_brief(kb):
         "tags": kb.tags or "",
         "severity": kb.severity or "warning",
         "asset_type": kb.asset_type or "",
+    }
+
+
+def _rb_brief(rb):
+    return {
+        "id": rb.id,
+        "title": rb.title,
+        "category": rb.category or "",
+        "symptom": rb.symptom or "",
+        "diagnosis": rb.diagnosis or "",
+        "steps": rb.steps or "",
+        "tags": rb.tags or "",
+        "severity": rb.severity or "warning",
+        "asset_type": rb.asset_type or "",
     }
 
 
@@ -103,6 +117,66 @@ def _rule_recommend(db, alert, limit=10):
             scored.append((score, entry, reasons))
     scored.sort(key=lambda x: -x[0])
     return scored[:limit]
+
+
+def _runbook_recommend(db, alert, limit=3):
+    runbooks = db.query(Runbook).all()
+    scored = []
+    for rb in runbooks:
+        score, reasons = _score_runbook(alert, rb, db)
+        if score > 0:
+            scored.append((score, rb, reasons))
+    scored.sort(key=lambda x: -x[0])
+    return scored[:limit]
+
+
+def _score_runbook(alert, rb, db):
+    score = 0
+    reasons = []
+
+    rb_tags = _parse_tags(rb.tags)
+    metric = (alert.metric_name or "").lower()
+    if metric:
+        for tag in rb_tags:
+            tag_lower = tag.lower()
+            if metric == tag_lower or metric in tag_lower or tag_lower in metric:
+                score += 5
+                reasons.append("metric_tag:%s" % tag)
+                break
+        title_lower = (rb.title or "").lower()
+        if metric.replace("_", "") in title_lower.replace("_", "") or metric in title_lower:
+            score += 3
+            reasons.append("metric_in_title")
+
+    if alert.severity and rb.severity:
+        sev_order = {"critical": 4, "high": 3, "warning": 2, "info": 1}
+        a_sev = sev_order.get(alert.severity, 0)
+        e_sev = sev_order.get(rb.severity, 0)
+        if a_sev == e_sev:
+            score += 2
+            reasons.append("severity_exact")
+        elif abs(a_sev - e_sev) == 1:
+            score += 1
+            reasons.append("severity_adjacent")
+
+    if alert.asset_id and rb.asset_type:
+        asset = db.query(Asset).filter(Asset.id == alert.asset_id).first()
+        if asset and asset.type and asset.type.lower() == rb.asset_type.lower():
+            score += 3
+            reasons.append("asset_type_match")
+
+    alert_msg = (alert.message or "").lower()
+    symptom = (rb.symptom or "").lower()
+    if symptom and alert_msg:
+        symptom_words = set(re.findall(r'[\u4e00-\u9fa5]{2,}|[a-z]+', symptom))
+        msg_words = set(re.findall(r'[\u4e00-\u9fa5]{2,}|[a-z]+', alert_msg))
+        overlap = symptom_words & msg_words
+        if overlap:
+            ratio = len(overlap) / max(len(symptom_words), 1)
+            score += round(ratio * 4, 2)
+            reasons.append("text_overlap:%s" % ",".join(list(overlap)[:3]))
+
+    return score, reasons
 
 
 def _rag_search(alert, top_k=5):
@@ -195,13 +269,14 @@ def _merge_results(rule_recs, rag_results, rule_weight=0.5, rag_weight=0.5):
 def api_recommend(alert_id: int = 0, limit: int = 5, db: Session = Depends(get_db)):
     try:
         if not alert_id:
-            return JSONResponse({"error": "alert_id is required", "alert_id": 0, "recommendations": []}, status_code=400)
+            return JSONResponse({"error": "alert_id is required", "alert_id": 0, "recommendations": [], "runbooks": []}, status_code=400)
         selected_alert = db.query(Alert).filter(Alert.id == alert_id).first()
         if not selected_alert:
-            return JSONResponse({"error": "alert not found", "alert_id": alert_id, "recommendations": []}, status_code=404)
+            return JSONResponse({"error": "alert not found", "alert_id": alert_id, "recommendations": [], "runbooks": []}, status_code=404)
 
         rule_recs = _rule_recommend(db, selected_alert, limit=min(limit, 20))
         rag_results = _rag_search(selected_alert, top_k=min(limit, 5))
+        runbook_recs = _runbook_recommend(db, selected_alert, limit=3)
 
         merged = _merge_results(rule_recs, rag_results)
 
@@ -213,11 +288,22 @@ def api_recommend(alert_id: int = 0, limit: int = 5, db: Session = Depends(get_d
                     AlertKbLink.kb_id == kb_id).first()
                 item["linked"] = bool(linked)
 
+        runbooks = []
+        for score, rb, reasons in runbook_recs:
+            runbooks.append({
+                "runbook": _rb_brief(rb),
+                "score": min(round(score / max(score, 1), 4), 1.0),
+                "raw_score": round(score, 2),
+                "reasons": reasons,
+            })
+
         return JSONResponse({
             "alert_id": alert_id,
             "alert": _alert_brief(selected_alert),
             "recommendations": merged[:limit],
             "count": len(merged[:limit]),
+            "runbooks": runbooks,
+            "runbook_count": len(runbooks),
             "sources": {
                 "rule": len(rule_recs),
                 "rag": len(rag_results),
@@ -226,4 +312,4 @@ def api_recommend(alert_id: int = 0, limit: int = 5, db: Session = Depends(get_d
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return JSONResponse({"error": str(e), "alert_id": alert_id, "recommendations": []}, status_code=500)
+        return JSONResponse({"error": str(e), "alert_id": alert_id, "recommendations": [], "runbooks": []}, status_code=500)

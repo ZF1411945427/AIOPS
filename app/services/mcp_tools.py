@@ -344,6 +344,68 @@ def query_knowledge_rag(db: Optional[Session] = None, user_id: Optional[int] = N
             db.close()
 
 
+# ─── Runbook Tools (操作流程检索) ──────────────────────────────
+
+@register_mcp_tool(
+    name="query_runbook",
+    description="检索运维操作流程（Runbook）。通过标题、症状、标签匹配标准操作流程文档，返回操作步骤、诊断方法。适用于：告警处置时查找标准操作流程、需要执行具体操作步骤时参考、故障修复时按步骤执行。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "search": {"type": "string", "description": "搜索关键字，匹配标题、症状、诊断、步骤"},
+            "category": {"type": "string", "description": "分类筛选，如 运维、网络、数据库"},
+            "asset_type": {"type": "string", "description": "资产类型筛选，如 server、database、pod"},
+            "limit": {"type": "integer", "description": "返回数量限制", "default": 5},
+        },
+    },
+    risk_level="read_only",
+)
+def query_runbook(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        from app.models import Runbook
+        query = db.query(Runbook)
+        if kwargs.get("search"):
+            search = kwargs["search"]
+            from sqlalchemy import or_
+            query = query.filter(or_(
+                Runbook.title.ilike(f"%{search}%"),
+                Runbook.symptom.ilike(f"%{search}%"),
+                Runbook.diagnosis.ilike(f"%{search}%"),
+                Runbook.steps.ilike(f"%{search}%"),
+                Runbook.tags.ilike(f"%{search}%"),
+            ))
+        if kwargs.get("category"):
+            query = query.filter(Runbook.category == kwargs["category"])
+        if kwargs.get("asset_type"):
+            query = query.filter(Runbook.asset_type == kwargs["asset_type"])
+        limit = kwargs.get("limit", 5)
+        items = query.order_by(Runbook.created_at.desc()).limit(limit).all()
+        return {
+            "count": len(items),
+            "items": [
+                {
+                    "id": r.id,
+                    "title": r.title,
+                    "category": r.category,
+                    "symptom": r.symptom,
+                    "diagnosis": r.diagnosis,
+                    "steps": r.steps,
+                    "tags": r.tags,
+                    "severity": r.severity,
+                    "asset_type": r.asset_type,
+                }
+                for r in items
+            ],
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
 # ─── K8s Tools ─────────────────────────────────────────────────
 
 @register_mcp_tool(
