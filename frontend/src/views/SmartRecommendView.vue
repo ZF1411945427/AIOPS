@@ -9,6 +9,42 @@
       <input v-model="alertId" class="input search-input" placeholder="输入告警 ID" @keyup.enter="runRecommend">
       <input v-model.number="limit" class="input limit-input" type="number" min="1" max="20" placeholder="数量">
       <button class="btn btn-primary" @click="runRecommend" :disabled="loading">{{ loading ? '查询中...' : '查询推荐' }}</button>
+      <button class="btn btn-help" @click="showLogic = true">逻辑说明</button>
+    </div>
+
+    <div v-if="showLogic" class="modal-overlay" @click.self="showLogic = false">
+      <div class="modal-box">
+        <h3>推荐算法逻辑说明</h3>
+        <div class="logic-section">
+          <div class="logic-title">数据源</div>
+          <div class="logic-row"><span class="logic-tag tag-rule">规则匹配</span> 从 knowledge_base 表扫描所有知识条目，基于告警特征打分排序</div>
+          <div class="logic-row"><span class="logic-tag tag-rag">RAG 语义</span> 用告警的指标名+消息作为 query，通过 BGE-small 向量 + BM25 关键词混合检索 Milvus 文档切片</div>
+        </div>
+        <div class="logic-section">
+          <div class="logic-title">规则打分维度</div>
+          <table class="logic-table">
+            <tr><td class="lt-score">+5</td><td>指标名匹配知识标签（模糊匹配，如 cpu_usage 包含 cpu）</td></tr>
+            <tr><td class="lt-score">+3</td><td>指标名出现在知识标题中</td></tr>
+            <tr><td class="lt-score">+3</td><td>告警资产类型与知识资产类型一致</td></tr>
+            <tr><td class="lt-score">+2</td><td>告警级别与知识级别完全一致</td></tr>
+            <tr><td class="lt-score">+1</td><td>告警级别与知识级别相邻（如 critical vs warning）</td></tr>
+            <tr><td class="lt-score">+0~4</td><td>告警消息与知识症状的关键词重叠比例</td></tr>
+          </table>
+        </div>
+        <div class="logic-section">
+          <div class="logic-title">融合策略</div>
+          <div class="logic-row">规则分归一化到 0~1 后 × 0.5 权重</div>
+          <div class="logic-row">RAG 语义分 × 0.5 权重</div>
+          <div class="logic-row">同一标题命中两路时分数相加，上限 1.0（100%）</div>
+        </div>
+        <div class="logic-section">
+          <div class="logic-title">来源标签</div>
+          <div class="logic-row"><span class="logic-tag tag-rule">规则</span> 仅规则匹配命中</div>
+          <div class="logic-row"><span class="logic-tag tag-rag">RAG</span> 仅语义检索命中</div>
+          <div class="logic-row"><span class="logic-tag tag-both">融合</span> 两路同时命中，相关性最高</div>
+        </div>
+        <div class="modal-actions"><button class="btn" @click="showLogic = false">知道了</button></div>
+      </div>
     </div>
 
     <div v-if="sources" class="source-bar">
@@ -81,6 +117,7 @@ import request from '@/api/request'
 
 const loading = ref(false)
 const searched = ref(false)
+const showLogic = ref(false)
 const alertId = ref('')
 const limit = ref(5)
 const alert = ref(null)
@@ -199,4 +236,20 @@ async function runRecommend() {
 .rec-reasons { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
 .reason-tag { font-size: 0.68rem; padding: 1px 6px; border-radius: 4px; background: rgba(59,130,246,0.08); color: #3b82f6; font-weight: 500; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.btn-help { border-color: rgba(99,102,241,0.3); color: var(--accent, #6366f1); }
+.btn-help:hover { background: rgba(99,102,241,0.06); }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: var(--bg-card-solid, #fff); border-radius: 12px; padding: 24px 28px; min-width: 520px; max-width: 600px; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+.modal-box h3 { margin: 0 0 16px; font-size: 1.05rem; font-weight: 600; color: var(--text, #1e293b); }
+.modal-actions { margin-top: 18px; display: flex; justify-content: flex-end; }
+.logic-section { margin-bottom: 16px; }
+.logic-title { font-size: 0.82rem; font-weight: 700; color: var(--accent, #6366f1); margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
+.logic-row { font-size: 0.8rem; color: var(--text, #1e293b); line-height: 1.6; padding: 3px 0; }
+.logic-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.logic-table td { padding: 4px 8px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.04)); vertical-align: top; }
+.lt-score { font-weight: 700; color: var(--accent, #6366f1); white-space: nowrap; width: 36px; }
+.logic-tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; margin-right: 4px; }
+.tag-rule { background: rgba(59,130,246,0.1); color: #3b82f6; }
+.tag-rag { background: rgba(168,85,247,0.1); color: #a855f7; }
+.tag-both { background: rgba(34,197,94,0.1); color: #22c55e; }
 </style>
