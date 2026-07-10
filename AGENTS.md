@@ -24,7 +24,7 @@ MEMORY.md 按时间倒序记录，最新的在最上面。
 
 ## 开发流程
 ### 启动项目
-终端1: python run.py          # FastAPI 后端 (端口 8000)
+终端1: D:\AIOPS\project07\.venv\Scripts\python.exe run.py          # FastAPI 后端 (端口 8000)
 终端2: npm run dev --prefix frontend  # Vue 前端 (端口 3000，自动代理 API 到 8000)
 
 浏览器访问 http://localhost:3000 使用 Vue 前端 (Vite dev server，开发热更新)
@@ -47,8 +47,8 @@ powershell -Command "Get-Process python* | Stop-Process -Force"
 # 2. 确认端口已释放
 python -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',8000)); s.close(); print('OK')"
 
-# 3. 重新启动
-python run.py
+# 3. 重新启动（用项目 .venv 的 Python）
+D:\AIOPS\project07\.venv\Scripts\python.exe run.py
 ```
 
 **不要依赖** `npx kill-port 8000` 或 `taskkill`，它们常杀不干净。
@@ -73,11 +73,11 @@ if (tab) { activeTab.value = tab; app.globalData.alertTab = null }
 
 ```powershell
 # PowerShell（opencode bash 工具实际是 PowerShell）
-Start-Process -FilePath 'python' -ArgumentList 'run.py' -WorkingDirectory 'D:\AIOPS\project07' -WindowStyle Normal
+Start-Process -FilePath 'D:\AIOPS\project07\.venv\Scripts\python.exe' -ArgumentList 'run.py' -WorkingDirectory 'D:\AIOPS\project07' -WindowStyle Normal
 ```
 ```bash
 # cmd 环境
-start "AIOps Backend" python run.py
+start "AIOps Backend" D:\AIOPS\project07\.venv\Scripts\python.exe run.py
 ```
 
 ### ⚠️ uni-app H5 页面组件缓存大坑（重要！）

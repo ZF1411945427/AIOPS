@@ -1,8 +1,21 @@
 <template>
   <div class="kbdoc-page">
     <div class="page-header">
-      <h1>RAG 知识库文档</h1>
-      <p>语义检索增强 · 文档向量化索引</p>
+      <div class="header-top">
+        <div>
+          <h1>RAG 知识库文档</h1>
+          <p>语义检索增强 · 文档向量化索引</p>
+        </div>
+        <div class="mode-toggle">
+          <span class="mode-label" :class="{ active: !smartMode }">经典版</span>
+          <label class="toggle-switch">
+            <input type="checkbox" v-model="smartMode">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="mode-label" :class="{ active: smartMode }">智能版</span>
+          <span v-if="smartMode" class="mode-badge">BGE-M3 + Milvus</span>
+        </div>
+      </div>
     </div>
 
     <div class="stat-cards">
@@ -12,25 +25,36 @@
       </div>
       <div class="stat-card success">
         <div class="stat-icon green">✅</div>
-        <div class="stat-body"><div class="stat-value">{{ stats.indexed_count || 0 }}</div><div class="stat-label">已索引</div></div>
+        <div class="stat-body"><div class="stat-value">{{ smartMode ? (stats.indexed_docs || 0) : (stats.indexed_count || 0) }}</div><div class="stat-label">已索引</div></div>
       </div>
       <div class="stat-card">
         <div class="stat-icon indigo">🧩</div>
         <div class="stat-body"><div class="stat-value">{{ stats.total_chunks || 0 }}</div><div class="stat-label">切片总数</div></div>
       </div>
+      <div v-if="smartMode" class="stat-card">
+        <div class="stat-icon purple">🧠</div>
+        <div class="stat-body"><div class="stat-value">{{ stats.embedding_mode || 'bge-m3' }}</div><div class="stat-label">Embedding</div></div>
+      </div>
     </div>
 
     <div class="panel">
-      <div class="panel-head">语义检索（RAG）</div>
+      <div class="panel-head">
+        语义检索（RAG）
+        <span v-if="smartMode" class="panel-badge">混合检索 · BM25 + 向量 + Reranker</span>
+      </div>
       <div class="panel-body">
         <div class="rag-box">
-          <input v-model="ragQuery" class="input" placeholder="输入检索问题，语义匹配知识切片..." @keyup.enter="runSearch">
+          <input v-model="ragQuery" class="input" :placeholder="smartMode ? '输入问题，BGE-M3 语义检索 + BM25 关键词匹配...' : '输入检索问题，语义匹配知识切片...'" @keyup.enter="runSearch">
           <button class="btn btn-primary" @click="runSearch" :disabled="ragSearching">{{ ragSearching ? '检索中...' : '检索' }}</button>
         </div>
         <div v-if="ragItems.length" class="rag-results">
           <div v-for="(r, i) in ragItems" :key="i" class="rag-item">
             <div class="rag-head">
-              <span class="rag-score">相似度 {{ ((r.similarity || r.score || 0) * 100).toFixed(1) }}%</span>
+              <span class="rag-score" :class="{ reranked: r.rerank_score }">
+                {{ r.rerank_score ? 'Rerank' : '相似度' }} {{ ((r.similarity || r.score || r.rerank_score || 0) * 100).toFixed(1) }}%
+              </span>
+              <span v-if="r.vector_score" class="rag-detail">向量 {{ (r.vector_score * 100).toFixed(1) }}%</span>
+              <span v-if="r.bm25_score" class="rag-detail">BM25 {{ (r.bm25_score * 100).toFixed(1) }}%</span>
               <span v-if="r.doc_title" class="rag-doc">{{ r.doc_title }}</span>
               <span v-if="r.source_type" class="rag-meta badge src">{{ r.source_type }}</span>
               <span v-if="r.tags" class="rag-meta badge tag">{{ r.tags }}</span>
@@ -66,7 +90,7 @@
               <td>{{ d.id }}</td>
               <td class="title-cell">{{ d.title }}</td>
               <td><span class="badge" :class="srcClass(d.source_type)">{{ d.source_type || '-' }}</span></td>
-              <td><span class="badge" :class="statusClass(d.status)">{{ d.status || d.index_status || '-' }}</span></td>
+              <td><span class="badge" :class="statusClass(d.status)">{{ statusLabel(d.status) }}</span></td>
               <td>{{ d.chunk_count ?? d.chunks_count ?? '-' }}</td>
               <td>{{ d.updated_at || d.created_at || '-' }}</td>
               <td class="ops">
@@ -100,7 +124,7 @@
         <h3>文档详情 #{{ detail.id }}</h3>
         <div class="detail-row"><span class="detail-label">标题</span><span class="detail-val">{{ detail.title }}</span></div>
         <div class="detail-row"><span class="detail-label">来源</span><span class="badge" :class="srcClass(detail.source_type)">{{ detail.source_type || '-' }}</span></div>
-        <div class="detail-row"><span class="detail-label">状态</span><span class="badge" :class="statusClass(detail.status || detail.index_status)">{{ detail.status || detail.index_status || '-' }}</span></div>
+        <div class="detail-row"><span class="detail-label">状态</span><span class="badge" :class="statusClass(detail.status || detail.index_status)">{{ statusLabel(detail.status || detail.index_status) }}</span></div>
         <div class="detail-row"><span class="detail-label">标签</span>
           <span v-for="t in tagList(detail.tags)" :key="t" class="tag-mini">{{ t }}</span>
         </div>
@@ -121,7 +145,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
@@ -132,6 +156,7 @@ const fileInput = ref(null)
 const uploading = ref(false)
 const dragOver = ref(false)
 
+const smartMode = ref(false)
 const ragQuery = ref('')
 const ragItems = ref([])
 const ragSearched = ref(false)
@@ -142,6 +167,9 @@ const form = ref({ title: '', content: '', tags: '', source: 'manual' })
 
 const showDetail = ref(false)
 const detail = ref({})
+
+const v2Prefix = '/knowledge/v2'
+const v1Prefix = '/knowledge/documents'
 
 function tagList(tags) {
   if (!tags) return []
@@ -161,12 +189,45 @@ function statusClass(s) {
   return 'st-pending'
 }
 
+function statusLabel(s) {
+  return { indexed: '已索引', pending: '索引中...', failed: '索引失败', ok: '已索引', done: '已索引', error: '索引失败' }[s] || s || '-'
+}
+
+function prefix() {
+  return smartMode.value ? v2Prefix : v1Prefix
+}
+
+watch(smartMode, () => {
+  loadList()
+  ragItems.value = []
+  ragSearched.value = false
+  ragQuery.value = ''
+})
+
 async function loadList() {
   loading.value = true
   try {
-    const data = await request.get('/knowledge/documents/api/list')
-    docs.value = data.items || []
-    stats.value = { total_docs: data.total_docs, indexed_count: data.indexed_count, total_chunks: data.total_chunks }
+    if (smartMode.value) {
+      const data = await request.get(`${v2Prefix}/documents/list`)
+      docs.value = data.items || []
+      stats.value = {
+        total_docs: data.total,
+        indexed_count: 0,
+        indexed_docs: 0,
+        total_chunks: data.vector_chunks || 0,
+        embedding_mode: '',
+      }
+      const st = await request.get(`${v2Prefix}/stats`).catch(() => ({}))
+      if (st) {
+        stats.value.total_chunks = st.total_chunks || 0
+        stats.value.indexed_docs = st.indexed_docs || 0
+        stats.value.embedding_mode = st.embedding_mode || 'bge-m3'
+      }
+    } else {
+      const data = await request.get(`${v1Prefix}/api/list`)
+      docs.value = data.items || []
+      stats.value = { total_docs: data.total_docs, indexed_count: data.indexed_count, total_chunks: data.total_chunks }
+    }
   } catch (e) {
     ElMessage.error('加载失败: ' + (e.message || e))
   } finally {
@@ -182,8 +243,13 @@ async function runSearch() {
   ragSearching.value = true
   ragSearched.value = true
   try {
-    const data = await request.get('/knowledge/documents/search', { params: { q: ragQuery.value } })
-    ragItems.value = data.items || []
+    if (smartMode.value) {
+      const data = await request.get(`${v2Prefix}/search`, { params: { q: ragQuery.value, top_k: 8 } })
+      ragItems.value = data.items || []
+    } else {
+      const data = await request.get(`${v1Prefix}/search`, { params: { q: ragQuery.value } })
+      ragItems.value = data.items || []
+    }
   } catch (e) {
     ElMessage.error('检索失败: ' + (e.message || e))
     ragItems.value = []
@@ -215,9 +281,15 @@ async function uploadFile(file) {
     fd.append('file', file)
     fd.append('title', file.name.replace(/\.[^.]+$/, ''))
     fd.append('tags', '')
-    await request.post('/knowledge/documents/api/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-    ElMessage.success('上传成功')
+    if (smartMode.value) {
+      await request.post(`${v2Prefix}/documents/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    } else {
+      await request.post(`${v1Prefix}/api/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    }
+    ElMessage.success('上传成功，索引在后台处理中')
     loadList()
+    setTimeout(loadList, 3000)
+    setTimeout(loadList, 10000)
   } catch (e) {
     ElMessage.error('上传失败: ' + (e.message || e))
   } finally {
@@ -236,10 +308,16 @@ async function createDoc() {
     return
   }
   try {
-    await request.post('/knowledge/documents/api/create', { ...form.value, tags: form.value.tags })
-    ElMessage.success('已创建')
+    if (smartMode.value) {
+      await request.post(`${v2Prefix}/documents/create`, { ...form.value })
+    } else {
+      await request.post(`${v1Prefix}/api/create`, { ...form.value, tags: form.value.tags })
+    }
+    ElMessage.success('已创建，索引在后台处理中')
     showCreate.value = false
     loadList()
+    setTimeout(loadList, 3000)
+    setTimeout(loadList, 10000)
   } catch (e) {
     ElMessage.error('创建失败: ' + (e.message || e))
   }
@@ -247,7 +325,13 @@ async function createDoc() {
 
 async function openDetail(id) {
   try {
-    const resp = await request.get(`/knowledge/documents/api/${id}`)
+    if (smartMode.value) {
+      const resp = await request.get(`${v2Prefix}/documents/${id}/detail`)
+      detail.value = { ...resp.doc, content: resp.content || '', chunks: resp.chunks || [] }
+      showDetail.value = true
+      return
+    }
+    const resp = await request.get(`${v1Prefix}/api/${id}`)
     detail.value = { ...resp.doc, chunks: resp.chunks || [] }
     showDetail.value = true
   } catch (e) {
@@ -257,9 +341,15 @@ async function openDetail(id) {
 
 async function reindex(d) {
   try {
-    await request.post(`/knowledge/documents/api/${d.id}/reindex`)
-    ElMessage.success('已触发重建索引')
+    if (smartMode.value) {
+      await request.post(`${v2Prefix}/documents/${d.id}/reindex`)
+    } else {
+      await request.post(`${v1Prefix}/api/${d.id}/reindex`)
+    }
+    ElMessage.success('已触发重建索引，后台处理中')
     loadList()
+    setTimeout(loadList, 3000)
+    setTimeout(loadList, 10000)
   } catch (e) {
     ElMessage.error('重建失败: ' + (e.message || e))
   }
@@ -268,7 +358,11 @@ async function reindex(d) {
 async function confirmDelete(d) {
   try {
     await ElMessageBox.confirm(`确定删除文档「${d.title}」？`, '删除确认', { type: 'warning' })
-    await request.post(`/knowledge/documents/api/${d.id}/delete`)
+    if (smartMode.value) {
+      await request.post(`${v2Prefix}/documents/${d.id}/delete`)
+    } else {
+      await request.post(`${v1Prefix}/api/${d.id}/delete`)
+    }
     ElMessage.success('已删除')
     loadList()
   } catch (e) {
@@ -284,14 +378,30 @@ onMounted(loadList)
 <style scoped>
 .kbdoc-page { padding: 4px; }
 .page-header { margin-bottom: 16px; }
+.header-top { display: flex; justify-content: space-between; align-items: flex-start; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
+.mode-toggle { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.mode-label { font-size: 0.78rem; color: var(--text-tertiary, #94a3b8); transition: all 0.2s; }
+.mode-label.active { color: var(--text, #1e293b); font-weight: 600; }
+.mode-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: rgba(34,197,94,0.1); color: #22c55e; font-weight: 600; }
+.toggle-switch { position: relative; width: 36px; height: 20px; cursor: pointer; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; inset: 0; background: #cbd5e1; border-radius: 20px; transition: 0.3s; }
+.toggle-slider::before { content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: 0.3s; }
+.toggle-switch input:checked + .toggle-slider { background: var(--accent, #6366f1); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
+.panel-head { display: flex; align-items: center; gap: 8px; }
+.panel-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 8px; background: rgba(34,197,94,0.1); color: #22c55e; font-weight: 600; }
+.rag-detail { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); background: rgba(148,163,184,0.1); padding: 2px 6px; border-radius: 6px; }
+.rag-score.reranked { color: #6366f1; background: rgba(99,102,241,0.1); }
 .stat-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 .stat-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
 .stat-icon.blue { background: rgba(59,130,246,0.12); }
 .stat-icon.green { background: rgba(34,197,94,0.12); }
 .stat-icon.indigo { background: rgba(99,102,241,0.12); }
+.stat-icon.purple { background: rgba(168,85,247,0.12); }
 .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--text, #1e293b); }
 .stat-label { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
@@ -330,7 +440,8 @@ onMounted(loadList)
 .badge.src-archive { background: rgba(245,158,11,0.1); color: #d97706; }
 .badge.st-indexed { background: rgba(34,197,94,0.12); color: #22c55e; }
 .badge.st-failed { background: rgba(239,68,68,0.12); color: #ef4444; }
-.badge.st-pending { background: rgba(148,163,184,0.12); color: #64748b; }
+.badge.st-pending { background: rgba(148,163,184,0.12); color: #64748b; animation: pending-pulse 1.5s ease-in-out infinite; }
+@keyframes pending-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 .loading-state, .empty-state { text-align: center; padding: 24px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 380px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
