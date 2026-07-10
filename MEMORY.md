@@ -3,6 +3,16 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-10: RAG V2 上传速度优化 — 异步索引 + 智能切片
+- **核心问题**: BGE-M3（568M参数）在 CPU 上编码9个切片需60秒，上传时阻塞用户体验
+- **解决方案**: 改为异步索引——上传API秒级返回（0.05s），后台线程执行Embedding
+- **smart_chunk 优化**: 合并小段落（原142段落→9个切片），`max_chars=2000, overlap=200`
+- **embed_texts 优化**: `batch_size=32` + `show_progress_bar=False`
+- **前端优化**: 上传/创建/重建索引后自动刷新列表（3s、10s延迟轮询），pending状态显示"索引中..."带脉冲动画
+- **重构**: 提取 `_bg_index_document()` 共享函数，消除3处重复代码
+- **Milvus Lite 文件锁**: 单进程限制，后台线程需复用主进程的 `vector_store.get_client()` 单例
+- **密码**: admin 密码是 `1234`（不是 admin123）
+
 ### 2026-07-10: RAG V2 上传卡死修复 — 3 个核心 bug
 - **Bug1 Session 跨线程死锁**: `asyncio.to_thread()` 将 SQLAlchemy `db` session 传到线程池，Session 非线程安全导致死锁 → `index_document_v2` 内部用 `get_session_for(get_db_mode())` 创建独立 Session
 - **Bug2 HuggingFace 网络超时**: BGE-M3 每次加载都尝试联网验证，国内网络 SSL 错误导致每次卡 2+ 分钟 → `HF_HUB_OFFLINE=1` + `TRANSFORMERS_OFFLINE=1` 强制离线 + `snapshot_download(local_files_only=True)` 从本地缓存加载

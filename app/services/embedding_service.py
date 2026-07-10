@@ -1,10 +1,11 @@
-"""Embedding 服务：BGE-M3 本地 + OpenAI API 双模式.
+"""Embedding 服务：BGE-small-zh 本地 + OpenAI API 双模式.
 
 模式：
-- bge-m3（默认）：本地 BGE-M3 模型，中文效果最佳，免费
+- bge-m3（默认）：本地 BGE-small-zh-v1.5 模型，中文效果好，CPU 友好
 - openai：OpenAI text-embedding-3-large，需要 API Key
 """
 import os
+from pathlib import Path
 import threading
 from typing import List, Optional
 
@@ -15,7 +16,8 @@ _bge_lock = threading.Lock()
 # 配置
 DEFAULT_MODE = "bge-m3"
 OPENAI_MODEL = "text-embedding-3-large"
-OPENAI_DIMENSION = 1024  # BGE-M3 输出维度
+OPENAI_DIMENSION = 512  # BGE-small-zh 输出维度
+_LOCAL_MODEL_DIR = str(Path(__file__).resolve().parent.parent.parent / "models" / "bge-small-zh-v1.5")
 
 
 def get_embedding_mode() -> str:
@@ -29,26 +31,22 @@ def set_embedding_mode(mode: str):
 
 
 def _get_bge_model():
-    """懒加载 BGE-M3 模型（强制离线，从本地缓存加载）"""
+    """懒加载 BGE 模型（从项目内本地目录加载）"""
     global _bge_model
     if _bge_model is not None:
         return _bge_model
     with _bge_lock:
         if _bge_model is not None:
             return _bge_model
-        print("[embedding] 加载 BGE-M3 模型（离线模式）...")
-        os.environ["HF_HUB_OFFLINE"] = "1"
-        os.environ["TRANSFORMERS_OFFLINE"] = "1"
-        from huggingface_hub import snapshot_download
+        print(f"[embedding] 加载 BGE 模型: {_LOCAL_MODEL_DIR} ...")
         from sentence_transformers import SentenceTransformer
-        model_path = snapshot_download("BAAI/bge-m3", local_files_only=True)
-        _bge_model = SentenceTransformer(model_path)
-        print("[embedding] BGE-M3 模型加载完成")
+        _bge_model = SentenceTransformer(_LOCAL_MODEL_DIR)
+        print("[embedding] BGE 模型加载完成")
         return _bge_model
 
 
 def _embed_bge_m3(texts: List[str]) -> List[List[float]]:
-    """使用 BGE-M3 生成 embedding"""
+    """使用 BGE 模型生成 embedding"""
     model = _get_bge_model()
     embeddings = model.encode(texts, normalize_embeddings=True, batch_size=32, show_progress_bar=False)
     return embeddings.tolist()
