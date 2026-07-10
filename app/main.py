@@ -161,7 +161,7 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CacheControlMiddleware)
 
-# 公共 assets 由 /vue-assets 和 /mobile-assets 各自承载，不在此挂载（避免与 /assets API 路由冲突）
+# 公共 assets 由 /vue-assets 和 /mobile-app 各自承载，不在此挂载（避免与 /assets API 路由冲突）
 
 # Mobile tab 图标（需在 /static 之前挂载，Starlette 优先匹配精确路径）
 _MOBILE_STATIC_TAB = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/static/tab"

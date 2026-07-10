@@ -27,8 +27,10 @@ MEMORY.md 按时间倒序记录，最新的在最上面。
 终端1: python run.py          # FastAPI 后端 (端口 8000)
 终端2: npm run dev --prefix frontend  # Vue 前端 (端口 3000，自动代理 API 到 8000)
 
-浏览器访问 http://localhost:3000 使用 Vue 前端
-浏览器访问 http://localhost:8000 使用原有 Jinja2 前端(兼容保留)
+浏览器访问 http://localhost:3000 使用 Vue 前端 (Vite dev server，开发热更新)
+浏览器访问 http://localhost:8000 同样是 Vue SPA 前端 (`/` 和 `/login` 均返回 `frontend/dist/index.html`)
+  - 仅 product_intro/overview、容器日志/终端等少量辅助页仍用 Jinja2 模板，主体已全部 Vue 化
+  - 修改前端 UI 必须改 `frontend/src/views/*.vue` 然后 `npm run build --prefix frontend` 构建
 
 ### ⚠️ Windows 热重载大坑（重要！）
 `uvicorn --reload` 在 Windows 上**热重载不可靠**：
@@ -67,9 +69,14 @@ if (tab) { activeTab.value = tab; app.globalData.alertTab = null }
 
 ### ⚠️ 后端启动方式（重要！）
 在 opencode 的 bash 工具中直接运行 `python run.py` 会**随 bash 会话超时而终止进程**。
-必须使用 Windows `start` 命令在新窗口中启动：
+必须在新窗口中启动（PowerShell 环境用 `Start-Process`，cmd 环境用 `start`）：
 
+```powershell
+# PowerShell（opencode bash 工具实际是 PowerShell）
+Start-Process -FilePath 'python' -ArgumentList 'run.py' -WorkingDirectory 'D:\AIOPS\project07' -WindowStyle Normal
+```
 ```bash
+# cmd 环境
 start "AIOps Backend" python run.py
 ```
 

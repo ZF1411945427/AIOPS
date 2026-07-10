@@ -3,6 +3,30 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-10: 用户与权限页新增修改密码功能 + 确认 8000 已是 Vue SPA
+- **确认现状**: 8000 端口 `/` 路由返回 `frontend/dist/index.html`（Vue SPA），`/login` 也是 `_serve_vue()`。仅 product_intro/overview、容器日志/终端等少量辅助页仍用 Jinja2 模板。AGENTS.md 中"原有 Jinja2 前端(兼容保留)"的说法已过时
+- **新增接口** `app/routers/users.py`:
+  - `POST /users/api/{user_id}/reset-password` — 管理员重置任意用户密码（不验证旧密码）
+  - `POST /users/api/change-password` — 当前用户改自己密码（验证旧密码 + 新旧不能相同）
+  - 均要求新密码 ≥4 位
+- **前端** `UsersView.vue`:
+  - 操作列每行加"修改密码"按钮（btn-warning 橙色）
+  - 弹窗根据是否当前用户决定：当前用户需填旧密码+新密码+确认，走 change-password；其他用户只需新密码+确认，走 reset-password
+  - 前端校验：旧密码非空、新密码≥4位、两次新密码一致
+- **验证**: build 成功 / 后端重启 HTTP 200 / 接口测试（错误旧密码被拒✅、重置成功✅、短密码被拒✅）
+
+### 2026-07-09: 修复移动端「连接服务器超时」——JS 懒加载 chunk 404（base URL 不统一）
+- **根因**: 移除 `/assets` 静态挂载后（避免与 API 路由冲突），移动端构建产物 hardcode `/assets/` 路径：
+  - HTML 层路径已通过字符串 replace `/assets/` → `/mobile-assets/assets/` 修复
+  - 但 JS 代码中 Vite 动态 import 的 chunk 仍引用 `/assets/...` → 404
+  - 且服务器 `aiops.db` 已损坏（`database disk image is malformed`），API 返回 500 → 移动端显示"连接服务器超时"
+- **修复**:
+  - `mobile/vite.config.js` 加 `base: '/mobile-app/'` → 构建产物所有路径统一为 `/mobile-app/assets/...`
+  - `app/main.py`: 用 `app.mount("/mobile-app", StaticFiles(html=True))` 替代 `serve_mobile()` 路由 + `/mobile-assets` 挂载
+  - 移除 `/mobile-assets` 的 PUBLIC_PATHS 条目
+  - 服务器：`git checkout HEAD -- db/aiops.db` 从 git 恢复健康数据库
+- **验证**: `/mobile-app/` 200、JS/CSS 静态资源 200、API 401(未登录)/200(已登录) ✅
+
 ### 2026-07-09: 记录正确部署方式（弃用 tools/deploy.py）
 - **不要用** `tools/deploy.py`（本地打包上传 565MB 太慢，且包含 helm 等服务器已有的大文件）
 - **正确方式**：本地 `git push` → SSH 到服务器 → 服务器上操作：
