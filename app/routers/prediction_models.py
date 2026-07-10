@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import PredictionModel
+from app.services.prediction_service import predict_with_model
 
 router = APIRouter(prefix="/prediction-models", tags=["prediction_models"])
 
@@ -54,3 +55,31 @@ def api_model_delete(mid: int, db: Session = Depends(get_db)):
     db.query(PredictionModel).filter(PredictionModel.id == mid).delete()
     db.commit()
     return {"status": "ok"}
+
+
+@router.get("/api/{mid}/predict")
+def api_model_predict(mid: int, hours_back: int = 168, db: Session = Depends(get_db)):
+    """Execute prediction using a configured model."""
+    model = db.query(PredictionModel).filter(PredictionModel.id == mid).first()
+    if not model:
+        return {"status": "error", "message": "Model not found"}
+    if not model.enabled:
+        return {"status": "error", "message": "Model is disabled"}
+
+    result = predict_with_model(db, model, hours_back)
+    if result is None:
+        return {"status": "error", "message": "Not enough data for prediction"}
+
+    return {"status": "ok", "result": result}
+
+
+@router.get("/api/predict-all")
+def api_predict_all(db: Session = Depends(get_db)):
+    """Execute prediction for all enabled models."""
+    models = db.query(PredictionModel).filter(PredictionModel.enabled == True).all()
+    results = []
+    for model in models:
+        result = predict_with_model(db, model)
+        if result:
+            results.append(result)
+    return {"status": "ok", "count": len(results), "results": results}
