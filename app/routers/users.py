@@ -72,3 +72,42 @@ def api_user_delete(user_id: int, request: Request, db: Session = Depends(get_db
     db.query(User).filter(User.id == user_id).delete()
     db.commit()
     return {"status": "ok"}
+
+
+@router.post("/api/{user_id}/reset-password")
+def api_reset_password(user_id: int, payload: dict = Body(...), request: Request = None, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return {"status": "error", "message": "无权限"}
+    new_password = payload.get("new_password", "")
+    if not new_password or len(new_password) < 4:
+        return {"status": "error", "message": "新密码不能为空且至少4位"}
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return {"status": "error", "message": "用户不存在"}
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/api/change-password")
+def api_change_password(payload: dict = Body(...), request: Request = None, db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"status": "error", "message": "未登录"}
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return {"status": "error", "message": "用户不存在"}
+    old_password = payload.get("old_password", "")
+    new_password = payload.get("new_password", "")
+    if not old_password or not new_password:
+        return {"status": "error", "message": "旧密码和新密码不能为空"}
+    if user.password_hash != hash_password(old_password):
+        return {"status": "error", "message": "旧密码错误"}
+    if len(new_password) < 4:
+        return {"status": "error", "message": "新密码至少4位"}
+    if hash_password(new_password) == user.password_hash:
+        return {"status": "error", "message": "新密码不能与旧密码相同"}
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    return {"status": "ok"}
