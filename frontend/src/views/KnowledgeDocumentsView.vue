@@ -32,7 +32,7 @@
             <div class="rag-head">
               <span class="rag-score">相似度 {{ ((r.similarity || r.score || 0) * 100).toFixed(1) }}%</span>
               <span v-if="r.doc_title" class="rag-doc">{{ r.doc_title }}</span>
-              <span v-if="r.source" class="rag-meta badge src">{{ r.source }}</span>
+              <span v-if="r.source_type" class="rag-meta badge src">{{ r.source_type }}</span>
               <span v-if="r.tags" class="rag-meta badge tag">{{ r.tags }}</span>
             </div>
             <div class="rag-content">{{ r.content || r.chunk_text || r.text || '' }}</div>
@@ -65,7 +65,7 @@
             <tr v-for="d in docs" :key="d.id">
               <td>{{ d.id }}</td>
               <td class="title-cell">{{ d.title }}</td>
-              <td><span class="badge" :class="srcClass(d.source)">{{ d.source || '-' }}</span></td>
+              <td><span class="badge" :class="srcClass(d.source_type)">{{ d.source_type || '-' }}</span></td>
               <td><span class="badge" :class="statusClass(d.status)">{{ d.status || d.index_status || '-' }}</span></td>
               <td>{{ d.chunk_count ?? d.chunks_count ?? '-' }}</td>
               <td>{{ d.updated_at || d.created_at || '-' }}</td>
@@ -88,7 +88,6 @@
         <div class="form-row"><label>标题</label><input v-model="form.title" class="input" placeholder="文档标题"></div>
         <div class="form-row"><label>内容</label><textarea v-model="form.content" class="input textarea" rows="8" placeholder="文档正文内容"></textarea></div>
         <div class="form-row"><label>标签（逗号分隔）</label><input v-model="form.tags" class="input" placeholder="如: 运维,数据库"></div>
-        <div class="form-row"><label>来源</label><input v-model="form.source" class="input" placeholder="如: manual / wiki"></div>
         <div class="modal-actions">
           <button class="btn" @click="showCreate = false">取消</button>
           <button class="btn btn-primary" @click="createDoc">创建</button>
@@ -100,7 +99,7 @@
       <div class="modal-box wide">
         <h3>文档详情 #{{ detail.id }}</h3>
         <div class="detail-row"><span class="detail-label">标题</span><span class="detail-val">{{ detail.title }}</span></div>
-        <div class="detail-row"><span class="detail-label">来源</span><span class="badge" :class="srcClass(detail.source)">{{ detail.source || '-' }}</span></div>
+        <div class="detail-row"><span class="detail-label">来源</span><span class="badge" :class="srcClass(detail.source_type)">{{ detail.source_type || '-' }}</span></div>
         <div class="detail-row"><span class="detail-label">状态</span><span class="badge" :class="statusClass(detail.status || detail.index_status)">{{ detail.status || detail.index_status || '-' }}</span></div>
         <div class="detail-row"><span class="detail-label">标签</span>
           <span v-for="t in tagList(detail.tags)" :key="t" class="tag-mini">{{ t }}</span>
@@ -248,7 +247,8 @@ async function createDoc() {
 
 async function openDetail(id) {
   try {
-    detail.value = await request.get(`/knowledge/documents/api/${id}`)
+    const resp = await request.get(`/knowledge/documents/api/${id}`)
+    detail.value = { ...resp.doc, chunks: resp.chunks || [] }
     showDetail.value = true
   } catch (e) {
     ElMessage.error('获取详情失败: ' + (e.message || e))

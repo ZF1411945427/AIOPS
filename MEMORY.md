@@ -3,6 +3,15 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-10: 修复 RAG 知识库文档页 3 个前端 bug
+- **Bug1 `source` vs `source_type` 字段名不匹配**: 后端 `_doc_to_dict()` 返回 `source_type`，前端模板用 `d.source`/`detail.source`/`r.source` → 所有"来源"字段永远显示 `-`
+  - 修复：`KnowledgeDocumentsView.vue` 三处 `d.source` → `d.source_type`
+- **Bug2 详情接口返回结构嵌套未解包**: 后端 `api_doc_detail` 返回 `{"doc": {...}, "chunks": [...]}`，前端直接赋值 `detail.value = resp` → `detail.title`/`detail.content` 全部 undefined
+  - 修复：`openDetail()` 解包 `detail.value = { ...resp.doc, chunks: resp.chunks }`
+- **Bug3 创建弹窗"来源"输入框无效**: 前端有 `form.source` 输入框，但后端 `api_doc_create` 硬编码 `source_type: "manual"` → 用户填了也没用
+  - 修复：删除创建弹窗中的来源输入框
+- **验证**: `npm run build` 成功 / 本地后端重启 HTTP 200
+
 ### 2026-07-10: 用户与权限页新增修改密码功能 + 确认 8000 已是 Vue SPA
 - **确认现状**: 8000 端口 `/` 路由返回 `frontend/dist/index.html`（Vue SPA），`/login` 也是 `_serve_vue()`。仅 product_intro/overview、容器日志/终端等少量辅助页仍用 Jinja2 模板。AGENTS.md 中"原有 Jinja2 前端(兼容保留)"的说法已过时
 - **新增接口** `app/routers/users.py`:
