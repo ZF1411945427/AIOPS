@@ -7,6 +7,7 @@
 
     <div class="toolbar">
       <button class="btn btn-primary" @click="openCreate">+ 新建模型</button>
+      <button class="btn btn-success" @click="predictAll">运行全部预测</button>
       <button class="btn" @click="showLogic = true">逻辑说明</button>
       <button class="btn" @click="loadModels">刷新</button>
     </div>
@@ -27,6 +28,7 @@
               <div><span class="meta-label">参数</span><span class="text-sm">{{ m.params }}</span></div>
             </div>
             <div class="card-actions">
+              <button class="btn btn-sm btn-primary" @click="predictModel(m)">预测</button>
               <button class="btn btn-sm" @click="toggleModel(m)">{{ m.enabled ? '禁用' : '启用' }}</button>
               <button class="btn btn-sm btn-danger" @click="deleteModel(m)">删除</button>
             </div>
@@ -106,6 +108,68 @@
         </ul>
       </div>
     </el-dialog>
+
+    <el-dialog v-model="showResult" title="预测结果" width="800px">
+      <div v-if="predictionResult" style="font-size:13px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="result-item">
+            <span class="result-label">指标</span>
+            <span class="result-value">{{ predictionResult.metric_name }}</span>
+          </div>
+          <div class="result-item">
+            <span class="result-label">当前值</span>
+            <span class="result-value">{{ predictionResult.current_value?.toFixed(2) }}</span>
+          </div>
+          <div class="result-item">
+            <span class="result-label">趋势</span>
+            <span class="result-value" :class="'trend-' + predictionResult.trend">{{ trendLabel(predictionResult.trend) }}</span>
+          </div>
+          <div class="result-item">
+            <span class="result-label">数据点</span>
+            <span class="result-value">{{ predictionResult.data_points }}</span>
+          </div>
+          <div class="result-item">
+            <span class="result-label">R²</span>
+            <span class="result-value">{{ predictionResult.r2?.toFixed(4) }}</span>
+          </div>
+          <div v-if="predictionResult.days_until_threshold" class="result-item">
+            <span class="result-label">预计达到阈值</span>
+            <span class="result-value warning">{{ predictionResult.days_until_threshold }} 天</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <h4 style="margin:0 0 8px">特征数据</h4>
+          <div v-if="Object.keys(predictionResult.features || {}).length" style="display:flex;gap:12px;flex-wrap:wrap">
+            <div v-for="(v, k) in predictionResult.features" :key="k" class="feature-tag">
+              <span class="feature-name">{{ k }}</span>
+              <span class="feature-value">{{ v.value?.toFixed(2) }}</span>
+            </div>
+          </div>
+          <div v-else style="color:#94a3b8">暂无特征数据</div>
+        </div>
+
+        <div>
+          <h4 style="margin:0 0 8px">预测曲线（未来 48 小时）</h4>
+          <div style="background:#f8f9fa;border-radius:8px;padding:12px;max-height:300px;overflow-y:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <thead>
+                <tr style="background:#e5e7eb">
+                  <th style="padding:4px 8px;text-align:left">时间</th>
+                  <th style="padding:4px 8px;text-align:right">预测值</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(ts, i) in predictionResult.prediction?.timestamps?.slice(0, 24)" :key="i">
+                  <td style="padding:4px 8px;border-bottom:1px solid #e5e7eb">{{ formatTime(ts) }}</td>
+                  <td style="padding:4px 8px;text-align:right;border-bottom:1px solid #e5e7eb">{{ predictionResult.prediction.values[i]?.toFixed(2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -121,10 +185,21 @@ const page = ref(1)
 const pageSize = ref(20)
 const showDialog = ref(false)
 const showLogic = ref(false)
+const showResult = ref(false)
+const predictionResult = ref(null)
 const form = ref({ name: '', metric_name: '', asset_id: 0, model_type: 'linear', params: '{"window": 20}' })
 
 function typeLabel(t) {
   return { linear: '线性回归', polynomial: '多项式', rolling_avg: '移动平均' }[t] || t
+}
+
+function trendLabel(t) {
+  return { increasing: '上升趋势 ↑', decreasing: '下降趋势 ↓', stable: '稳定 →' }[t] || t
+}
+
+function formatTime(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 async function loadModels() {
@@ -180,6 +255,37 @@ async function deleteModel(m) {
   }
 }
 
+async function predictModel(m) {
+  try {
+    ElMessage.info('正在运行预测...')
+    const data = await request.get(`/prediction-models/api/${m.id}/predict`)
+    if (data.status === 'ok') {
+      predictionResult.value = data.result
+      showResult.value = true
+    } else {
+      ElMessage.error(data.message || '预测失败')
+    }
+  } catch (e) {
+    ElMessage.error('预测失败: ' + (e.message || e))
+  }
+}
+
+async function predictAll() {
+  try {
+    ElMessage.info('正在运行全部预测...')
+    const data = await request.get('/prediction-models/api/predict-all')
+    if (data.status === 'ok') {
+      ElMessage.success(`预测完成，共 ${data.count} 个模型`)
+      if (data.count > 0) {
+        predictionResult.value = data.results[0]
+        showResult.value = true
+      }
+    }
+  } catch (e) {
+    ElMessage.error('预测失败: ' + (e.message || e))
+  }
+}
+
 onMounted(loadModels)
 </script>
 
@@ -193,6 +299,7 @@ onMounted(loadModels)
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
+.btn-success { background: rgba(34,197,94,0.1); color: #22c55e; border-color: rgba(34,197,94,0.3); }
 .btn-danger { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
@@ -218,4 +325,14 @@ onMounted(loadModels)
 .form-row label { display: block; font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 4px; }
 .input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.result-item { display: flex; flex-direction: column; gap: 4px; }
+.result-label { font-size: 0.75rem; color: var(--text-secondary, #64748b); }
+.result-value { font-size: 1rem; font-weight: 600; color: var(--text, #1e293b); }
+.result-value.warning { color: #f59e0b; }
+.trend-increasing { color: #ef4444; }
+.trend-decreasing { color: #22c55e; }
+.trend-stable { color: #6366f1; }
+.feature-tag { display: flex; gap: 8px; padding: 4px 8px; background: #f1f5f9; border-radius: 4px; font-size: 0.75rem; }
+.feature-name { color: var(--text-secondary, #64748b); }
+.feature-value { font-weight: 600; color: var(--text, #1e293b); }
 </style>
