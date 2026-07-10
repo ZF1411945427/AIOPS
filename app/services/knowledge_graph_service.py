@@ -1,7 +1,7 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Asset, AssetRelation, Alert, KnowledgeBase, AlertKbLink
+from app.models import Asset, AssetRelation, Alert, KnowledgeBase, AlertKbLink, Runbook
 
 
 # CI type → color mapping for the dependency graph
@@ -21,6 +21,7 @@ CI_COLORS = {
     "deployment": "#34d399",
     "node": "#94a3b8",
     "application": "#f472b6",
+    "runbook": "#14b8a6",
 }
 DEFAULT_COLOR = "#64748b"
 
@@ -28,6 +29,7 @@ DEFAULT_COLOR = "#64748b"
 def get_dependency_graph(db: Session):
     assets = db.query(Asset).all()
     relations = db.query(AssetRelation).all()
+    runbooks = db.query(Runbook).all()
 
     # Count active alerts per asset
     active_alerts_count = {}
@@ -84,6 +86,35 @@ def get_dependency_graph(db: Session):
                 "color": color,
                 "asset_id": a.id,
             })
+
+    # Add Runbook nodes and connect to matching assets
+    for rb in runbooks:
+        rb_key = f"runbook_{rb.id}"
+        nodes.append({
+            "id": rb_key,
+            "label": rb.title,
+            "type": "runbook",
+            "status": rb.severity or "warning",
+            "ip": "",
+            "alert_count": 0,
+            "color": CI_COLORS["runbook"],
+            "category": rb.category or "",
+            "asset_type": rb.asset_type or "",
+            "tags": rb.tags or "",
+        })
+
+        # Connect runbook to matching assets by asset_type
+        if rb.asset_type:
+            for a in assets:
+                if a.ci_type and a.ci_type.lower() == rb.asset_type.lower():
+                    a_key = f"asset_{a.id}"
+                    edge_list.append({
+                        "source": rb_key,
+                        "target": a_key,
+                        "relation": "covers",
+                    })
+                    node_set.add(a_key)
+                    node_set.add(rb_key)
 
     return {"nodes": nodes, "edges": edge_list}
 

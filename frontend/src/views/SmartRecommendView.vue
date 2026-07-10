@@ -139,6 +139,36 @@
         </div>
       </div>
     </div>
+
+    <div v-if="runbooks.length" class="panel" style="margin-top:14px;">
+      <div class="panel-head">推荐操作流程 · {{ runbooks.length }} 条</div>
+      <div class="panel-body">
+        <div class="rec-list">
+          <div v-for="(rb, i) in runbooks" :key="i" class="rec-item rb-item">
+            <div class="rec-head">
+              <span class="rec-rank rb-rank">RB#{{ rb.runbook.id }}</span>
+              <span class="rec-title">{{ rb.runbook.title }}</span>
+              <span class="source-tag src-runbook">Runbook</span>
+              <span class="rec-score">{{ (rb.score * 100).toFixed(1) }}%</span>
+            </div>
+            <div class="rec-meta">
+              <span class="badge" :class="sevClass(rb.runbook.severity)">{{ rb.runbook.severity }}</span>
+              <span class="tag-mini">{{ rb.runbook.category }}</span>
+              <span v-for="t in tagList(rb.runbook.tags)" :key="t" class="tag-mini">{{ t }}</span>
+            </div>
+            <div v-if="rb.reasons && rb.reasons.length" class="rec-reasons">
+              <span v-for="(reason, ri) in rb.reasons" :key="ri" class="reason-tag">{{ reasonLabel(reason) }}</span>
+            </div>
+            <div v-if="rb.runbook.symptom" class="rec-block"><span class="rec-label">症状</span><div class="rec-text">{{ rb.runbook.symptom }}</div></div>
+            <div v-if="rb.runbook.diagnosis" class="rec-block"><span class="rec-label">诊断</span><div class="rec-text">{{ rb.runbook.diagnosis }}</div></div>
+            <div v-if="rb.runbook.steps" class="rec-block">
+              <span class="rec-label">操作步骤</span>
+              <div class="rec-text rb-steps">{{ rb.runbook.steps }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -176,6 +206,7 @@ const glossary = [
 const limit = ref(5)
 const alert = ref(null)
 const recommendations = ref([])
+const runbooks = ref([])
 const sources = ref(null)
 
 function sourceLabel(s) {
@@ -226,11 +257,13 @@ async function runRecommend() {
     const data = await request.get('/smart-recommend/api/recommend', { params })
     alert.value = data.alert || null
     recommendations.value = data.recommendations || []
+    runbooks.value = data.runbooks || []
     sources.value = data.sources || null
   } catch (e) {
     ElMessage.error('查询失败: ' + (e.message || e))
     alert.value = null
     recommendations.value = []
+    runbooks.value = []
     sources.value = null
   } finally {
     loading.value = false
@@ -281,6 +314,10 @@ async function runRecommend() {
 .src-rule { background: rgba(59,130,246,0.1); color: #3b82f6; }
 .src-rag { background: rgba(168,85,247,0.1); color: #a855f7; }
 .src-both { background: rgba(34,197,94,0.1); color: #22c55e; }
+.src-runbook { background: rgba(20,184,166,0.1); color: #14b8a6; }
+.rb-item { border-left: 3px solid #14b8a6; }
+.rb-rank { background: rgba(20,184,166,0.1); color: #14b8a6; }
+.rb-steps { background: rgba(20,184,166,0.04); border-left: 3px solid #14b8a6; padding: 8px 10px; border-radius: 0 6px 6px 0; font-size: 0.8rem; color: #475569; line-height: 1.6; }
 .rec-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .tag-mini { display: inline-block; padding: 1px 6px; border-radius: 4px; background: rgba(99,102,241,0.08); color: var(--accent, #6366f1); font-size: 0.7rem; margin-right: 4px; }
 .rec-block { margin-top: 6px; }
