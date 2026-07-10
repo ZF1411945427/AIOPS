@@ -3,6 +3,40 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。
 
+### 2026-07-10: RAG V2 上传卡死修复 — 3 个核心 bug
+- **Bug1 Session 跨线程死锁**: `asyncio.to_thread()` 将 SQLAlchemy `db` session 传到线程池，Session 非线程安全导致死锁 → `index_document_v2` 内部用 `get_session_for(get_db_mode())` 创建独立 Session
+- **Bug2 HuggingFace 网络超时**: BGE-M3 每次加载都尝试联网验证，国内网络 SSL 错误导致每次卡 2+ 分钟 → `HF_HUB_OFFLINE=1` + `TRANSFORMERS_OFFLINE=1` 强制离线 + `snapshot_download(local_files_only=True)` 从本地缓存加载
+- **Bug3 系统 Python vs hermes venv**: `Start-Process python run.py` 调的是系统 Python（无 torch），hermes venv 才有 ML 包 → 必须用 `C:\Users\zhuming\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe run.py` 启动
+- **Reranker 优雅降级**: 模型权重未完整缓存，改为 `snapshot_download(local_files_only=True)` 失败时标记 `_rerank._model = False` 跳过，用 BM25+向量混合分
+- **测试结果**: 7 项测试全部通过 / E2E 端到端验证通过 / 前端构建成功
+
+### 2026-07-10: 项目独立 Python 环境 (.venv) + 启动命令修正
+- **根因**: 之前用 `Start-Process python run.py`，系统 Python 没有 torch/sentence-transformers → 每次请求都卡在下载模型
+- **解决**: 在项目目录创建 `.venv`，从 hermes venv 复制 site-packages（网络不通无法 pip install）
+- **启动命令**: `D:\AIOPS\project07\.venv\Scripts\python.exe run.py`
+- **AGENTS.md 已更新**: 所有启动命令改为 .venv 路径
+- **换电脑部署**: 需要 `pip install -r requirements.txt`（含 torch, sentence-transformers, pymilvus 等 ML 依赖）
+
+### 2026-07-10: RAG V2 知识库升级 — BGE-M3 + Milvus + 混合检索
+- **目标**: 将简化版 TF-IDF RAG 升级为生产级 RAG，增加 Dense Embedding + 向量数据库 + 混合检索 + Reranker
+- **技术选型**: BGE-M3 (BAAI/bge-m3, 1024d, MTEB 67.3, 中文最佳, 本地免费) 为默认 Embedding；Milvus Lite (本地文件存储) 为向量数据库；BM25 + 向量 + BGE-Reranker-v2-m3 为混合检索策略
+- **新文件创建**:
+  - `app/services/embedding_service.py` — 双模式 Embedding: BGE-M3 (默认) + OpenAI API (可选)
+  - `app/services/vector_store.py` — Milvus Lite 连接管理、Collection CRUD、向量检索
+  - `app/services/rag_engine_v2.py` — 完整 RAG Pipeline: 智能切片 → BGE-M3 Embedding → Milvus 存储 → BM25+向量混合检索 → Reranker 重排序
+  - `app/routers/knowledge_v2.py` — REST API: 文档管理/上传/创建/删除/重建索引 + 语义检索 + Embedding 模式切换 + 统计信息
+  - `scripts/migrate_to_v2.py` — 数据迁移脚本：将现有文档重新索引到 Milvus V2
+- **修改文件**:
+  - `app/main.py` — 注册 `knowledge_v2.router`
+  - `frontend/src/views/KnowledgeDocumentsView.vue` — 新增经典版/智能版切换按钮，根据模式路由到不同 API (v1 vs v2)
+- **关键技术细节**:
+  - `vector_store.py` 必须在 insert/delete 后调用 `client.load_collection()` 否则 Milvus Lite 搜索报 "collection is released" 错误
+  - torch 2.13.0 在 Windows 上有 DLL 加载问题 (c10.dll)，需要降级到 torch 2.1.0+cpu
+  - sentence-transformers 5.x 需要 torch >= 2.4，不兼容 torch 2.1.0，需降级到 sentence-transformers 2.7.0 + transformers 4.41.0
+  - numpy 需降级到 <2.0 以兼容 torch 2.1.0
+- **测试结果**: BGE-M3 Embedding (dim=1024) ✅ / Milvus 插入+检索 ✅ / 智能切片 ✅ / 前端构建 ✅
+- **待完成**: git commit & push / 部署到服务器 / 运行迁移脚本
+
 ### 2026-07-10: 修复 RAG 知识库文档页 3 个前端 bug
 - **Bug1 `source` vs `source_type` 字段名不匹配**: 后端 `_doc_to_dict()` 返回 `source_type`，前端模板用 `d.source`/`detail.source`/`r.source` → 所有"来源"字段永远显示 `-`
   - 修复：`KnowledgeDocumentsView.vue` 三处 `d.source` → `d.source_type`
