@@ -10,12 +10,17 @@ router = APIRouter(prefix="/feature-store", tags=["feature-store"])
 
 
 @router.get("/api/list")
-def api_feature_list(db: Session = Depends(get_db)):
+def api_feature_list(db: Session = Depends(get_db), page: int = 1, page_size: int = 20):
     features = [f[0] for f in db.query(FeatureStoreItem.feature_name).distinct().order_by(FeatureStoreItem.feature_name).all()]
     entities = [e[0] for e in db.query(FeatureStoreItem.entity_type).distinct().all()]
-    recent = db.query(FeatureStoreItem).order_by(desc(FeatureStoreItem.created_at)).limit(50).all()
+    query = db.query(FeatureStoreItem).order_by(desc(FeatureStoreItem.created_at))
+    total = query.count()
+    recent = query.offset((page - 1) * page_size).limit(page_size).all()
     return {
         "features": features, "entities": entities,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
         "recent": [
             {
                 "id": r.id, "feature_name": r.feature_name, "entity_type": r.entity_type,
