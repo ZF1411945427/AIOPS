@@ -105,13 +105,13 @@ def get_alert_detail(db: Optional[Session] = None, user_id: Optional[int] = None
 
 @register_mcp_tool(
     name="query_assets",
-    description="查询资产列表，支持按类型、状态、名称搜索",
+    description="查询资产列表，支持按类型、状态、名称搜索。注意：server、cloud_host、vm 都是服务器类型，搜索主机时可不传 ci_type，用 search 关键字匹配名称/IP。",
     input_schema={
         "type": "object",
         "properties": {
-            "ci_type": {"type": "string", "description": "资产类型: server, pod, deployment, service, node, cluster 等"},
+            "ci_type": {"type": "string", "description": "资产类型: server, cloud_host, vm, pod, deployment, service, database 等。搜索主机时可不传，会返回所有类型"},
             "status": {"type": "string", "description": "状态: online, offline, warning"},
-            "search": {"type": "string", "description": "名称搜索关键字"},
+            "search": {"type": "string", "description": "名称或IP搜索关键字"},
             "limit": {"type": "integer", "description": "返回数量限制", "default": 20},
         },
     },
