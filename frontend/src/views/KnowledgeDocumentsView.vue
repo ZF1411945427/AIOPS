@@ -13,7 +13,7 @@
             <span class="toggle-slider"></span>
           </label>
           <span class="mode-label" :class="{ active: smartMode }">智能版</span>
-          <span v-if="smartMode" class="mode-badge">BGE-M3 + Milvus</span>
+          <span v-if="smartMode" class="mode-badge">BGE-small + Milvus</span>
         </div>
       </div>
     </div>
@@ -44,7 +44,7 @@
       </div>
       <div class="panel-body">
         <div class="rag-box">
-          <input v-model="ragQuery" class="input" :placeholder="smartMode ? '输入问题，BGE-M3 语义检索 + BM25 关键词匹配...' : '输入检索问题，语义匹配知识切片...'" @keyup.enter="runSearch">
+          <input v-model="ragQuery" class="input" :placeholder="smartMode ? '输入问题，BGE-small 语义检索 + BM25 关键词匹配...' : '输入检索问题，语义匹配知识切片...'" @keyup.enter="runSearch">
           <button class="btn btn-primary" @click="runSearch" :disabled="ragSearching">{{ ragSearching ? '检索中...' : '检索' }}</button>
         </div>
         <div v-if="ragItems.length" class="rag-results">
@@ -59,7 +59,7 @@
               <span v-if="r.source_type" class="rag-meta badge src">{{ r.source_type }}</span>
               <span v-if="r.tags" class="rag-meta badge tag">{{ r.tags }}</span>
             </div>
-            <div class="rag-content">{{ r.content || r.chunk_text || r.text || '' }}</div>
+            <div class="rag-content" v-html="highlightText(r.content || r.chunk_text || r.text || '', ragQuery)"></div>
           </div>
           <div class="rag-count">共 {{ ragItems.length }} 条匹配</div>
         </div>
@@ -156,7 +156,7 @@ const fileInput = ref(null)
 const uploading = ref(false)
 const dragOver = ref(false)
 
-const smartMode = ref(false)
+const smartMode = ref(true)
 const ragQuery = ref('')
 const ragItems = ref([])
 const ragSearched = ref(false)
@@ -195,6 +195,15 @@ function statusLabel(s) {
 
 function prefix() {
   return smartMode.value ? v2Prefix : v1Prefix
+}
+
+function highlightText(text, query) {
+  if (!query || !text) return text
+  const words = query.split(/\s+/).filter(w => w.length >= 2)
+  if (!words.length) return text
+  const escaped = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const re = new RegExp(`(${escaped.join('|')})`, 'gi')
+  return text.replace(re, '<mark class="hl">$1</mark>')
 }
 
 watch(smartMode, () => {
@@ -416,6 +425,7 @@ onMounted(loadList)
 .rag-meta { font-size: 0.7rem; }
 .rag-content { font-size: 0.82rem; color: var(--text-secondary, #475569); line-height: 1.5; white-space: pre-wrap; }
 .rag-count { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); margin-top: 6px; }
+:deep(mark.hl) { background: #fef08a; color: #854d0e; padding: 0 2px; border-radius: 3px; font-weight: 600; }
 .upload-zone { border: 2px dashed var(--border-strong, rgba(0,0,0,0.15)); border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; color: var(--text-secondary, #64748b); font-size: 0.85rem; margin-bottom: 12px; }
 .upload-zone:hover, .upload-zone.active { border-color: var(--accent, #6366f1); background: rgba(99,102,241,0.04); color: var(--accent, #6366f1); }
 .toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }

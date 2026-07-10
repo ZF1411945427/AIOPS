@@ -31,15 +31,38 @@
     </div>
 
     <div v-if="showNodeDetail" class="modal-overlay" @click.self="showNodeDetail = false">
-      <div class="modal-box">
-        <h3>节点详情</h3>
+      <div class="modal-box modal-wide">
+        <h3>{{ nodeDetail.name || '节点详情' }}</h3>
         <div class="detail-row"><span class="detail-label">ID</span><span class="detail-val">{{ nodeDetail.id }}</span></div>
-        <div class="detail-row"><span class="detail-label">名称</span><span class="detail-val">{{ nodeDetail.name }}</span></div>
         <div class="detail-row"><span class="detail-label">类型</span><span class="badge" :style="{ background: typeColor(nodeDetail.type) + '22', color: typeColor(nodeDetail.type) }">{{ nodeDetail.type || '-' }}</span></div>
-        <div v-if="nodeDetail.properties" class="detail-block">
-          <div class="detail-label">属性</div>
-          <pre class="detail-pre">{{ formatProps(nodeDetail.properties) }}</pre>
+        <div v-if="nodeDetail.ip" class="detail-row"><span class="detail-label">IP</span><span class="detail-val mono">{{ nodeDetail.ip }}</span></div>
+        <div v-if="nodeDetail.status" class="detail-row"><span class="detail-label">状态</span><span class="detail-val">{{ nodeDetail.status }}</span></div>
+        <div v-if="nodeDetail.alert_count > 0" class="detail-row"><span class="detail-label">告警</span><span class="detail-val" style="color:#ef4444;font-weight:700">{{ nodeDetail.alert_count }} 条活跃告警</span></div>
+
+        <div v-if="connectedUp.length" class="detail-block">
+          <div class="detail-label conn-label">⬆ 上游依赖（它依赖谁）</div>
+          <div class="conn-list">
+            <div v-for="n in connectedUp" :key="n.id" class="conn-item" :style="{ borderLeftColor: typeColor(n.type) }">
+              <span class="conn-name">{{ n.name }}</span>
+              <span class="badge sm" :style="{ background: typeColor(n.type) + '22', color: typeColor(n.type) }">{{ n.type }}</span>
+            </div>
+          </div>
         </div>
+
+        <div v-if="connectedDown.length" class="detail-block">
+          <div class="detail-label conn-label">⬇ 下游影响（谁依赖它）</div>
+          <div class="conn-list">
+            <div v-for="n in connectedDown" :key="n.id" class="conn-item" :style="{ borderLeftColor: typeColor(n.type) }">
+              <span class="conn-name">{{ n.name }}</span>
+              <span class="badge sm" :style="{ background: typeColor(n.type) + '22', color: typeColor(n.type) }">{{ n.type }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!connectedUp.length && !connectedDown.length" class="detail-block">
+          <div class="detail-label" style="color:#94a3b8">暂无上下游关系</div>
+        </div>
+
         <div class="modal-actions"><button class="btn" @click="showNodeDetail = false">关闭</button></div>
       </div>
     </div>
@@ -59,6 +82,8 @@ let chart = null
 
 const showNodeDetail = ref(false)
 const nodeDetail = ref({})
+const connectedUp = ref([])
+const connectedDown = ref([])
 
 const typeColorMap = {
   service: '#3b82f6',
@@ -95,26 +120,29 @@ async function loadGraph() {
       node_count: data.node_count ?? (data.nodes || []).length,
       edge_count: data.edge_count ?? (data.edges || []).length
     }
+    loading.value = false
+    await nextTick()
     await nextTick()
     renderChart()
   } catch (e) {
-    ElMessage.error('加载图谱失败: ' + (e.message || e))
-  } finally {
     loading.value = false
+    ElMessage.error('加载图谱失败: ' + (e.message || e))
   }
 }
 
 function renderChart() {
-  if (!chartRef.value) return
+  if (!chartRef.value) { console.warn('[KG] chartRef is null'); return }
+  console.log('[KG] chartRef:', chartRef.value, 'size:', chartRef.value.offsetWidth, chartRef.value.offsetHeight)
   if (chart) chart.dispose()
   chart = echarts.init(chartRef.value)
 
   const nodes = (graph.value.nodes || []).map(n => ({
     id: String(n.id),
     name: n.name || n.label || String(n.id),
-    symbolSize: 36,
+    symbolSize: n.alert_count > 0 ? 48 : 30,
     category: n.type || 'other',
-    itemStyle: { color: typeColor(n.type) },
+    itemStyle: { color: typeColor(n.type), borderColor: '#fff', borderWidth: 2 },
+    label: { show: true, fontSize: 10, color: '#334155', formatter: (p) => p.name?.length > 12 ? p.name.slice(0, 12) + '...' : p.name },
     raw: n
   }))
 
@@ -141,26 +169,46 @@ function renderChart() {
       }
     },
     legend: { show: false },
+    animation: true,
+    animationDuration: 1500,
+    animationEasingUpdate: 'quinticInOut',
     series: [{
       type: 'graph',
       layout: 'force',
       roam: true,
       draggable: true,
-      force: { repulsion: 200, edgeLength: 120, gravity: 0.1 },
-      label: { show: true, position: 'right', fontSize: 11, color: '#475569' },
-      edgeLabel: { show: true },
+      force: { repulsion: [80, 300], edgeLength: [60, 180], gravity: 0.15, friction: 0.6 },
+      label: { show: true, position: 'right', fontSize: 10, color: '#475569' },
+      edgeLabel: { show: false },
       categories,
       data: nodes,
       links: edges,
-      lineStyle: { color: '#cbd5e1', width: 1, curveness: 0.1 },
-      emphasis: { focus: 'adjacency', lineStyle: { width: 2 } }
+      lineStyle: { color: '#cbd5e1', width: 0.8, curveness: 0.15, opacity: 0.6 },
+      emphasis: { focus: 'adjacency', lineStyle: { width: 2.5 }, itemStyle: { borderWidth: 3 } }
     }]
   })
+  console.log('[KG] chart rendered, nodes:', nodes.length, 'edges:', edges.length)
 
   chart.off('click')
   chart.on('click', (params) => {
     if (params.dataType === 'node' && params.data?.raw) {
+      const clickedId = params.data.id
       nodeDetail.value = params.data.raw
+
+      const allEdges = graph.value.edges || []
+      const nodeMap = {}
+      ;(graph.value.nodes || []).forEach(n => { nodeMap[String(n.id)] = n })
+
+      connectedUp.value = allEdges
+        .filter(e => String(e.target ?? e.to ?? e.target_id) === clickedId)
+        .map(e => nodeMap[String(e.source ?? e.from ?? e.source_id)])
+        .filter(Boolean)
+
+      connectedDown.value = allEdges
+        .filter(e => String(e.source ?? e.from ?? e.source_id) === clickedId)
+        .map(e => nodeMap[String(e.target ?? e.to ?? e.target_id)])
+        .filter(Boolean)
+
       showNodeDetail.value = true
     }
   })
@@ -196,7 +244,7 @@ onBeforeUnmount(() => {
 .legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-body { padding: 16px 18px; }
-.chart-box { width: 100%; height: 600px; }
+.chart-box { width: 100%; height: 700px; background: radial-gradient(circle at 50% 50%, rgba(99,102,241,0.03), transparent 70%); border-radius: 8px; }
 .loading-state, .empty-state { text-align: center; padding: 40px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 400px; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
@@ -207,6 +255,13 @@ onBeforeUnmount(() => {
 .detail-block { margin: 10px 0; }
 .detail-pre { margin-top: 4px; padding: 10px; background: var(--bg-hover, rgba(0,0,0,0.03)); border-radius: 6px; font-size: 0.75rem; white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
+.badge.sm { font-size: 0.65rem; padding: 1px 6px; }
+.modal-wide { min-width: 480px; max-width: 560px; }
+.conn-label { font-weight: 600; color: var(--text, #1e293b); margin-bottom: 6px; }
+.conn-list { display: flex; flex-direction: column; gap: 4px; }
+.conn-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-left: 3px solid #cbd5e1; background: var(--bg-hover, rgba(0,0,0,0.02)); border-radius: 0 6px 6px 0; font-size: 0.82rem; }
+.conn-name { flex: 1; color: var(--text, #1e293b); font-weight: 500; }
+.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }

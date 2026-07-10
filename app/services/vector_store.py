@@ -12,7 +12,7 @@ from pymilvus import MilvusClient, DataType
 # 配置
 _MILVUS_DB_PATH = str(Path(__file__).resolve().parent.parent.parent / "docker" / "milvus" / "kb_v2.db")
 _COLLECTION_NAME = "kb_chunks_v2"
-_DIMENSION = 1024  # BGE-M3 输出维度
+_DIMENSION = 512  # BGE-small-zh 输出维度
 
 # 全局客户端
 _client: Optional[MilvusClient] = None
