@@ -133,6 +133,7 @@ def _runbook_recommend(db, alert, limit=3):
 def _score_runbook(alert, rb, db):
     score = 0
     reasons = []
+    has_content_match = False
 
     rb_tags = _parse_tags(rb.tags)
     metric = (alert.metric_name or "").lower()
@@ -142,28 +143,20 @@ def _score_runbook(alert, rb, db):
             if metric == tag_lower or metric in tag_lower or tag_lower in metric:
                 score += 5
                 reasons.append("metric_tag:%s" % tag)
+                has_content_match = True
                 break
         title_lower = (rb.title or "").lower()
         if metric.replace("_", "") in title_lower.replace("_", "") or metric in title_lower:
             score += 3
             reasons.append("metric_in_title")
-
-    if alert.severity and rb.severity:
-        sev_order = {"critical": 4, "high": 3, "warning": 2, "info": 1}
-        a_sev = sev_order.get(alert.severity, 0)
-        e_sev = sev_order.get(rb.severity, 0)
-        if a_sev == e_sev:
-            score += 2
-            reasons.append("severity_exact")
-        elif abs(a_sev - e_sev) == 1:
-            score += 1
-            reasons.append("severity_adjacent")
+            has_content_match = True
 
     if alert.asset_id and rb.asset_type:
         asset = db.query(Asset).filter(Asset.id == alert.asset_id).first()
         if asset and asset.type and asset.type.lower() == rb.asset_type.lower():
             score += 3
             reasons.append("asset_type_match")
+            has_content_match = True
 
     alert_msg = (alert.message or "").lower()
     symptom = (rb.symptom or "").lower()
@@ -175,6 +168,21 @@ def _score_runbook(alert, rb, db):
             ratio = len(overlap) / max(len(symptom_words), 1)
             score += round(ratio * 4, 2)
             reasons.append("text_overlap:%s" % ",".join(list(overlap)[:3]))
+            has_content_match = True
+
+    if not has_content_match:
+        return 0, []
+
+    if alert.severity and rb.severity:
+        sev_order = {"critical": 4, "high": 3, "warning": 2, "info": 1}
+        a_sev = sev_order.get(alert.severity, 0)
+        e_sev = sev_order.get(rb.severity, 0)
+        if a_sev == e_sev:
+            score += 1
+            reasons.append("severity_exact")
+        elif abs(a_sev - e_sev) == 1:
+            score += 0.5
+            reasons.append("severity_adjacent")
 
     return score, reasons
 
