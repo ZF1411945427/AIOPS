@@ -19,6 +19,20 @@
 
 ---
 
+## 2026-07-13: 服务器全量部署 (39.96.51.45)
+- **部署内容**: 后端 + Web前端 + Mobile前端，全部通过 FastAPI 8000 端口服务
+- **备份**: `/data/AIOPS.bak.20260713_deploy.tar.gz`（轻量备份，排除 models/bin）
+- **代码更新**: `tar -xf aiops_deploy.tar` 解压到 `/data/AIOPS/`（复用服务器已有 bin/models）
+- **依赖安装**: 服务器 Python 3.11，用清华镜像分4批安装（loguru/openai/sentence-transformers/pymilvus/langchain/faiss/elasticsearch/torch 等）
+  - ⚠️ `scipy==1.18.0` 需 Python 3.12+，服务器是 3.11，改用不锁版本安装
+  - ⚠️ `pywin32`/`win32_setctime` 是 Windows 专属，服务器跳过
+  - ⚠️ `starlette` 版本冲突：mcp/sse-starlette 要求 >=0.49.1，fastapi 0.115.6 要求 <0.42.0，最终锁定 `starlette==0.41.3 + sse-starlette<3.4`
+- **服务器无 GPU**，torch 2.13.0 自动 fallback 到 CPU 模式
+- **BGE 模型加载成功**，AuroraX Reranker 模型在 `/data/AIOPS/models/` 可用
+- **访问地址**: Web → http://39.96.51.45:8000/ | Mobile → http://39.96.51.45:8000/mobile-app/
+- **启动方式**: `cd /data/AIOPS && setsid python3 run.py > /tmp/aiops_backend.log 2>&1 &`
+- **内存占用**: ~1GB（3.5GB 总内存），磁盘 51% 已用
+
 ## 2026-07-13: V1/V2 引擎标识 + 跨引擎安全删除
 - `KbDocument` 新增 `index_engine` 字段（v1/v2/both）
 - V1 删除时清理 Milvus，V2 删除时清理 SQLite，防止跨引擎孤儿数据
