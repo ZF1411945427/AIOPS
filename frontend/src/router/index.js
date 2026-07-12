@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import AppLayout from '@/layout/AppLayout.vue'
-import LoginView from '@/views/LoginView.vue'
+import { defineAsyncComponent } from 'vue'
+
+const AppLayout = defineAsyncComponent(() => import('@/layout/AppLayout.vue'))
 
 const routes = [
     { path: '/error-budget', name: 'ErrorBudget', component: () => import('../views/ErrorBudgetView.vue') },
@@ -11,7 +12,7 @@ const routes = [
   {
     path: '/login',
     name: 'login',
-    component: LoginView,
+    component: () => import('../views/LoginView.vue'),
     meta: { title: '登录' },
   },
   {

@@ -9,3 +9,8 @@ router = APIRouter(prefix="/alert-storm", tags=["alert_storm"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "alert_storm", "status": "ok"}
+
+

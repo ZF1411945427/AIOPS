@@ -3,8 +3,10 @@ from fastapi.responses import JSONResponse
 from app.template_utils import get_templates
 
 from app.database import get_db
+from app.models import MetricRecord
 from app.services import anomaly_service
 from sqlalchemy.orm import Session
+from sqlalchemy import distinct
 
 router = APIRouter(prefix="/anomaly", tags=["anomaly"])
 templates = get_templates()
@@ -68,5 +70,12 @@ def api_config_delete(config_id: int, db: Session = Depends(get_db)):
     """删除异常检测配置 JSON API."""
     anomaly_service.delete_config(db, config_id)
     return JSONResponse({"ok": True})
+
+
+@router.get("/api/metrics")
+def api_metric_list(db: Session = Depends(get_db)):
+    """动态获取指标名列表（从 MetricRecord 表去重查询）."""
+    names = db.query(distinct(MetricRecord.name)).order_by(MetricRecord.name).all()
+    return JSONResponse({"metrics": [n[0] for n in names]})
 
 

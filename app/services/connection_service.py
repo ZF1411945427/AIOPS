@@ -14,7 +14,7 @@ class ConnectionTester:
             if connection_type == "ssh":
                 return ConnectionTester._test_ssh(host, config)
             elif connection_type == "kubernetes":
-                return ConnectionTester._test_kubernetes(config)
+                return ConnectionTester._test_kubernetes(host, config)
             elif connection_type == "snmp":
                 return ConnectionTester._test_snmp(host, config)
             elif connection_type == "http":
@@ -28,7 +28,7 @@ class ConnectionTester:
 
     @staticmethod
     def _test_ssh(host: str, config: dict) -> dict:
-        """测试 SSH 连接"""
+        """测试 SSH 连接（添加新资产专用：自动注册主机指纹）"""
         if not host:
             return {"ok": False, "message": "IP地址不能为空"}
 
@@ -47,33 +47,31 @@ class ConnectionTester:
             return {"ok": False, "message": f"端口 {port} 无法连接: {e}"}
 
         try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            from app.services.ssh_helper import test_and_register_ssh
+            from io import StringIO
 
+            pkey = None
             if private_key:
                 try:
-                    from io import StringIO
-                    key_obj = paramiko.RSAKey.from_private_key(StringIO(private_key))
+                    pkey = paramiko.RSAKey.from_private_key(StringIO(private_key))
                 except:
                     try:
-                        key_obj = paramiko.ECDSAKey.from_private_key(StringIO(private_key))
+                        pkey = paramiko.ECDSAKey.from_private_key(StringIO(private_key))
                     except:
-                        key_obj = paramiko.Ed25519Key.from_private_key(StringIO(private_key))
-                ssh.connect(host, port=port, username=username, pkey=key_obj, timeout=timeout, banner_timeout=timeout)
-            elif password:
-                ssh.connect(host, port=port, username=username, password=password, timeout=timeout, banner_timeout=timeout)
-            else:
-                ssh.connect(host, port=port, username=username, timeout=timeout, banner_timeout=timeout, look_for_keys=False, allow_agent=False)
+                        pkey = paramiko.Ed25519Key.from_private_key(StringIO(private_key))
 
-            stdin, stdout, stderr = ssh.exec_command("echo ok", timeout=5)
-            result = stdout.read().decode().strip()
-            ssh.close()
+            result = test_and_register_ssh(
+                host=host, port=port, username=username,
+                password=password, pkey=pkey, timeout=timeout,
+            )
 
-            if result == "ok":
+            if result["ok"]:
                 latency = (datetime.now() - start).total_seconds() * 1000
-                return {"ok": True, "message": f"连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
-            else:
-                return {"ok": False, "message": "命令执行异常"}
+                result["latency_ms"] = latency
+                result["message"] = f"{result['message']} (延迟 {latency:.0f}ms)"
+
+            return result
+
         except paramiko.AuthenticationException:
             return {"ok": False, "message": "认证失败，用户名或密码错误"}
         except paramiko.SSHException as e:
@@ -84,16 +82,19 @@ class ConnectionTester:
             return {"ok": False, "message": f"连接异常: {e}"}
 
     @staticmethod
-    def _test_kubernetes(config: dict) -> dict:
-        """测试 Kubernetes 连接"""
+    def _test_kubernetes(host: str, config: dict) -> dict:
+        """测试 Kubernetes 连接
+
+        统一字段名: k8s_api_server / k8s_token（见 CONTRACT.md）
+        host 参数（asset.ip）作为 api_server 的 fallback。
+        """
         try:
             from kubernetes import client, config as k8s_config
             from kubernetes.client.rest import ApiException
 
             kubeconfig = config.get("kubeconfig", "")
-            api_server = config.get("api_server", "")
-            token = config.get("token", "")
-            namespace = config.get("namespace", "default")
+            api_server = config.get("k8s_api_server") or host or ""
+            token = config.get("k8s_token") or ""
 
             if kubeconfig:
                 try:
@@ -105,12 +106,12 @@ class ConnectionTester:
                     configuration = client.Configuration()
                     configuration.host = api_server
                     configuration.api_key = {"authorization": f"Bearer {token}"}
-                    configuration.verify_ssl = False
+                    configuration.verify_ssl = config.get("verify_ssl", False)
                     client.Configuration.set_default(configuration)
                 except Exception as e:
                     return {"ok": False, "message": f"K8s API 配置错误: {e}"}
             else:
-                return {"ok": False, "message": "缺少 kubeconfig 或 api_server/token"}
+                return {"ok": False, "message": "缺少 kubeconfig 或 k8s_api_server/k8s_token"}
 
             v1 = client.CoreV1Api()
             start = datetime.now()
@@ -133,7 +134,7 @@ class ConnectionTester:
 
         community = config.get("snmp_community", "public")
         oid = config.get("snmp_oid", "1.3.6.1.2.1.1.1.0")
-        version = config.get("snmp_version", "2c")
+        version = config.get("snmp_version", "v2c")
         timeout = 10
 
         try:
@@ -141,7 +142,7 @@ class ConnectionTester:
         except ImportError:
             try:
                 result = subprocess.run(
-                    ["snmpget", "-v", "2c" if version == "2c" else "1", "-c", community, host, oid, "-t", str(timeout)],
+                    ["snmpget", "-v", "2c" if version.lstrip("v") == "2c" else "1", "-c", community, host, oid, "-t", str(timeout)],
                     capture_output=True, text=True, timeout=timeout + 5
                 )
                 start = datetime.now()
@@ -158,7 +159,7 @@ class ConnectionTester:
         start = datetime.now()
         try:
             var = netsnmp.Varbind(oid)
-            result = netsnmp.snmpget(var, Version=2 if version == "2c" else 1, DestHost=host, Community=community, Timeout=timeout * 1000000)
+            result = netsnmp.snmpget(var, Version=2 if version.lstrip("v") == "2c" else 1, DestHost=host, Community=community, Timeout=timeout * 1000000)
             latency = (datetime.now() - start).total_seconds() * 1000
             if result and result[0]:
                 return {"ok": True, "message": f"SNMP 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
@@ -169,7 +170,10 @@ class ConnectionTester:
 
     @staticmethod
     def _test_http(host: str, config: dict) -> dict:
-        """测试 HTTP/HTTPS API 连接"""
+        """测试 HTTP/HTTPS API 连接
+
+        认证字段: http_auth (basic/bearer) + http_credential (见 CONTRACT.md)
+        """
         url = config.get("http_url", "")
         if not url:
             if host:
@@ -177,23 +181,29 @@ class ConnectionTester:
             else:
                 return {"ok": False, "message": "URL 不能为空"}
 
-        username = config.get("http_user", "")
-        password = config.get("http_password", "")
-        headers = config.get("http_headers", {})
-        timeout = config.get("http_timeout", 10)
+        http_auth_mode = config.get("http_auth", "")
+        http_credential = config.get("http_credential", "")
+        timeout = 10
 
         start = datetime.now()
         try:
             import requests
-            auth = None
-            if username and password:
-                auth = (username, password)
 
-            kwargs = {"timeout": timeout, "headers": headers, "auth": auth}
+            auth = None
+            headers = {}
+            if http_auth_mode == "basic" and http_credential:
+                if ":" in http_credential:
+                    user, pwd = http_credential.split(":", 1)
+                    auth = (user, pwd)
+                else:
+                    auth = (http_credential, "")
+            elif http_auth_mode == "bearer" and http_credential:
+                headers["Authorization"] = f"Bearer {http_credential}"
+
             if not url.startswith("https") and not url.startswith("http"):
                 url = f"http://{url}"
 
-            resp = requests.get(url, **kwargs)
+            resp = requests.get(url, timeout=timeout, headers=headers, auth=auth)
             latency = (datetime.now() - start).total_seconds() * 1000
 
             if resp.status_code < 500:

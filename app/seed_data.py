@@ -494,7 +494,7 @@ def seed_all():
             ("user-svc-deploy", "deployment", "", "online", ["k8s", "api"]),
             ("k8s-svc-nginx", "service", "10.0.30.1", "online", ["k8s", "web"]),
             ("k8s-svc-api", "service", "10.0.30.2", "online", ["k8s", "api"]),
-            ("k8s-cluster-prod", "cluster", "", "online", ["k8s", "cluster"]),
+            ("k8s-cluster-prod", "kubernetes_cluster", "", "online", ["k8s", "cluster"]),
         ]
         for name, ci_t, ip, status, tags in k8s_assets:
             existing = db.query(Asset).filter(Asset.name == name).first()
@@ -518,7 +518,7 @@ def seed_all():
     # ── K8s DataSource ──
     if not db.query(DataSource).filter(DataSource.type == "kubernetes").first():
         db.add(DataSource(name="生产 K8s 集群", type="kubernetes", endpoint="https://k8s-api.prod.local:6443",
-            auth_config=json.dumps({"auth_type": "token", "token": "seed-k8s-token"}),
+            auth_config=json.dumps({"k8s_api_server": "https://k8s-api.prod.local:6443", "k8s_token": "seed-k8s-token", "verify_ssl": False}),
             last_status="unknown", enabled=False))
 
     # ── AutoRemediation (5) ──
@@ -801,7 +801,8 @@ def seed_all():
                         )),
                     }),
                 ))
-        print("[seed] 12 beautiful traces seeded with realistic microservice spans")
+        from app.logger import logger
+        logger.info("12 beautiful traces seeded with realistic microservice spans")
 
     # ── AlertSuppression (5) ──
     if db.query(AlertSuppression).count() < 3:
@@ -818,7 +819,8 @@ def seed_all():
 
     db.commit()
     db.close()
-    print("[seed] Demo data seeded successfully: 30+ assets, 10 rules, 80 alerts, 12 incidents, 45 k8s events, metric timeseries, 6 chats, 15 change requests, knowledge base, runbooks, netflow, posture records.")
+    from app.logger import logger
+    logger.info("Demo data seeded successfully: 30+ assets, 10 rules, 80 alerts, 12 incidents, 45 k8s events, metric timeseries, 6 chats, 15 change requests, knowledge base, runbooks, netflow, posture records.")
 
 
 if __name__ == "__main__":

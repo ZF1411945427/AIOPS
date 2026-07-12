@@ -8,3 +8,8 @@ router = APIRouter(prefix="/asset-changes", tags=["asset_changes"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "asset_changes", "status": "ok"}
+
+

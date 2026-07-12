@@ -1,16 +1,14 @@
-import hashlib
-
 from fastapi import APIRouter, Depends, Request, Body
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.database import get_db
 from app.models import User
+from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
-
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+_limiter = Limiter(key_func=get_remote_address)
 
 
 def require_admin(request: Request, db: Session = Depends(get_db)):
@@ -41,7 +39,8 @@ def api_user_list(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/api/create")
-def api_user_create(payload: dict = Body(...), request: Request = None, db: Session = Depends(get_db)):
+@_limiter.limit("5/minute")
+def api_user_create(request: Request, payload: dict = Body(...), db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
         return {"status": "error", "message": "无权限"}
@@ -75,6 +74,7 @@ def api_user_delete(user_id: int, request: Request, db: Session = Depends(get_db
 
 
 @router.post("/api/{user_id}/reset-password")
+@_limiter.limit("5/minute")
 def api_reset_password(user_id: int, payload: dict = Body(...), request: Request = None, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
@@ -91,6 +91,7 @@ def api_reset_password(user_id: int, payload: dict = Body(...), request: Request
 
 
 @router.post("/api/change-password")
+@_limiter.limit("5/minute")
 def api_change_password(payload: dict = Body(...), request: Request = None, db: Session = Depends(get_db)):
     user_id = request.session.get("user_id")
     if not user_id:
@@ -102,11 +103,11 @@ def api_change_password(payload: dict = Body(...), request: Request = None, db: 
     new_password = payload.get("new_password", "")
     if not old_password or not new_password:
         return {"status": "error", "message": "旧密码和新密码不能为空"}
-    if user.password_hash != hash_password(old_password):
+    if not verify_password(old_password, user.password_hash):
         return {"status": "error", "message": "旧密码错误"}
     if len(new_password) < 4:
         return {"status": "error", "message": "新密码至少4位"}
-    if hash_password(new_password) == user.password_hash:
+    if verify_password(new_password, user.password_hash):
         return {"status": "error", "message": "新密码不能与旧密码相同"}
     user.password_hash = hash_password(new_password)
     db.commit()

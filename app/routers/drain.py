@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Body, Request
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/drain", tags=["drain"])
@@ -43,5 +43,15 @@ def drain_cluster(logs: list[str], similarity_threshold: float = 0.5) -> list[di
         {"template": c["template"], "count": c["count"], "logs": c["logs"]}
         for c in sorted(clusters, key=lambda x: -x["count"])
     ]
+
+
+@router.get("/status")
+def status():
+    return {"module": "drain", "status": "ok"}
+
+
+@router.post("/cluster")
+def cluster_logs(logs: list[str] = Body(...), similarity_threshold: float = 0.5):
+    return {"clusters": drain_cluster(logs, similarity_threshold)}
 
 

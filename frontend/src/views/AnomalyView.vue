@@ -46,6 +46,10 @@
       <div class="info-card"><h4>3σ 检测</h4><p>基于均值和标准差，值偏离均值超过 N 倍标准差判定为异常。适用于正态分布数据。</p></div>
       <div class="info-card"><h4>EWMA 检测</h4><p>指数加权移动平均，对近期数据更敏感，通过残差判定异常。适用于趋势性数据。</p></div>
       <div class="info-card"><h4>STL 分解</h4><p>将时序分解为趋势+季节+残差，残差异常判定。适用于周期性数据。</p></div>
+      <div class="info-card"><h4>MAD 检测</h4><p>中位数绝对偏差，对极端值鲁棒，通过修正 Z 分数判定异常。适用于非正态分布或含离群点数据。</p></div>
+      <div class="info-card"><h4>Prophet</h4><p>Facebook 时序预测模型，自动拟合趋势+季节性，预测区间外的值判定为异常。适用于强周期性业务指标。</p></div>
+      <div class="info-card"><h4>LSTM</h4><p>滑动窗口线性预测模拟 LSTM 行为，通过预测残差与动态阈值比较判定异常。适用于短序列趋势预测。</p></div>
+      <div class="info-card"><h4>Transformer</h4><p>基于自注意力机制，通过注意力权重重建序列，残差超过动态阈值判定为异常。适用于多变量关联时序。</p></div>
     </div>
 
     <div v-if="createVisible" class="modal-overlay" @click.self="createVisible = false">
@@ -62,11 +66,8 @@
           <div class="form-group">
             <label>指标</label>
             <select v-model="form.metric_name">
-              <option value="cpu_usage">cpu_usage</option>
-              <option value="memory_usage">memory_usage</option>
-              <option value="disk_usage">disk_usage</option>
-              <option value="network_in">network_in</option>
-              <option value="network_out">network_out</option>
+              <option v-for="m in metrics" :key="m" :value="m">{{ m }}</option>
+              <option v-if="!metrics.length" value="cpu_usage">cpu_usage</option>
             </select>
           </div>
           <div class="form-group">
@@ -111,12 +112,25 @@ import request from '@/api/request'
 const loading = ref(false)
 const configs = ref([])
 const total = ref(0)
+const metrics = ref([])
 const createVisible = ref(false)
 const creating = ref(false)
 const form = reactive({
   name: '', metric_name: 'cpu_usage', algorithm: 'sigma',
   sensitivity: 3.0, window_size: 20, period: 12,
 })
+
+async function loadMetrics() {
+  try {
+    const data = await request.get('/anomaly/api/metrics')
+    metrics.value = data.metrics || []
+    if (metrics.value.length && !metrics.value.includes(form.metric_name)) {
+      form.metric_name = metrics.value[0]
+    }
+  } catch (e) {
+    // 降级使用默认值
+  }
+}
 
 async function loadConfigs() {
   loading.value = true
@@ -183,7 +197,10 @@ async function deleteConfig(c) {
   }
 }
 
-onMounted(loadConfigs)
+onMounted(() => {
+  loadConfigs()
+  loadMetrics()
+})
 </script>
 
 <style scoped>
@@ -211,7 +228,7 @@ onMounted(loadConfigs)
 .badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.info { background: rgba(100,116,139,0.1); color: #64748b; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
-.info-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+.info-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
 .info-card { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; padding: 14px; }
 .info-card h4 { margin: 0 0 6px; font-size: 0.9rem; color: var(--accent, #6366f1); }
 .info-card p { margin: 0; font-size: 0.78rem; color: var(--text-secondary, #64748b); line-height: 1.5; }

@@ -45,6 +45,7 @@ def _doc_to_dict(d):
         "tags": d.tags or "",
         "asset_type": d.asset_type or "",
         "severity": d.severity or "warning",
+        "index_engine": getattr(d, "index_engine", "v1") or "v1",
         "created_by": d.created_by,
         "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else None,
         "updated_at": d.updated_at.strftime("%Y-%m-%d %H:%M:%S") if d.updated_at else None,
@@ -165,7 +166,7 @@ async def api_doc_upload(
             return JSONResponse(
                 {"ok": False, "error": f"文件过大（{len(content_bytes)//1024}KB），限制 10MB"},
                 status_code=400)
-        safe_name = (file.filename or "upload.txt").replace("/", "_").replace("\\", "_")
+        safe_name = (file.filename or "upload.txt").replace("/", "_").replace("\\", "_").replace("..", "_")
         saved_path = _UPLOAD_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
         with open(saved_path, "wb") as f:
             f.write(content_bytes)
@@ -181,6 +182,7 @@ async def api_doc_upload(
             "asset_type": asset_type,
             "severity": severity,
             "status": "pending",
+            "index_engine": "v1",
             "created_by": user_id,
         })
         success, msg = rag_service.index_document(db, doc.id)
@@ -211,7 +213,15 @@ def api_doc_reindex(doc_id: int, db: Session = Depends(get_db)):
 def api_doc_delete(doc_id: int, db: Session = Depends(get_db)):
     try:
         doc = rag_service.get_document(db, doc_id)
-        if doc and doc.file_path and os.path.exists(doc.file_path):
+        if not doc:
+            return JSONResponse({"ok": False, "error": "文档不存在"}, status_code=404)
+        # 同时清理 Milvus 侧（防止 V2 索引残留孤儿向量）
+        try:
+            from app.services import vector_store
+            vector_store.delete_by_document(doc_id)
+        except Exception:
+            pass
+        if doc.file_path and os.path.exists(doc.file_path):
             try:
                 os.remove(doc.file_path)
             except OSError:

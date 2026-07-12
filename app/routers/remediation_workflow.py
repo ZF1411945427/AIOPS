@@ -49,11 +49,23 @@ def _wf_log_to_dict(lg) -> dict:
 def api_workflow_list(db: Session = Depends(get_db)):
     """自愈工作流列表 JSON API."""
     workflows = db.query(RemediationWorkflow).order_by(RemediationWorkflow.id.desc()).all()
-    logs = get_remediation_logs(db)
     return JSONResponse({
         "workflows": [_workflow_to_dict(w) for w in workflows],
-        "logs": [_wf_log_to_dict(l) for l in logs],
         "total": len(workflows),
+    })
+
+
+@router.get("/api/logs")
+def api_workflow_logs(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    """自愈日志分页查询 JSON API."""
+    from app.services.remediation_service import get_remediation_logs_paged
+    items, total, total_pages = get_remediation_logs_paged(db, page, per_page)
+    return JSONResponse({
+        "items": [_wf_log_to_dict(lg) for lg in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
     })
 
 

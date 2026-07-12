@@ -17,6 +17,7 @@ CI_COLORS = {
     "storage": "#14b8a6",
     "network": "#64748b",
     "cluster": "#6366f1",
+    "kubernetes_cluster": "#6366f1",
     "namespace": "#a78bfa",
     "deployment": "#34d399",
     "node": "#94a3b8",

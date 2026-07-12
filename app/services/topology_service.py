@@ -35,7 +35,7 @@ def build_k8s_topo_graph(db: Session):
     孤岛标记: configmap/secret/pvc 的 attrs.orphan=true 时节点标记 abnormal
     """
     # 排除 deprecated（旧 pod/replicaset 记录已降级）
-    container_types = ["cluster", "kubernetes_cluster", "namespace", "node",
+    container_types = ["kubernetes_cluster", "namespace", "node",
                        "deployment", "statefulset", "daemonset",
                        "service", "ingress", "pvc", "pv",
                        "configmap", "secret"]
@@ -43,7 +43,15 @@ def build_k8s_topo_graph(db: Session):
     all_assets = [a for a in all_assets if a.status != "deprecated"]
 
     # 只保留：1）kubernetes_cluster/cluster 根节点 2）有 parent_id 且父级在集合中的后代
-    cluster_ids = set(a.id for a in all_assets if a.ci_type in ("kubernetes_cluster", "cluster"))
+    all_clusters = [a for a in all_assets if a.ci_type == "kubernetes_cluster"]
+    # 按集群名去重：同名 cluster 只保留子资产最多的那个（防止重复纳管导致统计翻倍）
+    _root_by_name = {}
+    for c in all_clusters:
+        key = c.name
+        cnt = sum(1 for a in all_assets if a.parent_id == c.id)
+        if key not in _root_by_name or cnt > sum(1 for a in all_assets if a.parent_id == _root_by_name[key].id):
+            _root_by_name[key] = c
+    cluster_ids = set(c.id for c in _root_by_name.values())
     valid_ids = set(cluster_ids)
     changed = True
     while changed:
@@ -62,11 +70,12 @@ def build_k8s_topo_graph(db: Session):
         attrs = _parse_attrs(a)
         asset_map[a.id] = {"asset": a, "attrs": attrs}
         full_name_to_id[a.name] = a.id
+        ci_type = a.ci_type
         # 异常标记：orphan 资源 / 工作负载 pod 概要异常 / status offline
         is_abnormal = False
         if attrs.get("orphan"):
             is_abnormal = True
-        if a.ci_type in ("deployment", "statefulset", "daemonset"):
+        if ci_type in ("deployment", "statefulset", "daemonset"):
             ps = attrs.get("pod_summary") or {}
             if ps.get("failed", 0) > 0 or (ps.get("total", 0) > 0 and ps.get("running", 0) == 0):
                 is_abnormal = True
@@ -76,7 +85,7 @@ def build_k8s_topo_graph(db: Session):
             "id": a.id,
             "name": a.name.split("/")[-1] if "/" in a.name else a.name,
             "full_name": a.name,
-            "ci_type": a.ci_type,
+            "ci_type": ci_type,
             "status": a.status,
             "cluster": a.k8s_cluster or attrs.get("k8s_cluster", ""),
             "attrs": attrs,
@@ -159,16 +168,14 @@ def build_k8s_topo_graph(db: Session):
 
     # 构建树形结构（按 ci_type 语义分层，不依赖 owns 边）
     node_dict = {n["id"]: n for n in nodes}
-    roots = [n for n in nodes if n["ci_type"] in ("kubernetes_cluster", "cluster")]
+    roots = [n for n in nodes if n["ci_type"] == "kubernetes_cluster"]
 
     # 构建 parent_id 索引
     by_parent = {}
     for n in nodes:
         pid = n.get("parent_id")
         if pid:
-            if pid not in by_parent:
-                by_parent[pid] = []
-            by_parent[pid].append(n)
+            by_parent.setdefault(pid, []).append(n)
 
     # 同时构建 name 索引用于 ns→deploy 的关联（deployment/pod 的 name 含 namespace 前缀）
     name_to_node = {n["name"]: n for n in nodes}
@@ -278,15 +285,11 @@ def build_topo(db: Session):
 
     for root in roots:
         trees.append(build_node(root.id))
-    orphans = [a for a in assets if a.id not in linked and a.id not in {r.parent_id for r in relations}]
-    for o in orphans:
-        if o.id not in linked:
-            trees.append(build_node(o.id))
     return trees
 
 
 def build_container_topo(db: Session):
-    container_types = ["cluster", "namespace", "node", "deployment", "statefulset", "daemonset",
+    container_types = ["kubernetes_cluster", "namespace", "node", "deployment", "statefulset", "daemonset",
                        "service", "ingress", "pvc", "pv", "configmap", "secret", "container"]
     assets = db.query(Asset).filter(Asset.ci_type.in_(container_types)).order_by(Asset.ci_type, Asset.name).all()
     assets = [a for a in assets if a.status != "deprecated"]

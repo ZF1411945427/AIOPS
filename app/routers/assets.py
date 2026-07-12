@@ -7,7 +7,8 @@ from app.database import get_db
 from app.template_utils import get_templates
 from app.services import asset_service
 from app.services.connection_service import ConnectionTester
-from app.models import Asset, DataSource, AssetLifecycle
+from app.models import Asset, DataSource, AssetLifecycle, ChatSession, ChatMessage, AssetSessionLink
+from app.services.agent_service import get_or_create_session, add_message
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 templates = get_templates()
@@ -73,44 +74,42 @@ def api_asset_delete(asset_id: int, db: Session = Depends(get_db)):
 
 
 def _build_connection_config(payload: dict) -> dict:
-    """根据 payload 字段构造 connection_config dict."""
+    """根据 payload 字段构造 connection_config dict.
+
+    字段名以 CONTRACT.md 为准（Single Source of Truth）。
+    """
     ct = payload.get("connection_type", "ssh")
+    # 合并已有 config（编辑场景：connection_config 已存则作为 base）
+    base = {}
+    if payload.get("connection_config"):
+        try:
+            base = json.loads(payload["connection_config"]) if isinstance(payload["connection_config"], str) else payload["connection_config"]
+        except Exception:
+            base = {}
+
     if ct == "ssh":
         return {
-            "ssh_user": payload.get("ssh_user", "root"),
-            "ssh_password": payload.get("ssh_password", ""),
-            "ssh_port": int(payload.get("ssh_port", 22)),
+            "ssh_user": payload.get("ssh_user", base.get("ssh_user", "root")),
+            "ssh_password": payload.get("ssh_password", base.get("ssh_password", "")),
+            "ssh_port": int(payload.get("ssh_port", base.get("ssh_port", 22))),
         }
     elif ct == "kubernetes":
-        cfg = {}
-        if payload.get("connection_config"):
-            try:
-                cfg = json.loads(payload["connection_config"]) if isinstance(payload["connection_config"], str) else payload["connection_config"]
-            except Exception:
-                cfg = {}
+        cfg = dict(base)
         if payload.get("k8s_api_server"):
             cfg["k8s_api_server"] = payload["k8s_api_server"]
         if payload.get("k8s_token"):
             cfg["k8s_token"] = payload["k8s_token"]
+        if payload.get("k8s_namespace"):
+            cfg["k8s_namespace"] = payload["k8s_namespace"]
         return cfg
     elif ct == "snmp":
-        cfg = {}
-        if payload.get("connection_config"):
-            try:
-                cfg = json.loads(payload["connection_config"]) if isinstance(payload["connection_config"], str) else payload["connection_config"]
-            except Exception:
-                cfg = {}
-        cfg["snmp_community"] = payload.get("snmp_community", cfg.get("snmp_community", "public"))
-        cfg["snmp_port"] = int(payload.get("snmp_port", cfg.get("snmp_port", 161)))
-        cfg["snmp_version"] = payload.get("snmp_version", cfg.get("snmp_version", "v2c"))
-        return cfg
+        return {
+            "snmp_community": payload.get("snmp_community", base.get("snmp_community", "public")),
+            "snmp_port": int(payload.get("snmp_port", base.get("snmp_port", 161))),
+            "snmp_version": payload.get("snmp_version", base.get("snmp_version", "v2c")),
+        }
     elif ct == "http":
-        cfg = {}
-        if payload.get("connection_config"):
-            try:
-                cfg = json.loads(payload["connection_config"]) if isinstance(payload["connection_config"], str) else payload["connection_config"]
-            except Exception:
-                cfg = {}
+        cfg = dict(base)
         if payload.get("http_url"):
             cfg["http_url"] = payload["http_url"]
         if payload.get("http_auth"):
@@ -119,19 +118,13 @@ def _build_connection_config(payload: dict) -> dict:
             cfg["http_credential"] = payload["http_credential"]
         return cfg
     elif ct == "database":
-        cfg = {}
-        if payload.get("connection_config"):
-            try:
-                cfg = json.loads(payload["connection_config"]) if isinstance(payload["connection_config"], str) else payload["connection_config"]
-            except Exception:
-                cfg = {}
-        cfg["db_type"] = payload.get("db_type", cfg.get("db_type", "mysql"))
-        cfg["db_port"] = int(payload.get("db_port", cfg.get("db_port", 3306)))
-        cfg["db_user"] = payload.get("db_user", cfg.get("db_user", "root"))
-        cfg["db_password"] = payload.get("db_password", cfg.get("db_password", ""))
-        if payload.get("db_name"):
-            cfg["db_name"] = payload["db_name"]
-        return cfg
+        return {
+            "db_type": payload.get("db_type", base.get("db_type", "mysql")),
+            "db_port": int(payload.get("db_port", base.get("db_port", 3306))),
+            "db_user": payload.get("db_user", base.get("db_user", "root")),
+            "db_password": payload.get("db_password", base.get("db_password", "")),
+            "db_name": payload.get("db_name", base.get("db_name", "")),
+        }
     return {}
 
 
@@ -188,7 +181,7 @@ def api_asset_update(asset_id: int, payload: dict, db: Session = Depends(get_db)
     if "connection_config" in payload:
         cfg = payload["connection_config"]
         data["connection_config"] = json.dumps(cfg, ensure_ascii=False) if isinstance(cfg, dict) else cfg
-    elif any(k in payload for k in ("ssh_user", "ssh_password", "ssh_port", "k8s_api_server", "k8s_token", "http_url", "db_type")):
+    elif any(k in payload for k in ("ssh_user", "ssh_password", "ssh_port", "k8s_api_server", "k8s_token", "http_url", "http_auth", "http_credential", "db_type", "db_port", "db_user", "db_password", "db_name", "snmp_community", "snmp_port", "snmp_version")):
         config = _build_connection_config(payload)
         data["connection_config"] = json.dumps(config, ensure_ascii=False)
     if data.get("connection_config") and data.get("connection_type"):
@@ -239,40 +232,45 @@ def api_asset_detail(asset_id: int, db: Session = Depends(get_db)):
         "connection_type": asset.connection_type or "ssh",
         "ci_attributes": attrs,
         "ssh_user": config.get("ssh_user", "root"),
-        "ssh_password": config.get("ssh_password", ""),
+        "ssh_password": "***" if config.get("ssh_password") else "",
+        "has_ssh_password": bool(config.get("ssh_password")),
         "ssh_port": config.get("ssh_port", 22),
         "k8s_api_server": config.get("k8s_api_server", ""),
-        "k8s_token": config.get("k8s_token", ""),
+        "k8s_token": "***" if config.get("k8s_token") else "",
+        "has_k8s_token": bool(config.get("k8s_token")),
         "k8s_namespace": config.get("k8s_namespace", ""),
         "http_url": config.get("http_url", ""),
         "http_auth": config.get("http_auth", ""),
-        "http_credential": config.get("http_credential", ""),
-        "db_subtype": config.get("db_subtype", config.get("db_type", "mysql")),
+        "http_credential": "***" if config.get("http_credential") else "",
+        "has_http_credential": bool(config.get("http_credential")),
+        "db_type": config.get("db_type", "mysql"),
         "db_port": config.get("db_port", 3306),
         "db_user": config.get("db_user", "root"),
-        "db_password": config.get("db_password", ""),
+        "db_password": "***" if config.get("db_password") else "",
+        "has_db_password": bool(config.get("db_password")),
         "db_name": config.get("db_name", ""),
         "snmp_community": config.get("snmp_community", "public"),
         "snmp_port": config.get("snmp_port", 161),
         "snmp_version": config.get("snmp_version", "v2c"),
-        "mw_subtype": config.get("mw_subtype", config.get("middleware_type", "nginx")),
-        "mw_port": config.get("mw_port", 80),
-        "mw_admin_url": config.get("mw_admin_url", ""),
-        "app_url": config.get("app_url", ""),
-        "app_auth": config.get("app_auth", ""),
-        "app_credential": config.get("app_credential", ""),
-        "cert_domain": config.get("cert_domain", ""),
-        "cert_issuer": config.get("cert_issuer", ""),
-        "cert_expiry": config.get("cert_expiry", ""),
-        "dns_domain": config.get("dns_domain", ""),
-        "dns_type": config.get("dns_type", "A"),
-        "dns_value": config.get("dns_value", ""),
-        "monitor_url": config.get("monitor_url", ""),
-        "monitor_type": config.get("monitor_type", "http"),
-        "monitor_interval": config.get("monitor_interval", 60),
-        "storage_type": config.get("storage_type", "nfs"),
-        "storage_mount": config.get("storage_mount", ""),
-        "storage_capacity": config.get("storage_capacity", 0),
+        "mw_subtype": attrs.get("mw_subtype", config.get("mw_subtype", "nginx")),
+        "mw_port": attrs.get("mw_port", config.get("mw_port", 80)),
+        "mw_admin_url": attrs.get("mw_admin_url", config.get("mw_admin_url", "")),
+        "http_url": config.get("http_url", config.get("app_url", "")),
+        "http_auth": config.get("http_auth", config.get("app_auth", "")),
+        "http_credential": "***" if (config.get("http_credential") or config.get("app_credential")) else "",
+        "has_http_credential": bool(config.get("http_credential") or config.get("app_credential")),
+        "cert_domain": attrs.get("cert_domain", config.get("cert_domain", "")),
+        "cert_issuer": attrs.get("cert_issuer", config.get("cert_issuer", "")),
+        "cert_expiry": attrs.get("cert_expiry", config.get("cert_expiry", "")),
+        "dns_domain": attrs.get("dns_domain", config.get("dns_domain", "")),
+        "dns_type": attrs.get("dns_type", config.get("dns_type", "A")),
+        "dns_value": attrs.get("dns_value", config.get("dns_value", "")),
+        "monitor_url": attrs.get("monitor_url", config.get("monitor_url", "")),
+        "monitor_type": attrs.get("monitor_type", config.get("monitor_type", "http")),
+        "monitor_interval": attrs.get("monitor_interval", config.get("monitor_interval", 60)),
+        "storage_type": attrs.get("storage_type", config.get("storage_type", "nfs")),
+        "storage_mount": attrs.get("storage_mount", config.get("storage_mount", "")),
+        "storage_capacity": attrs.get("storage_capacity", config.get("storage_capacity", 0)),
     })
 
 
@@ -300,8 +298,8 @@ def _sync_k8s_datasource(db: Session, asset, config: dict):
         DataSource.type == "kubernetes", DataSource.name == ds_name
     ).first()
     auth_config = json.dumps({
-        "api_server": api_server,
-        "token": token,
+        "k8s_api_server": api_server,
+        "k8s_token": token,
         "verify_ssl": False,
     }, ensure_ascii=False)
     if existing:
@@ -353,10 +351,10 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
 
     try:
         cfg = json.loads(ds.auth_config) if ds.auth_config else {}
-        api_server = cfg.get("api_server", ds.endpoint or "")
-        token = cfg.get("token", "")
+        api_server = cfg.get("k8s_api_server") or ds.endpoint or ""
+        token = cfg.get("k8s_token") or ""
         if not api_server or not token:
-            return JSONResponse({"ok": False, "message": "DataSource 缺少 API Server 或 Token"}, status_code=400)
+            return JSONResponse({"ok": False, "message": "DataSource 缺少 k8s_api_server 或 k8s_token"}, status_code=400)
 
         configuration = k8s_client.Configuration()
         configuration.host = api_server
@@ -626,3 +624,46 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "message": "未安装 kubernetes 库"}, status_code=500)
     except Exception as e:
         return JSONResponse({"ok": False, "message": f"同步异常: {e}"}, status_code=500)
+
+
+# ─── 从资产跳转 AI 助手（创建/复用会话并注入资产上下文） ───
+
+@router.post("/api/{asset_id}/open-assistant")
+def open_assistant_from_asset(asset_id: int, request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id", 1)
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset:
+        return JSONResponse({"error": "资产不存在"}, status_code=404)
+
+    existing = db.query(AssetSessionLink).filter(AssetSessionLink.asset_id == asset_id).first()
+    if existing:
+        return JSONResponse({"session_id": existing.session_id, "new": False})
+
+    session = get_or_create_session(db, user_id, None)
+
+    context = {
+        "asset_id": asset.id,
+        "asset_name": asset.name,
+        "asset_ip": asset.ip,
+        "asset_ci_type": asset.ci_type,
+        "asset_status": asset.status,
+    }
+
+    session.context = json.dumps(context, ensure_ascii=False)
+    session.title = f"资产 {asset.name} ({asset.ip or 'N/A'})"
+
+    db.add(AssetSessionLink(
+        asset_id=asset_id,
+        session_id=session.id,
+        context_summary="来自资产管理的关联会话"
+    ))
+
+    summary_content = (
+        f"**系统上下文注入**\n"
+        f"已关联资产 **{asset.name}** ({asset.ip or 'N/A'})\n"
+        f"- CI 类型：{asset.ci_type}，状态：{asset.status}\n"
+        f"你可以直接问我关于这个资产的诊断、监控、运维方案，我会调用工具查询详细信息。"
+    )
+    add_message(db, session.id, "system", summary_content, message_type="text")
+
+    return JSONResponse({"session_id": session.id, "new": True})

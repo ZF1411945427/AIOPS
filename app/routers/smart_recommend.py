@@ -200,7 +200,8 @@ def _rag_search(alert, top_k=5):
             return []
         return hybrid_search(query, top_k=top_k)
     except Exception as e:
-        print("[smart_recommend] RAG search failed: %s" % e)
+        from app.logger import logger
+        logger.warning(f"RAG search failed: {e}")
         return []
 
 

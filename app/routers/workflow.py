@@ -11,10 +11,10 @@ router = APIRouter(prefix="/workflow", tags=["workflow"])
 
 
 @router.get("/api/templates")
-def list_templates(category: Optional[str] = None, only_enabled: bool = False, db: Session = Depends(get_db)):
+def list_templates(category: Optional[str] = None, only_enabled: bool = False, page: Optional[int] = None, per_page: int = 20, db: Session = Depends(get_db)):
     try:
-        items = workflow_service.list_templates(db, category=category, only_enabled=only_enabled)
-        return {"items": items, "count": len(items)}
+        result = workflow_service.list_templates(db, category=category, only_enabled=only_enabled, page=page, per_page=per_page)
+        return result
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -64,10 +64,10 @@ def delete_template(template_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/api/runs")
-def list_runs(status: Optional[str] = None, limit: int = 50, db: Session = Depends(get_db)):
+def list_runs(status: Optional[str] = None, page: Optional[int] = None, per_page: int = 20, limit: int = 50, db: Session = Depends(get_db)):
     try:
-        items = workflow_service.list_runs(db, status=status, limit=limit)
-        return {"items": items, "count": len(items)}
+        result = workflow_service.list_runs(db, status=status, limit=limit, page=page, per_page=per_page)
+        return result
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

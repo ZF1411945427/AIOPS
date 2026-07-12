@@ -20,7 +20,7 @@ def topo_graph_data(db: Session = Depends(get_db)):
     for a in assets:
         ci = a.ci_type or a.type or "unknown"
         color = "#ef4444" if a.id in alert_asset_ids else "#3b82f6"
-        if ci == "cluster": color = "#8b5cf6"
+        if ci == "kubernetes_cluster": color = "#8b5cf6"
         elif ci == "namespace": color = "#06b6d4"
         elif ci == "deployment": color = "#10b981"
         elif ci == "pod": color = "#f59e0b"
@@ -29,6 +29,6 @@ def topo_graph_data(db: Session = Depends(get_db)):
 
     links = []
     for r in relations:
-        links.append({"source": r.source_id, "target": r.target_id, "type": r.relation_type or "depends"})
+        links.append({"source": r.parent_id, "target": r.child_id, "type": r.relation_type or "depends"})
 
     return JSONResponse({"nodes": nodes, "links": links})

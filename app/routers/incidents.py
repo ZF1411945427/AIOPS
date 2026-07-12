@@ -40,15 +40,19 @@ def _alert_to_dict(a) -> dict:
 
 
 @router.get("/api/list")
-def api_incident_list(status: str = "", db: Session = Depends(get_db)):
+def api_incident_list(status: str = "", page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
     """故障单列表 JSON API."""
-    incidents = incident_service.list_incidents(db, status)
+    incidents, total = incident_service.list_incidents(db, status, page, per_page)
     from app.models import Asset
     asset_ids = {inc.asset_id for inc in incidents if inc.asset_id}
     asset_map = {a.id: a.name for a in db.query(Asset).filter(Asset.id.in_(asset_ids)).all()} if asset_ids else {}
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
     return JSONResponse({
         "incidents": [_incident_to_dict(inc, asset_map.get(inc.asset_id, "")) for inc in incidents],
-        "total": len(incidents),
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
     })
 
 

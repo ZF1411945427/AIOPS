@@ -2,15 +2,15 @@
   <div class="wft-page">
     <div class="page-header">
       <h1>SOP 工作流模板</h1>
-      <p>标准化运维剧本管理 · 共 {{ items.length }} 个</p>
+      <p>标准化运维剧本管理 · 共 {{ total }} 个</p>
     </div>
 
     <div class="toolbar">
-      <select v-model="categoryFilter" class="input select-input" @change="loadList">
+      <select v-model="categoryFilter" class="input select-input" @change="onFilterChange">
         <option value="">全部分类</option>
         <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
       </select>
-      <input v-model="search" class="input search-input" placeholder="搜索名称/描述" @keyup.enter="loadList">
+      <input v-model="search" class="input search-input" placeholder="搜索名称/描述" @keyup.enter="onSearchChange">
       <button class="btn" @click="loadList">刷新</button>
       <button class="btn btn-primary" @click="openCreate">+ 新建模板</button>
     </div>
@@ -41,6 +41,15 @@
           </tbody>
         </table>
         <div v-else class="empty-state"><div style="font-size:32px;margin-bottom:8px;">📋</div><div>暂无 SOP 模板</div></div>
+        <div v-if="totalPages > 1 && !search.trim()" class="pagination">
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(1)">首页</button>
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
+          <span v-for="p in pageNumbers" :key="p" class="page-num" :class="{ active: p === currentPage }" @click="goPage(p)">{{ p }}</span>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(totalPages)">末页</button>
+          <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="jumpPage" min="1" :max="totalPages" @keyup.enter="goPage(jumpPage)" /> 页</span>
+          <span class="page-info">共 {{ total }} 条 / {{ totalPages }} 页</span>
+        </div>
       </div>
     </div>
 
@@ -56,6 +65,14 @@
               <option value="service">service</option>
               <option value="scaling">scaling</option>
               <option value="healing">healing</option>
+              <option value="k8s">k8s</option>
+              <option value="database">database</option>
+              <option value="network">network</option>
+              <option value="security">security</option>
+              <option value="backup">backup</option>
+              <option value="monitoring">monitoring</option>
+              <option value="deployment">deployment</option>
+              <option value="performance">performance</option>
               <option value="custom">custom</option>
             </select>
           </div>
@@ -103,11 +120,21 @@
         <div class="detail-row"><span class="detail-label">触发条件</span><code class="inline-code">{{ JSON.stringify(detail.trigger_condition || {}) }}</code></div>
         <div class="detail-block"><div class="detail-label">节点流程</div>
           <div class="node-preview">
-            <div v-for="(n, i) in (detail.nodes || [])" :key="n.id" class="node-prev-item">
+            <div v-for="(n, i) in (detail.nodes || [])" :key="n.id" class="node-prev-item" :class="{ expanded: selectedNodeId === n.id }" @click="toggleNode(n.id)">
               <span class="node-prev-idx">{{ i + 1 }}</span>
               <span class="node-prev-name">{{ n.name || n.id }}</span>
               <span class="node-prev-action">{{ n.action_type }}</span>
               <span v-if="n.requires_confirm" class="badge confirm-badge">需确认</span>
+              <span class="node-prev-arrow">{{ selectedNodeId === n.id ? '▼' : '▶' }}</span>
+              <div v-if="selectedNodeId === n.id" class="node-detail" @click.stop>
+                <div class="node-detail-row"><span class="node-detail-key">动作类型</span><code class="inline-code">{{ n.action_type }}</code></div>
+                <div class="node-detail-row"><span class="node-detail-key">执行参数</span><code class="inline-code">{{ JSON.stringify(n.payload_template || {}) }}</code></div>
+                <div v-if="n.payload_template && n.payload_template.command" class="node-detail-row"><span class="node-detail-key">实际命令</span><pre class="node-cmd">{{ n.payload_template.command }}</pre></div>
+                <div v-if="n.payload_template && n.payload_template.service" class="node-detail-row"><span class="node-detail-key">目标服务</span><code class="inline-code">{{ n.payload_template.service }}</code></div>
+                <div v-if="n.payload_template && n.payload_template.path" class="node-detail-row"><span class="node-detail-key">目标路径</span><code class="inline-code">{{ n.payload_template.path }}</code></div>
+                <div class="node-detail-row"><span class="node-detail-key">需确认</span><span :class="n.requires_confirm ? 'txt-warn' : 'txt-ok'">{{ n.requires_confirm ? '是' : '否' }}</span></div>
+                <div class="node-detail-row"><span class="node-detail-key">重试次数</span><code class="inline-code">{{ n.retry_count || 0 }}</code></div>
+              </div>
             </div>
           </div>
         </div>
@@ -128,6 +155,42 @@ const items = ref([])
 const categories = ref([])
 const search = ref('')
 const categoryFilter = ref('')
+const total = ref(0)
+
+const currentPage = ref(1)
+const pageSize = ref(20)
+const totalPages = ref(1)
+const jumpPage = ref(1)
+const pageNumbers = computed(() => {
+  const pages = []
+  const cur = currentPage.value
+  const tp = totalPages.value
+  if (tp <= 7) {
+    for (let i = 1; i <= tp; i++) pages.push(i)
+  } else {
+    pages.push(1)
+    if (cur > 4) pages.push('...')
+    const start = Math.max(2, cur - 1)
+    const end = Math.min(tp - 1, cur + 1)
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (cur < tp - 3) pages.push('...')
+    pages.push(tp)
+  }
+  return pages
+})
+function goPage(p) {
+  if (p < 1 || p > totalPages.value || p === currentPage.value) return
+  currentPage.value = p
+  loadList()
+}
+function onFilterChange() {
+  currentPage.value = 1
+  loadList()
+}
+function onSearchChange() {
+  currentPage.value = 1
+  loadList()
+}
 
 const showDialog = ref(false)
 const editing = ref(false)
@@ -140,6 +203,11 @@ const form = ref({
 
 const showDetail = ref(false)
 const detail = ref({})
+const selectedNodeId = ref(null)
+
+function toggleNode(nid) {
+  selectedNodeId.value = selectedNodeId.value === nid ? null : nid
+}
 
 const filteredItems = computed(() => {
   if (!search.value.trim()) return items.value
@@ -150,16 +218,32 @@ const filteredItems = computed(() => {
   )
 })
 
+async function loadCategories() {
+  try {
+    const data = await request.get('/workflow/api/templates', { params: { per_page: 1000 } })
+    const cats = new Set(['generic', 'disk', 'service', 'scaling', 'healing', 'k8s', 'database', 'network', 'security', 'backup', 'monitoring', 'deployment', 'performance', 'custom'])
+    ;(data.items || []).forEach(it => { if (it.category) cats.add(it.category) })
+    categories.value = [...cats].sort()
+  } catch (e) { /* ignore */ }
+}
+
 async function loadList() {
   loading.value = true
   try {
     const params = {}
     if (categoryFilter.value) params.category = categoryFilter.value
+    if (search.value.trim()) {
+      params.per_page = 1000
+    } else {
+      params.page = currentPage.value
+      params.per_page = pageSize.value
+    }
     const data = await request.get('/workflow/api/templates', { params })
     items.value = data.items || []
-    const cats = new Set(['generic', 'disk', 'service', 'scaling', 'healing', 'custom'])
-    items.value.forEach(it => { if (it.category) cats.add(it.category) })
-    categories.value = [...cats]
+    if (!search.value.trim()) {
+      total.value = data.total || 0
+      totalPages.value = data.total_pages || 1
+    }
   } catch (e) {
     ElMessage.error('加载失败: ' + (e.message || e))
   } finally {
@@ -203,6 +287,7 @@ async function openEdit(id) {
 async function openDetail(id) {
   try {
     detail.value = await request.get(`/workflow/api/templates/${id}`)
+    selectedNodeId.value = null
     showDetail.value = true
   } catch (e) {
     ElMessage.error('获取详情失败: ' + (e.message || e))
@@ -294,7 +379,10 @@ function riskClass(r) {
   return { 'risk-low': r === 'low', 'risk-medium': r === 'medium', 'risk-high': r === 'high', 'risk-critical': r === 'critical' }
 }
 
-onMounted(loadList)
+onMounted(() => {
+  loadCategories()
+  loadList()
+})
 </script>
 
 <style scoped>
@@ -330,6 +418,13 @@ onMounted(loadList)
 .badge.dis-badge { background: rgba(100,116,139,0.12); color: #64748b; }
 .badge.confirm-badge { background: rgba(245,158,11,0.12); color: #f59e0b; }
 .loading-state, .empty-state { text-align: center; padding: 24px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+.page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
+.page-num { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; cursor: pointer; transition: all 0.2s; user-select: none; }
+.page-num:hover { background: var(--bg-hover, rgba(99,102,241,0.08)); border-color: var(--accent, #6366f1); }
+.page-num.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); font-weight: 600; }
+.page-jump { font-size: 0.8rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; }
+.page-input { width: 50px; padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; text-align: center; font-size: 0.8rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 380px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
 .modal-box.xwide { min-width: 720px; }
@@ -351,4 +446,14 @@ onMounted(loadList)
 .node-prev-idx { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent, #6366f1); color: #fff; font-size: 0.7rem; font-weight: 600; }
 .node-prev-name { font-weight: 500; }
 .node-prev-action { margin-left: auto; font-size: 0.7rem; color: var(--text-secondary, #64748b); font-family: 'Consolas', monospace; background: rgba(99,102,241,0.08); padding: 1px 6px; border-radius: 4px; }
+.node-prev-item { cursor: pointer; transition: background 0.2s; }
+.node-prev-item:hover { background: rgba(99,102,241,0.06); }
+.node-prev-item.expanded { background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); }
+.node-prev-arrow { font-size: 0.7rem; color: var(--text-secondary, #94a3b8); margin-left: 4px; }
+.node-detail { width: 100%; margin-top: 8px; padding: 10px 12px; background: rgba(0,0,0,0.03); border-radius: 6px; display: flex; flex-direction: column; gap: 6px; }
+.node-detail-row { display: flex; gap: 8px; align-items: flex-start; font-size: 0.78rem; }
+.node-detail-key { min-width: 70px; color: var(--text-secondary, #64748b); flex-shrink: 0; }
+.node-cmd { flex: 1; margin: 0; padding: 8px 10px; background: rgba(0,0,0,0.06); border-radius: 6px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; color: var(--text, #1e293b); line-height: 1.5; }
+.txt-warn { color: #f59e0b; font-weight: 600; }
+.txt-ok { color: #10b981; }
 </style>

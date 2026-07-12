@@ -18,6 +18,7 @@
             <div class="deploy-head">
               <span class="deploy-name">{{ d.name }}</span>
               <span class="badge ns">{{ d.namespace }}</span>
+              <span v-if="d.cluster" class="badge cluster">{{ d.cluster }}</span>
               <span class="badge" :class="d.status === 'active' ? 'resolved' : 'warning'">{{ d.status }}</span>
             </div>
             <div class="deploy-meta">
@@ -31,12 +32,24 @@
               <button class="btn btn-sm btn-primary" @click="switchDeploy(d)" :disabled="switching === d.id">
                 {{ switching === d.id ? '切换中...' : '切换蓝绿' }}
               </button>
+              <button class="btn btn-sm btn-danger" @click="deleteDeploy(d)" :disabled="deleting === d.id">
+                {{ deleting === d.id ? '删除中...' : '删除' }}
+              </button>
             </div>
           </div>
         </div>
         <div v-else class="empty-state">
           <div style="font-size:32px;margin-bottom:8px;">🔀</div>
           <div>暂无部署组，点击"新建部署"创建</div>
+        </div>
+        <div v-if="totalPages > 1" class="pagination">
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(1)">首页</button>
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
+          <span v-for="p in pageNumbers" :key="p" class="page-num" :class="{ active: p === currentPage }" @click="goPage(p)">{{ p }}</span>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(totalPages)">末页</button>
+          <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="jumpPage" min="1" :max="totalPages" @keyup.enter="goPage(jumpPage)" /> 页</span>
+          <span class="page-info">共 {{ total }} 条 / {{ totalPages }} 页</span>
         </div>
       </div>
     </div>
@@ -80,6 +93,10 @@
               <label>绿副本数</label>
               <input v-model.number="form.standby_replicas" type="number" min="0" />
             </div>
+            <div class="form-group full">
+              <label>容器镜像</label>
+              <input v-model="form.image" placeholder="nginx:latest" />
+            </div>
           </div>
           <div class="form-actions">
             <button class="btn" @click="createVisible = false">取消</button>
@@ -92,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
@@ -103,19 +120,48 @@ const total = ref(0)
 const createVisible = ref(false)
 const creating = ref(false)
 const switching = ref(null)
+const deleting = ref(null)
 const form = reactive({
   name: '', namespace: 'default', cluster: '',
   active_label: 'blue', standby_label: 'green',
-  active_replicas: 3, standby_replicas: 3,
+  active_replicas: 3, standby_replicas: 3, image: 'nginx:latest',
 })
+
+const currentPage = ref(1)
+const pageSize = ref(20)
+const totalPages = ref(1)
+const jumpPage = ref(1)
+const pageNumbers = computed(() => {
+  const pages = []
+  const cur = currentPage.value
+  const tp = totalPages.value
+  if (tp <= 7) {
+    for (let i = 1; i <= tp; i++) pages.push(i)
+  } else {
+    pages.push(1)
+    if (cur > 4) pages.push('...')
+    const start = Math.max(2, cur - 1)
+    const end = Math.min(tp - 1, cur + 1)
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (cur < tp - 3) pages.push('...')
+    pages.push(tp)
+  }
+  return pages
+})
+function goPage(p) {
+  if (p < 1 || p > totalPages.value || p === currentPage.value) return
+  currentPage.value = p
+  loadData()
+}
 
 async function loadData() {
   loading.value = true
   try {
-    const data = await request.get('/blue-green/api/list')
+    const data = await request.get('/blue-green/api/list', { params: { page: currentPage.value, per_page: pageSize.value } })
     deploys.value = data.deploys || []
     clusters.value = data.clusters || []
     total.value = data.total || 0
+    totalPages.value = data.total_pages || 1
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
   } finally {
@@ -124,7 +170,7 @@ async function loadData() {
 }
 
 function openCreate() {
-  Object.assign(form, { name: '', namespace: 'default', cluster: '', active_label: 'blue', standby_label: 'green', active_replicas: 3, standby_replicas: 3 })
+  Object.assign(form, { name: '', namespace: 'default', cluster: '', active_label: 'blue', standby_label: 'green', active_replicas: 3, standby_replicas: 3, image: 'nginx:latest' })
   createVisible.value = true
 }
 
@@ -140,6 +186,7 @@ async function createDeploy() {
     fd.append('standby_label', form.standby_label)
     fd.append('active_replicas', form.active_replicas)
     fd.append('standby_replicas', form.standby_replicas)
+    fd.append('image', form.image)
     const data = await request.post('/blue-green/api/create', fd)
     ElMessage.success('创建成功' + (data.k8s_msg ? '（' + data.k8s_msg + '）' : ''))
     createVisible.value = false
@@ -166,6 +213,20 @@ async function switchDeploy(d) {
 }
 
 onMounted(loadData)
+
+async function deleteDeploy(d) {
+  try {
+    await ElMessageBox.confirm(`确认删除 ${d.name}？将同时清理 K8s 资源`, '删除确认', { type: 'warning' })
+    deleting.value = d.id
+    const data = await request.post(`/blue-green/api/${d.id}/delete`)
+    ElMessage.success('已删除' + (data.k8s_msg ? '（' + data.k8s_msg + '）' : ''))
+    loadData()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('删除失败: ' + (e.message || e))
+  } finally {
+    deleting.value = null
+  }
+}
 </script>
 
 <style scoped>
@@ -179,6 +240,8 @@ onMounted(loadData)
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
+.btn-danger { background: #ef4444; color: #fff; border-color: #ef4444; }
+.btn-danger:hover { background: #dc2626; }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-body { padding: 16px 18px; }
@@ -191,12 +254,20 @@ onMounted(loadData)
 .deploy-actions { display: flex; gap: 8px; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
 .badge.ns { background: rgba(100,116,139,0.1); color: #64748b; }
+.badge.cluster { background: rgba(99,102,241,0.1); color: #6366f1; }
 .badge.blue { background: rgba(59,130,246,0.1); color: #3b82f6; }
 .badge.green { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
 .text-sm { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+.page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
+.page-num { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; cursor: pointer; transition: all 0.2s; user-select: none; }
+.page-num:hover { background: var(--bg-hover, rgba(99,102,241,0.08)); border-color: var(--accent, #6366f1); }
+.page-num.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); font-weight: 600; }
+.page-jump { font-size: 0.8rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; }
+.page-input { width: 50px; padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; text-align: center; font-size: 0.8rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 12px; width: 90%; max-width: 600px; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }

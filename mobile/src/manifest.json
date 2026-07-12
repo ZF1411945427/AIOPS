@@ -78,8 +78,9 @@
     "h5": {
         "router": {
             "mode": "hash",
-            "base": "/"
+            "base": "/mobile-app/"
         },
+        "publicPath": "/mobile-app/",
         "title": "AIOps 移动运维",
         "template": "index.html"
     },

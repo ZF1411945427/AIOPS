@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.database import get_db
@@ -32,12 +33,10 @@ def analyze_trace_rca(spans: list) -> dict:
     total_duration = max(s.end_time for s in spans) - min(s.start_time for s in spans)
     total_duration_ms = total_duration.total_seconds() * 1000 if total_duration else 0
 
-    # Find root span
     root_spans = children_of.get("root", [])
     if not root_spans:
         root_spans = [spans[0]]
 
-    # Latency analysis: find spans with abnormal duration
     all_durations = [s.duration_ms for s in spans]
     avg_dur = sum(all_durations) / len(all_durations) if all_durations else 0
     std_dur = (sum((d - avg_dur) ** 2 for d in all_durations) / len(all_durations)) ** 0.5 or 1
@@ -64,7 +63,6 @@ def analyze_trace_rca(spans: list) -> dict:
                 "type": "error",
             })
 
-    # Error propagation: find error spans and trace to root
     error_spans = [s for s in spans if s.status != "OK"]
     error_paths = []
     for es in error_spans:
@@ -76,7 +74,6 @@ def analyze_trace_rca(spans: list) -> dict:
             pid = parent.parent_span_id
         error_paths.append(list(reversed(path)))
 
-    # Service ranking by total latency contribution
     service_stats = defaultdict(lambda: {"total_duration": 0, "call_count": 0, "error_count": 0, "avg_duration": 0})
     for s in spans:
         sv = service_stats[s.service_name]
@@ -90,9 +87,7 @@ def analyze_trace_rca(spans: list) -> dict:
 
     sorted_services = sorted(service_stats.items(), key=lambda x: -x[1]["total_duration"])
 
-    # Root cause candidates
     root_causes = sorted(anomalies, key=lambda x: -x.get("z_score", 0))
-    # Also include services with high error rate
     for sv_name, sv in sorted_services:
         if sv["error_rate"] > 10:
             root_causes.append({
@@ -113,3 +108,60 @@ def analyze_trace_rca(spans: list) -> dict:
     }
 
 
+@router.get("/analyze")
+def analyze_trace(
+    db: Session = Depends(get_db),
+    trace_id: str = Query(None, description="Trace ID"),
+    hours: int = Query(1, description="最近 N 小时"),
+):
+    """链路追踪根因分析：对指定 trace 或最近 traces 做 RCA"""
+    try:
+        q = db.query(Span)
+        if trace_id:
+            q = q.filter(Span.trace_id == trace_id)
+        else:
+            since = datetime.now() - timedelta(hours=hours)
+            q = q.filter(Span.start_time >= since).order_by(desc(Span.start_time)).limit(500)
+        spans = q.all()
+        if not spans:
+            return JSONResponse({"error": "No spans found"}, status_code=404)
+        result = analyze_trace_rca(spans)
+        return result
+    except Exception as e:
+        from app.logger import logger
+        logger.error(f"trace-rca analyze failed: {e}")
+        return JSONResponse({"error": "分析失败"}, status_code=500)
+
+
+@router.get("/traces")
+def list_recent_traces(
+    db: Session = Depends(get_db),
+    hours: int = Query(1, description="最近 N 小时"),
+    limit: int = Query(20, description="返回数量"),
+):
+    """列出最近的 trace（用于选择分析目标）"""
+    try:
+        since = datetime.now() - timedelta(hours=hours)
+        rows = (
+            db.query(Span.trace_id, Span.service_name, Span.start_time, Span.duration_ms, Span.status)
+            .filter(Span.start_time >= since)
+            .order_by(desc(Span.start_time))
+            .limit(limit * 10)
+            .all()
+        )
+        seen = {}
+        for r in rows:
+            tid = r[0]
+            if tid not in seen:
+                seen[tid] = {
+                    "trace_id": tid,
+                    "first_service": r[1],
+                    "start_time": r[2].isoformat() if r[2] else "",
+                    "duration_ms": r[3],
+                    "status": r[4],
+                }
+        return {"traces": list(seen.values())[:limit]}
+    except Exception as e:
+        from app.logger import logger
+        logger.error(f"trace-rca list failed: {e}")
+        return JSONResponse({"error": "查询失败"}, status_code=500)

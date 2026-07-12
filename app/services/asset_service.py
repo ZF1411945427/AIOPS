@@ -65,6 +65,7 @@ def delete_asset(db: Session, asset_id: int):
 def probe_assets(db: Session):
     """批量探测所有资产的连接状态，更新 status / last_checked / latency_ms"""
     from app.services.connection_service import ConnectionTester
+    from app.logger import logger
     from datetime import datetime
     import json
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -114,7 +115,8 @@ def probe_assets(db: Session):
             return None
         except Exception as e:
             sess.rollback()
-            print(f"[probe] {asset.name}({asset.ip}) 探测异常: {e}")
+            from app.logger import logger
+            logger.warning(f"probe {asset.name}({asset.ip}) 探测异常: {e}")
             return None
         finally:
             sess.close()
@@ -127,6 +129,6 @@ def probe_assets(db: Session):
             if c:
                 changed.append(c)
                 with _lock:
-                    print(f"[probe] {c['name']}({futures[future].ip}): {c['old']} -> {c['new']} ({c['message']})")
+                    logger.info(f"probe {c['name']}({futures[future].ip}): {c['old']} -> {c['new']} ({c['message']})")
 
     return changed

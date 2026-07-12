@@ -147,7 +147,7 @@ const TYPE_LABEL = {
   ingress:'Ingress', pvc:'PVC', pv:'PV',
   configmap:'ConfigMap', secret:'Secret',
 }
-const CI_ORDER = ['kubernetes_cluster','cluster','namespace','node','deployment','statefulset','daemonset','service','ingress','configmap','secret','pvc','pv']
+const CI_ORDER = ['kubernetes_cluster','namespace','node','deployment','statefulset','daemonset','service','ingress','configmap','secret','pvc','pv']
 
 function typeColor(t) { return TYPE_COLOR[t] || '#94a3b8' }
 function typeLabel(t) { return TYPE_LABEL[t] || t }

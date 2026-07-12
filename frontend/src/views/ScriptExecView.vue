@@ -77,13 +77,22 @@
           <div style="font-size:32px;margin-bottom:8px;">📜</div>
           <div>暂无执行历史</div>
         </div>
+        <div v-if="totalPages > 1" class="pagination">
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(1)">首页</button>
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
+          <span v-for="p in pageNumbers" :key="p" class="page-num" :class="{ active: p === currentPage }" @click="goPage(p)">{{ p }}</span>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(totalPages)">末页</button>
+          <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="jumpPage" min="1" :max="totalPages" @keyup.enter="goPage(jumpPage)" /> 页</span>
+          <span class="page-info">共 {{ historyTotal }} 条 / {{ totalPages }} 页</span>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 
@@ -96,6 +105,33 @@ const expanded = ref(null)
 const lastOutput = ref(null)
 const lastError = ref('')
 const form = reactive({ target_id: null, script_content: '', timeout: 30 })
+
+const currentPage = ref(1)
+const pageSize = ref(20)
+const totalPages = ref(1)
+const jumpPage = ref(1)
+const pageNumbers = computed(() => {
+  const pages = []
+  const cur = currentPage.value
+  const tp = totalPages.value
+  if (tp <= 7) {
+    for (let i = 1; i <= tp; i++) pages.push(i)
+  } else {
+    pages.push(1)
+    if (cur > 4) pages.push('...')
+    const start = Math.max(2, cur - 1)
+    const end = Math.min(tp - 1, cur + 1)
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (cur < tp - 3) pages.push('...')
+    pages.push(tp)
+  }
+  return pages
+})
+function goPage(p) {
+  if (p < 1 || p > totalPages.value || p === currentPage.value) return
+  currentPage.value = p
+  loadHistory()
+}
 
 async function loadTargets() {
   try {
@@ -110,9 +146,10 @@ async function loadTargets() {
 async function loadHistory() {
   loading.value = true
   try {
-    const data = await request.get('/script/api/history')
+    const data = await request.get('/script/api/history', { params: { page: currentPage.value, per_page: pageSize.value } })
     history.value = data.history || []
     historyTotal.value = data.total || 0
+    totalPages.value = data.total_pages || 1
   } catch (e) {
     ElMessage.error('加载历史失败: ' + e.message)
   } finally {
@@ -139,6 +176,7 @@ async function executeScript() {
     } else {
       ElMessage.warning('执行完成（有错误输出）')
     }
+    currentPage.value = 1
     loadHistory()
   } catch (e) {
     ElMessage.error('执行失败: ' + (e.response?.data?.error || e.message))
@@ -207,4 +245,11 @@ onMounted(() => {
 .badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.critical { background: rgba(239,68,68,0.1); color: #ef4444; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+.page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
+.page-num { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; cursor: pointer; transition: all 0.2s; user-select: none; }
+.page-num:hover { background: var(--bg-hover, rgba(99,102,241,0.08)); border-color: var(--accent, #6366f1); }
+.page-num.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); font-weight: 600; }
+.page-jump { font-size: 0.8rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; }
+.page-input { width: 50px; padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; text-align: center; font-size: 0.8rem; }
 </style>

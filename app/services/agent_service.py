@@ -317,6 +317,30 @@ def process_chat_message(
 
     # Build messages
     system_prompt = config.system_prompt or DEFAULT_SYSTEM_PROMPT
+    
+    # 注入会话上下文（告警/资产关联）
+    session_ctx = json.loads(session.context or "{}")
+    if session_ctx.get("alert_id"):
+        ctx_injection = (
+            f"\n\n## ⚠️ 当前告警上下文（系统自动注入，请优先分析此告警）\n"
+            f"- 告警 ID: #{session_ctx['alert_id']}\n"
+            f"- 指标: {session_ctx.get('alert_metric', '')}\n"
+            f"- 级别: {session_ctx.get('alert_severity', '')}\n"
+            f"- 当前值: {session_ctx.get('alert_value', '')}，阈值: {session_ctx.get('alert_threshold', '')}\n"
+            f"- 涉事资产: {session_ctx.get('asset_name', '')} (IP: {session_ctx.get('asset_ip', '')})\n"
+            f"用户正在处理此告警，你应该优先调用 get_alert_detail(id={session_ctx['alert_id']}) 获取详情，并进行根因分析和操作建议。\n"
+        )
+        system_prompt += ctx_injection
+    elif session_ctx.get("asset_id"):
+        ctx_injection = (
+            f"\n\n## 🏢 当前资产上下文（系统自动注入）\n"
+            f"- 资产 ID: {session_ctx['asset_id']}\n"
+            f"- 资产名称: {session_ctx.get('asset_name', '')}\n"
+            f"- IP: {session_ctx.get('asset_ip', '')}\n"
+            f"用户正在关注此资产，请优先分析其状态、指标和关联告警。\n"
+        )
+        system_prompt += ctx_injection
+
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(get_message_history(db, session, config))
     messages.append({"role": "user", "content": user_message})

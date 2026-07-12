@@ -62,7 +62,7 @@
 <script setup>
 import { ref, nextTick } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
-import { sendMessage, confirmPending, cancelPending, listPending, takePendingPreset } from '@/api/agent.js'
+import { sendMessage, confirmPending, cancelPending, listPending, takePendingPreset, getHistory, takePendingSessionId } from '@/api/agent.js'
 import ChatBubble from '@/components/ChatBubble.vue'
 
 const messages = ref([])
@@ -109,8 +109,9 @@ async function doSend(text) {
             }))
         }
         if (Array.isArray(data.pending_actions)) {
+            const existingIds = new Set(pendingActions.value.map(a => a.id))
             for (const a of data.pending_actions) {
-                if (a && a.id) pendingActions.value.push(a)
+                if (a && a.id && !existingIds.has(a.id)) pendingActions.value.push(a)
             }
         }
         if (data.error) uni.showToast({ title: '处理失败', icon: 'none' })
@@ -241,6 +242,25 @@ async function loadPending() {
     } catch (e) {}
 }
 
+async function switchToSession(sid) {
+    sessionId.value = sid
+    messages.value = []
+    pendingActions.value = []
+    try {
+        const data = await getHistory(sid)
+        const msgs = data.messages || []
+        messages.value = msgs.map((m) => ({
+            id: m.id || 'm-' + Math.random(),
+            role: m.role,
+            content: m.content,
+            toolCalls: [],
+        }))
+        const pa = data.pending_actions || []
+        pendingActions.value = pa.filter((a) => a && a.id)
+    } catch (e) {}
+    scrollToBottom()
+}
+
 onShow(() => {
     try {
         const pb = document.querySelector('uni-page-body')
@@ -251,9 +271,14 @@ onShow(() => {
             pb.style.overflow = 'hidden'
         }
     } catch (e) {}
-    loadPending()
-    const preset = takePendingPreset()
-    if (preset) doSend(preset)
+    const sid = takePendingSessionId()
+    if (sid) {
+        switchToSession(sid)
+    } else {
+        loadPending()
+        const preset = takePendingPreset()
+        if (preset) doSend(preset)
+    }
 })
 
 onHide(() => {

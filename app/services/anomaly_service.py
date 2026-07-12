@@ -48,8 +48,19 @@ def toggle_config(db: Session, config_id: int):
     return config
 
 
+_ALGO_TAGS = {
+    "sigma": "3σ",
+    "ewma": "EWMA",
+    "stl": "STL",
+    "mad": "MAD",
+    "prophet": "Prophet",
+    "lstm": "LSTM",
+    "transformer": "Transformer",
+}
+
+
 def _has_recent_alert(db: Session, metric_name: str, asset_id: int, algorithm: str, config_name: str) -> bool:
-    tag = f"{'EWMA' if algorithm == 'ewma' else '3σ'}异常"
+    tag = f"{_ALGO_TAGS.get(algorithm, algorithm)}异常"
     return bool(
         db.query(Alert)
         .filter(
@@ -246,15 +257,19 @@ def _detect_prophet(db: Session, config: AnomalyConfig, records: list) -> Alert 
     anomalies = merged[merged["y"] > merged["yhat_upper"]]
     if anomalies.empty:
         return None
+    if _has_recent_alert(db, config.metric_name, config.asset_id, "prophet", config.name):
+        return None
     latest = anomalies.iloc[-1]
     return Alert(
-        name=f"Prophet-{config.name}",
-        metric=config.metric_name,
-        message=f"Prophet异常检测- {config.name}: 最新值={round(latest['y'],2)}, "
-                f"上限={round(latest['yhat_upper'],2)}, 预测={round(latest['yhat'],2)}",
+        rule_id=None,
+        asset_id=config.asset_id or records[0].asset_id,
+        metric_name=config.metric_name,
+        actual_value=round(float(latest["y"]), 2),
+        threshold=round(float(latest["yhat_upper"]), 2),
         severity="warning",
-        asset_id=config.asset_id,
-        source="prophet",
+        status="triggered",
+        message=f"Prophet异常检测- {config.name}: 最新值={round(float(latest['y']),2)}, "
+                f"上限={round(float(latest['yhat_upper']),2)}, 预测={round(float(latest['yhat']),2)}",
     )
 
 
@@ -284,14 +299,18 @@ def _detect_lstm(db: Session, config: AnomalyConfig, records: list) -> Alert | N
     threshold = np.mean(residuals) + 2 * np.std(residuals)
     latest_residual = residuals[-1]
     if latest_residual > threshold and latest_residual > np.mean(residuals) * 1.5:
+        if _has_recent_alert(db, config.metric_name, config.asset_id, "lstm", config.name):
+            return None
         return Alert(
-            name=f"LSTM-{config.name}",
-            metric=config.metric_name,
-            message=f"LSTM预测异常- {config.name}: 实际={round(acts[-1],2)}, "
-                    f"预测={round(preds[-1],2)}, 残差={round(latest_residual,2)}",
+            rule_id=None,
+            asset_id=config.asset_id or records[0].asset_id,
+            metric_name=config.metric_name,
+            actual_value=round(float(acts[-1]), 2),
+            threshold=round(float(preds[-1] + threshold), 2),
             severity="warning",
-            asset_id=config.asset_id,
-            source="lstm",
+            status="triggered",
+            message=f"LSTM预测异常- {config.name}: 实际={round(float(acts[-1]),2)}, "
+                    f"预测={round(float(preds[-1]),2)}, 残差={round(float(latest_residual),2)}",
         )
     return None
 
@@ -319,14 +338,18 @@ def _detect_transformer(db: Session, config: AnomalyConfig, records: list) -> Al
         return None
     threshold = np.mean(residuals) + 2 * np.std(residuals)
     if residuals[-1] > threshold:
+        if _has_recent_alert(db, config.metric_name, config.asset_id, "transformer", config.name):
+            return None
         return Alert(
-            name=f"Transformer-{config.name}",
-            metric=config.metric_name,
-            message=f"Transformer异常检测- {config.name}: 残差={round(residuals[-1],2)}, "
-                    f"阈值={round(threshold,2)}",
+            rule_id=None,
+            asset_id=config.asset_id or records[0].asset_id,
+            metric_name=config.metric_name,
+            actual_value=round(float(values[d-1+d-1+len(attn_output)-1]), 2) if len(values) > d-1+len(attn_output) else round(float(values[-1]), 2),
+            threshold=round(float(threshold), 2),
             severity="warning",
-            asset_id=config.asset_id,
-            source="transformer",
+            status="triggered",
+            message=f"Transformer异常检测- {config.name}: 残差={round(float(residuals[-1]),2)}, "
+                    f"阈值={round(float(threshold),2)}",
         )
     return None
 

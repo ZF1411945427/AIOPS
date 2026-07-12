@@ -55,6 +55,7 @@
                 <button v-if="a.ci_type === 'kubernetes_cluster'" class="btn btn-sm btn-sync" :disabled="syncingId === a.id" @click="syncK8s(a)">{{ syncingId === a.id ? '同步中...' : '同步' }}</button>
                 <a v-if="a.tags" href="javascript:void(0)" class="btn btn-sm btn-tag" @click="showTags(a)">标签</a>
                 <a href="javascript:void(0)" class="btn btn-sm btn-lifecycle" @click="goLifecycle(a.id)">生命周期</a>
+                <button class="btn btn-sm btn-ai" @click="openAssistant(a.id)">💬 智能助手</button>
                 <a href="javascript:void(0)" class="btn btn-sm" @click="openEdit(a.id)">编辑</a>
                 <button class="btn btn-sm btn-danger" @click="deleteAsset(a.id, a.name)">删除</button>
               </td>
@@ -162,7 +163,7 @@
           <template v-else-if="form.ci_type === 'database'">
             <div class="form-grid">
               <div class="form-row"><label>数据库类型</label>
-                <select v-model="form.db_subtype" class="input">
+                <select v-model="form.db_type" class="input">
                   <option value="mysql">MySQL</option><option value="postgresql">PostgreSQL</option>
                   <option value="redis">Redis</option><option value="mongodb">MongoDB</option>
                   <option value="elasticsearch">Elasticsearch</option>
@@ -201,13 +202,13 @@
             </div>
           </template>
 
-          <template v-else-if="form.ci_type === 'business_app' || form.ci_type === 'api_service'">
+          <template v-else-if="form.ci_type === 'business_app' || form.ci_type === 'api_service' || form.ci_type === 'middleware' || form.ci_type === 'monitoring_endpoint'">
             <div class="form-grid">
-              <div class="form-row full"><label>服务地址</label><input v-model="form.app_url" class="input" placeholder="https://api.example.com/health"></div>
+              <div class="form-row full"><label>服务地址</label><input v-model="form.http_url" class="input" placeholder="https://api.example.com/health"></div>
               <div class="form-row"><label>认证方式</label>
-                <select v-model="form.app_auth" class="input"><option value="">无</option><option value="basic">Basic Auth</option><option value="bearer">Bearer Token</option></select>
+                <select v-model="form.http_auth" class="input"><option value="">无</option><option value="basic">Basic Auth</option><option value="bearer">Bearer Token</option></select>
               </div>
-              <div class="form-row"><label>凭据</label><input v-model="form.app_credential" class="input" placeholder="用户名:密码 或 Token"></div>
+              <div class="form-row"><label>凭据</label><input v-model="form.http_credential" class="input" placeholder="用户名:密码 或 Token"></div>
             </div>
           </template>
 
@@ -300,7 +301,7 @@ const ciTypeGroups = [
   ]},
 ]
 
-const PERSISTENT_TYPES = new Set(['node','namespace','deployment','statefulset','daemonset','service','ingress','pv','pvc','kubernetes_cluster','cluster'])
+const PERSISTENT_TYPES = new Set(['node','namespace','deployment','statefulset','daemonset','service','ingress','pv','pvc','kubernetes_cluster'])
 const WEAK_TYPES = new Set(['configmap','secret'])
 const CI_TYPE_COLOR = {
   kubernetes_cluster:'#6366f1', cluster:'#6366f1', namespace:'#3b82f6', node:'#10b981',
@@ -308,7 +309,7 @@ const CI_TYPE_COLOR = {
   ingress:'#ec4899', pv:'#475569', pvc:'#64748b', configmap:'#06b6d4', secret:'#dc2626',
 }
 
-const sshTypes = ['server', 'virtual_machine', 'cloud_host', 'middleware']
+const sshTypes = ['server', 'virtual_machine', 'cloud_host']
 const snmpTypes = ['network_device', 'switch', 'router', 'firewall', 'load_balancer', 'storage_device']
 const isSshType = computed(() => sshTypes.includes(form.value.ci_type))
 const isSnmpType = computed(() => snmpTypes.includes(form.value.ci_type))
@@ -346,7 +347,7 @@ const namePlaceholder = computed(() => ({
 
 const dbPortPlaceholder = computed(() => ({
   mysql: '3306', postgresql: '5432', redis: '6379', mongodb: '27017', elasticsearch: '9200',
-})[form.value.db_subtype] || '3306')
+})[form.value.db_type] || '3306')
 
 const form = ref({})
 const specValues = ref({})
@@ -356,9 +357,9 @@ const defaultForm = {
   connection_type: 'ssh', ssh_user: 'root', ssh_port: 22, ssh_password: '',
   k8s_api_server: '', k8s_token: '',
   snmp_community: 'public', snmp_port: 161, snmp_version: 'v2c',
-  db_subtype: 'mysql', db_port: 3306, db_user: 'root', db_password: '', db_name: '',
+  db_type: 'mysql', db_port: 3306, db_user: 'root', db_password: '', db_name: '',
   mw_subtype: 'nginx', mw_port: 80, mw_admin_url: '',
-  app_url: '', app_auth: '', app_credential: '',
+  http_url: '', http_auth: '', http_credential: '',
   cert_domain: '', cert_issuer: '', cert_expiry: '',
   dns_domain: '', dns_type: 'A', dns_value: '',
   monitor_url: '', monitor_type: 'http', monitor_interval: 60,
@@ -478,7 +479,8 @@ function onCiTypeChange() {
   else if (isSnmpType.value) form.value.connection_type = 'snmp'
   else if (form.value.ci_type === 'kubernetes_cluster') { form.value.connection_type = 'kubernetes'; form.value.ip = '' }
   else if (form.value.ci_type === 'database') form.value.connection_type = 'database'
-  else if (['business_app', 'api_service'].includes(form.value.ci_type)) form.value.connection_type = 'http'
+  else if (['business_app', 'api_service', 'middleware', 'monitoring_endpoint'].includes(form.value.ci_type)) form.value.connection_type = 'http'
+  else if (['ssl_certificate', 'dns_record'].includes(form.value.ci_type)) form.value.connection_type = 'none'
   else form.value.connection_type = 'ssh'
 }
 
@@ -487,12 +489,25 @@ function openCreate() { formMode.value = 'create'; form.value = { ...defaultForm
 async function openEdit(id) {
   try {
     const detail = await request.get(`/assets/api/${id}/detail`)
-    formMode.value = 'edit'; form.value = { ...defaultForm, ...detail }; specValues.value = {}; connTestResult.value = null
+    formMode.value = 'edit'
+    // 密码/敏感字段置空（后端返回 ***），保存时空值=不更新
+    const safeDetail = { ...detail }
+    ;['ssh_password', 'k8s_token', 'db_password', 'http_credential'].forEach(f => { safeDetail[f] = '' })
+    form.value = { ...defaultForm, ...safeDetail }
+    specValues.value = {}
+    connTestResult.value = null
     const meta = ciTypeMetaMap[detail.ci_type] || {}
+    const attrs = (typeof detail.ci_attributes === 'object' ? detail.ci_attributes : {}) || {}
     if (meta.specFields) {
-      const attrs = (typeof detail.ci_attributes === 'object' ? detail.ci_attributes : {}) || {}
       meta.specFields.forEach(f => { specValues.value[f.key] = attrs[f.key] || '' })
     }
+    // 从 ci_attributes 加载业务属性到表单
+    const ci = detail.ci_type
+    if (ci === 'middleware') { form.value.mw_subtype = attrs.mw_subtype || form.value.mw_subtype; form.value.mw_port = attrs.mw_port || form.value.mw_port; form.value.mw_admin_url = attrs.mw_admin_url || '' }
+    else if (ci === 'storage_device') { form.value.storage_type = attrs.storage_type || form.value.storage_type; form.value.storage_mount = attrs.storage_mount || ''; form.value.storage_capacity = attrs.storage_capacity || 0 }
+    else if (ci === 'ssl_certificate') { form.value.cert_domain = attrs.cert_domain || ''; form.value.cert_issuer = attrs.cert_issuer || ''; form.value.cert_expiry = attrs.cert_expiry || '' }
+    else if (ci === 'dns_record') { form.value.dns_domain = attrs.dns_domain || ''; form.value.dns_type = attrs.dns_type || 'A'; form.value.dns_value = attrs.dns_value || '' }
+    else if (ci === 'monitoring_endpoint') { form.value.monitor_url = attrs.monitor_url || ''; form.value.monitor_type = attrs.monitor_type || 'http'; form.value.monitor_interval = attrs.monitor_interval || 60 }
     showForm.value = true
   } catch (e) { ElMessage.error('加载详情失败: ' + (e.message || e)) }
 }
@@ -502,8 +517,7 @@ function closeForm() { showForm.value = false; connTestResult.value = null }
 function getTestHost() {
   const ct = form.value.ci_type
   if (ct === 'kubernetes_cluster') return form.value.k8s_api_server || ''
-  if (['business_app', 'api_service'].includes(ct)) return form.value.app_url || ''
-  if (ct === 'monitoring_endpoint') return form.value.monitor_url || ''
+  if (['business_app', 'api_service', 'middleware', 'monitoring_endpoint'].includes(ct)) return form.value.http_url || ''
   return form.value.ip || ''
 }
 
@@ -514,13 +528,20 @@ async function testConnection() {
   testingConn.value = true; connTestResult.value = null
   try {
     let cfg = {}
-    if (form.value.ci_type === 'kubernetes_cluster') {
-      cfg = { api_server: form.value.k8s_api_server, token: form.value.k8s_token }
-    } else if (isSshType.value) {
+    const ct = form.value.connection_type || 'ssh'
+    if (ct === 'kubernetes') {
+      cfg = { k8s_api_server: form.value.k8s_api_server, k8s_token: form.value.k8s_token }
+    } else if (ct === 'ssh') {
       cfg = { ssh_user: form.value.ssh_user, ssh_password: form.value.ssh_password, ssh_port: form.value.ssh_port }
+    } else if (ct === 'database') {
+      cfg = { db_type: form.value.db_type, db_port: form.value.db_port, db_user: form.value.db_user, db_password: form.value.db_password, db_name: form.value.db_name }
+    } else if (ct === 'snmp') {
+      cfg = { snmp_community: form.value.snmp_community, snmp_port: form.value.snmp_port, snmp_version: form.value.snmp_version }
+    } else if (ct === 'http') {
+      cfg = { http_url: form.value.http_url, http_auth: form.value.http_auth, http_credential: form.value.http_credential }
     }
     const p = new URLSearchParams()
-    p.append('connection_type', form.value.connection_type || 'ssh')
+    p.append('connection_type', ct)
     p.append('host', host)
     p.append('connection_config', JSON.stringify(cfg))
     const data = await request.post('/assets/api/test-connection', p, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
@@ -565,33 +586,36 @@ async function syncK8s(asset) {
 function buildPayload() {
   const p = { name: form.value.name, ci_type: form.value.ci_type, ip: form.value.ip, status: form.value.status, tags: form.value.tags, connection_type: form.value.connection_type }
   const meta = ciTypeMetaMap[form.value.ci_type] || {}
-  if (meta.specFields && Object.keys(specValues.value).some(k => specValues.value[k])) {
-    const attrs = {}; meta.specFields.forEach(f => { if (specValues.value[f.key]) attrs[f.key] = specValues.value[f.key] })
-    if (Object.keys(attrs).length) p.ci_attributes = attrs
+  // 规格属性存 ci_attributes
+  const attrs = {}
+  if (meta.specFields) {
+    meta.specFields.forEach(f => { if (specValues.value[f.key]) attrs[f.key] = specValues.value[f.key] })
   }
-  if (form.value.ci_type === 'kubernetes_cluster') {
+  // 业务属性也存 ci_attributes（mw_/storage_/cert_/dns_/monitor_）
+  const ci = form.value.ci_type
+  if (ci === 'middleware') { attrs.mw_subtype = form.value.mw_subtype; attrs.mw_port = form.value.mw_port; attrs.mw_admin_url = form.value.mw_admin_url }
+  else if (ci === 'storage_device') { attrs.storage_type = form.value.storage_type; attrs.storage_mount = form.value.storage_mount; attrs.storage_capacity = form.value.storage_capacity }
+  else if (ci === 'ssl_certificate') { attrs.cert_domain = form.value.cert_domain; attrs.cert_issuer = form.value.cert_issuer; attrs.cert_expiry = form.value.cert_expiry }
+  else if (ci === 'dns_record') { attrs.dns_domain = form.value.dns_domain; attrs.dns_type = form.value.dns_type; attrs.dns_value = form.value.dns_value }
+  else if (ci === 'monitoring_endpoint') { attrs.monitor_url = form.value.monitor_url; attrs.monitor_type = form.value.monitor_type; attrs.monitor_interval = form.value.monitor_interval }
+  if (Object.keys(attrs).length) p.ci_attributes = attrs
+  // 连接配置存 connection_config（按 CONTRACT.md 字段名）
+  if (ci === 'kubernetes_cluster') {
     const cfg = {}
     if (form.value.k8s_api_server) cfg.k8s_api_server = form.value.k8s_api_server
     if (form.value.k8s_token) cfg.k8s_token = form.value.k8s_token
     if (Object.keys(cfg).length) p.connection_config = cfg
     p.ip = form.value.k8s_api_server || ''
-  } else if (form.value.ci_type === 'database') {
-    p.db_subtype = form.value.db_subtype; p.db_port = form.value.db_port; p.db_user = form.value.db_user; p.db_password = form.value.db_password; p.db_name = form.value.db_name
-  } else if (form.value.ci_type === 'middleware') {
-    p.mw_subtype = form.value.mw_subtype; p.mw_port = form.value.mw_port; p.mw_admin_url = form.value.mw_admin_url
-  } else if (['business_app', 'api_service'].includes(form.value.ci_type)) {
-    p.app_url = form.value.app_url; p.app_auth = form.value.app_auth; p.app_credential = form.value.app_credential; p.ip = form.value.app_url || ''
-  } else if (form.value.ci_type === 'ssl_certificate') {
-    p.cert_domain = form.value.cert_domain; p.cert_issuer = form.value.cert_issuer; p.cert_expiry = form.value.cert_expiry
-  } else if (form.value.ci_type === 'dns_record') {
-    p.dns_domain = form.value.dns_domain; p.dns_type = form.value.dns_type; p.dns_value = form.value.dns_value
-  } else if (form.value.ci_type === 'monitoring_endpoint') {
-    p.monitor_url = form.value.monitor_url; p.monitor_type = form.value.monitor_type; p.monitor_interval = form.value.monitor_interval; p.ip = form.value.monitor_url || ''
-  } else if (form.value.ci_type === 'storage_device') {
-    p.storage_type = form.value.storage_type; p.storage_mount = form.value.storage_mount; p.storage_capacity = form.value.storage_capacity
+  } else if (ci === 'database') {
+    p.db_type = form.value.db_type; p.db_port = form.value.db_port; p.db_user = form.value.db_user; p.db_password = form.value.db_password; p.db_name = form.value.db_name
+  } else if (['business_app', 'api_service', 'middleware', 'monitoring_endpoint'].includes(ci)) {
+    p.http_url = form.value.http_url; p.http_auth = form.value.http_auth; p.http_credential = form.value.http_credential; p.ip = form.value.http_url || ''
   }
   if (isSshType.value) {
     p.ssh_user = form.value.ssh_user; p.ssh_password = form.value.ssh_password; p.ssh_port = form.value.ssh_port
+  }
+  if (isSnmpType.value) {
+    p.snmp_community = form.value.snmp_community; p.snmp_port = form.value.snmp_port; p.snmp_version = form.value.snmp_version
   }
   if (form.value.id) p.id = form.value.id
   return p
@@ -626,6 +650,18 @@ async function loadAssets() {
 }
 
 function onSearch() { if (searchTimer) clearTimeout(searchTimer); searchTimer = setTimeout(loadAssets, 300) }
+
+async function openAssistant(assetId) {
+  try {
+    const data = await request.post(`/assets/api/${assetId}/open-assistant`)
+    if (data.session_id) {
+      window._pendingAgentSessionId = data.session_id
+      window._navigateTo('agent-chat')
+    }
+  } catch (e) {
+    ElMessage.error('打开助手失败: ' + (e.message || e))
+  }
+}
 
 async function deleteAsset(id, name) {
   try { await ElMessageBox.confirm(`确认删除「${name}」？`, '删除确认', { type: 'warning' }); await request.post(`/assets/api/${id}/delete`); ElMessage.success('已删除'); loadAssets() }
@@ -732,6 +768,8 @@ tr.row-orphan td { background: rgba(239,68,68,0.03); }
 .btn-lifecycle:hover { background: rgba(99,102,241,0.15); }
 .btn-tag { background: rgba(245,158,11,0.08); color: #d97706; border-color: rgba(245,158,11,0.25); }
 .btn-tag:hover { background: rgba(245,158,11,0.15); }
+.btn-ai { background: rgba(99,102,241,0.08); color: #6366f1; border-color: rgba(99,102,241,0.25); }
+.btn-ai:hover { background: rgba(99,102,241,0.15); }
 .lc-badge { font-size: 0.68rem; padding: 2px 7px; }
 .lc-badge.lc-provisioning { background: rgba(148,163,184,0.15); color: #475569; }
 .lc-badge.lc-active { background: rgba(34,197,94,0.15); color: #16a34a; }

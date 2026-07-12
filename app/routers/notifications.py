@@ -127,10 +127,21 @@ def _relative_time(dt, now):
 @router.get("/api/channels")
 def api_channels_list(db: Session = Depends(get_db)):
     channels = notification_service.get_channels(db)
+    import json as _json
+    def _mask_config(cfg_str):
+        try:
+            cfg = _json.loads(cfg_str) if isinstance(cfg_str, str) else (cfg_str or {})
+        except Exception:
+            cfg = {}
+        masked = dict(cfg)
+        for k in ("secret", "webhook_secret", "token", "password", "key"):
+            if k in masked and masked[k]:
+                masked[k] = "***"
+        return masked
     return {
         "channels": [
             {
-                "id": c.id, "name": c.name, "type": c.type, "config": c.config,
+                "id": c.id, "name": c.name, "type": c.type, "config": _mask_config(c.config),
                 "enabled": c.enabled,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
             }

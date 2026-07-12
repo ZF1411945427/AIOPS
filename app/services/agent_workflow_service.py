@@ -46,7 +46,8 @@ def _audit(db: Session, run_id: Optional[int] = None, node_run_id: Optional[int]
         db.add(log)
         db.commit()
     except Exception as e:
-        print(f"[wf-audit] 审计日志写入失败: {e}")
+        from app.logger import logger
+        logger.warning(f"审计日志写入失败: {e}")
         try:
             db.rollback()
         except Exception:
@@ -631,8 +632,8 @@ def start_workflow_run(
                 _finalize_run(bg_db, _run_id, AgentWorkflowRun.STATUS_FAILED, f"后台执行异常: {e}")
             except Exception:
                 pass
-            print(f"[wf] run#{_run_id} 后台执行异常: {e}")
-            traceback.print_exc()
+            from app.logger import logger
+            logger.error(f"run#{_run_id} 后台执行异常: {e}")
         finally:
             bg_db.close()
 

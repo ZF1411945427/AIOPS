@@ -47,14 +47,25 @@ def api_remediation_list(db: Session = Depends(get_db)):
     """自愈规则列表 JSON API."""
     remediations = remediation_service.list_remediations(db)
     rules = list_rules(db)
-    logs = remediation_service.get_remediation_logs(db)
     actions = {k: v["label"] for k, v in remediation_service.ACTIONS.items()}
     return JSONResponse({
         "remediations": [_remediation_to_dict(r) for r in remediations],
         "rules": [{"id": r.id, "name": r.name} for r in rules],
-        "logs": [_log_to_dict(l) for l in logs],
         "actions": actions,
         "total": len(remediations),
+    })
+
+
+@router.get("/api/logs")
+def api_remediation_logs(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    """自愈执行记录分页查询 JSON API."""
+    items, total, total_pages = remediation_service.get_remediation_logs_paged(db, page, per_page)
+    return JSONResponse({
+        "items": [_log_to_dict(lg) for lg in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
     })
 
 

@@ -8,3 +8,8 @@ router = APIRouter(prefix="/kafka", tags=["kafka"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "kafka_pipeline", "status": "ok"}
+
+

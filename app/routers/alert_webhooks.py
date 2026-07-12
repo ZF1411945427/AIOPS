@@ -33,3 +33,8 @@ def call_alert_webhooks(db: Session, alert):
                 break
             except Exception:
                 pass
+
+
+@router.get("/status")
+def status():
+    return {"module": "alert_webhooks", "status": "ok"}
