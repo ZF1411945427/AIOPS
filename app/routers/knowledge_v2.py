@@ -35,10 +35,10 @@ def _bg_index_document(doc_id: int, mode: str):
         if _d:
             _d.status = "indexed" if ok else "failed"
             _db.commit()
-        print(f"[bg_index] doc={doc_id} ok={ok} msg={msg}", flush=True)
+        from app.logger import logger
+        logger.info(f"bg_index doc={doc_id} ok={ok} msg={msg}")
     except Exception as e:
-        print(f"[bg_index] doc={doc_id} EXCEPTION: {e}", flush=True)
-        traceback.print_exc()
+        logger.error(f"bg_index doc={doc_id} EXCEPTION: {e}")
         try:
             _d = _db.query(KbDocument).filter(KbDocument.id == doc_id).first()
             if _d:
@@ -53,6 +53,11 @@ def _bg_index_document(doc_id: int, mode: str):
 _UPLOAD_DIR = Path(__file__).resolve().parent.parent / "static" / "uploads" / "kb_v2"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _ALLOWED_EXT = {"md", "txt", "markdown", "pdf", "docx"}
+_ALLOWED_MIME = {
+    "text/plain", "text/markdown", "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/octet-stream",
+}
 _MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
@@ -62,6 +67,7 @@ def _doc_to_dict(d):
         "file_ext": d.file_ext or "", "chunk_count": d.chunk_count or 0,
         "status": d.status or "pending", "tags": d.tags or "",
         "asset_type": d.asset_type or "", "severity": d.severity or "warning",
+        "index_engine": getattr(d, "index_engine", "v1") or "v1",
         "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else None,
         "updated_at": d.updated_at.strftime("%Y-%m-%d %H:%M:%S") if d.updated_at else None,
     }
@@ -93,8 +99,9 @@ def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
         if not doc:
             return JSONResponse({"error": "文档不存在"}, status_code=404)
 
-        # 从 Milvus 获取该文档的切片
+        # 先从 Milvus 获取切片
         chunks = []
+        chunk_source = "milvus"
         try:
             client = vector_store.get_client()
             results = client.query(
@@ -108,10 +115,22 @@ def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
         except Exception:
             pass
 
+        # Milvus 查不到时回退 SQLite KbChunk（V1 文档兼容）
+        if not chunks:
+            try:
+                from app.models import KbChunk
+                db_chunks = db.query(KbChunk).filter(KbChunk.document_id == doc_id).order_by(KbChunk.chunk_index).all()
+                if db_chunks:
+                    chunks = [{"id": c.chunk_index, "content": c.content or ""} for c in db_chunks]
+                    chunk_source = "sqlite"
+            except Exception:
+                pass
+
         return JSONResponse({
             "doc": _doc_to_dict(doc),
             "content": doc.content or "",
             "chunks": chunks,
+            "chunk_source": chunk_source,
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -132,11 +151,15 @@ async def upload_document(
         if ext not in _ALLOWED_EXT:
             return JSONResponse({"ok": False, "error": f"不支持的文件类型 .{ext}"}, status_code=400)
 
+        content_type = (file.content_type or "").lower()
+        if content_type and content_type not in _ALLOWED_MIME:
+            return JSONResponse({"ok": False, "error": f"不支持的文件 MIME 类型: {content_type}"}, status_code=400)
+
         content_bytes = await file.read()
         if len(content_bytes) > _MAX_FILE_SIZE:
             return JSONResponse({"ok": False, "error": f"文件过大（{len(content_bytes)//1024}KB），限制 10MB"}, status_code=400)
 
-        safe_name = (file.filename or "upload.txt").replace("/", "_").replace("\\", "_")
+        safe_name = (file.filename or "upload.txt").replace("/", "_").replace("\\", "_").replace("..", "_")
         saved_path = _UPLOAD_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
         with open(saved_path, "wb") as f:
             f.write(content_bytes)
@@ -148,6 +171,7 @@ async def upload_document(
             title=doc_title[:256], content=text, source_type="upload",
             file_path=str(saved_path), file_ext=ext, tags=tags,
             asset_type=asset_type, severity=severity, status="pending",
+            index_engine="v2",
             created_by=request.session.get("user_id"),
         )
         db.add(doc)
@@ -175,7 +199,8 @@ async def create_document(payload: dict = {}, db: Session = Depends(get_db)):
             file_ext="txt", tags=payload.get("tags", ""),
             asset_type=payload.get("asset_type", ""),
             severity=payload.get("severity", "warning"),
-            status="pending", created_by=payload.get("created_by"),
+            status="pending", index_engine="v2",
+            created_by=payload.get("created_by"),
         )
         db.add(doc)
         db.commit()
@@ -196,16 +221,22 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
         if not doc:
             return JSONResponse({"ok": False, "error": "文档不存在"}, status_code=404)
 
-        # 删除 Milvus 中的切片
+        # 同时清理两侧（幂等：不存在则 no-op）
+        # 1. 清 Milvus 向量
         vector_store.delete_by_document(doc_id)
-
-        # 删除上传文件
+        # 2. 清 SQLite KbChunk（防止 V1 索引残留孤儿切片）
+        try:
+            from app.models import KbChunk
+            db.query(KbChunk).filter(KbChunk.document_id == doc_id).delete()
+        except Exception:
+            pass
+        # 3. 清文件
         if doc.file_path and os.path.exists(doc.file_path):
             try:
                 os.remove(doc.file_path)
             except OSError:
                 pass
-
+        # 4. 清文档记录
         db.delete(doc)
         db.commit()
         return JSONResponse({"ok": True})
@@ -245,6 +276,7 @@ async def search(
     asset_type: str = "",
     severity: str = "",
     tags: str = "",
+    rerank_mode: str = "",
     db: Session = Depends(get_db),
 ):
     if not q:
@@ -256,16 +288,20 @@ async def search(
         asset_type=asset_type or None,
         severity=severity or None,
         tags=tags or None,
+        rerank_mode=rerank_mode or None,
     )
 
-    # 补充文档信息
+    # 补充文档信息（批量查询，避免 N+1）
+    doc_ids = {r.get("document_id") for r in results if r.get("document_id")}
+    doc_map = {}
+    if doc_ids:
+        docs = db.query(KbDocument).filter(KbDocument.id.in_(doc_ids)).all()
+        doc_map = {d.id: d for d in docs}
     for r in results:
         doc_id = r.get("document_id")
-        if doc_id:
-            doc = db.query(KbDocument).filter(KbDocument.id == doc_id).first()
-            if doc:
-                r["doc_title"] = doc.title
-                r["source_type"] = doc.source_type
+        if doc_id and doc_id in doc_map:
+            r["doc_title"] = doc_map[doc_id].title
+            r["source_type"] = doc_map[doc_id].source_type
 
     return JSONResponse({"count": len(results), "query": q, "items": results})
 
@@ -294,15 +330,34 @@ def get_stats(db: Session = Depends(get_db)):
         total_docs = db.query(KbDocument).count()
         indexed_docs = db.query(KbDocument).filter(KbDocument.status == "indexed").count()
         vector_stats = vector_store.get_stats()
+        reranker_status = rag_engine_v2.get_reranker_status()
         return JSONResponse({
             "total_docs": total_docs,
             "indexed_docs": indexed_docs,
             "total_chunks": vector_stats.get("total_chunks", 0),
             "embedding_mode": embedding_service.get_embedding_mode(),
             "embedding_dimension": embedding_service.get_embedding_dimension(),
+            "reranker": reranker_status,
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/reranker/status")
+def get_reranker_status_api():
+    """获取 Reranker 状态"""
+    return JSONResponse(rag_engine_v2.get_reranker_status())
+
+
+@router.post("/reranker/mode")
+def set_reranker_mode(payload: dict = {}):
+    """切换 Reranker 模式：classic（经典版）| smart（智能版，需 GPU）"""
+    mode = payload.get("mode", "classic")
+    try:
+        rag_engine_v2.set_rerank_mode(mode)
+        return {"ok": True, "mode": mode}
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
 # ─── 工具函数 ───────────────────────────────────────────────────

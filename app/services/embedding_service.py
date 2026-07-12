@@ -38,10 +38,11 @@ def _get_bge_model():
     with _bge_lock:
         if _bge_model is not None:
             return _bge_model
-        print(f"[embedding] 加载 BGE 模型: {_LOCAL_MODEL_DIR} ...")
+        from app.logger import logger
+        logger.info(f"加载 BGE 模型: {_LOCAL_MODEL_DIR} ...")
         from sentence_transformers import SentenceTransformer
         _bge_model = SentenceTransformer(_LOCAL_MODEL_DIR)
-        print("[embedding] BGE 模型加载完成")
+        logger.info("BGE 模型加载完成")
         return _bge_model
 
 
@@ -97,7 +98,7 @@ def get_embedding_dimension(mode: Optional[str] = None) -> int:
     mode = mode or get_embedding_mode()
     if mode == "openai":
         return OPENAI_DIMENSION
-    return 1024  # BGE-M3 默认维度
+    return 512  # BGE-small-zh-v1.5 输出维度
 
 
 def preload_model():
@@ -106,7 +107,7 @@ def preload_model():
         try:
             _get_bge_model()
         except Exception as e:
-            print(f"[embedding] 预加载 BGE-M3 失败: {e}")
+            logger.warning(f"预加载 BGE-M3 失败: {e}")
     t = threading.Thread(target=_load, daemon=True)
     t.start()
 

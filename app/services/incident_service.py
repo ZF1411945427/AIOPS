@@ -6,11 +6,14 @@ from sqlalchemy import func
 from app.models import Incident, IncidentAlert, Alert, Asset
 
 
-def list_incidents(db: Session, status: str = ""):
+def list_incidents(db: Session, status: str = "", page: int = 1, per_page: int = 20):
     q = db.query(Incident)
     if status:
         q = q.filter(Incident.status == status)
-    return q.order_by(Incident.created_at.desc()).all()
+    q = q.order_by(Incident.created_at.desc())
+    total = q.count()
+    incidents = q.offset((page - 1) * per_page).limit(per_page).all()
+    return incidents, total
 
 
 def get_incident_detail(db: Session, incident_id: int):
@@ -58,7 +61,16 @@ def correlate_alerts(db: Session):
     for asset_id, alerts in assets.items():
         severity_order = {"critical": 0, "warning": 1, "info": 2}
         sev = min((a.severity for a in alerts), key=lambda s: severity_order.get(s, 99))
-        title = f"Asset #{asset_id} fault - {len(alerts)} alerts"
+        # 查资产名，生成中文标题
+        asset_name = ""
+        if asset_id > 0:
+            from app.models import Asset
+            _asset = db.query(Asset).filter(Asset.id == asset_id).first()
+            asset_name = _asset.name if _asset else f"资产#{asset_id}"
+        else:
+            asset_name = "未关联资产"
+        sev_cn = {"critical": "严重", "warning": "警告", "info": "提示"}.get(sev, "警告")
+        title = f"[{sev_cn}] {asset_name} 异常 - {len(alerts)} 条告警"
 
         existing = (
             db.query(Incident)

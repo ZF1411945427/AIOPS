@@ -12,3 +12,8 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "discovery", "status": "ok"}
+
+

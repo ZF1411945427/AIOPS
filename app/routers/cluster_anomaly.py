@@ -64,3 +64,17 @@ def detect_node_notready(db: Session) -> list[dict]:
     return []
 
 
+@router.get("/status")
+def status():
+    return {"module": "cluster_anomaly", "status": "ok"}
+
+
+@router.get("/detect")
+def detect_all(db: Session = Depends(get_db)):
+    results = []
+    results.extend(detect_dns_failures(db))
+    results.extend(detect_cni_errors(db))
+    results.extend(detect_node_notready(db))
+    return {"anomalies": results}
+
+

@@ -10,3 +10,8 @@ router = APIRouter(prefix="/alert-console", tags=["alert_console"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "alert_console", "status": "ok"}
+
+

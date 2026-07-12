@@ -569,6 +569,28 @@ class AlertEventLink(Base):
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
+class AlertSessionLink(Base):
+    """告警与 AI 会话的关联"""
+    __tablename__ = "alert_session_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    context_summary = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class AssetSessionLink(Base):
+    """资产与 AI 会话的关联"""
+    __tablename__ = "asset_session_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    context_summary = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
 class SavedFilter(Base):
     __tablename__ = "saved_filters"
 
@@ -748,6 +770,7 @@ class BlueGreenDeploy(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(128))
     namespace = Column(String(64), default="default")
+    cluster = Column(String(128), default="")
     active_label = Column(String(64), default="blue")
     standby_label = Column(String(64), default="green")
     active_replicas = Column(Integer, default=3)
@@ -798,11 +821,12 @@ class AIProvider(Base):
     def set_api_key(self, value):
         from cryptography.fernet import Fernet
         import hashlib, base64
+        from app.config import PROVIDER_ENCRYPT_SEED
         value = (value or "").strip()
         if not value:
             self.api_key_encrypted = ""
             return
-        seed = b"aiops-agent-provider-key-seed"
+        seed = PROVIDER_ENCRYPT_SEED.encode("utf-8")
         key = base64.urlsafe_b64encode(hashlib.sha256(seed).digest())
         self.api_key_encrypted = Fernet(key).encrypt(value.encode("utf-8")).decode("utf-8")
 
@@ -812,7 +836,8 @@ class AIProvider(Base):
         try:
             from cryptography.fernet import Fernet
             import hashlib, base64
-            seed = b"aiops-agent-provider-key-seed"
+            from app.config import PROVIDER_ENCRYPT_SEED
+            seed = PROVIDER_ENCRYPT_SEED.encode("utf-8")
             key = base64.urlsafe_b64encode(hashlib.sha256(seed).digest())
             return Fernet(key).decrypt(self.api_key_encrypted.encode("utf-8")).decode("utf-8")
         except Exception:
@@ -1085,6 +1110,7 @@ class KbDocument(Base):
     tags = Column(String(256), default="")
     asset_type = Column(String(32), default="")
     severity = Column(String(32), default="warning")
+    index_engine = Column(String(16), default="v1")        # v1 / v2 / both（标识索引归属引擎）
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

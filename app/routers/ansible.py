@@ -103,9 +103,12 @@ class TestInventoryReq(BaseModel):
 
 
 @router.get("/api/inventories")
-def list_inventories(db: Session = Depends(get_db)):
-    items = db.query(AnsibleInventory).order_by(AnsibleInventory.id.desc()).all()
-    return JSONResponse({"items": [_inventory_to_dict(i) for i in items], "total": len(items)})
+def list_inventories(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    q = db.query(AnsibleInventory).order_by(AnsibleInventory.id.desc())
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return JSONResponse({"items": [_inventory_to_dict(i) for i in items], "total": total, "page": page, "per_page": per_page, "total_pages": total_pages})
 
 
 @router.post("/api/inventories")
@@ -152,9 +155,12 @@ def delete_inventory(inv_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/api/playbooks")
-def list_playbooks(db: Session = Depends(get_db)):
-    items = db.query(AnsiblePlaybook).order_by(AnsiblePlaybook.id.desc()).all()
-    return JSONResponse({"items": [_playbook_to_dict(i) for i in items], "total": len(items)})
+def list_playbooks(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    q = db.query(AnsiblePlaybook).order_by(AnsiblePlaybook.id.desc())
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return JSONResponse({"items": [_playbook_to_dict(i) for i in items], "total": total, "page": page, "per_page": per_page, "total_pages": total_pages})
 
 
 @router.post("/api/playbooks")
@@ -308,9 +314,12 @@ def run_playbook(body: RunCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/api/runs")
-def list_runs(db: Session = Depends(get_db)):
-    items = db.query(AnsibleRun).order_by(AnsibleRun.id.desc()).limit(50).all()
-    return JSONResponse({"items": [_run_to_dict(r) for r in items], "total": len(items)})
+def list_runs(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    q = db.query(AnsibleRun).order_by(AnsibleRun.id.desc())
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return JSONResponse({"items": [_run_to_dict(r) for r in items], "total": total, "page": page, "per_page": per_page, "total_pages": total_pages})
 
 
 @router.get("/api/runs/{run_id}")

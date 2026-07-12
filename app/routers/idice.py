@@ -11,3 +11,8 @@ router = APIRouter(prefix="/idice", tags=["idice"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "idice", "status": "ok"}
+
+

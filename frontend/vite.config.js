@@ -2,10 +2,20 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
+    base: '/vue-assets/',
     plugins: [vue()],
     build: {
         outDir: 'dist',
         chunkSizeWarningLimit: 900,
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    'vendor-vue': ['vue', 'vue-router', 'pinia'],
+                    'vendor-element': ['element-plus', '@element-plus/icons-vue'],
+                    'vendor-echarts': ['echarts'],
+                },
+            },
+        },
     },
     server: {
         host: '0.0.0.0',

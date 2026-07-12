@@ -152,13 +152,13 @@ def _test_ssh(source: DataSource) -> tuple:
     try:
         import paramiko
         cfg = parse_json_config(source.auth_config)
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        from app.services.ssh_helper import get_ssh_client
+        client = get_ssh_client()
         client.connect(
             hostname=source.endpoint,
-            port=int(cfg.get("port", 22)),
-            username=cfg.get("username", ""),
-            password=cfg.get("password", ""),
+            port=int(cfg.get("ssh_port", cfg.get("port", 22))),
+            username=cfg.get("ssh_user", cfg.get("username", "")),
+            password=cfg.get("ssh_password", cfg.get("password", "")),
             timeout=10,
         )
         stdin, stdout, stderr = client.exec_command("uptime")
@@ -171,13 +171,22 @@ def _test_ssh(source: DataSource) -> tuple:
 
 def _test_kubernetes(source: DataSource) -> tuple:
     try:
-        from kubernetes import config, client
+        from kubernetes import client
         cfg = parse_json_config(source.auth_config)
         if cfg.get("kubeconfig"):
-            config.load_kube_config_from_dict(cfg["kubeconfig"])
+            from kubernetes import config as k8s_config
+            k8s_config.load_kube_config_from_dict(cfg["kubeconfig"])
+            api_client = client.ApiClient()
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            configuration = client.Configuration()
+            configuration.host = cfg["k8s_api_server"]
+            configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            configuration.verify_ssl = cfg.get("verify_ssl", False)
+            configuration.timeout = 10
+            api_client = client.ApiClient(configuration=configuration)
         else:
-            config.load_kube_config()
-        v1 = client.CoreV1Api()
+            return (False, "缺少 k8s_api_server/k8s_token 配置")
+        v1 = client.CoreV1Api(api_client=api_client)
         nodes = v1.list_node().items
         return (True, f"K8s 连接成功, 发现 {len(nodes)} nodes")
     except Exception as e:
@@ -315,11 +324,14 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
 
 def _sync_k8s_asset(db: Session, ci_type: str, name: str, parent_id: int, k8s_cluster: str, attrs: dict) -> Asset:
     existing = db.query(Asset).filter(Asset.ci_type == ci_type, Asset.name == name, Asset.k8s_cluster == k8s_cluster).first()
+    if not existing:
+        existing = db.query(Asset).filter(Asset.ci_type == ci_type, Asset.name == name).first()
     if existing:
         for k, v in attrs.items():
             setattr(existing, k, v)
         if parent_id:
             existing.parent_id = parent_id
+        existing.k8s_cluster = k8s_cluster
         db.commit()
         return existing
     asset = Asset(
@@ -504,12 +516,12 @@ def _scrape_ssh(db: Session, source: DataSource) -> tuple:
     import paramiko
     cfg = parse_json_config(source.auth_config)
     host = source.endpoint
-    port = int(cfg.get("port", 22))
-    username = cfg.get("username", "")
-    password = cfg.get("password", "")
+    port = int(cfg.get("ssh_port", cfg.get("port", 22)))
+    username = cfg.get("ssh_user", cfg.get("username", ""))
+    password = cfg.get("ssh_password", cfg.get("password", ""))
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    from app.services.ssh_helper import get_ssh_client
+    client = get_ssh_client()
     client.connect(hostname=host, port=port, username=username, password=password, timeout=8)
 
     now = datetime.now()
@@ -644,35 +656,44 @@ def _save_metric(db: Session, host: str, name: str, value: float, unit: str, tim
 
 def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
     try:
-        from kubernetes import config, client
+        from kubernetes import client
     except ImportError:
         source.last_status = "error"
         source.last_error = "missing kubernetes Python package"
-    try:
-        cfg = parse_json_config(source.auth_config)
-        if cfg.get("kubeconfig"):
-            config.load_kube_config_from_dict(cfg["kubeconfig"])
-        elif source.endpoint:
-            from kubernetes.config import kube_config
-            kube_config.KUBE_CONFIG_DEFAULT_LOCATION = ""
-            client.Configuration().host = source.endpoint
-            if cfg.get("token"):
-                client.Configuration().api_key = {"authorization": f"Bearer {cfg['token']}"}
-            config.load_kube_config()
-        else:
-            config.load_kube_config()
-    except Exception:
-        config.load_incluster_config()
+        db.commit()
+        return (False, "missing kubernetes Python package")
 
-    v1 = client.CoreV1Api()
-    apps_v1 = client.AppsV1Api()
+    cfg = parse_json_config(source.auth_config)
+    api_client = None
+    try:
+        if cfg.get("kubeconfig"):
+            from kubernetes import config as k8s_config
+            k8s_config.load_kube_config_from_dict(cfg["kubeconfig"])
+            api_client = client.ApiClient()
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            configuration = client.Configuration()
+            configuration.host = cfg["k8s_api_server"]
+            configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            configuration.verify_ssl = cfg.get("verify_ssl", False)
+            configuration.timeout = 10
+            api_client = client.ApiClient(configuration=configuration)
+        else:
+            raise Exception("缺少 k8s_api_server/k8s_token 配置")
+    except Exception as e:
+        source.last_status = "error"
+        source.last_error = f"K8s 配置错误: {e}"
+        db.commit()
+        return (False, str(e))
+
+    v1 = client.CoreV1Api(api_client=api_client)
+    apps_v1 = client.AppsV1Api(api_client=api_client)
     now = datetime.now()
     cluster_name = source.name
     collected = 0
     created = 0
 
     # 1. Cluster asset
-    cluster_asset = _sync_k8s_asset(db, "cluster", cluster_name, 0, cluster_name, {"endpoint": source.endpoint})
+    cluster_asset = _sync_k8s_asset(db, "kubernetes_cluster", cluster_name, 0, cluster_name, {"endpoint": source.endpoint})
     created += 1
 
     # 2. Nodes

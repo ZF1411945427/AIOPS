@@ -10,3 +10,8 @@ router = APIRouter(prefix="/log-rca", tags=["log-rca"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "log_rca", "status": "ok"}
+
+

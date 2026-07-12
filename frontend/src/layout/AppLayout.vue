@@ -226,7 +226,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
 import {
@@ -238,72 +238,72 @@ import {
 } from '@element-plus/icons-vue'
 import AIOpsChatWidget from '@/components/AIOpsChatWidget.vue'
 import DashboardView from '@/views/DashboardView.vue'
-import AgentAudit from '@/views/AgentAudit.vue'
-import OperationAudit from '@/views/OperationAudit.vue'
-import AgentChatView from '@/views/AgentChatView.vue'
-import MenuConfig from '@/views/MenuConfig.vue'
-import SystemPosture from '@/views/SystemPosture.vue'
-import TraceView from '@/views/TraceView.vue'
-import TraceAgentGuide from '@/views/TraceAgentGuide.vue'
-import MetricsView from '@/views/MetricsView.vue'
-import ErrorBudgetView from '@/views/ErrorBudgetView.vue'
-import OnCallView from '@/views/OnCallView.vue'
-import BurnRateView from '@/views/BurnRateView.vue'
-import SLOConfigView from '@/views/SLOConfigView.vue'
-import SLAView from '@/views/SLAView.vue'
-import EscalationPolicyView from '@/views/EscalationPolicyView.vue'
-import AvailabilityReportView from '@/views/AvailabilityReportView.vue'
-import ChaosExperimentView from '@/views/ChaosExperimentView.vue'
-import ChaosReportView from '@/views/ChaosReportView.vue'
-import ChaosScenarioView from '@/views/ChaosScenarioView.vue'
-import AlertsView from '@/views/AlertsView.vue'
-import AssetsView from '@/views/AssetsView.vue'
-import DatasourcesView from '@/views/DatasourcesView.vue'
-import LogsView from '@/views/LogsView.vue'
-import IncidentsView from '@/views/IncidentsView.vue'
-import EventStatsView from '@/views/EventStatsView.vue'
-import EventSourcesView from '@/views/EventSourcesView.vue'
-import AnomalyView from '@/views/AnomalyView.vue'
-import RemediationView from '@/views/RemediationView.vue'
-import RemediationWorkflowView from '@/views/RemediationWorkflowView.vue'
-import ScriptExecView from '@/views/ScriptExecView.vue'
-import BlueGreenView from '@/views/BlueGreenView.vue'
-import ChangeWorkflowView from '@/views/ChangeWorkflowView.vue'
-import PendingActionsView from '@/views/PendingActionsView.vue'
-import AiProvidersView from '@/views/AiProvidersView.vue'
-import FeatureStoreView from '@/views/FeatureStoreView.vue'
-import PredictionModelsView from '@/views/PredictionModelsView.vue'
-import UsersView from '@/views/UsersView.vue'
-import NotificationsView from '@/views/NotificationsView.vue'
-import SettingsView from '@/views/SettingsView.vue'
-import EsIntegrationView from '@/views/EsIntegrationView.vue'
-import TagsView from '@/views/TagsView.vue'
-import ExtCmdbView from '@/views/ExtCmdbView.vue'
-import ReportsView from '@/views/ReportsView.vue'
-import K8sOverviewView from '@/views/K8sOverviewView.vue'
-import K8sMonitorView from '@/views/K8sMonitorView.vue'
-import K8sResourceListView from '@/views/K8sResourceListView.vue'
-import ContainerTopologyView from '@/views/ContainerTopologyView.vue'
-import K8sPodsView from '@/views/K8sPodsView.vue'
-import K8sDeploymentsView from '@/views/K8sDeploymentsView.vue'
-import DockerOverviewView from '@/views/DockerOverviewView.vue'
-import DockerListView from '@/views/DockerListView.vue'
-import KnowledgeView from '@/views/KnowledgeView.vue'
-import KnowledgeDocumentsView from '@/views/KnowledgeDocumentsView.vue'
-import KnowledgeGraphView from '@/views/KnowledgeGraphView.vue'
-import SmartRecommendView from '@/views/SmartRecommendView.vue'
-import RunbooksView from '@/views/RunbooksView.vue'
-import LifecycleView from '@/views/LifecycleView.vue'
-import TopologyView from '@/views/TopologyView.vue'
-import TopologyPathView from '@/views/TopologyPathView.vue'
-import OpenApiView from '@/views/OpenApiView.vue'
-import WorkflowRunsView from '@/views/WorkflowRunsView.vue'
-import WorkflowTemplatesView from '@/views/WorkflowTemplatesView.vue'
-import AgentWorkflowEditor from '@/views/AgentWorkflowEditor.vue'
-import AgentWorkflowRunsView from '@/views/AgentWorkflowRunsView.vue'
-import HelmView from '@/views/HelmView.vue'
-import AnsibleView from '@/views/AnsibleView.vue'
-import LicenseView from '@/views/LicenseView.vue'
+const AgentAudit = defineAsyncComponent(() => import('@/views/AgentAudit.vue'))
+const OperationAudit = defineAsyncComponent(() => import('@/views/OperationAudit.vue'))
+const AgentChatView = defineAsyncComponent(() => import('@/views/AgentChatView.vue'))
+const MenuConfig = defineAsyncComponent(() => import('@/views/MenuConfig.vue'))
+const SystemPosture = defineAsyncComponent(() => import('@/views/SystemPosture.vue'))
+const TraceView = defineAsyncComponent(() => import('@/views/TraceView.vue'))
+const TraceAgentGuide = defineAsyncComponent(() => import('@/views/TraceAgentGuide.vue'))
+const MetricsView = defineAsyncComponent(() => import('@/views/MetricsView.vue'))
+const ErrorBudgetView = defineAsyncComponent(() => import('@/views/ErrorBudgetView.vue'))
+const OnCallView = defineAsyncComponent(() => import('@/views/OnCallView.vue'))
+const BurnRateView = defineAsyncComponent(() => import('@/views/BurnRateView.vue'))
+const SLOConfigView = defineAsyncComponent(() => import('@/views/SLOConfigView.vue'))
+const SLAView = defineAsyncComponent(() => import('@/views/SLAView.vue'))
+const EscalationPolicyView = defineAsyncComponent(() => import('@/views/EscalationPolicyView.vue'))
+const AvailabilityReportView = defineAsyncComponent(() => import('@/views/AvailabilityReportView.vue'))
+const ChaosExperimentView = defineAsyncComponent(() => import('@/views/ChaosExperimentView.vue'))
+const ChaosReportView = defineAsyncComponent(() => import('@/views/ChaosReportView.vue'))
+const ChaosScenarioView = defineAsyncComponent(() => import('@/views/ChaosScenarioView.vue'))
+const AlertsView = defineAsyncComponent(() => import('@/views/AlertsView.vue'))
+const AssetsView = defineAsyncComponent(() => import('@/views/AssetsView.vue'))
+const DatasourcesView = defineAsyncComponent(() => import('@/views/DatasourcesView.vue'))
+const LogsView = defineAsyncComponent(() => import('@/views/LogsView.vue'))
+const IncidentsView = defineAsyncComponent(() => import('@/views/IncidentsView.vue'))
+const EventStatsView = defineAsyncComponent(() => import('@/views/EventStatsView.vue'))
+const EventSourcesView = defineAsyncComponent(() => import('@/views/EventSourcesView.vue'))
+const AnomalyView = defineAsyncComponent(() => import('@/views/AnomalyView.vue'))
+const RemediationView = defineAsyncComponent(() => import('@/views/RemediationView.vue'))
+const RemediationWorkflowView = defineAsyncComponent(() => import('@/views/RemediationWorkflowView.vue'))
+const ScriptExecView = defineAsyncComponent(() => import('@/views/ScriptExecView.vue'))
+const BlueGreenView = defineAsyncComponent(() => import('@/views/BlueGreenView.vue'))
+const ChangeWorkflowView = defineAsyncComponent(() => import('@/views/ChangeWorkflowView.vue'))
+const PendingActionsView = defineAsyncComponent(() => import('@/views/PendingActionsView.vue'))
+const AiProvidersView = defineAsyncComponent(() => import('@/views/AiProvidersView.vue'))
+const FeatureStoreView = defineAsyncComponent(() => import('@/views/FeatureStoreView.vue'))
+const PredictionModelsView = defineAsyncComponent(() => import('@/views/PredictionModelsView.vue'))
+const UsersView = defineAsyncComponent(() => import('@/views/UsersView.vue'))
+const NotificationsView = defineAsyncComponent(() => import('@/views/NotificationsView.vue'))
+const SettingsView = defineAsyncComponent(() => import('@/views/SettingsView.vue'))
+const EsIntegrationView = defineAsyncComponent(() => import('@/views/EsIntegrationView.vue'))
+const TagsView = defineAsyncComponent(() => import('@/views/TagsView.vue'))
+const ExtCmdbView = defineAsyncComponent(() => import('@/views/ExtCmdbView.vue'))
+const ReportsView = defineAsyncComponent(() => import('@/views/ReportsView.vue'))
+const K8sOverviewView = defineAsyncComponent(() => import('@/views/K8sOverviewView.vue'))
+const K8sMonitorView = defineAsyncComponent(() => import('@/views/K8sMonitorView.vue'))
+const K8sResourceListView = defineAsyncComponent(() => import('@/views/K8sResourceListView.vue'))
+const ContainerTopologyView = defineAsyncComponent(() => import('@/views/ContainerTopologyView.vue'))
+const K8sPodsView = defineAsyncComponent(() => import('@/views/K8sPodsView.vue'))
+const K8sDeploymentsView = defineAsyncComponent(() => import('@/views/K8sDeploymentsView.vue'))
+const DockerOverviewView = defineAsyncComponent(() => import('@/views/DockerOverviewView.vue'))
+const DockerListView = defineAsyncComponent(() => import('@/views/DockerListView.vue'))
+const KnowledgeView = defineAsyncComponent(() => import('@/views/KnowledgeView.vue'))
+const KnowledgeDocumentsView = defineAsyncComponent(() => import('@/views/KnowledgeDocumentsView.vue'))
+const KnowledgeGraphView = defineAsyncComponent(() => import('@/views/KnowledgeGraphView.vue'))
+const SmartRecommendView = defineAsyncComponent(() => import('@/views/SmartRecommendView.vue'))
+const RunbooksView = defineAsyncComponent(() => import('@/views/RunbooksView.vue'))
+const LifecycleView = defineAsyncComponent(() => import('@/views/LifecycleView.vue'))
+const TopologyView = defineAsyncComponent(() => import('@/views/TopologyView.vue'))
+const TopologyPathView = defineAsyncComponent(() => import('@/views/TopologyPathView.vue'))
+const OpenApiView = defineAsyncComponent(() => import('@/views/OpenApiView.vue'))
+const WorkflowRunsView = defineAsyncComponent(() => import('@/views/WorkflowRunsView.vue'))
+const WorkflowTemplatesView = defineAsyncComponent(() => import('@/views/WorkflowTemplatesView.vue'))
+const AgentWorkflowEditor = defineAsyncComponent(() => import('@/views/AgentWorkflowEditor.vue'))
+const AgentWorkflowRunsView = defineAsyncComponent(() => import('@/views/AgentWorkflowRunsView.vue'))
+const HelmView = defineAsyncComponent(() => import('@/views/HelmView.vue'))
+const AnsibleView = defineAsyncComponent(() => import('@/views/AnsibleView.vue'))
+const LicenseView = defineAsyncComponent(() => import('@/views/LicenseView.vue'))
 import request from '@/api/request'
 
 const appStore = useAppStore()

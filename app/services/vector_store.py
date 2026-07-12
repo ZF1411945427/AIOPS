@@ -10,9 +10,10 @@ from pathlib import Path
 from pymilvus import MilvusClient, DataType
 
 # 配置
-_MILVUS_DB_PATH = str(Path(__file__).resolve().parent.parent.parent / "docker" / "milvus" / "kb_v2.db")
-_COLLECTION_NAME = "kb_chunks_v2"
-_DIMENSION = 512  # BGE-small-zh 输出维度
+from app.config import MILVUS_DB_PATH, MILVUS_COLLECTION
+_MILVUS_DB_PATH = MILVUS_DB_PATH
+_COLLECTION_NAME = MILVUS_COLLECTION
+_DIMENSION = 512  # BGE-small-zh-v1.5 输出维度
 
 # 全局客户端
 _client: Optional[MilvusClient] = None
@@ -57,7 +58,8 @@ def _ensure_collection():
         index_params=index_params,
     )
     client.load_collection(_COLLECTION_NAME)
-    print(f"[vector] Collection '{_COLLECTION_NAME}' 创建并加载完成")
+    from app.logger import logger
+    logger.info(f"Collection '{_COLLECTION_NAME}' 创建并加载完成")
 
 
 def insert_chunks(chunks: List[Dict]):
@@ -101,15 +103,18 @@ def search_by_vector(
     client = get_client()
     search_params = {"metric_type": "COSINE", "params": {}}
 
-    # 构建过滤条件
+    # 构建过滤条件（转义引号防止 filter 注入）
     filter_expr = None
     conditions = []
     if asset_type:
-        conditions.append(f'asset_type == "{asset_type}"')
+        _v = asset_type.replace('"', '\\"').replace('\\', '\\\\')
+        conditions.append(f'asset_type == "{_v}"')
     if severity:
-        conditions.append(f'severity == "{severity}"')
+        _v = severity.replace('"', '\\"').replace('\\', '\\\\')
+        conditions.append(f'severity == "{_v}"')
     if tags:
-        conditions.append(f'tags like "%{tags}%"')
+        _v = tags.replace('"', '\\"').replace('\\', '\\\\')
+        conditions.append(f'tags like "%{_v}%"')
     if conditions:
         filter_expr = " and ".join(conditions)
 

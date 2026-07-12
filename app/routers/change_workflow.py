@@ -53,14 +53,20 @@ def _task_to_dict(t, users: dict) -> dict:
 
 
 @router.get("/api/list")
-def api_change_list(db: Session = Depends(get_db)):
-    """变更审批列表 JSON API."""
-    changes = db.query(ChangeRequest).order_by(ChangeRequest.created_at.desc()).all()
+def api_change_list(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    """变更审批列表 JSON API（分页）."""
+    q = db.query(ChangeRequest).order_by(ChangeRequest.created_at.desc())
+    total = q.count()
+    changes = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
     users = {u.id: u for u in db.query(User).all()}
     return JSONResponse({
         "changes": [_change_to_dict(c, users) for c in changes],
         "users": [{"id": u.id, "username": u.username} for u in users.values()],
-        "total": len(changes),
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
     })
 
 
@@ -113,9 +119,10 @@ def api_change_submit(change_id: int, db: Session = Depends(get_db)):
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
     if not c:
         return JSONResponse({"error": "not found"}, status_code=404)
-    if c.status == "draft":
-        c.status = "pending_approval"
-        db.commit()
+    if c.status != "draft":
+        return JSONResponse({"ok": False, "error": f"当前状态为 {c.status}，仅 draft 状态可提交审批", "status": c.status})
+    c.status = "pending_approval"
+    db.commit()
     return JSONResponse({"ok": True, "status": c.status})
 
 
@@ -128,11 +135,12 @@ def api_change_approve(
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
     if not c:
         return JSONResponse({"error": "not found"}, status_code=404)
-    if c.status == "pending_approval":
-        c.status = "approved"
-        c.reviewer_id = request.session.get("user_id")
-        c.review_comment = review_comment
-        db.commit()
+    if c.status != "pending_approval":
+        return JSONResponse({"ok": False, "error": f"当前状态为 {c.status}，仅 pending_approval 状态可审批通过", "status": c.status})
+    c.status = "approved"
+    c.reviewer_id = request.session.get("user_id")
+    c.review_comment = review_comment
+    db.commit()
     return JSONResponse({"ok": True, "status": c.status})
 
 
@@ -145,11 +153,12 @@ def api_change_reject(
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
     if not c:
         return JSONResponse({"error": "not found"}, status_code=404)
-    if c.status == "pending_approval":
-        c.status = "rejected"
-        c.reviewer_id = request.session.get("user_id")
-        c.review_comment = review_comment
-        db.commit()
+    if c.status != "pending_approval":
+        return JSONResponse({"ok": False, "error": f"当前状态为 {c.status}，仅 pending_approval 状态可驳回", "status": c.status})
+    c.status = "rejected"
+    c.reviewer_id = request.session.get("user_id")
+    c.review_comment = review_comment
+    db.commit()
     return JSONResponse({"ok": True, "status": c.status})
 
 
@@ -159,9 +168,10 @@ def api_change_start(change_id: int, db: Session = Depends(get_db)):
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
     if not c:
         return JSONResponse({"error": "not found"}, status_code=404)
-    if c.status in ("approved", "in_progress"):
-        c.status = "in_progress"
-        db.commit()
+    if c.status not in ("approved", "in_progress"):
+        return JSONResponse({"ok": False, "error": f"当前状态为 {c.status}，仅 approved 状态可开始执行", "status": c.status})
+    c.status = "in_progress"
+    db.commit()
     return JSONResponse({"ok": True, "status": c.status})
 
 
@@ -171,9 +181,10 @@ def api_change_complete(change_id: int, db: Session = Depends(get_db)):
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
     if not c:
         return JSONResponse({"error": "not found"}, status_code=404)
-    if c.status == "in_progress":
-        c.status = "completed"
-        db.commit()
+    if c.status != "in_progress":
+        return JSONResponse({"ok": False, "error": f"当前状态为 {c.status}，仅 in_progress 状态可完成", "status": c.status})
+    c.status = "completed"
+    db.commit()
     return JSONResponse({"ok": True, "status": c.status})
 
 
@@ -183,9 +194,10 @@ def api_change_rollback(change_id: int, db: Session = Depends(get_db)):
     c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
     if not c:
         return JSONResponse({"error": "not found"}, status_code=404)
-    if c.status in ("approved", "in_progress"):
-        c.status = "rolled_back"
-        db.commit()
+    if c.status not in ("approved", "in_progress"):
+        return JSONResponse({"ok": False, "error": f"当前状态为 {c.status}，仅 approved/in_progress 状态可回滚", "status": c.status})
+    c.status = "rolled_back"
+    db.commit()
     return JSONResponse({"ok": True, "status": c.status})
 
 
@@ -197,6 +209,9 @@ def api_task_new(
     step_order: int = Form(0),
     db: Session = Depends(get_db)):
     """新增执行步骤 JSON API."""
+    c = db.query(ChangeRequest).filter(ChangeRequest.id == change_id).first()
+    if not c:
+        return JSONResponse({"error": "not found"}, status_code=404)
     t = ChangeTask(change_id=change_id, description=description, command=command, step_order=step_order)
     db.add(t)
     db.commit()

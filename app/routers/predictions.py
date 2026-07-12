@@ -9,3 +9,8 @@ router = APIRouter(prefix="/predictions", tags=["predictions"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "predictions", "status": "ok"}
+
+

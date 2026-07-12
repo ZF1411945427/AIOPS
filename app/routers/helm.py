@@ -42,8 +42,10 @@ def _prepare_kubeconfig(db: Session, cluster: str):
         return None, None, "未找到集群数据源: " + cluster
     cfg = parse_json_config(ds.auth_config)
     kubeconfig = cfg.get("kubeconfig")
-    if not kubeconfig and cfg.get("api_server") and cfg.get("token"):
-        kubeconfig = _build_kubeconfig_from_token(cfg.get("api_server"), cfg.get("token"), cfg.get("verify_ssl", False))
+    _api_server = cfg.get("k8s_api_server")
+    _token = cfg.get("k8s_token")
+    if not kubeconfig and _api_server and _token:
+        kubeconfig = _build_kubeconfig_from_token(_api_server, _token, cfg.get("verify_ssl", False))
     if not kubeconfig:
         return None, None, "该集群数据源未配置 kubeconfig"
     if isinstance(kubeconfig, dict):

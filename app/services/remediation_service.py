@@ -33,6 +33,15 @@ def get_remediation_logs(db: Session, limit: int = 50):
     return db.query(RemediationLog).order_by(RemediationLog.created_at.desc()).limit(limit).all()
 
 
+def get_remediation_logs_paged(db: Session, page: int = 1, per_page: int = 20):
+    """分页查询自愈执行记录，返回 (items, total, total_pages)."""
+    q = db.query(RemediationLog).order_by(RemediationLog.created_at.desc())
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return items, total, total_pages
+
+
 ACTIONS = {
     "restart": {"label": "重启服务", "template": "systemctl restart {service}"},
     "clean": {"label": "清理磁盘", "template": "清理 {target} 磁盘空间"},
@@ -94,8 +103,8 @@ def _ssh_connect(asset: Asset, timeout: int = 10) -> paramiko.SSHClient:
     username = config.get("ssh_user", "root")
     password = config.get("ssh_password", "")
 
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    from app.services.ssh_helper import get_ssh_client
+    ssh = get_ssh_client()
     ssh.connect(host, port=port, username=username, password=password,
                 timeout=timeout, banner_timeout=timeout)
     return ssh
@@ -179,7 +188,7 @@ def execute_action(action_type: str, params: dict, asset: Asset) -> tuple:
         if not all(c.isalnum() or c in "-_./" for c in script_path):
             return (False, f"非法脚本路径: {script_path}")
         command = f"bash {script_path}"
-        success, output = _remote_exec(asset, command, timeout=120)
+        success, output = _remote_exec(asset, command, timeout=30)
         if success:
             return (True, f"脚本 {script_path} 在 {asset.ip} 执行完成: {output[:500]}")
         return (False, f"脚本 {script_path} 在 {asset.ip} 执行失败: {output[:500]}")

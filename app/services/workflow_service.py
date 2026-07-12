@@ -462,13 +462,20 @@ def retry_node(db: Session, node_run_id: int) -> Dict:
     return {"success": True, "message": "节点已重试"}
 
 
-def list_templates(db: Session, category: Optional[str] = None, only_enabled: bool = False) -> List[Dict]:
+def list_templates(db: Session, category: Optional[str] = None, only_enabled: bool = False, page: Optional[int] = None, per_page: int = 20) -> Dict:
     q = db.query(WorkflowTemplate)
     if category:
         q = q.filter(WorkflowTemplate.category == category)
     if only_enabled:
         q = q.filter(WorkflowTemplate.enabled == True)
-    return [_serialize_template(t) for t in q.order_by(WorkflowTemplate.id.desc()).all()]
+    q = q.order_by(WorkflowTemplate.id.desc())
+    if page is None:
+        items = [_serialize_template(t) for t in q.all()]
+        return {"items": items, "count": len(items)}
+    total = q.count()
+    rows = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return {"items": [_serialize_template(t) for t in rows], "count": total, "total": total, "page": page, "per_page": per_page, "total_pages": total_pages}
 
 
 def get_template(db: Session, template_id: int) -> Optional[Dict]:
@@ -523,16 +530,26 @@ def delete_template(db: Session, template_id: int) -> bool:
     return True
 
 
-def list_runs(db: Session, status: Optional[str] = None, limit: int = 50) -> List[Dict]:
+def list_runs(db: Session, status: Optional[str] = None, limit: int = 50, page: Optional[int] = None, per_page: int = 20) -> Dict:
     q = db.query(WorkflowRun)
     if status:
         q = q.filter(WorkflowRun.status == status)
-    runs = q.order_by(WorkflowRun.id.desc()).limit(limit).all()
+    q = q.order_by(WorkflowRun.id.desc())
+    if page is None:
+        runs = q.limit(limit).all()
+        result = []
+        for r in runs:
+            node_runs = db.query(WorkflowNodeRun).filter(WorkflowNodeRun.run_id == r.id).all()
+            result.append(_serialize_run(r, node_runs))
+        return {"items": result, "count": len(result)}
+    total = q.count()
+    runs = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
     result = []
     for r in runs:
         node_runs = db.query(WorkflowNodeRun).filter(WorkflowNodeRun.run_id == r.id).all()
         result.append(_serialize_run(r, node_runs))
-    return result
+    return {"items": result, "count": total, "total": total, "page": page, "per_page": per_page, "total_pages": total_pages}
 
 
 def get_run(db: Session, run_id: int) -> Optional[Dict]:
@@ -570,103 +587,5 @@ def seed_workflow_templates(db: Session):
 
 
 def _preset_templates() -> List[Dict]:
-    return [
-        {
-            "name": "磁盘告警处置 SOP",
-            "description": "磁盘占用超 90% 告警的标准化处置流程：查盘→定位大文件→清理→验证→关告警",
-            "category": "disk",
-            "trigger_type": "alert_auto",
-            "trigger_condition": {"metric": "disk_usage", "threshold": 90},
-            "risk_level": "high",
-            "enabled": True,
-            "nodes": [
-                {"id": "n1", "name": "检查磁盘占用", "action_type": "run_command", "payload_template": {"command": "df -h", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n2", "name": "定位大文件", "action_type": "run_command", "payload_template": {"command": "du -sh /tmp /var/log /home 2>/dev/null | sort -rh", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n3", "name": "清理磁盘", "action_type": "clean_disk", "payload_template": {"path": "/tmp", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": True, "retry_count": 1},
-                {"id": "n4", "name": "验证清理结果", "action_type": "run_command", "payload_template": {"command": "df -h", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n5", "name": "关闭告警", "action_type": "resolve_alert", "payload_template": {"alert_id": "{{ context.alert_id }}"}, "requires_confirm": True, "retry_count": 0},
-            ],
-            "edges": [
-                {"source": "n1", "target": "n2"},
-                {"source": "n2", "target": "n3"},
-                {"source": "n3", "target": "n4"},
-                {"source": "n4", "target": "n5"},
-            ],
-        },
-        {
-            "name": "服务重启 SOP",
-            "description": "服务无响应告警的标准化处置：查进程→重启→验证→关告警",
-            "category": "service",
-            "trigger_type": "alert_auto",
-            "trigger_condition": {"metric": "service_status", "threshold": "down"},
-            "risk_level": "high",
-            "enabled": True,
-            "nodes": [
-                {"id": "n1", "name": "查进程", "action_type": "run_command", "payload_template": {"command": "ps aux | grep {{ context.service_name }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n2", "name": "重启服务", "action_type": "restart_service", "payload_template": {"service": "{{ context.service_name }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": True, "retry_count": 1},
-                {"id": "n3", "name": "验证服务", "action_type": "run_command", "payload_template": {"command": "ps aux | grep {{ context.service_name }} && curl -s -o /dev/null -w '%{http_code}' http://localhost:{{ context.port | default(80) }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n4", "name": "关告警", "action_type": "resolve_alert", "payload_template": {"alert_id": "{{ context.alert_id }}"}, "requires_confirm": True, "retry_count": 0},
-            ],
-            "edges": [
-                {"source": "n1", "target": "n2"},
-                {"source": "n2", "target": "n3"},
-                {"source": "n3", "target": "n4"},
-            ],
-        },
-        {
-            "name": "Pod 重启循环处置 SOP",
-            "description": "CrashLoopBackOff 事件的标准化处置：查日志→查事件→重启 Pod→验证",
-            "category": "healing",
-            "trigger_type": "alert_auto",
-            "trigger_condition": {"event": "CrashLoopBackOff"},
-            "risk_level": "medium",
-            "enabled": True,
-            "nodes": [
-                {"id": "n1", "name": "查 Pod 日志", "action_type": "run_command", "payload_template": {"command": "kubectl logs {{ context.pod_name }} -n {{ context.namespace | default('default') }} --tail=100", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n2", "name": "查 Pod 事件", "action_type": "run_command", "payload_template": {"command": "kubectl describe pod {{ context.pod_name }} -n {{ context.namespace | default('default') }} | tail -50", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n3", "name": "重启 Pod", "action_type": "run_command", "payload_template": {"command": "kubectl delete pod {{ context.pod_name }} -n {{ context.namespace | default('default') }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": True, "retry_count": 1},
-                {"id": "n4", "name": "验证 Pod", "action_type": "run_command", "payload_template": {"command": "kubectl get pod {{ context.pod_name }} -n {{ context.namespace | default('default') }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-            ],
-            "edges": [
-                {"source": "n1", "target": "n2"},
-                {"source": "n2", "target": "n3"},
-                {"source": "n3", "target": "n4"},
-            ],
-        },
-        {
-            "name": "扩容 SOP",
-            "description": "CPU/内存持续高位告警的标准化处置：查副本→扩容→验证→观察",
-            "category": "scaling",
-            "trigger_type": "alert_auto",
-            "trigger_condition": {"metric": "cpu_usage", "threshold": 85},
-            "risk_level": "medium",
-            "enabled": True,
-            "nodes": [
-                {"id": "n1", "name": "查当前副本数", "action_type": "run_command", "payload_template": {"command": "kubectl get deploy {{ context.deployment }} -n {{ context.namespace | default('default') }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n2", "name": "扩容", "action_type": "run_command", "payload_template": {"command": "kubectl scale deploy {{ context.deployment }} -n {{ context.namespace | default('default') }} --replicas={{ context.target_replicas | default(5) }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": True, "retry_count": 1},
-                {"id": "n3", "name": "验证副本数", "action_type": "run_command", "payload_template": {"command": "kubectl get deploy {{ context.deployment }} -n {{ context.namespace | default('default') }}", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-            ],
-            "edges": [
-                {"source": "n1", "target": "n2"},
-                {"source": "n2", "target": "n3"},
-            ],
-        },
-        {
-            "name": "数据库慢查询处置 SOP",
-            "description": "慢查询告警的标准化处置：查进程列表→杀慢查询→验证",
-            "category": "service",
-            "trigger_type": "alert_auto",
-            "trigger_condition": {"metric": "slow_query", "threshold": 10},
-            "risk_level": "high",
-            "enabled": True,
-            "nodes": [
-                {"id": "n1", "name": "查进程列表", "action_type": "run_command", "payload_template": {"command": "mysql -uroot -p{{ context.db_password | default('') }} -e 'show processlist'", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-                {"id": "n2", "name": "杀慢查询", "action_type": "run_command", "payload_template": {"command": "mysql -uroot -p{{ context.db_password | default('') }} -e 'kill {{ context.query_id }}'", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": True, "retry_count": 1},
-                {"id": "n3", "name": "验证", "action_type": "run_command", "payload_template": {"command": "mysql -uroot -p{{ context.db_password | default('') }} -e 'show processlist'", "asset_id": "{{ context.asset_id }}"}, "requires_confirm": False, "retry_count": 0},
-            ],
-            "edges": [
-                {"source": "n1", "target": "n2"},
-                {"source": "n2", "target": "n3"},
-            ],
-        },
-    ]
+    from app.data.sop_templates import get_all_templates
+    return get_all_templates()

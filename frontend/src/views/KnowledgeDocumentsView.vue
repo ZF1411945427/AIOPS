@@ -6,14 +6,46 @@
           <h1>RAG 知识库文档</h1>
           <p>语义检索增强 · 文档向量化索引</p>
         </div>
-        <div class="mode-toggle">
-          <span class="mode-label" :class="{ active: !smartMode }">经典版</span>
-          <label class="toggle-switch">
-            <input type="checkbox" v-model="smartMode">
-            <span class="toggle-slider"></span>
-          </label>
-          <span class="mode-label" :class="{ active: smartMode }">智能版</span>
-          <span v-if="smartMode" class="mode-badge">BGE-small + Milvus</span>
+        <div class="header-toggles">
+          <div class="mode-toggle">
+            <span class="toggle-title">检索引擎</span>
+            <span class="mode-label" :class="{ active: !smartMode }">经典版</span>
+            <label class="toggle-switch">
+              <input type="checkbox" v-model="smartMode">
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="mode-label" :class="{ active: smartMode }">智能版</span>
+            <span v-if="smartMode" class="mode-badge">BGE-small + Milvus</span>
+          </div>
+          <div v-if="smartMode" class="mode-toggle rr-toggle">
+            <span class="toggle-title">Reranker</span>
+            <span class="mode-label" :class="{ active: rerankMode === 'classic' }">经典版</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="rerankMode === 'smart'" @change="switchRerank(rerankMode === 'classic' ? 'smart' : 'classic')">
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="mode-label" :class="{ active: rerankMode === 'smart' }">智能版</span>
+            <span v-if="rerankStatus" class="mode-badge" :class="rerankMode === 'smart' && rerankStatus.smart?.available ? 'badge-gpu' : ''">
+              {{ rerankMode === 'smart' ? (rerankStatus.smart?.available ? 'GPU ' + rerankStatus.smart.device : '模型未加载') : 'CPU 零开销' }}
+            </span>
+          </div>
+          <div class="info-trigger" @click="showHelp = !showHelp" @mouseenter="showHelp = true" @mouseleave="showHelp = false">
+            <span class="info-icon">?</span>
+            <div v-if="showHelp" class="info-popover" @click.stop @mouseenter="showHelp = true" @mouseleave="showHelp = false">
+              <div class="info-section">
+                <div class="info-title">检索引擎</div>
+                <div class="info-row"><span class="tag-mini">经典版</span> 纯关键词匹配，无向量计算，速度快但精度低</div>
+                <div class="info-row"><span class="tag-mini">智能版</span> BGE-small 向量嵌入 + Milvus 语义检索 + BM25 关键词混合，精度高</div>
+              </div>
+              <div class="info-divider"></div>
+              <div class="info-section">
+                <div class="info-title">Reranker（重排序）</div>
+                <div class="info-row"><span class="tag-mini">经典版</span> 多特征混合打分（关键词40% + 向量30% + BM25 20% + 长度归一化10%），CPU 零开销</div>
+                <div class="info-row"><span class="tag-mini">智能版</span> AuroraX-Reranker（300M 参数，ModernBert），需 GPU 加速，语义理解更精准</div>
+              </div>
+              <div class="info-tip">提示：智能版需 CUDA PyTorch + GPU 显卡才能运行，否则自动降级为经典版</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -53,6 +85,7 @@
               <span class="rag-score" :class="{ reranked: r.rerank_score }">
                 {{ r.rerank_score ? 'Rerank' : '相似度' }} {{ ((r.similarity || r.score || r.rerank_score || 0) * 100).toFixed(1) }}%
               </span>
+              <span v-if="r.rerank_method" class="rag-detail method" :class="'m-' + r.rerank_method">{{ r.rerank_method === 'smart' ? 'GPU智能' : 'CPU经典' }}</span>
               <span v-if="r.vector_score" class="rag-detail">向量 {{ (r.vector_score * 100).toFixed(1) }}%</span>
               <span v-if="r.bm25_score" class="rag-detail">BM25 {{ (r.bm25_score * 100).toFixed(1) }}%</span>
               <span v-if="r.doc_title" class="rag-doc">{{ r.doc_title }}</span>
@@ -83,13 +116,14 @@
 
         <table v-if="docs.length" class="table">
           <thead>
-            <tr><th>ID</th><th>标题</th><th>来源</th><th>状态</th><th>切片数</th><th>更新时间</th><th>操作</th></tr>
+            <tr><th>ID</th><th>标题</th><th>来源</th><th>引擎</th><th>状态</th><th>切片数</th><th>更新时间</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="d in docs" :key="d.id">
               <td>{{ d.id }}</td>
               <td class="title-cell">{{ d.title }}</td>
               <td><span class="badge" :class="srcClass(d.source_type)">{{ d.source_type || '-' }}</span></td>
+              <td><span class="badge engine" :class="'eng-' + (d.index_engine || 'v1')">{{ engineLabel(d.index_engine) }}</span></td>
               <td><span class="badge" :class="statusClass(d.status)">{{ statusLabel(d.status) }}</span></td>
               <td>{{ d.chunk_count ?? d.chunks_count ?? '-' }}</td>
               <td>{{ d.updated_at || d.created_at || '-' }}</td>
@@ -161,6 +195,9 @@ const ragQuery = ref('')
 const ragItems = ref([])
 const ragSearched = ref(false)
 const ragSearching = ref(false)
+const rerankMode = ref('classic')
+const rerankStatus = ref(null)
+const showHelp = ref(false)
 
 const showCreate = ref(false)
 const form = ref({ title: '', content: '', tags: '', source: 'manual' })
@@ -193,6 +230,10 @@ function statusLabel(s) {
   return { indexed: '已索引', pending: '索引中...', failed: '索引失败', ok: '已索引', done: '已索引', error: '索引失败' }[s] || s || '-'
 }
 
+function engineLabel(e) {
+  return { v1: '经典', v2: '智能', both: '双引擎' }[e] || '经典'
+}
+
 function prefix() {
   return smartMode.value ? v2Prefix : v1Prefix
 }
@@ -211,7 +252,28 @@ watch(smartMode, () => {
   ragItems.value = []
   ragSearched.value = false
   ragQuery.value = ''
+  if (smartMode.value) loadRerankStatus()
 })
+
+async function loadRerankStatus() {
+  try {
+    const data = await request.get(`${v2Prefix}/reranker/status`)
+    rerankStatus.value = data
+    rerankMode.value = data.mode || 'classic'
+  } catch { /* ignore */ }
+}
+
+async function switchRerank(mode) {
+  rerankMode.value = mode
+  try {
+    await request.post(`${v2Prefix}/reranker/mode`, { mode })
+    await loadRerankStatus()
+  } catch (e) {
+    ElMessage.warning('切换失败: ' + (e.message || e))
+    rerankMode.value = mode === 'smart' ? 'classic' : 'smart'
+    await loadRerankStatus()
+  }
+}
 
 async function loadList() {
   loading.value = true
@@ -253,7 +315,9 @@ async function runSearch() {
   ragSearched.value = true
   try {
     if (smartMode.value) {
-      const data = await request.get(`${v2Prefix}/search`, { params: { q: ragQuery.value, top_k: 8 } })
+      const params = { q: ragQuery.value, top_k: 8 }
+      if (rerankMode.value) params.rerank_mode = rerankMode.value
+      const data = await request.get(`${v2Prefix}/search`, { params })
       ragItems.value = data.items || []
     } else {
       const data = await request.get(`${v1Prefix}/search`, { params: { q: ragQuery.value } })
@@ -381,16 +445,33 @@ async function confirmDelete(d) {
   }
 }
 
-onMounted(loadList)
+onMounted(() => {
+  loadList()
+  if (smartMode.value) loadRerankStatus()
+})
 </script>
 
 <style scoped>
 .kbdoc-page { padding: 4px; }
 .page-header { margin-bottom: 16px; }
 .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.header-toggles { display: flex; gap: 12px; align-items: flex-start; }
+.info-trigger { position: relative; cursor: pointer; margin-top: 2px; }
+.info-icon { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-hover, rgba(0,0,0,0.05)); color: var(--text-tertiary, #94a3b8); font-size: 0.72rem; font-weight: 700; font-style: italic; transition: all 0.15s; border: 1px solid var(--border, rgba(0,0,0,0.08)); }
+.info-icon:hover { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+.info-popover { position: absolute; top: calc(100% + 6px); right: 0; width: 380px; background: var(--bg-card-solid, #fff); border: 1px solid var(--border, rgba(0,0,0,0.1)); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 16px; z-index: 50; }
+.info-section { margin-bottom: 4px; }
+.info-title { font-size: 0.82rem; font-weight: 700; color: var(--text, #1e293b); margin-bottom: 6px; }
+.info-row { font-size: 0.75rem; color: var(--text-secondary, #475569); line-height: 1.55; margin-bottom: 4px; display: flex; gap: 6px; align-items: flex-start; }
+.info-row .tag-mini { flex-shrink: 0; margin-top: 1px; }
+.info-divider { height: 1px; background: var(--border, rgba(0,0,0,0.07)); margin: 8px 0; }
+.info-tip { font-size: 0.7rem; color: var(--text-tertiary, #94a3b8); margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border, rgba(0,0,0,0.06)); line-height: 1.4; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 .mode-toggle { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.toggle-title { font-size: 0.7rem; font-weight: 700; color: var(--text-secondary, #64748b); text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+.rr-toggle { border-color: rgba(99,102,241,0.2); }
+.mode-badge.badge-gpu { background: rgba(99,102,241,0.15); color: #6366f1; }
 .mode-label { font-size: 0.78rem; color: var(--text-tertiary, #94a3b8); transition: all 0.2s; }
 .mode-label.active { color: var(--text, #1e293b); font-weight: 600; }
 .mode-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: rgba(34,197,94,0.1); color: #22c55e; font-weight: 600; }
@@ -403,6 +484,8 @@ onMounted(loadList)
 .panel-head { display: flex; align-items: center; gap: 8px; }
 .panel-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 8px; background: rgba(34,197,94,0.1); color: #22c55e; font-weight: 600; }
 .rag-detail { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); background: rgba(148,163,184,0.1); padding: 2px 6px; border-radius: 6px; }
+.rag-detail.method.m-smart { color: #6366f1; background: rgba(99,102,241,0.1); }
+.rag-detail.method.m-classic { color: #64748b; background: rgba(148,163,184,0.08); }
 .rag-score.reranked { color: #6366f1; background: rgba(99,102,241,0.1); }
 .stat-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 .stat-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
@@ -451,6 +534,9 @@ onMounted(loadList)
 .badge.st-indexed { background: rgba(34,197,94,0.12); color: #22c55e; }
 .badge.st-failed { background: rgba(239,68,68,0.12); color: #ef4444; }
 .badge.st-pending { background: rgba(148,163,184,0.12); color: #64748b; animation: pending-pulse 1.5s ease-in-out infinite; }
+.badge.engine.eng-v1 { background: rgba(148,163,184,0.12); color: #64748b; }
+.badge.engine.eng-v2 { background: rgba(59,130,246,0.12); color: #3b82f6; }
+.badge.engine.eng-both { background: rgba(168,85,247,0.12); color: #a855f7; }
 @keyframes pending-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 .loading-state, .empty-state { text-align: center; padding: 24px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }

@@ -5,27 +5,32 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.template_utils import get_templates
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
+from app.security import verify_password
 
 router = APIRouter(tags=["auth"])
 templates = get_templates()
+_limiter = Limiter(key_func=get_remote_address)
 
 _VUE_INDEX = Path(__file__).resolve().parent.parent.parent / "frontend/dist/index.html"
 
 
 def _serve_vue() -> HTMLResponse:
     content = _VUE_INDEX.read_text(encoding="utf-8")
-    content = content.replace('/assets/', '/vue-assets/assets/')
     return HTMLResponse(content=content)
 
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    """向后兼容的 hash 函数，实际验证用 app.security.verify_password"""
+    from app.security import hash_password as _hp
+    return _hp(password)
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
@@ -66,6 +71,7 @@ def product_overview(request: Request):
 
 
 @router.post("/login")
+@_limiter.limit("10/minute")
 async def login(request: Request, db: Session = Depends(get_db)):
     content_type = request.headers.get("content-type", "")
 
@@ -81,7 +87,7 @@ async def login(request: Request, db: Session = Depends(get_db)):
         is_json = False
 
     user = db.query(User).filter(User.username == uname).first()
-    if not user or user.password_hash != hash_password(pwd):
+    if not user or not verify_password(pwd, user.password_hash):
         if is_json:
             return JSONResponse({"ok": False, "message": "用户名或密码错误"}, status_code=401)
         return RedirectResponse(url="/login?error=用户名或密码错误", status_code=303)
@@ -100,6 +106,23 @@ async def login(request: Request, db: Session = Depends(get_db)):
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+
+@router.post("/refresh")
+async def refresh_token(request: Request, db: Session = Depends(get_db)):
+    """刷新登录 token（移动端 / API 客户端用）"""
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return JSONResponse({"ok": False, "error": "缺少 token"}, status_code=401)
+    from app.services.mobile_push_service import verify_login_token, issue_login_token
+    payload = verify_login_token(auth[7:])
+    if not payload:
+        return JSONResponse({"ok": False, "error": "token 已过期，请重新登录"}, status_code=401)
+    user = db.query(User).filter(User.id == payload.get("user_id")).first()
+    if not user:
+        return JSONResponse({"ok": False, "error": "用户不存在"}, status_code=401)
+    new_token = issue_login_token(user.id, user.username)
+    return {"ok": True, "token": new_token}
 
 
 @router.get("/me")

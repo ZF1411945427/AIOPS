@@ -4,12 +4,15 @@ import json
 from fastapi import APIRouter, Depends, Request, Form, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from app.database import get_db
 from app.models import DataSource, ScriptTask
 from app.template_utils import get_templates, parse_json_config
 
 router = APIRouter(prefix="/script", tags=["script"])
 templates = get_templates()
+_limiter = Limiter(key_func=get_remote_address)
 
 
 def _target_to_dict(t) -> dict:
@@ -44,28 +47,44 @@ def api_script_targets(db: Session = Depends(get_db)):
 
 
 @router.get("/api/history")
-def api_script_history(db: Session = Depends(get_db)):
-    """远程脚本执行历史 JSON API."""
-    history = db.query(ScriptTask).order_by(ScriptTask.id.desc()).limit(50).all()
-    return JSONResponse({"history": [_script_task_to_dict(s) for s in history], "total": len(history)})
+def api_script_history(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    """远程脚本执行历史 JSON API（分页）."""
+    q = db.query(ScriptTask).order_by(ScriptTask.id.desc())
+    total = q.count()
+    history = q.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return JSONResponse({
+        "history": [_script_task_to_dict(s) for s in history],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    })
 
 
 @router.post("/api/execute")
+@_limiter.limit("10/minute")
 def api_script_execute(
+    request: Request,
     target_id: int = Form(...),
     script_content: str = Form(...),
     timeout: int = Form(30),
     db: Session = Depends(get_db)):
     """执行远程脚本 JSON API."""
+    from app.security import is_dangerous_command
+    dangerous, pattern = is_dangerous_command(script_content)
+    if dangerous:
+        return JSONResponse({"ok": False, "error": f"命令被安全策略拦截(匹配: {pattern})"}, status_code=403)
+
     target = db.query(DataSource).filter(DataSource.id == target_id).first()
     if not target:
         return JSONResponse({"error": "Target not found"}, status_code=404)
 
     cfg = parse_json_config(target.auth_config)
     host = target.endpoint or cfg.get("host") or target.name
-    port = cfg.get("port", 22)
-    username = cfg.get("username", "root")
-    password = cfg.get("password")
+    port = cfg.get("ssh_port", cfg.get("port", 22))
+    username = cfg.get("ssh_user", cfg.get("username", "root"))
+    password = cfg.get("ssh_password", cfg.get("password"))
     key_path = cfg.get("key_path") or cfg.get("private_key")
     use_local = cfg.get("local", False) or host in ("localhost", "127.0.0.1")
 
@@ -74,7 +93,9 @@ def api_script_execute(
     if use_local:
         try:
             r = subprocess.run(
-                script_content, shell=True, capture_output=True, text=True, timeout=timeout
+                ["sh", "-c", script_content],
+                capture_output=True, text=True, timeout=timeout,
+                shell=False,
             )
             output = r.stdout
             error = r.stderr
@@ -85,8 +106,8 @@ def api_script_execute(
             error = str(e)
     else:
         try:
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            from app.services.ssh_helper import get_ssh_client
+            client = get_ssh_client()
             if key_path:
                 key = paramiko.RSAKey.from_private_key_file(key_path)
                 client.connect(host, port=port, username=username, pkey=key, timeout=timeout)

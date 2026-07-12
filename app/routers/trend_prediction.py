@@ -20,3 +20,32 @@ def simple_linear_regression(x, y):
     return slope, intercept
 
 
+@router.get("/status")
+def status():
+    return {"module": "trend_prediction", "status": "ok"}
+
+
+@router.get("/predict")
+def predict(asset_id: int, metric_name: str, hours: int = 168, db: Session = Depends(get_db)):
+    since = datetime.now() - timedelta(hours=hours)
+    records = (
+        db.query(MetricRecord)
+        .filter(MetricRecord.asset_id == asset_id, MetricRecord.metric_name == metric_name, MetricRecord.timestamp >= since)
+        .order_by(MetricRecord.timestamp)
+        .all()
+    )
+    if len(records) < 2:
+        return {"prediction": None, "reason": "insufficient data"}
+    x = [i for i in range(len(records))]
+    y = [r.value for r in records]
+    slope, intercept = simple_linear_regression(x, y)
+    next_x = len(records)
+    predicted_next = slope * next_x + intercept
+    return {
+        "slope": slope,
+        "intercept": intercept,
+        "predicted_next": predicted_next,
+        "n": len(records),
+    }
+
+

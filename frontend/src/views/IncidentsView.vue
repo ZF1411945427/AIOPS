@@ -6,7 +6,7 @@
     </div>
 
     <div class="toolbar">
-      <select v-model="filters.status" @change="loadIncidents">
+      <select v-model="filters.status" @change="onStatusChange">
         <option value="">全部状态</option>
         <option value="open">进行中</option>
         <option value="resolved">已解决</option>
@@ -28,7 +28,7 @@
             <tr v-for="inc in incidents" :key="inc.id">
               <td>{{ inc.id }}</td>
               <td class="title-cell" @click="showDetail(inc.id)">{{ inc.title }}</td>
-              <td><span class="badge" :class="inc.severity">{{ inc.severity }}</span></td>
+              <td><span class="badge" :class="inc.severity">{{ severityCn(inc.severity) }}</span></td>
               <td><span class="badge" :class="inc.status === 'open' ? 'triggered' : 'resolved'">{{ inc.status === 'open' ? '进行中' : '已解决' }}</span></td>
               <td>{{ inc.alert_count }}</td>
               <td>{{ inc.asset_name || inc.asset_id || '-' }}</td>
@@ -47,6 +47,16 @@
       </div>
     </div>
 
+    <div v-if="totalPages > 1" class="pagination">
+      <button class="btn btn-sm" :disabled="filters.page <= 1" @click="goPage(1)">首页</button>
+      <button class="btn btn-sm" :disabled="filters.page <= 1" @click="goPage(filters.page - 1)">上一页</button>
+      <span v-for="p in pageNumbers" :key="p" class="page-num" :class="{ active: p === filters.page }" @click="goPage(p)">{{ p }}</span>
+      <button class="btn btn-sm" :disabled="filters.page >= totalPages" @click="goPage(filters.page + 1)">下一页</button>
+      <button class="btn btn-sm" :disabled="filters.page >= totalPages" @click="goPage(totalPages)">末页</button>
+      <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="jumpPage" min="1" :max="totalPages" @keyup.enter="goPage(jumpPage)" /> 页</span>
+      <span class="page-info">共 {{ total }} 条 / {{ totalPages }} 页</span>
+    </div>
+
     <div v-if="detailVisible" class="modal-overlay" @click.self="detailVisible = false">
       <div class="modal-box">
         <div class="modal-header">
@@ -56,7 +66,7 @@
         <div v-if="detail" class="modal-body">
           <div class="detail-grid">
             <div class="detail-item"><span class="detail-label">标题</span><span class="detail-value">{{ detail.incident.title }}</span></div>
-            <div class="detail-item"><span class="detail-label">级别</span><span><span class="badge" :class="detail.incident.severity">{{ detail.incident.severity }}</span></span></div>
+            <div class="detail-item"><span class="detail-label">级别</span><span><span class="badge" :class="detail.incident.severity">{{ severityCn(detail.incident.severity) }}</span></span></div>
             <div class="detail-item"><span class="detail-label">状态</span><span><span class="badge" :class="detail.incident.status === 'open' ? 'triggered' : 'resolved'">{{ detail.incident.status === 'open' ? '进行中' : '已解决' }}</span></span></div>
             <div class="detail-item"><span class="detail-label">关联告警</span><span class="detail-value">{{ detail.incident.alert_count }} 条</span></div>
             <div class="detail-item"><span class="detail-label">关联资产</span><span class="detail-value">{{ detail.asset ? detail.asset.name + ' (' + detail.asset.ip + ')' : '-' }}</span></div>
@@ -85,11 +95,11 @@
           </table>
           <div v-if="rcaResult" class="rca-box">
             <h4>根因分析</h4>
-            <pre>{{ rcaResult }}</pre>
+            <div class="rca-report" v-html="rcaResult"></div>
           </div>
           <div v-if="aiRcaResult" class="rca-box ai-rca-box">
             <h4>🤖 AI 深度分析</h4>
-            <div class="ai-rca-content">{{ aiRcaResult }}</div>
+            <div class="ai-rca-content" v-html="aiRcaResult"></div>
           </div>
         </div>
       </div>
@@ -98,26 +108,61 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import MarkdownIt from 'markdown-it'
 import request from '@/api/request'
+
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 const loading = ref(false)
 const incidents = ref([])
 const total = ref(0)
-const filters = reactive({ status: '' })
+const totalPages = ref(1)
+const filters = reactive({ status: '', page: 1 })
+const jumpPage = ref(1)
 const detailVisible = ref(false)
 const detail = ref(null)
 const rcaResult = ref('')
 const aiRcaResult = ref('')
 const aiRcaLoading = ref(false)
 
+const pageNumbers = computed(() => {
+  const pages = []
+  const cur = filters.page
+  const tp = totalPages.value
+  if (tp <= 7) {
+    for (let i = 1; i <= tp; i++) pages.push(i)
+  } else {
+    pages.push(1)
+    if (cur > 4) pages.push('...')
+    const start = Math.max(2, cur - 1)
+    const end = Math.min(tp - 1, cur + 1)
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (cur < tp - 3) pages.push('...')
+    pages.push(tp)
+  }
+  return pages
+})
+
+function goPage(p) {
+  if (p < 1 || p > totalPages.value || p === filters.page) return
+  filters.page = p
+  loadIncidents()
+}
+
+function onStatusChange() {
+  filters.page = 1
+  loadIncidents()
+}
+
 async function loadIncidents() {
   loading.value = true
   try {
-    const data = await request.get('/incidents/api/list', { params: { status: filters.status } })
+    const data = await request.get('/incidents/api/list', { params: { status: filters.status, page: filters.page, per_page: 20 } })
     incidents.value = data.incidents || []
     total.value = data.total || 0
+    totalPages.value = data.total_pages || 1
   } catch (e) {
     ElMessage.error('加载故障单失败: ' + e.message)
   } finally {
@@ -164,7 +209,14 @@ async function doRca() {
   if (!detail.value) return
   try {
     const data = await request.get(`/incidents/api/${detail.value.incident.id}/rca`)
-    rcaResult.value = typeof data.analysis === 'string' ? data.analysis : JSON.stringify(data.analysis, null, 2)
+    const analysis = data.analysis
+    if (analysis && analysis.report) {
+      rcaResult.value = md.render(analysis.report)
+    } else if (typeof analysis === 'string') {
+      rcaResult.value = md.render(analysis)
+    } else {
+      rcaResult.value = md.render('```\n' + JSON.stringify(analysis, null, 2) + '\n```')
+    }
   } catch (e) {
     ElMessage.error('根因分析失败: ' + e.message)
   }
@@ -177,7 +229,7 @@ async function doAiRca() {
   try {
     const data = await request.post(`/incidents/api/${detail.value.incident.id}/ai-rca`)
     if (data.ok === false) { ElMessage.error(data.error || 'AI 分析失败'); return }
-    aiRcaResult.value = data.analysis
+    aiRcaResult.value = md.render(data.analysis || '')
   } catch (e) {
     ElMessage.error('AI 深度分析失败: ' + (e.message || e))
   } finally {
@@ -188,6 +240,10 @@ async function doAiRca() {
 function formatTime(s) {
   if (!s) return '-'
   return s.substring(5, 16)
+}
+
+function severityCn(s) {
+  return { critical: '严重', warning: '警告', info: '提示' }[s] || s
 }
 
 onMounted(loadIncidents)
@@ -221,6 +277,13 @@ onMounted(loadIncidents)
 .badge.acknowledged { background: rgba(245,158,11,0.1); color: #f59e0b; }
 .badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+.page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
+.page-num { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; cursor: pointer; transition: all 0.2s; user-select: none; }
+.page-num:hover { background: var(--bg-hover, rgba(99,102,241,0.08)); border-color: var(--accent, #6366f1); }
+.page-num.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); font-weight: 600; }
+.page-jump { font-size: 0.8rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; }
+.page-input { width: 50px; padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; text-align: center; font-size: 0.8rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 12px; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
@@ -237,14 +300,34 @@ onMounted(loadIncidents)
 .rca-box { margin-top: 16px; background: var(--bg-hover, rgba(0,0,0,0.03)); border-radius: 8px; padding: 12px; }
 .rca-box h4 { margin: 0 0 8px; font-size: 0.9rem; }
 .rca-box pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 0.78rem; color: var(--text, #1e293b); }
+.rca-report { font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); }
+.rca-report :deep(h1), .rca-report :deep(h2), .rca-report :deep(h3), .rca-report :deep(h4) { margin: 14px 0 6px; font-weight: 600; }
+.rca-report :deep(h2) { font-size: 1.05rem; color: #6366f1; }
+.rca-report :deep(h3) { font-size: 0.92rem; }
+.rca-report :deep(p) { margin: 6px 0; }
+.rca-report :deep(ul), .rca-report :deep(ol) { padding-left: 20px; margin: 6px 0; }
+.rca-report :deep(li) { margin-bottom: 4px; }
+.rca-report :deep(strong) { color: #6366f1; }
+.rca-report :deep(code) { background: rgba(99,102,241,0.1); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; color: #6366f1; }
+.rca-report :deep(table) { border-collapse: collapse; margin: 8px 0; width: 100%; }
+.rca-report :deep(th), .rca-report :deep(td) { border: 1px solid var(--border, rgba(0,0,0,0.1)); padding: 4px 8px; font-size: 0.8rem; }
+.rca-report :deep(th) { background: rgba(99,102,241,0.06); font-weight: 600; }
+.rca-report :deep(blockquote) { border-left: 3px solid #6366f1; padding: 6px 12px; margin: 8px 0; background: rgba(99,102,241,0.04); border-radius: 0 6px 6px 0; }
 .btn-ai { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; }
 .btn-ai:hover:not(:disabled) { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
 .btn-ai:disabled { opacity: 0.6; cursor: wait; }
 .ai-rca-box { background: linear-gradient(135deg, rgba(99,102,241,0.04), rgba(139,92,246,0.08)); border: 1px solid rgba(99,102,241,0.15); }
 .ai-rca-box h4 { color: #6366f1; }
-.ai-rca-content { font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); white-space: pre-wrap; word-break: break-word; }
-.ai-rca-content h1, .ai-rca-content h2, .ai-rca-content h3 { margin: 12px 0 6px; font-size: 1rem; color: var(--text, #1e293b); }
-.ai-rca-content ul, .ai-rca-content ol { padding-left: 20px; margin: 6px 0; }
-.ai-rca-content li { margin-bottom: 4px; }
-.ai-rca-content strong { color: #6366f1; }
+.ai-rca-content { font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); }
+.ai-rca-content :deep(h1), .ai-rca-content :deep(h2), .ai-rca-content :deep(h3), .ai-rca-content :deep(h4) { margin: 14px 0 6px; font-weight: 600; }
+.ai-rca-content :deep(h1) { font-size: 1.1rem; }
+.ai-rca-content :deep(h2) { font-size: 1rem; color: #6366f1; }
+.ai-rca-content :deep(h3) { font-size: 0.92rem; }
+.ai-rca-content :deep(h4) { font-size: 0.85rem; }
+.ai-rca-content :deep(p) { margin: 6px 0; }
+.ai-rca-content :deep(ul), .ai-rca-content :deep(ol) { padding-left: 20px; margin: 6px 0; }
+.ai-rca-content :deep(li) { margin-bottom: 4px; }
+.ai-rca-content :deep(strong) { color: #6366f1; }
+.ai-rca-content :deep(code) { background: rgba(99,102,241,0.1); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; }
+.ai-rca-content :deep(blockquote) { border-left: 3px solid #6366f1; padding-left: 12px; margin: 8px 0; color: var(--text-secondary, #64748b); }
 </style>

@@ -29,7 +29,12 @@ def _get_db_url(mode: str) -> str:
 
 def _create_engine_for(mode: str):
     url = _get_db_url(mode)
-    eng = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
+    eng = create_engine(
+        url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
 
     @event.listens_for(eng, "connect")
     def _set_pragma(dbapi_connection, connection_record):

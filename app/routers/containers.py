@@ -55,6 +55,13 @@ def pod_logs(asset_id: int, tail: int = 100, db: Session = Depends(get_db)):
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
         v1 = client.CoreV1Api()
@@ -82,6 +89,17 @@ def pod_terminal_page(request: Request, asset_id: int, db: Session = Depends(get
 
 @router.websocket("/ws/pod/{asset_id}/logs")
 async def pod_log_ws(websocket: WebSocket, asset_id: int):
+    # 认证检查：WebSocket 无法直接读 session，通过 query param token 验证
+    token = websocket.query_params.get("token", "")
+    from app.services.mobile_push_service import verify_login_token
+    payload = None
+    if token:
+        payload = verify_login_token(token)
+    if not payload:
+        await websocket.accept()
+        await websocket.send_text("未认证，请先登录")
+        await websocket.close()
+        return
     await websocket.accept()
     from app.database import get_session_for, get_db_mode
     try:
@@ -106,6 +124,13 @@ async def pod_log_ws(websocket: WebSocket, asset_id: int):
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
         v1 = client.CoreV1Api()
@@ -128,6 +153,13 @@ async def pod_log_ws(websocket: WebSocket, asset_id: int):
 
 @router.websocket("/ws/pod/{asset_id}/terminal")
 async def pod_terminal_ws(websocket: WebSocket, asset_id: int):
+    token = websocket.query_params.get("token", "")
+    from app.services.mobile_push_service import verify_login_token
+    if not token or not verify_login_token(token):
+        await websocket.accept()
+        await websocket.send_text("未认证，请先登录")
+        await websocket.close()
+        return
     await websocket.accept()
     from app.database import get_session_for, get_db_mode
     try:
@@ -152,6 +184,13 @@ async def pod_terminal_ws(websocket: WebSocket, asset_id: int):
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
 
@@ -421,10 +460,10 @@ def api_pod_list(cluster: str = "", namespace: str = "", db: Session = Depends(g
         if namespace:
             q = q.filter(Asset.name.like(f"{namespace}/%"))
         pods = q.order_by(Asset.name).all()
-        clusters = db.query(Asset).filter(Asset.ci_type == "cluster").all()
+        clusters = db.query(Asset).filter(Asset.ci_type == "kubernetes_cluster").all()
         cluster_info = None
         if cluster:
-            c = db.query(Asset).filter(Asset.ci_type == "cluster", Asset.name == cluster).first()
+            c = db.query(Asset).filter(Asset.ci_type == "kubernetes_cluster", Asset.name == cluster).first()
             if c:
                 cluster_info = _cluster_to_dict(c)
         items = [_pod_to_dict(p) for p in pods]
@@ -465,10 +504,10 @@ def api_deployment_list(cluster: str = "", namespace: str = "", db: Session = De
         if namespace:
             q = q.filter(Asset.name.like(f"{namespace}/%"))
         deployments = q.order_by(Asset.name).all()
-        clusters = db.query(Asset).filter(Asset.ci_type == "cluster").all()
+        clusters = db.query(Asset).filter(Asset.ci_type == "kubernetes_cluster").all()
         cluster_info = None
         if cluster:
-            c = db.query(Asset).filter(Asset.ci_type == "cluster", Asset.name == cluster).first()
+            c = db.query(Asset).filter(Asset.ci_type == "kubernetes_cluster", Asset.name == cluster).first()
             if c:
                 cluster_info = _cluster_to_dict(c)
         items = [_deployment_to_dict(d) for d in deployments]
@@ -520,6 +559,13 @@ def api_deploy_create(body: dict = Body(...), db: Session = Depends(get_db)):
                 config.load_incluster_config()
             elif cfg.get("kubeconfig"):
                 config.load_kube_config_from_dict(cfg["kubeconfig"])
+            elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+                from kubernetes import client as _k8s_client
+                _cfg = _k8s_client.Configuration()
+                _cfg.host = cfg["k8s_api_server"]
+                _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+                _cfg.verify_ssl = cfg.get("verify_ssl", False)
+                _k8s_client.Configuration.set_default(_cfg)
             else:
                 config.load_kube_config()
         except Exception:
@@ -577,6 +623,13 @@ def api_deployment_rollout(asset_id: int, body: dict = Body(default={}), db: Ses
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
         apps_v1 = client.AppsV1Api()
@@ -611,6 +664,13 @@ def api_deployment_scale_api(asset_id: int, body: dict = Body(...), db: Session 
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
         apps_v1 = client.AppsV1Api()
@@ -636,6 +696,13 @@ def api_deployment_canary_api(asset_id: int, body: dict = Body(default={}), db: 
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
         apps_v1 = client.AppsV1Api()
@@ -683,6 +750,13 @@ def api_deployment_promote_api(asset_id: int, db: Session = Depends(get_db)):
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
         apps_v1 = client.AppsV1Api()
@@ -716,6 +790,13 @@ def api_deployment_rollback_api(asset_id: int, body: dict = Body(default={}), db
         cfg = parse_json_config(ds.auth_config)
         if cfg.get("kubeconfig"):
             config.load_kube_config_from_dict(cfg["kubeconfig"])
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            from kubernetes import client as _k8s_client
+            _cfg = _k8s_client.Configuration()
+            _cfg.host = cfg["k8s_api_server"]
+            _cfg.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+            _cfg.verify_ssl = cfg.get("verify_ssl", False)
+            _k8s_client.Configuration.set_default(_cfg)
         else:
             config.load_kube_config()
         apps_v1 = client.AppsV1Api()

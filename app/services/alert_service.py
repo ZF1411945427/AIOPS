@@ -359,3 +359,96 @@ def is_in_silence_window(db: Session, alert: Alert) -> bool:
     return False
 
 
+# ─── K8S Event 告警检测 ───
+
+_K8S_EVENT_ALERT_MAP = {
+    "OOMKilling": "critical",
+    "OOMKilled": "critical",
+    "CrashLoopBackOff": "critical",
+    "BackOff": "warning",
+    "FailedScheduling": "warning",
+    "NodeNotReady": "critical",
+    "NodeUnreachable": "critical",
+    "Evicted": "warning",
+    "FailedMount": "warning",
+    "FailedAttachVolume": "warning",
+    "Unhealthy": "warning",
+    "FailedSync": "warning",
+    "FailedCreate": "warning",
+    "ImagePullBackOff": "critical",
+    "ErrImagePull": "critical",
+    "FailedPreStopHook": "warning",
+    "DNSConfigForming": "warning",
+}
+
+
+def check_k8s_events(db: Session, window_minutes: int = 30):
+    """扫描 K8S Event 表，将严重事件（OOM/CrashLoopBackOff/NodeNotReady 等）自动转为告警。
+    window_minutes: 扫描时间窗口（分钟），手动触发时可传更大的值扫描历史事件
+    """
+    from app.models import K8sEvent, Asset, Alert
+    now = datetime.now()
+    since = now - timedelta(minutes=window_minutes)
+    events = db.query(K8sEvent).filter(
+        K8sEvent.severity.in_(["warning", "critical"]),
+        K8sEvent.last_seen >= since,
+    ).order_by(K8sEvent.last_seen.desc()).all()
+
+    new_alerts = []
+    skipped = 0
+    for ev in events:
+        severity = _K8S_EVENT_ALERT_MAP.get(ev.reason, "")
+        if not severity:
+            reason_lower = (ev.reason or "").lower()
+            if "oom" in reason_lower:
+                severity = "critical"
+            elif "crash" in reason_lower:
+                severity = "critical"
+            elif "fail" in reason_lower:
+                severity = "warning"
+            elif "notready" in reason_lower or "unreachable" in reason_lower:
+                severity = "critical"
+            else:
+                continue
+
+        asset = None
+        if ev.name:
+            asset = db.query(Asset).filter(Asset.name.ilike(f"%{ev.name}%")).first()
+            if not asset and ev.cluster:
+                asset = db.query(Asset).filter(
+                    Asset.name.ilike(f"%{ev.cluster}%"),
+                    Asset.ci_type == "kubernetes_cluster",
+                ).first()
+
+        existing = db.query(Alert).filter(
+            Alert.asset_id == (asset.id if asset else None),
+            Alert.metric_name == f"k8s_event_{ev.reason}",
+            Alert.created_at >= since,
+            Alert.status.in_(["triggered", "acknowledged"]),
+        ).first()
+        if existing:
+            skipped += 1
+            continue
+
+        alert = Alert(
+            asset_id=asset.id if asset else None,
+            metric_name=f"k8s_event_{ev.reason}",
+            actual_value=float(ev.count or 1),
+            threshold=1.0,
+            severity=severity,
+            status="triggered",
+            message=f"[K8S] {ev.reason} | {ev.kind or ''} {ev.name or ''} | ns: {ev.namespace or '-'} | {ev.message[:200] if ev.message else ''}",
+        )
+        db.add(alert)
+        new_alerts.append(alert)
+
+    if new_alerts:
+        db.commit()
+        for a in new_alerts:
+            db.refresh(a)
+        try:
+            notification_service.notify_new_alerts(db, new_alerts)
+        except Exception:
+            pass
+
+    return new_alerts, skipped, len(events)

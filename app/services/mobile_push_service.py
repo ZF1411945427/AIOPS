@@ -15,7 +15,8 @@ from app.models import MobileDevice, PushRecord, SystemConfig, Alert, PendingAct
 
 logger = logging.getLogger("mobile_push")
 
-_BIOMETRIC_SECRET = os.environ.get("MOBILE_JWT_SECRET", "aiops-mobile-secret")
+from app.config import MOBILE_JWT_SECRET
+_BIOMETRIC_SECRET = MOBILE_JWT_SECRET
 _BIOMETRIC_TTL_DAYS = 7
 
 _GETUI_BASE = "https://restapi.getui.com/v2"

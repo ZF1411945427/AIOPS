@@ -15,22 +15,21 @@ templates = get_templates()
 def _get_k8s_client(ds: DataSource):
     if ds.enabled is False:
         raise Exception(f"K8s 集群 [{ds.name}] 已被禁用")
-    if ds.last_status in ("offline", "error", "failed"):
-        raise Exception(f"K8s 集群 [{ds.name}] 当前不可用 (status={ds.last_status})")
-    from kubernetes import config, client
+    from kubernetes import client
     cfg = parse_json_config(ds.auth_config)
     if cfg.get("kubeconfig"):
-        config.load_kube_config_from_dict(cfg["kubeconfig"])
-    elif cfg.get("api_server") and cfg.get("token"):
+        from kubernetes import config as k8s_config
+        k8s_config.load_kube_config_from_dict(cfg["kubeconfig"])
+        api_client = client.ApiClient()
+    elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
         configuration = client.Configuration()
-        configuration.host = cfg["api_server"]
-        configuration.api_key = {"authorization": f"Bearer {cfg['token']}"}
+        configuration.host = cfg["k8s_api_server"]
+        configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
         configuration.verify_ssl = cfg.get("verify_ssl", False)
         configuration.timeout = 10
-        client.Configuration.set_default(configuration)
+        api_client = client.ApiClient(configuration=configuration)
     else:
-        config.load_kube_config()
-    api_client = client.ApiClient()
+        raise Exception(f"K8s 集群 [{ds.name}] 缺少 k8s_api_server/k8s_token 配置")
     api_client.configuration.timeout = 10
     return client.CoreV1Api(api_client=api_client), client.AppsV1Api(api_client=api_client), client.NetworkingV1Api(api_client=api_client)
 
@@ -1267,6 +1266,13 @@ def api_pod_terminal_page(request: Request, cluster: str, namespace: str, name: 
 
 @router.websocket("/ws/pod/{cluster}/{namespace}/{name}/terminal")
 async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str, name: str):
+    token = websocket.query_params.get("token", "")
+    from app.services.mobile_push_service import verify_login_token
+    if not token or not verify_login_token(token):
+        await websocket.accept()
+        await websocket.send_text("未认证，请先登录")
+        await websocket.close()
+        return
     await websocket.accept()
     from app.database import get_session_for, get_db_mode
     try:
@@ -1287,9 +1293,9 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
             from kubernetes import config
             config.load_kube_config_from_dict(cfg["kubeconfig"])
             api_client = client.ApiClient()
-        elif cfg.get("api_server") and cfg.get("token"):
-            configuration.host = cfg["api_server"]
-            configuration.api_key = {"authorization": f"Bearer {cfg['token']}"}
+        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+            configuration.host = cfg["k8s_api_server"]
+            configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
             configuration.verify_ssl = cfg.get("verify_ssl", False)
             configuration.timeout = 30
             api_client = client.ApiClient(configuration)

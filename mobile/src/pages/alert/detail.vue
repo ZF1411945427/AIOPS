@@ -54,6 +54,9 @@
                 <button class="ai-btn" @tap="goAI">
                     <text class="ai-btn-text">AI 根因分析</text>
                 </button>
+                <button class="assistant-btn" @tap="openAssistant">
+                    <text class="assistant-btn-text">💬 智能助手</text>
+                </button>
             </view>
         </template>
     </view>
@@ -63,7 +66,7 @@
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { getList, acknowledge, resolve, triggerHeal } from '@/api/alert.js'
-import { setPendingPreset } from '@/api/agent.js'
+import { setPendingPreset, openAlertAssistant, setPendingSessionId } from '@/api/agent.js'
 
 const alert = ref(null)
 const loading = ref(true)
@@ -158,6 +161,25 @@ function goAI() {
     const id = alert.value.id
     setPendingPreset('分析告警 #' + id + ' 的根因，并给出处置建议')
     uni.switchTab({ url: '/pages/agent/chat' })
+}
+
+async function openAssistant() {
+    if (!alert.value || alert.value.id == null) {
+        uni.showToast({ title: '告警信息缺失', icon: 'none' })
+        return
+    }
+    uni.showLoading({ title: '创建会话...' })
+    try {
+        const data = await openAlertAssistant(alert.value.id)
+        if (data.session_id) {
+            setPendingSessionId(data.session_id)
+            uni.switchTab({ url: '/pages/agent/chat' })
+        }
+    } catch (e) {
+        uni.showToast({ title: '打开助手失败', icon: 'none' })
+    } finally {
+        uni.hideLoading()
+    }
 }
 
 onLoad((opts) => {
@@ -289,6 +311,24 @@ onLoad((opts) => {
 .ai-btn-text {
     color: #fff;
     font-size: $font-lg;
+    font-weight: 600;
+}
+
+.assistant-btn {
+    width: 100%;
+    height: $btn-height;
+    line-height: $btn-height;
+    background: $bg-card;
+    color: $primary;
+    border-radius: $btn-radius;
+    margin-top: 16rpx;
+    border: 2rpx solid $primary;
+}
+.assistant-btn::after { border: none; }
+
+.assistant-btn-text {
+    color: $primary;
+    font-size: $font-md;
     font-weight: 600;
 }
 </style>

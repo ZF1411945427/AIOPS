@@ -4,7 +4,8 @@ import mimetypes
 import os as _os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Windows 上 Python 默认把 .js 映射为 text/plain，导致浏览器拒绝执行 module script
 mimetypes.add_type("text/javascript", ".js")
@@ -20,8 +21,10 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pathlib import Path
+
+from app.logger import logger
 
 
 class _MultiStaticFiles(_FastStaticFiles):
@@ -42,6 +45,7 @@ class _MultiStaticFiles(_FastStaticFiles):
 
 StaticFiles = _FastStaticFiles  # alias so existing mounts keep working
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
+from app import config as _config
 from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, knowledge_v2, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license, mobile
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service
@@ -107,16 +111,61 @@ for _eng in get_all_engines().values():
                 _conn.execute(_sa_text("DROP TABLE pending_actions"))
                 _conn.execute(_sa_text("ALTER TABLE _pa_new RENAME TO pending_actions"))
                 _conn.commit()
-                print("[migrate] pending_actions 重建完成: session_id 已改为 nullable")
+                logger.info("pending_actions 重建完成: session_id 已改为 nullable")
         except Exception as _e:
             try:
                 _conn.rollback()
             except Exception:
                 pass
 
+        # ── 性能索引：高频查询字段加索引（幂等，已存在则跳过）──
+        _INDEXES = [
+            "CREATE INDEX IF NOT EXISTS idx_metric_asset_name_ts ON metric_records (asset_id, name, timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_metric_name_ts ON metric_records (name, timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_alerts_status_created ON alerts (status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_alerts_severity_created ON alerts (severity, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_alerts_asset_id ON alerts (asset_id)",
+            "CREATE INDEX IF NOT EXISTS idx_k8s_events_cluster_ns ON k8s_events (cluster, namespace, last_seen)",
+            "CREATE INDEX IF NOT EXISTS idx_notif_logs_alert_id ON notification_logs (alert_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_spans_service_time ON spans (service_name, start_time)",
+            "CREATE INDEX IF NOT EXISTS idx_asset_changes_asset_ts ON asset_change_logs (asset_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents (status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_tool_inv_session ON tool_invocations (session_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_chat_msgs_session ON chat_messages (session_id, created_at)",
+        ]
+        for _idx_sql in _INDEXES:
+            try:
+                _conn.execute(_sa_text(_idx_sql))
+                _conn.commit()
+            except Exception:
+                pass
+
 app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/sre", "/api/sre/", "/api/system/db-switch", "/api/menu", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/ansible"}
+# ── 限流中间件 (slowapi) ──
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["1000/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ── 全局异常处理：净化错误消息，避免向前端泄露内部细节 ──
+from fastapi import HTTPException as _HTTPException
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    from app.logger import logger
+    import traceback
+    logger.error(f"Unhandled exception on {request.url.path}: {exc}\n{traceback.format_exc()}")
+    if isinstance(exc, _HTTPException):
+        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+    return JSONResponse({"error": "服务器内部错误"}, status_code=500)
+
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -134,17 +183,52 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         request.session["username"] = payload.get("username", "")
                         return await call_next(request)
                 return RedirectResponse(url="/login", status_code=303)
+            # RBAC: viewer 角色禁止写操作
+            request.state.user_id = user_id
+            from app.database import get_session_for, get_db_mode
+            from app.models import User as _User
+            _db = get_session_for(get_db_mode())()
+            try:
+                _user = _db.query(_User).filter(_User.id == user_id).first()
+                if _user and _user.role == "viewer":
+                    _method = request.method
+                    if _method in ("POST", "PUT", "PATCH", "DELETE"):
+                        _db.close()
+                        return JSONResponse(
+                            {"error": "权限不足：viewer 角色只读"},
+                            status_code=403,
+                        )
+                # admin-only 路径：非 admin 禁止写操作
+                _ADMIN_WRITE_PREFIXES = (
+                    "/ai/providers", "/helm/api", "/api/chaos", "/api/users",
+                    "/script/api", "/system/db-switch",
+                )
+                if _user and _user.role != "admin":
+                    _method = request.method
+                    if _method in ("POST", "PUT", "PATCH", "DELETE"):
+                        for _pfx in _ADMIN_WRITE_PREFIXES:
+                            if path.startswith(_pfx):
+                                _db.close()
+                                return JSONResponse(
+                                    {"error": "权限不足：需要管理员权限"},
+                                    status_code=403,
+                                )
+            finally:
+                _db.close()
         return await call_next(request)
 
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(LicenseMiddleware)
-app.add_middleware(SessionMiddleware, secret_key="aiops-secret-key-change-in-production")
+app.add_middleware(SessionMiddleware, secret_key=_config.SESSION_SECRET,
+                   https_only=_config.APP_ENV == "prod",
+                   same_site="lax", max_age=86400)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -180,7 +264,6 @@ _MOBILE_INDEX = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/i
 @app.get("/", response_class=HTMLResponse)
 def serve_spa():
     content = _VUE_INDEX.read_text(encoding="utf-8")
-    content = content.replace('/assets/', '/vue-assets/assets/')
     return HTMLResponse(content=content)
 
 
@@ -279,9 +362,11 @@ def init_admin():
     db = get_session_for(get_db_mode())()
     user = db.query(User).filter(User.username == "admin").first()
     if not user:
+        from app.security import hash_password
+        default_pwd = _os.environ.get("AIOPS_ADMIN_PASSWORD", "admin123")
         admin = User(
             username="admin",
-            password_hash=hashlib.sha256(b"admin123").hexdigest(),
+            password_hash=hash_password(default_pwd),
             role="admin",
         )
         db.add(admin)
@@ -357,25 +442,73 @@ def init_admin():
 BACKGROUND_INTERVAL = 10
 _last_probe_time = 0
 _last_collect_time = 0.0
+_last_archive_time = 0.0
+METRIC_RETENTION_DAYS = int(_os.environ.get("AIOPS_METRIC_RETENTION_DAYS", "90"))
+
+
+def _run_bg_service(name: str, fn, db_mode: str):
+    """在独立线程中运行后台服务，使用独立 DB session（线程安全）"""
+    _t0 = time.time()
+    _db = get_session_for(db_mode)()
+    try:
+        fn(_db)
+        _elapsed = time.time() - _t0
+        if _elapsed > 30:
+            logger.warning(f"后台服务 {name} 耗时过长: {_elapsed:.1f}s")
+        elif _elapsed > 5:
+            logger.info(f"后台服务 {name} 完成: {_elapsed:.1f}s")
+    except Exception as e:
+        _elapsed = time.time() - _t0
+        logger.warning(f"后台服务 {name} 异常({_elapsed:.1f}s): {e}")
+    finally:
+        _db.close()
 
 
 def background_loop():
     while True:
+        _mode = get_db_mode()
+        # ── 核心服务并发执行（每个独立 session，最多 5 线程）──
+        _services = [
+            ("alert_check", alert_service.check_rules),
+            ("alert_escalate", alert_service.escalate_alerts),
+            ("k8s_event_alert", alert_service.check_k8s_events),
+            ("anomaly_detect", anomaly_service.detect_anomalies),
+            ("incident_correlate", incident_service.correlate_alerts),
+            ("remediation", remediation_service.check_and_remediate),
+            ("datasource_scrape", datasource_service.scrape_all_sources),
+            ("pod_health", pod_health_service.check_pod_anomalies),
+            ("log_anomaly", log_anomaly_service.check_log_anomalies),
+            ("contention", contention_service.detect_contention),
+        ]
+        _pool = ThreadPoolExecutor(max_workers=5)
+        futures = {_pool.submit(_run_bg_service, name, fn, _mode): name
+                   for name, fn in _services}
         try:
-            db = get_session_for(get_db_mode())()
+            for f in as_completed(futures, timeout=120):
+                try:
+                    f.result()
+                except Exception as e:
+                    logger.warning(f"后台服务 {futures[f]} 异常: {e}")
+        except TimeoutError:
+            _pending = [futures[f] for f in futures if not f.done()]
+            logger.warning(f"后台服务超时(120s), 未完成: {_pending}")
+            for f in futures:
+                if not f.done():
+                    f.cancel()
+        except Exception as e:
+            import traceback
+            logger.error(f"Background services error: {e}")
+            traceback.print_exc()
+        finally:
+            _pool.shutdown(wait=False)
+
+        # ── 辅助任务（独立计时器，主线程执行）──
+        try:
+            db = get_session_for(_mode)()
             try:
-                alert_service.check_rules(db)
-                alert_service.escalate_alerts(db)
-                anomaly_service.detect_anomalies(db)
-                incident_service.correlate_alerts(db)
-                remediation_service.check_and_remediate(db)
-                datasource_service.scrape_all_sources(db)
-                pod_health_service.check_pod_anomalies(db)
-                log_anomaly_service.check_log_anomalies(db)
-                contention_service.detect_contention(db)
-                # 资产健康探测（间隔从系统配置读取，独立计时避免阻塞主循环）
-                global _last_probe_time
+                global _last_probe_time, _last_collect_time, _last_archive_time
                 _now = time.time()
+                # 资产健康探测
                 try:
                     from app.services import config_service
                     _probe_enabled = config_service.get_config(db, "asset_probe_enabled", "true").lower() == "true"
@@ -386,16 +519,12 @@ def background_loop():
                 if _probe_enabled and _now - _last_probe_time >= _probe_interval:
                     _last_probe_time = _now
                     try:
-                        _probe_mode = get_db_mode()
-                        print(f"[bg] 资产探测开始, db_mode={_probe_mode}")
                         changed = asset_service.probe_assets(db)
-                        print(f"[bg] 资产探测完成, 变更: {len(changed)} 条")
                         if changed:
-                            print(f"[bg] 资产状态变更: {changed}")
+                            logger.info(f"资产状态变更: {len(changed)} 条")
                     except Exception as pe:
-                        print(f"[bg] 资产探测异常: {pe}")
-                # 指标采集（独立计时器，间隔从配置读取）
-                global _last_collect_time
+                        logger.warning(f"资产探测异常: {pe}")
+                # 指标采集
                 try:
                     _collect_enabled = config_service.get_config(db, "metric_collect_enabled", "true").lower() == "true"
                     _collect_interval = int(config_service.get_config(db, "metric_collect_interval", "60") or "60")
@@ -407,9 +536,25 @@ def background_loop():
                     try:
                         summary = metric_collector.collect_all_metrics(db)
                         if summary["metrics_collected"] > 0:
-                            print(f"[bg] 指标采集: {summary['success']}成功/{summary['failed']}失败, 采集{summary['metrics_collected']}条指标")
+                            logger.info(f"指标采集: {summary['success']}成功/{summary['failed']}失败, 采集{summary['metrics_collected']}条指标")
                     except Exception as ce:
-                        print(f"[bg] 指标采集异常: {ce}")
+                        logger.warning(f"指标采集异常: {ce}")
+                # ── metric_records 归档：定期删除超期数据 ──
+                _ARCHIVE_INTERVAL = 3600
+                if _now - _last_archive_time >= _ARCHIVE_INTERVAL:
+                    _last_archive_time = _now
+                    try:
+                        from sqlalchemy import text as _arch_text
+                        _cutoff = datetime.now() - timedelta(days=METRIC_RETENTION_DAYS)
+                        _result = db.execute(_arch_text(
+                            "DELETE FROM metric_records WHERE timestamp < :cutoff"
+                        ), {"cutoff": _cutoff})
+                        db.commit()
+                        if _result.rowcount and _result.rowcount > 0:
+                            logger.info(f"指标归档: 删除 {_result.rowcount} 条超期记录 (>{METRIC_RETENTION_DAYS}天)")
+                    except Exception as ae:
+                        logger.warning(f"指标归档异常: {ae}")
+                # 报表调度
                 now = datetime.now()
                 schedules = db.query(ReportSchedule).filter(ReportSchedule.enabled == True).all()
                 for s in schedules:
@@ -424,15 +569,11 @@ def background_loop():
                                 db.commit()
                     except Exception:
                         pass
-            except Exception as e:
-                import traceback
-                print(f"[bg] Error in loop: {e}")
-                traceback.print_exc()
             finally:
                 db.close()
         except Exception as e:
             import traceback
-            print(f"[bg] Fatal error: {e}")
+            logger.error(f"Error in background loop (aux): {e}")
             traceback.print_exc()
         time.sleep(BACKGROUND_INTERVAL)
 
@@ -453,10 +594,10 @@ for _mode in ("demo", "real"):
     try:
         _added = seed_workflow_templates(_seed_db)
         if _added:
-            print(f"[seed] {_mode} 库播种 {_added} 个 SOP 工作流模板")
+            logger.info(f"{_mode} 库播种 {_added} 个 SOP 工作流模板")
         _added2 = seed_agent_workflows(_seed_db)
         if _added2:
-            print(f"[seed] {_mode} 库播种 {_added2} 个智能体工作流模板")
+            logger.info(f"{_mode} 库播种 {_added2} 个智能体工作流模板")
         # 给已有种子工作流的 tool 节点补 execution_mode: auto（向后兼容）
         from app.models import AgentWorkflow
         from sqlalchemy import text as _sa_text2
@@ -475,4 +616,31 @@ for _mode in ("demo", "real"):
         _seed_db.close()
 set_db_mode("demo")
 threading.Thread(target=background_loop, daemon=True).start()
+
+
+# ── 健康检查端点（容器化探针用）──
+@app.get("/healthz")
+async def healthz():
+    """轻量存活检查"""
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readyz():
+    """就绪检查：DB 连通性 + Milvus 连通性"""
+    checks = {"db": "ok", "milvus": "ok"}
+    try:
+        from sqlalchemy import text
+        _db = get_session_for(get_db_mode())()
+        _db.execute(text("SELECT 1"))
+        _db.close()
+    except Exception as e:
+        checks["db"] = f"fail: {e}"
+    try:
+        from app.services.vector_store import get_client
+        get_client()
+    except Exception as e:
+        checks["milvus"] = f"fail: {e}"
+    all_ok = all(v == "ok" for v in checks.values())
+    return JSONResponse(checks, status_code=200 if all_ok else 503)
 

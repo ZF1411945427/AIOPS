@@ -12,3 +12,8 @@ router = APIRouter(prefix="/hotspot", tags=["hotspot"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "hotspot", "status": "ok"}
+
+

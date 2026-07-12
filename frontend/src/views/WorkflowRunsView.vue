@@ -2,11 +2,11 @@
   <div class="wf-page">
     <div class="page-header">
       <h1>工作流执行监控</h1>
-      <p>SOP 工作流实例实时监控 · 共 {{ runs.length }} 个</p>
+      <p>SOP 工作流实例实时监控 · 共 {{ total }} 个</p>
     </div>
 
     <div class="toolbar">
-      <select v-model="statusFilter" class="input select-input" @change="loadRuns">
+      <select v-model="statusFilter" class="input select-input" @change="onFilterChange">
         <option value="">全部状态</option>
         <option value="running">执行中</option>
         <option value="paused">待确认</option>
@@ -45,6 +45,15 @@
           </tbody>
         </table>
         <div v-else class="empty-state"><div style="font-size:32px;margin-bottom:8px;">⚙️</div><div>暂无工作流实例</div></div>
+        <div v-if="totalPages > 1" class="pagination">
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(1)">首页</button>
+          <button class="btn btn-sm" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
+          <span v-for="p in pageNumbers" :key="p" class="page-num" :class="{ active: p === currentPage }" @click="goPage(p)">{{ p }}</span>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+          <button class="btn btn-sm" :disabled="currentPage >= totalPages" @click="goPage(totalPages)">末页</button>
+          <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="jumpPage" min="1" :max="totalPages" @keyup.enter="goPage(jumpPage)" /> 页</span>
+          <span class="page-info">共 {{ total }} 条 / {{ totalPages }} 页</span>
+        </div>
       </div>
     </div>
 
@@ -118,12 +127,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
 const loading = ref(false)
 const runs = ref([])
+const total = ref(0)
 const statusFilter = ref('')
 const templates = ref([])
 const showCreate = ref(false)
@@ -132,13 +142,47 @@ const showDetail = ref(false)
 const detail = ref({})
 let pollTimer = null
 
+const currentPage = ref(1)
+const pageSize = ref(20)
+const totalPages = ref(1)
+const jumpPage = ref(1)
+const pageNumbers = computed(() => {
+  const pages = []
+  const cur = currentPage.value
+  const tp = totalPages.value
+  if (tp <= 7) {
+    for (let i = 1; i <= tp; i++) pages.push(i)
+  } else {
+    pages.push(1)
+    if (cur > 4) pages.push('...')
+    const start = Math.max(2, cur - 1)
+    const end = Math.min(tp - 1, cur + 1)
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (cur < tp - 3) pages.push('...')
+    pages.push(tp)
+  }
+  return pages
+})
+function goPage(p) {
+  if (p < 1 || p > totalPages.value || p === currentPage.value) return
+  currentPage.value = p
+  loadRuns()
+}
+
+function onFilterChange() {
+  currentPage.value = 1
+  loadRuns()
+}
+
 async function loadRuns() {
   loading.value = true
   try {
-    const params = {}
+    const params = { page: currentPage.value, per_page: pageSize.value }
     if (statusFilter.value) params.status = statusFilter.value
     const data = await request.get('/workflow/api/runs', { params })
     runs.value = data.items || []
+    total.value = data.total || 0
+    totalPages.value = data.total_pages || 1
   } catch (e) {
     ElMessage.error('加载失败: ' + (e.message || e))
   } finally {
@@ -318,6 +362,13 @@ onBeforeUnmount(() => {
 .badge.src-badge { background: rgba(20,184,166,0.12); color: #14b8a6; }
 .progress-text { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .loading-state, .empty-state { text-align: center; padding: 24px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+.page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
+.page-num { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; cursor: pointer; transition: all 0.2s; user-select: none; }
+.page-num:hover { background: var(--bg-hover, rgba(99,102,241,0.08)); border-color: var(--accent, #6366f1); }
+.page-num.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); font-weight: 600; }
+.page-jump { font-size: 0.8rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; }
+.page-input { width: 50px; padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; text-align: center; font-size: 0.8rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 380px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
 .modal-box.wide { min-width: 560px; }

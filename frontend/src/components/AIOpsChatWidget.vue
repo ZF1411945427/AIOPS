@@ -251,11 +251,25 @@ function restorePos() {
   } catch (e) {}
 }
 
-onMounted(() => { restorePos() })
+onMounted(() => { 
+  restorePos()
+  window.addEventListener('open-chat-session', handleOpenChatSession)
+})
 onBeforeUnmount(() => {
   window.removeEventListener('mousemove', onMouseMove)
   window.removeEventListener('mouseup', onMouseUp)
+  window.removeEventListener('open-chat-session', handleOpenChatSession)
 })
+
+function handleOpenChatSession(e) {
+  const { sessionId } = e.detail
+  isOpen.value = true
+  if (sessionId) {
+    switchSession(sessionId)
+  } else {
+    restoreLastSession()
+  }
+}
 
 function toggleOpen() {
   isOpen.value = !isOpen.value

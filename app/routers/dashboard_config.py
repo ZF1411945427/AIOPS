@@ -10,3 +10,8 @@ router = APIRouter(prefix="/dashboard-config", tags=["dashboard_config"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "dashboard_config", "status": "ok"}
+
+

@@ -67,6 +67,7 @@ desktop.ini
 *.tmp
 *.bak
 .cache/
+*.whl
 
 # ===== 敏感凭据 =====
 token.txt
@@ -108,3 +109,17 @@ mobile/dist/
 
 # ===== 临时笔记文件 =====
 tools/1
+
+# ===== 临时产物（清理后防止再次入库）=====
+cookies.txt
+cookies2.txt
+AIOPSproject05v1_test.json
+*cleanup_scan.ps1
+MEMORY.md.bak.*
+opencode_bak.json
+nul
+projects/
+功能测试/
+
+# ===== 模型权重文件（体积过大，不入库）=====
+models/

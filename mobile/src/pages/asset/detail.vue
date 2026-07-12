@@ -118,6 +118,10 @@
                         <text class="quick-icon">AI</text>
                         <text class="quick-label">AI诊断</text>
                     </view>
+                    <view class="quick-item" @tap="openAssistant">
+                        <text class="quick-icon">💬</text>
+                        <text class="quick-label">智能助手</text>
+                    </view>
                 </view>
             </view>
         </template>
@@ -130,6 +134,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { getAssetDetail } from '@/api/asset.js'
 import { getList } from '@/api/alert.js'
 import { buildUrl, commonHeaders } from '@/api/config.js'
+import { openAssetAssistant, setPendingSessionId } from '@/api/agent.js'
 
 const asset = ref(null)
 const recentAlerts = ref([])
@@ -291,6 +296,26 @@ function goRestart() {
 function goDiagnose() {
     const id = asset.value && asset.value.id
     uni.navigateTo({ url: '/pages/asset/diagnose?assetId=' + id })
+}
+
+async function openAssistant() {
+    const id = asset.value && asset.value.id
+    if (!id) {
+        uni.showToast({ title: '资产信息缺失', icon: 'none' })
+        return
+    }
+    uni.showLoading({ title: '创建会话...' })
+    try {
+        const data = await openAssetAssistant(id)
+        if (data.session_id) {
+            setPendingSessionId(data.session_id)
+            uni.switchTab({ url: '/pages/agent/chat' })
+        }
+    } catch (e) {
+        uni.showToast({ title: '打开助手失败', icon: 'none' })
+    } finally {
+        uni.hideLoading()
+    }
 }
 
 onLoad((opts) => {

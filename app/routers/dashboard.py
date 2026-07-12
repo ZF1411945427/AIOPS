@@ -8,11 +8,13 @@ from app.database import get_db
 from app.models import Asset, Alert, AlertRule, Incident, DataSource, MetricRecord
 from app.services.health_score_service import compute_health_score
 from app.template_utils import get_templates
+from app.cache import cached
 
 router = APIRouter(tags=["dashboard"])
 templates = get_templates()
 
 @router.get("/api/dashboard/stats")
+@cached(ttl=15)
 def dashboard_stats(db: Session = Depends(get_db)):
     asset_total = db.query(func.count(Asset.id)).scalar() or 0
     asset_online = db.query(func.count(Asset.id)).filter(Asset.status == "online").scalar() or 0
@@ -27,6 +29,7 @@ def dashboard_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/api/dashboard/data")
+@cached(ttl=15)
 def dashboard_data(db: Session = Depends(get_db)):
     # Stats
     asset_total = db.query(func.count(Asset.id)).scalar() or 0

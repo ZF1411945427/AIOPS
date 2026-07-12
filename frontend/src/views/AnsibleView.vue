@@ -66,6 +66,15 @@
             <div>暂无执行历史</div>
             <div class="text-muted" style="margin-top:4px;">点击右上角「执行」开始一次 Ansible 任务</div>
           </div>
+          <div v-if="runsPager.totalPages > 1" class="pagination">
+            <button class="btn btn-sm" :disabled="runsPager.currentPage <= 1" @click="runsPager.goPage(1)">首页</button>
+            <button class="btn btn-sm" :disabled="runsPager.currentPage <= 1" @click="runsPager.goPage(runsPager.currentPage - 1)">上一页</button>
+            <span v-for="p in runsPager.pageNumbers" :key="p" class="page-num" :class="{ active: p === runsPager.currentPage }" @click="runsPager.goPage(p)">{{ p }}</span>
+            <button class="btn btn-sm" :disabled="runsPager.currentPage >= runsPager.totalPages" @click="runsPager.goPage(runsPager.currentPage + 1)">下一页</button>
+            <button class="btn btn-sm" :disabled="runsPager.currentPage >= runsPager.totalPages" @click="runsPager.goPage(runsPager.totalPages)">末页</button>
+            <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="runsPager.jumpPage" min="1" :max="runsPager.totalPages" @keyup.enter="runsPager.goPage(runsPager.jumpPage)" /> 页</span>
+            <span class="page-info">共 {{ runsPager.total }} 条 / {{ runsPager.totalPages }} 页</span>
+          </div>
         </div>
       </div>
     </div>
@@ -108,6 +117,15 @@
             <div style="font-size:32px;margin-bottom:8px;">🗂️</div>
             <div>暂无主机清单</div>
           </div>
+          <div v-if="invPager.totalPages > 1" class="pagination">
+            <button class="btn btn-sm" :disabled="invPager.currentPage <= 1" @click="invPager.goPage(1)">首页</button>
+            <button class="btn btn-sm" :disabled="invPager.currentPage <= 1" @click="invPager.goPage(invPager.currentPage - 1)">上一页</button>
+            <span v-for="p in invPager.pageNumbers" :key="p" class="page-num" :class="{ active: p === invPager.currentPage }" @click="invPager.goPage(p)">{{ p }}</span>
+            <button class="btn btn-sm" :disabled="invPager.currentPage >= invPager.totalPages" @click="invPager.goPage(invPager.currentPage + 1)">下一页</button>
+            <button class="btn btn-sm" :disabled="invPager.currentPage >= invPager.totalPages" @click="invPager.goPage(invPager.totalPages)">末页</button>
+            <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="invPager.jumpPage" min="1" :max="invPager.totalPages" @keyup.enter="invPager.goPage(invPager.jumpPage)" /> 页</span>
+            <span class="page-info">共 {{ invPager.total }} 条 / {{ invPager.totalPages }} 页</span>
+          </div>
         </div>
       </div>
     </div>
@@ -148,6 +166,15 @@
           <div v-else class="empty-state">
             <div style="font-size:32px;margin-bottom:8px;">📖</div>
             <div>暂无 Playbook 模板</div>
+          </div>
+          <div v-if="pbPager.totalPages > 1" class="pagination">
+            <button class="btn btn-sm" :disabled="pbPager.currentPage <= 1" @click="pbPager.goPage(1)">首页</button>
+            <button class="btn btn-sm" :disabled="pbPager.currentPage <= 1" @click="pbPager.goPage(pbPager.currentPage - 1)">上一页</button>
+            <span v-for="p in pbPager.pageNumbers" :key="p" class="page-num" :class="{ active: p === pbPager.currentPage }" @click="pbPager.goPage(p)">{{ p }}</span>
+            <button class="btn btn-sm" :disabled="pbPager.currentPage >= pbPager.totalPages" @click="pbPager.goPage(pbPager.currentPage + 1)">下一页</button>
+            <button class="btn btn-sm" :disabled="pbPager.currentPage >= pbPager.totalPages" @click="pbPager.goPage(pbPager.totalPages)">末页</button>
+            <span class="page-jump">跳转 <input type="number" class="page-input" v-model.number="pbPager.jumpPage" min="1" :max="pbPager.totalPages" @keyup.enter="pbPager.goPage(pbPager.jumpPage)" /> 页</span>
+            <span class="page-info">共 {{ pbPager.total }} 条 / {{ pbPager.totalPages }} 页</span>
           </div>
         </div>
       </div>
@@ -380,7 +407,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import GuideDrawer from '@/components/GuideDrawer.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
@@ -396,6 +423,43 @@ const inventories = ref([])
 const invLoading = ref(false)
 const playbooks = ref([])
 const pbLoading = ref(false)
+
+function usePagination(reloadFn) {
+  const pager = reactive({
+    currentPage: 1,
+    pageSize: 20,
+    total: 0,
+    totalPages: 1,
+    jumpPage: 1,
+    pageNumbers: computed(() => {
+      const pages = []
+      const cur = pager.currentPage
+      const tp = pager.totalPages
+      if (tp <= 7) {
+        for (let i = 1; i <= tp; i++) pages.push(i)
+      } else {
+        pages.push(1)
+        if (cur > 4) pages.push('...')
+        const start = Math.max(2, cur - 1)
+        const end = Math.min(tp - 1, cur + 1)
+        for (let i = start; i <= end; i++) pages.push(i)
+        if (cur < tp - 3) pages.push('...')
+        pages.push(tp)
+      }
+      return pages
+    }),
+    goPage(p) {
+      if (p < 1 || p > pager.totalPages || p === pager.currentPage) return
+      pager.currentPage = p
+      reloadFn()
+    },
+  })
+  return pager
+}
+
+const runsPager = usePagination(() => loadRuns())
+const invPager = usePagination(() => loadInventories())
+const pbPager = usePagination(() => loadPlaybooks())
 
 const showRunDialog = ref(false)
 const runExecuting = ref(false)
@@ -450,8 +514,10 @@ async function loadStatus() {
 async function loadRuns() {
   runsLoading.value = true
   try {
-    const data = await request.get('/ansible/api/runs')
+    const data = await request.get('/ansible/api/runs', { params: { page: runsPager.currentPage, per_page: runsPager.pageSize } })
     runs.value = data.items || []
+    runsPager.total = data.total || 0
+    runsPager.totalPages = data.total_pages || 1
   } catch (e) {
     ElMessage.error('加载执行历史失败: ' + e.message)
   } finally {
@@ -462,8 +528,10 @@ async function loadRuns() {
 async function loadInventories() {
   invLoading.value = true
   try {
-    const data = await request.get('/ansible/api/inventories')
+    const data = await request.get('/ansible/api/inventories', { params: { page: invPager.currentPage, per_page: invPager.pageSize } })
     inventories.value = data.items || []
+    invPager.total = data.total || 0
+    invPager.totalPages = data.total_pages || 1
   } catch (e) {
     ElMessage.error('加载主机清单失败: ' + e.message)
   } finally {
@@ -474,8 +542,10 @@ async function loadInventories() {
 async function loadPlaybooks() {
   pbLoading.value = true
   try {
-    const data = await request.get('/ansible/api/playbooks')
+    const data = await request.get('/ansible/api/playbooks', { params: { page: pbPager.currentPage, per_page: pbPager.pageSize } })
     playbooks.value = data.items || []
+    pbPager.total = data.total || 0
+    pbPager.totalPages = data.total_pages || 1
   } catch (e) {
     ElMessage.error('加载 Playbook 失败: ' + e.message)
   } finally {
@@ -518,6 +588,7 @@ async function executeRun() {
       ElMessage.warning('执行完成: ' + statusLabel(data.status))
     }
     closeRunDialog()
+    runsPager.currentPage = 1
     loadRuns()
   } catch (e) {
     ElMessage.error('执行失败: ' + e.message)
@@ -580,6 +651,7 @@ async function saveInventory() {
     }
     ElMessage.success(invForm.id ? '已更新' : '已创建')
     closeInvDialog()
+    invPager.currentPage = 1
     loadInventories()
   } catch (e) {
     ElMessage.error('保存失败: ' + e.message)
@@ -647,6 +719,7 @@ async function savePlaybook() {
     }
     ElMessage.success(pbForm.id ? '已更新' : '已创建')
     closePbDialog()
+    pbPager.currentPage = 1
     loadPlaybooks()
   } catch (e) {
     ElMessage.error('保存失败: ' + e.message)
@@ -722,6 +795,13 @@ const showGuide = ref(false)
 .action-cell { white-space: nowrap; }
 .action-cell .btn { margin-right: 4px; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+.page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
+.page-num { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; cursor: pointer; transition: all 0.2s; user-select: none; }
+.page-num:hover { background: var(--bg-hover, rgba(99,102,241,0.08)); border-color: var(--accent, #6366f1); }
+.page-num.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); font-weight: 600; }
+.page-jump { font-size: 0.8rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; }
+.page-input { width: 50px; padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; text-align: center; font-size: 0.8rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 420px; max-width: 92vw; box-shadow: 0 8px 24px rgba(0,0,0,0.15); max-height: 88vh; overflow-y: auto; }
 .modal-lg { min-width: 720px; }

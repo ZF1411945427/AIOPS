@@ -134,6 +134,48 @@ export function deleteSession(sessionId) {
   })
 }
 
+export function openAlertAssistant(alertId) {
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: buildUrl(`/alerts/api/${alertId}/open-assistant`),
+      method: 'POST',
+      header: commonHeaders(),
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
+        else reject(res)
+      },
+      fail: reject,
+    })
+  })
+}
+
+export function openAssetAssistant(assetId) {
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: buildUrl(`/assets/api/${assetId}/open-assistant`),
+      method: 'POST',
+      header: commonHeaders(),
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
+        else reject(res)
+      },
+      fail: reject,
+    })
+  })
+}
+
+let pendingSessionId = ''
+
+export function setPendingSessionId(id) {
+  pendingSessionId = id || ''
+}
+
+export function takePendingSessionId() {
+  const id = pendingSessionId
+  pendingSessionId = ''
+  return id
+}
+
 export default {
   listSessions,
   getHistory,
@@ -145,4 +187,8 @@ export default {
   deleteSession,
   setPendingPreset,
   takePendingPreset,
+  openAlertAssistant,
+  openAssetAssistant,
+  setPendingSessionId,
+  takePendingSessionId,
 }

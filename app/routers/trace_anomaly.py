@@ -8,3 +8,8 @@ router = APIRouter(prefix="/trace-anomaly", tags=["trace-anomaly"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "trace_anomaly", "status": "ok"}
+
+

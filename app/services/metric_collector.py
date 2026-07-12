@@ -70,8 +70,8 @@ def _ssh_connect(asset, timeout=10):
     if not host:
         return None
 
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    from app.services.ssh_helper import get_ssh_client
+    ssh = get_ssh_client()
     ssh.connect(host, port=port, username=username, password=password,
                 timeout=timeout, banner_timeout=timeout)
     return ssh

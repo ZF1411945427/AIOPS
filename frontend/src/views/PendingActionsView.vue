@@ -7,6 +7,12 @@
 
     <div class="toolbar">
       <button class="btn" @click="loadActions">刷新</button>
+      <select v-model="statusFilter" class="filter-select" @change="loadActions">
+        <option value="all">全部</option>
+        <option value="pending">待确认</option>
+        <option value="executed">已执行</option>
+        <option value="canceled">已取消</option>
+      </select>
       <span class="text-sm" style="margin-left:auto;">待处理: {{ pendingCount }} · 已执行: {{ executedCount }}</span>
     </div>
 
@@ -51,6 +57,7 @@ import request from '@/api/request'
 const loading = ref(false)
 const actions = ref([])
 const busy = ref(0)
+const statusFilter = ref('pending')
 
 const pendingCount = computed(() => actions.value.filter(a => a.status === 'pending').length)
 const executedCount = computed(() => actions.value.filter(a => ['executed', 'failed', 'canceled'].includes(a.status)).length)
@@ -75,7 +82,7 @@ function statusClass(s) {
 async function loadActions() {
   loading.value = true
   try {
-    const data = await request.get('/agent/api/pending')
+    const data = await request.get('/agent/api/pending', { params: { status: statusFilter.value } })
     actions.value = data.actions || []
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
@@ -156,6 +163,7 @@ onMounted(loadActions)
 .btn-danger { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); }
 .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+.filter-select { padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; cursor: pointer; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-body { padding: 16px 18px; }
 .table { width: 100%; border-collapse: collapse; }

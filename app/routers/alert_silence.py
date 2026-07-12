@@ -8,3 +8,8 @@ router = APIRouter(prefix="/alert-silence", tags=["alert_silence"])
 templates = get_templates()
 
 
+@router.get("/status")
+def status():
+    return {"module": "alert_silence", "status": "ok"}
+
+
