@@ -5,8 +5,31 @@
 
 ---
 
-## 2026-07-13: Docker/K8s 终端二次修复（转义序列污染 + xterm.js 双触发）
-- **问题 4（xterm.js 6.0.0 双触发）**: `_keyDown` 和 `_keyPress` 两个处理器都调用 `triggerDataEvent()`，导致 `onData` 对同一个按键触发两次 → 字符翻倍（`ddaattee`）
+## 2026-07-13: 远程脚本目标主机修复（同时支持 DataSource 和 Asset）
+- **问题**: 远程脚本下拉只查 `data_sources` 表（type=ssh/host/linux），但 39.96.51.45 (id=179) 在 `assets` 表（ci_type=cloud_host），导致下拉为空
+- **修复**: `script_exec.py` 的 `api_script_targets` 同时查询 `DataSource`(SSH类型) + `Asset`(cloud_host 且有 connection_config)，Asset 用 `asset_{id}` 格式区分
+- **修复**: `api_script_execute` 的 `target_id` 从 `int` 改为 `str`，支持 `asset_179` 前缀识别 Asset 类型
+- **前端**: 无需修改，`t.id` 直接作为 value 发送即可兼容 `asset_179` 格式
+
+## 2026-07-13: 远程脚本「生成 Playbook」功能
+- **功能**: 远程脚本执行成功后，结果区显示「📦 生成 Playbook」按钮，点击弹窗预览 Ansible YAML
+- **YAML 生成逻辑**: 单行命令生成单 task；多行生成多 step，每个 step 含 shell + debug
+- **弹窗支持**: 复制 YAML / 保存并跳转 Ansible 页面（自动 POST /ansible/api/playbooks）
+
+## 2026-07-13: SRE 页面服务名字段改为 ServicePicker 关联资产
+- **背景**: SRE 相关页面（ErrorBudget/SLO/SLA）的 `service_name` 字段原来随便输入文本，导致数据不规范
+- **解决方案**: 创建 `ServicePicker.vue` 组件（可搜索分页弹窗列表），替代原来的 `el-input`
+- **后端改动**: `assets.py` 新增 `GET /assets/api/services`（轻量分页列表）+ `GET /assets/api/{id}` + 分页参数；`asset_service.py` 新增 `list_assets_paged`；`sre.py` 的 `SLOConfigCreate/Response` 加 `service_id` 字段
+- **前端改动**: ErrorBudgetView / SLOConfigView / SLAView 的服务名输入改为 `<ServicePicker v-model="form.service_id" @update:modelValue="onServicePick">` + `onServicePick` 回调自动填充 `service_name`
+- **问题**: `DatasourcesView.vue` 的「+ 新增数据源」按钮是 `href="/datasources"` 死链，且后端缺少 `POST /api/create` 和 `PUT /api/{id}` 接口
+- **修复**: 后端 `datasources.py` 新增 `GET /api/{id}`、`POST /api/create`、`PUT /api/{id}` 三个接口
+- **前端**: `DatasourcesView.vue` 重写为 SPA 弹窗，支持新增/编辑数据源（类型、地址、认证方式、SSH/K8s 特殊配置、采集间隔）
+- 编辑时调用 `GET /datasources/api/{id}` 加载完整 auth_config 回填表单
+
+## 2026-07-13: 任务中心页面添加操作说明（GuideDrawer 右侧抽屉）
+- **自愈规则 / 自愈工作流 / 工作流执行监控** 三个页面新增 `📖 操作说明` 按钮，点击右侧滑出 GuideDrawer 抽屉
+- 实现方式：导入 `GuideDrawer` 组件 + `GuideDrawer v-model="showGuide" title="..."` + 内容用 `section.guide-section` 包裹
+- 注意：不要用内联折叠样式（guide-box），统一用 GuideDrawer 组件保持一致
 - **修复**: `onData` 开头加 15ms 去重窗口 `if (now - lastOnDataTime < 15) return`，同一次按键的双触发间隔 <1ms，可安全过滤
 - **问题 5（CPR 转义序列污染屏幕）**: xterm.js 内部处理 DSR 查询时通过 `onData` 返回 `\x1b[row;colR` 回应，handler 的 `ch >= ' '` 把 `[1;9R` 等可打印部分回显到屏幕
 - **修复**: `onData` 检测 `data.charCodeAt(0) === 0x1b` 则直接 `return`，不回显也不发送到服务端

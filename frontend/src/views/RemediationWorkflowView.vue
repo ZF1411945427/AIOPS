@@ -1,8 +1,13 @@
 <template>
   <div class="wf-page">
     <div class="page-header">
-      <h1>自愈工作流</h1>
-      <p>多步骤故障自愈流程编排 · 共 {{ total }} 个工作流</p>
+      <div class="title-row">
+        <div>
+          <h1>自愈工作流</h1>
+          <p>多步骤故障自愈流程编排 · 共 {{ total }} 个工作流</p>
+        </div>
+        <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+      </div>
     </div>
 
     <div class="toolbar">
@@ -81,15 +86,47 @@
         </div>
       </div>
     </div>
+
+    <GuideDrawer v-model="showGuide" title="📖 自愈工作流 · 操作说明">
+      <section class="guide-section">
+        <h4>1. 目的</h4>
+        <p>自愈工作流用于编排<strong>多步骤的故障自愈流程</strong>。与单动作的自愈规则不同，工作流支持多个动作按顺序执行（如：健康检查→重启→再次检查→通知），形成完整的自愈闭环。</p>
+      </section>
+      <section class="guide-section">
+        <h4>2. 可用步骤动作</h4>
+        <div class="key-value-list">
+          <div class="kv-row"><span class="kv-key">healthcheck</span><span class="kv-val">健康检查，确认目标服务状态是否正常</span></div>
+          <div class="kv-row"><span class="kv-key">restart</span><span class="kv-val">重启目标服务（通过资产 connection_config SSH 执行 systemctl restart）</span></div>
+          <div class="kv-row"><span class="kv-key">clean</span><span class="kv-val">清理临时文件或日志，释放磁盘空间</span></div>
+          <div class="kv-row"><span class="kv-key">scale</span><span class="kv-val">扩缩容 K8s Deployment（需在目标字段指定 Deployment 名）</span></div>
+          <div class="kv-row"><span class="kv-key">notify</span><span class="kv-val">发送通知（自愈成功后通知相关人员）</span></div>
+        </div>
+      </section>
+      <section class="guide-section">
+        <h4>3. 操作步骤</h4>
+        <ul>
+          <li><strong>点击「新建工作流」</strong> — 填写工作流名称，可选关联告警规则 ID（留空则匹配所有告警）</li>
+          <li><strong>定义步骤</strong> — 在 JSON 数组中填写步骤动作序列，如 <code>["healthcheck","restart","notify"]</code></li>
+          <li><strong>启用工作流</strong> — 创建后点击「启用」按钮激活工作流，此后匹配告警自动触发</li>
+          <li><strong>手动运行测试</strong> — 可随时点击「运行」按钮手动触发工作流，测试自愈流程是否正常</li>
+        </ul>
+      </section>
+      <section class="guide-section">
+        <h4>4. 实现了什么</h4>
+        <p>当告警触发时，系统自动查找匹配的自愈工作流并执行完整步骤序列，实现<strong>多步骤自动处置</strong>。例如：CPU 高→healthcheck 确认→restart 重启→healthcheck 确认→notify 通知。全程无需人工介入。</p>
+      </section>
+    </GuideDrawer>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import request from '@/api/request'
 
 const loading = ref(false)
+const showGuide = ref(false)
 const workflows = ref([])
 const logs = ref([])
 const total = ref(0)
@@ -204,6 +241,7 @@ onMounted(loadData)
 <style scoped>
 .wf-page { padding: 4px; }
 .page-header { margin-bottom: 16px; }
+.title-row { display: flex; align-items: center; gap: 16px; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }

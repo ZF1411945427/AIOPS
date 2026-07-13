@@ -44,6 +44,9 @@
           <div class="result-label danger">STDERR</div>
           <pre class="output-pre danger">{{ lastError }}</pre>
         </div>
+        <div v-if="lastScriptContent && !lastError" class="result-actions">
+          <button class="btn btn-primary" @click="openPlaybookDialog">📦 生成 Playbook</button>
+        </div>
       </div>
     </div>
 
@@ -88,6 +91,35 @@
         </div>
       </div>
     </div>
+
+    <!-- 生成 Playbook 弹窗 -->
+    <div v-if="showPbDialog" class="modal-overlay" @click.self="showPbDialog = false">
+      <div class="modal-box modal-lg">
+        <div class="modal-header">
+          <h3>📦 生成 Ansible Playbook</h3>
+          <button class="modal-close" @click="showPbDialog = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group"><label>Playbook 名称</label>
+            <input v-model="pbForm.name" class="input" placeholder="如: restart-nginx" />
+          </div>
+          <div class="form-group"><label>描述（可选）</label>
+            <input v-model="pbForm.description" class="input" placeholder="可选说明" />
+          </div>
+          <div class="form-group"><label>生成的 Playbook YAML</label>
+            <pre class="output-pre dark">{{ pbForm.content }}</pre>
+          </div>
+          <div class="form-tip" style="margin-bottom:8px;">
+            已自动提取脚本中的命令转换为 Ansible shell 模块，点击「复制 YAML」可粘贴到 Playbook 模板中使用。
+          </div>
+          <div class="modal-actions">
+            <button class="btn" @click="copyPbYaml">📋 复制 YAML</button>
+            <button class="btn" @click="showPbDialog = false">关闭</button>
+            <button class="btn btn-primary" @click="savePbAndGo">💾 保存并跳转 Ansible</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -104,6 +136,10 @@ const historyTotal = ref(0)
 const expanded = ref(null)
 const lastOutput = ref(null)
 const lastError = ref('')
+const lastScriptContent = ref('')
+const lastTargetName = ref('')
+const showPbDialog = ref(false)
+const pbForm = reactive({ name: '', description: '', content: '' })
 const form = reactive({ target_id: null, script_content: '', timeout: 30 })
 
 const currentPage = ref(1)
@@ -171,6 +207,8 @@ async function executeScript() {
     const data = await request.post('/script/api/execute', fd)
     lastOutput.value = data.output || ''
     lastError.value = data.error || ''
+    lastScriptContent.value = form.script_content
+    lastTargetName.value = targets.value.find(t => t.id === form.target_id)?.name || ''
     if (data.exit_code === 0 && !data.error) {
       ElMessage.success('执行完成')
     } else {
@@ -192,6 +230,49 @@ function toggleHistory(id) {
 function formatTime(s) {
   if (!s) return '-'
   return s.substring(5, 16)
+}
+
+function buildPlaybookYaml(script, targetName) {
+  const lines = script.trim().split('\n').filter(l => l.trim())
+  if (lines.length === 1) {
+    return `- hosts: all\n  gather_facts: false\n  tasks:\n    - name: Execute command on ${targetName}\n      ansible.builtin.shell: |\n        ${lines[0]}\n      register: result\n    - ansible.builtin.debug:\n        var: result.stdout_lines`
+  }
+  return `- hosts: all\n  gather_facts: false\n  tasks:\n${lines.map((l, i) => `    - name: Step ${i + 1}\n      ansible.builtin.shell: |\n        ${l}\n      register: step${i + 1}_output\n    - ansible.builtin.debug:\n        var: step${i + 1}_output.stdout_lines`).join('\n')}`
+}
+
+function openPlaybookDialog() {
+  const script = lastScriptContent.value
+  const tname = lastTargetName.value
+  const name = tname ? `Script on ${tname}` : 'Generated from remote script'
+  const desc = tname ? `Generated from remote script execution on ${tname}` : 'Generated from remote script execution'
+  const yaml = buildPlaybookYaml(script, tname)
+  Object.assign(pbForm, { name, description: desc, content: yaml })
+  showPbDialog.value = true
+}
+
+async function copyPbYaml() {
+  try {
+    await navigator.clipboard.writeText(pbForm.content)
+    ElMessage.success('YAML 已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败，请手动选择文本复制')
+  }
+}
+
+async function savePbAndGo() {
+  if (!pbForm.name.trim()) { ElMessage.warning('请填写 Playbook 名称'); return }
+  try {
+    await request.post('/ansible/api/playbooks', {
+      name: pbForm.name,
+      description: pbForm.description,
+      content: pbForm.content,
+    })
+    ElMessage.success('Playbook 已保存，正在跳转...')
+    showPbDialog.value = false
+    window.location.hash = '#/ansible'
+  } catch (e) {
+    ElMessage.error('保存失败: ' + e.message)
+  }
 }
 
 onMounted(() => {
@@ -226,7 +307,8 @@ onMounted(() => {
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 .result-block { margin-bottom: 12px; }
-.result-block:last-child { margin-bottom: 0; }
+.result-block:last-of-type { margin-bottom: 0; }
+.result-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .result-label { font-size: 0.72rem; color: var(--text-secondary, #64748b); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
 .result-label.danger { color: #ef4444; }
 .output-pre { margin: 0; padding: 12px; border-radius: 6px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.78rem; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto; }
@@ -252,4 +334,13 @@ onMounted(() => {
 .page-num.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); font-weight: 600; }
 .page-jump { font-size: 0.8rem; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 4px; }
 .page-input { width: 50px; padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; text-align: center; font-size: 0.8rem; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: var(--bg-card-solid, #fff); border-radius: 12px; width: 90%; max-width: 620px; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.modal-box.modal-lg { max-width: 700px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
+.modal-header h3 { margin: 0; font-size: 1rem; }
+.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-secondary, #64748b); line-height: 1; padding: 0; }
+.modal-close:hover { color: var(--text, #1e293b); }
+.modal-body { padding: 20px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 </style>

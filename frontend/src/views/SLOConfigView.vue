@@ -36,7 +36,7 @@
     <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑 SLO' : '新建 SLO'" width="450px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="服务名">
-          <el-input v-model="form.service_name" placeholder="如: payment-service" />
+          <ServicePicker v-model="form.service_id" @update:modelValue="onServicePick" />
         </el-form-item>
         <el-form-item label="目标可用性">
           <el-input-number v-model="form.slo_target" :min="0.9" :max="0.99999" :step="0.001" :precision="5" />
@@ -98,6 +98,7 @@ import { ref, onMounted, reactive } from "vue"
 import { ElMessage } from "element-plus"
 import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
+import ServicePicker from '@/components/ServicePicker.vue'
 
 const showGuide = ref(false)
 const sloList = ref([])
@@ -105,10 +106,23 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const editingId = ref(null)
 const form = reactive({
+  service_id: null,
   service_name: "",
   slo_target: 0.999,
   window_days: 30
 })
+let _assetMap = {}
+
+async function onServicePick(id) {
+  form.service_id = id
+  if (id && !_assetMap[id]) {
+    try {
+      const d = await axios.get(`/assets/api/${id}`)
+      _assetMap[id] = d.data.name
+    } catch { _assetMap[id] = "" }
+  }
+  form.service_name = id ? (_assetMap[id] || "") : ""
+}
 
 const loadData = async () => {
   try {
@@ -122,6 +136,7 @@ const loadData = async () => {
 const showCreateDialog = () => {
   isEdit.value = false
   editingId.value = null
+  form.service_id = null
   form.service_name = ""
   form.slo_target = 0.999
   form.window_days = 30
@@ -131,7 +146,8 @@ const showCreateDialog = () => {
 const editSlo = (row) => {
   isEdit.value = true
   editingId.value = row.id
-  form.service_name = row.service_name
+  form.service_id = row.service_id || null
+  form.service_name = row.service_name || ""
   form.slo_target = row.slo_target
   form.window_days = row.window_days
   dialogVisible.value = true

@@ -1,8 +1,13 @@
 <template>
   <div class="remediation-page">
     <div class="page-header">
-      <h1>自愈规则</h1>
-      <p>告警触发时自动执行预设动作 · 共 {{ total }} 条规则</p>
+      <div class="title-row">
+        <div>
+          <h1>自愈规则</h1>
+          <p>告警触发时自动执行预设动作 · 共 {{ total }} 条规则</p>
+        </div>
+        <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+      </div>
     </div>
 
     <div class="toolbar">
@@ -89,15 +94,46 @@
         </div>
       </div>
     </div>
+
+    <GuideDrawer v-model="showGuide" title="📖 自愈规则 · 操作说明">
+      <section class="guide-section">
+        <h4>1. 目的</h4>
+        <p>自愈规则用于将<strong>告警与自动处置动作绑定</strong>。当告警触发时，系统自动根据规则执行对应动作（如重启服务、清理磁盘、执行脚本），无需人工干预，实现故障的<strong>秒级自愈</strong>。</p>
+      </section>
+      <section class="guide-section">
+        <h4>2. 支持的动作类型</h4>
+        <div class="key-value-list">
+          <div class="kv-row"><span class="kv-key">restart</span><span class="kv-val">重启指定服务（通过 SSH 到目标主机执行 systemctl restart）</span></div>
+          <div class="kv-row"><span class="kv-key">stop</span><span class="kv-val">停止指定服务（systemctl stop）</span></div>
+          <div class="kv-row"><span class="kv-key">scale</span><span class="kv-val">扩缩容 K8s Deployment（需指定实例数）</span></div>
+          <div class="kv-row"><span class="kv-key">script</span><span class="kv-val">在目标主机执行自定义脚本路径</span></div>
+          <div class="kv-row"><span class="kv-key">run_command</span><span class="kv-val">在目标主机执行任意 Shell 命令（危险命令会被拦截）</span></div>
+        </div>
+      </section>
+      <section class="guide-section">
+        <h4>3. 操作步骤</h4>
+        <ul>
+          <li><strong>点击「新增规则」</strong> — 填写规则名称，选择触发该规则的告警规则，指定动作类型和目标</li>
+          <li><strong>填写目标</strong> — 目标格式：服务名（如 nginx）或资产标识（如 asset_5）</li>
+          <li><strong>查看执行记录</strong> — 规则触发后在下方「执行记录」查看每次动作的执行结果（成功/失败）和输出</li>
+        </ul>
+      </section>
+      <section class="guide-section">
+        <h4>4. 实现了什么</h4>
+        <p>当关联的告警被触发时，系统自动查找匹配的自愈规则并执行对应动作，实现<strong>监控→告警→自愈</strong>的闭环。全程无需人工介入，大幅缩短故障恢复时间（MTTR）。</p>
+      </section>
+    </GuideDrawer>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import request from '@/api/request'
 
 const loading = ref(false)
+const showGuide = ref(false)
 const remediations = ref([])
 const logs = ref([])
 const rules = ref([])
@@ -215,6 +251,7 @@ onMounted(loadData)
 .page-header { margin-bottom: 16px; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
+.title-row { display: flex; align-items: center; gap: 16px; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
