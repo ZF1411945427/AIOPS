@@ -24,8 +24,14 @@ CI_TYPES = [
 
 
 @router.get("/api/list")
-def asset_api_list(search: str = "", ci_type: str = "", db: Session = Depends(get_db)):
-    assets = asset_service.list_assets(db, search, "", ci_type)
+def asset_api_list(
+    search: str = "",
+    ci_type: str = "",
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+):
+    assets, total = asset_service.list_assets_paged(db, search, "", ci_type, page, page_size)
     # 查询所有资产的最新生命周期状态
     all_lcs = db.query(AssetLifecycle).order_by(AssetLifecycle.asset_id, AssetLifecycle.created_at.desc()).all()
     lc_map = {}
@@ -59,12 +65,58 @@ def asset_api_list(search: str = "", ci_type: str = "", db: Session = Depends(ge
             "ref_count": ref_count,
             "is_orphan": is_orphan,
         })
-    return JSONResponse(result)
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    return JSONResponse({"items": result, "total": total, "page": page, "page_size": page_size, "total_pages": total_pages})
 
 
 @router.get("/api/ci-types")
 def asset_api_ci_types():
     return JSONResponse(CI_TYPES)
+
+
+@router.get("/api/services")
+def asset_api_services(
+    search: str = "",
+    ci_types: str = "service,business_app,api_service",
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+):
+    """轻量级服务列表 API，专供 ServicePicker 组件使用。"""
+    types = [t.strip() for t in ci_types.split(",") if t.strip()]
+    q = db.query(Asset)
+    if search:
+        q = q.filter(Asset.name.ilike(f"%{search}%"))
+    if types:
+        q = q.filter(Asset.ci_type.in_(types))
+    total = q.count()
+    items = q.order_by(Asset.name).offset((page - 1) * page_size).limit(page_size).all()
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    return JSONResponse({
+        "items": [{"id": a.id, "name": a.name, "ci_type": a.ci_type, "ip": a.ip or ""} for a in items],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    })
+
+
+@router.get("/api/{asset_id}")
+def asset_api_get(asset_id: int, db: Session = Depends(get_db)):
+    asset = asset_service.get_asset(db, asset_id)
+    if not asset:
+        return JSONResponse({"error": "Asset not found"}, status_code=404)
+    return JSONResponse({
+        "id": asset.id,
+        "name": asset.name,
+        "type": asset.type,
+        "ci_type": getattr(asset, 'ci_type', None),
+        "ip": asset.ip,
+        "status": asset.status,
+        "tags": getattr(asset, 'tags', '') or '',
+        "k8s_cluster": getattr(asset, 'k8s_cluster', '') or '',
+        "connection_type": getattr(asset, 'connection_type', '') or '',
+    })
 
 
 @router.post("/api/{asset_id}/delete")

@@ -47,7 +47,7 @@
     <el-dialog v-model="dialogVisible" title="新建 SLA 记录" width="500px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="服务名">
-          <el-input v-model="form.service_name" placeholder="如: payment-service" />
+          <ServicePicker v-model="form.service_id" @update:modelValue="onServicePick" />
         </el-form-item>
         <el-form-item label="SLA 目标">
           <el-input-number v-model="form.sla_target" :min="0.9" :max="0.99999" :step="0.001" :precision="5" />
@@ -111,16 +111,30 @@ import { ref, onMounted, reactive } from "vue"
 import { ElMessage } from "element-plus"
 import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
+import ServicePicker from '@/components/ServicePicker.vue'
 
 const showGuide = ref(false)
 const slaList = ref([])
 const dialogVisible = ref(false)
 const form = reactive({
+  service_id: null,
   service_name: "",
   sla_target: 0.999,
   uptime_seconds: 0,
   downtime_seconds: 0
 })
+let _assetMap = {}
+
+async function onServicePick(id) {
+  form.service_id = id
+  if (id && !_assetMap[id]) {
+    try {
+      const d = await axios.get(`/assets/api/${id}`)
+      _assetMap[id] = d.data.name
+    } catch { _assetMap[id] = "" }
+  }
+  form.service_name = id ? (_assetMap[id] || "") : ""
+}
 
 const loadData = async () => {
   try {
@@ -132,6 +146,7 @@ const loadData = async () => {
 }
 
 const showCreateDialog = () => {
+  form.service_id = null
   form.service_name = ""
   form.sla_target = 0.999
   form.uptime_seconds = 0

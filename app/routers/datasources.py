@@ -38,6 +38,32 @@ def api_datasource_list(db: Session = Depends(get_db)):
     })
 
 
+@router.get("/api/{source_id}")
+def api_datasource_get(source_id: int, db: Session = Depends(get_db)):
+    source = datasource_service.get_source(db, source_id)
+    if not source:
+        return JSONResponse({"error": "数据源不存在"}, status_code=404)
+    return JSONResponse(_source_to_dict(source))
+
+
+@router.post("/api/create")
+def api_datasource_create(request: Request, db: Session = Depends(get_db)):
+    body = request.json()
+    if not body.get("name") or not body.get("type"):
+        return JSONResponse({"error": "name 和 type 为必填项"}, status_code=400)
+    source = datasource_service.create_source(db, body)
+    return JSONResponse({"ok": True, "source": _source_to_dict(source)})
+
+
+@router.put("/api/{source_id}")
+def api_datasource_update(source_id: int, request: Request, db: Session = Depends(get_db)):
+    body = request.json()
+    source = datasource_service.update_source(db, source_id, body)
+    if not source:
+        return JSONResponse({"error": "数据源不存在"}, status_code=404)
+    return JSONResponse({"ok": True, "source": _source_to_dict(source)})
+
+
 @router.post("/api/{source_id}/toggle")
 def api_datasource_toggle(source_id: int, db: Session = Depends(get_db)):
     source = datasource_service.get_source(db, source_id)

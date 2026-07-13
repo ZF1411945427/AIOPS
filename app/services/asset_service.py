@@ -11,8 +11,29 @@ def list_assets(db: Session, search: str = "", type: str = "", ci_type: str = ""
     if type:
         q = q.filter(Asset.type == type)
     if ci_type:
-        q = q.filter(Asset.ci_type == ci_type)
+        types = [t.strip() for t in ci_type.split(",") if t.strip()]
+        if len(types) == 1:
+            q = q.filter(Asset.ci_type == types[0])
+        elif types:
+            q = q.filter(Asset.ci_type.in_(types))
     return q.order_by(Asset.id.desc()).all()
+
+
+def list_assets_paged(db: Session, search: str = "", type: str = "", ci_type: str = "", page: int = 1, page_size: int = 20):
+    q = db.query(Asset)
+    if search:
+        q = q.filter(Asset.name.ilike(f"%{search}%"))
+    if type:
+        q = q.filter(Asset.type == type)
+    if ci_type:
+        types = [t.strip() for t in ci_type.split(",") if t.strip()]
+        if len(types) == 1:
+            q = q.filter(Asset.ci_type == types[0])
+        elif types:
+            q = q.filter(Asset.ci_type.in_(types))
+    total = q.count()
+    assets = q.order_by(Asset.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    return assets, total
 
 
 def list_by_ci_type(db: Session, ci_type: str):

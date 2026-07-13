@@ -207,6 +207,18 @@ const rules = {
       else callback()
     },
     trigger: "change"
+  }, {
+    validator: (rule, value, callback) => {
+      const phoneRe = /^1[3-9]\d{9}$/
+      for (const m of (value || [])) {
+        if (m && m.phone && m.phone.trim() && !phoneRe.test(m.phone.trim())) {
+          callback(new Error(`成员「${m.name || m.phone}」的电话号码格式不正确（需为手机号如 13812345678）`))
+          return
+        }
+      }
+      callback()
+    },
+    trigger: "blur"
   }],
   current_oncall: [
     { required: true, message: "请选择当前值班人", trigger: "change" },

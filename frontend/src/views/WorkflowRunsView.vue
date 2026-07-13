@@ -1,8 +1,13 @@
 <template>
   <div class="wf-page">
     <div class="page-header">
-      <h1>工作流执行监控</h1>
-      <p>SOP 工作流实例实时监控 · 共 {{ total }} 个</p>
+      <div class="title-row">
+        <div>
+          <h1>工作流执行监控</h1>
+          <p>SOP 工作流实例实时监控 · 共 {{ total }} 个</p>
+        </div>
+        <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+      </div>
     </div>
 
     <div class="toolbar">
@@ -123,15 +128,42 @@
         </div>
       </div>
     </div>
+
+    <GuideDrawer v-model="showGuide" title="📖 工作流执行监控 · 操作说明">
+      <section class="guide-section">
+        <h4>1. 目的</h4>
+        <p>工作流执行监控用于查看和管理所有<strong>SOP 工作流</strong>的运行实例。当告警触发或人工触发工作流后，每个执行实例都会在此页面实时显示运行状态、节点进度和输出结果。</p>
+      </section>
+      <section class="guide-section">
+        <h4>2. 操作步骤</h4>
+        <ul>
+          <li><strong>触发工作流</strong> — 点击右上角「+ 触发工作流」，选择 SOP 模板（如告警响应、巡检报告），填入运行时上下文 JSON，点击「触发」</li>
+          <li><strong>查看运行状态</strong> — 表格中实时显示每个工作流实例的状态（执行中/待确认/已完成/失败/已中止），节点进度列显示当前执行到第几个节点</li>
+          <li><strong>查看详情</strong> — 点击「详情」按钮可看到每个节点的输入参数、执行结果、耗时和错误信息</li>
+          <li><strong>中止工作流</strong> — 对执行中的工作流点击「中止」可强制终止，剩余节点将被跳过</li>
+          <li><strong>按状态筛选</strong> — 顶部状态下拉框可筛选只看「执行中」「已完成」「失败」等特定状态的工作流</li>
+        </ul>
+      </section>
+      <section class="guide-section">
+        <h4>3. 运行时上下文说明</h4>
+        <p>触发工作流时需要填入上下文 JSON，对应 SOP 模板的输入参数。常用字段：<code>asset_id</code>（资产ID）、<code>alert_id</code>（告警ID）、<code>service_name</code>（服务名）等，具体以所选模板的输入定义为准。</p>
+      </section>
+      <section class="guide-section">
+        <h4>4. 实现了什么</h4>
+        <p>统一管理所有工作流的执行生命周期，实现<strong>监控告警→触发SOP→自动执行→结果记录</strong>的完整闭环。每个执行步骤、输入输出、耗时均有记录，便于事后审计和问题追溯。</p>
+      </section>
+    </GuideDrawer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import request from '@/api/request'
 
 const loading = ref(false)
+const showGuide = ref(false)
 const runs = ref([])
 const total = ref(0)
 const statusFilter = ref('')
@@ -404,4 +436,9 @@ onBeforeUnmount(() => {
 .node-result { margin: 4px 0; }
 .node-meta { display: flex; gap: 12px; font-size: 0.7rem; color: var(--text-tertiary, #94a3b8); margin-top: 4px; }
 .node-actions { display: flex; gap: 6px; margin-top: 8px; }
+.wf-page { padding: 4px; }
+.page-header { margin-bottom: 16px; }
+.title-row { display: flex; align-items: center; gap: 16px; }
+.page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
+.page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 </style>
