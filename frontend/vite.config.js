@@ -49,6 +49,15 @@ export default defineConfig({
                 target: 'http://127.0.0.1:8000',
                 changeOrigin: true,
             },
+            '/k8s': {
+                target: 'http://127.0.0.1:8000',
+                changeOrigin: true,
+            },
+            '/containers': {
+                target: 'http://127.0.0.1:8000',
+                changeOrigin: true,
+                ws: true,
+            },
         },
     },
     resolve: {

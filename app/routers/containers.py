@@ -1,4 +1,6 @@
 import json
+import subprocess
+import asyncio
 from collections import Counter
 from datetime import datetime
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect, Body
@@ -9,6 +11,7 @@ from app.database import get_db
 from app.template_utils import get_templates, parse_json_config
 from app.models import Asset, DataSource
 from app.services import asset_service, topology_service, pod_health_service
+from app.services.mobile_push_service import verify_login_token
 
 router = APIRouter(prefix="/containers", tags=["containers"])
 templates = get_templates()
@@ -449,6 +452,145 @@ def api_docker_detail(asset_id: int, db: Session = Depends(get_db)):
         return JSONResponse({"container": _container_to_dict(container)})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/docker/{asset_id}/logs")
+def api_docker_container_logs(asset_id: int, tail: int = 200, db: Session = Depends(get_db)):
+    try:
+        container = db.query(Asset).filter(Asset.id == asset_id, Asset.ci_type == "container").first()
+        if not container:
+            return JSONResponse({"error": "容器未找到"}, status_code=404)
+        name = container.name.split("/")[-1]
+        result = subprocess.run(
+            ["docker", "logs", "--tail", str(tail), name],
+            capture_output=True, timeout=15
+        )
+        stdout = result.stdout.decode("utf-8", errors="replace")
+        if result.returncode != 0:
+            return JSONResponse({"error": result.stderr.decode("utf-8", errors="replace") or "获取日志失败"}, status_code=500)
+        lines = stdout.count("\n")
+        return JSONResponse({
+            "ok": True, "logs": stdout or "(无日志输出)",
+            "lines": lines, "container": name, "truncated": lines >= tail,
+        })
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"error": "日志获取超时"}, status_code=504)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/docker/local/scan")
+def api_docker_local_scan(db: Session = Depends(get_db)):
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{json .}}"],
+            capture_output=True, timeout=15
+        )
+        if result.returncode != 0:
+            return JSONResponse({"ok": False, "error": result.stderr.decode("utf-8", errors="replace")})
+        stdout = result.stdout.decode("utf-8", errors="replace")
+        imported = []
+        for line in stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            c = json.loads(line)
+            cid = c.get("ID", "")
+            cname = c.get("Names", "")
+            image = c.get("Image", "")
+            status = c.get("Status", "")
+            ports = c.get("Ports", "")
+            created = c.get("CreatedAt", "")
+            state = "running" if "Up" in status else "exited"
+            exists = db.query(Asset).filter(Asset.ci_type == "container", Asset.name == cname).first()
+            attrs = {"image": image, "status": state, "state": {"Status": "running" if state == "running" else "exited"}, "ports": ports, "created_at": created}
+            if exists:
+                exists.status = "online" if state == "running" else "offline"
+                exists.ci_attributes = json.dumps(attrs, ensure_ascii=False)
+            else:
+                asset = Asset(
+                    name=cname, type="docker", ci_type="container",
+                    status="online" if state == "running" else "offline",
+                    ci_attributes=json.dumps(attrs, ensure_ascii=False),
+                )
+                db.add(asset)
+            imported.append({"id": cid[:12], "name": cname, "image": image, "state": state})
+        db.commit()
+        return JSONResponse({"ok": True, "count": len(imported), "containers": imported})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.websocket("/ws/docker/{asset_id}/terminal")
+async def docker_terminal_ws(websocket: WebSocket, asset_id: int):
+    token = websocket.query_params.get("token", "")
+    if not token or not verify_login_token(token):
+        await websocket.accept()
+        await websocket.send_text("未认证，请先登录")
+        await websocket.close()
+        return
+    await websocket.accept()
+    try:
+        from app.database import get_session_for, get_db_mode
+        db = get_session_for(get_db_mode())()
+        container_asset = db.query(Asset).filter(Asset.id == asset_id, Asset.ci_type == "container").first()
+        db.close()
+        if not container_asset:
+            await websocket.send_text("容器未找到")
+            await websocket.close()
+            return
+        cname = container_asset.name.split("/")[-1]
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", "-i", cname, "sh",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        async def docker_to_browser():
+            try:
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    await websocket.send_text(line.decode("utf-8", errors="replace").replace("\n", "\r\n"))
+            except Exception:
+                pass
+
+        async def browser_to_docker():
+            try:
+                while True:
+                    data = await websocket.receive()
+                    if data.get("type") == "websocket.disconnect":
+                        break
+                    msg = data.get("text") or ""
+                    if "\x1b[6n" in msg:
+                        await websocket.send_text("\x1b[1;1R")
+                        msg = msg.replace("\x1b[6n", "")
+                    if proc.stdin and msg:
+                        msg = msg.replace("\r", "\n")
+                        proc.stdin.write(msg.encode("utf-8"))
+                        await proc.stdin.drain()
+            except Exception:
+                pass
+
+        t1 = asyncio.create_task(docker_to_browser())
+        t2 = asyncio.create_task(browser_to_docker())
+        await asyncio.gather(t1, t2)
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(f"Error: {e}")
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @router.get("/api/pods")

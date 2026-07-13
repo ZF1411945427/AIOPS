@@ -259,6 +259,10 @@ async function handleLogin() {
       password: form.password,
     })
     if (res?.ok || res?.success) {
+      // 保存登录 token（WebSocket、移动端等需用）
+      try {
+        if (res?.token) localStorage.setItem('aiops-token', res.token)
+      } catch (e) {}
       // "记住我"：勾选则存用户名，未勾选则清除
       try {
         if (form.remember) localStorage.setItem(REMEMBER_KEY, form.username)

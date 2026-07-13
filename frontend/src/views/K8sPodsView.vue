@@ -339,41 +339,55 @@ function initTerminal(p) {
   nextTick(() => {
     const el = document.getElementById('xterm-container')
     if (!el) return
-    if (typeof Terminal === 'undefined') {
-      el.textContent = '终端组件加载中...'
-      const script = document.createElement('script')
-      script.src = '/static/js/xterm.min.js'
-      script.onload = () => {
-        const fitScript = document.createElement('script')
-        fitScript.src = '/static/js/xterm-addon-fit.min.js'
-        fitScript.onload = () => doInitTerm(el, p)
-        document.body.appendChild(fitScript)
-      }
-      document.body.appendChild(script)
-    } else {
-      doInitTerm(el, p)
-    }
+    initXterm(el, p)
   })
 }
 
-function doInitTerm(el, p) {
-  if (termInstance) try { termInstance.dispose() } catch {}
-  termInstance = new Terminal({
-    cursorBlink: true, fontSize: 13,
-    fontFamily: "'Consolas','Courier New',monospace",
-    theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+function initXterm(el, p) {
+  Promise.all([
+    import('@xterm/xterm'),
+    import('@xterm/addon-fit'),
+  ]).then(([{ Terminal }, { FitAddon }]) => {
+    if (termInstance) try { termInstance.dispose() } catch {}
+    const fitAddon = new FitAddon()
+    termInstance = new Terminal({
+      cursorBlink: true, fontSize: 13,
+      fontFamily: "'Consolas','Courier New',monospace",
+      theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#e6edf3', selection: '#3b5998' },
+    })
+    termInstance.loadAddon(fitAddon)
+    termInstance.open(el)
+    fitAddon.fit()
+    termInstance.write('正在连接...\r\n')
+    const cluster = p.cluster || clusters.value[0]?.name || ''
+    if (!cluster) { termInstance.write('无法确定集群\r\n'); return }
+    const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://'
+    const token = localStorage.getItem('aiops-token') || ''
+    const wsUrl = protocol + location.host + '/k8s/ws/pod/' + cluster + '/' + p.namespace + '/' + p.name + '/terminal'
+    const ws = new WebSocket(token ? wsUrl + '?token=' + encodeURIComponent(token) : wsUrl)
+    ws.binaryType = 'arraybuffer'
+    ws.onopen = () => { termInstance.clear(); termInstance.focus(); fitAddon.fit() }
+    ws.onmessage = e => {
+      if (e.data instanceof ArrayBuffer) {
+        termInstance.write(new Uint8Array(e.data))
+      } else {
+        termInstance.write(e.data)
+      }
+    }
+    ws.onerror = () => { termInstance.write('\r\n[连接错误]\r\n') }
+    ws.onclose = () => { termInstance.write('\r\n[连接关闭]\r\n') }
+    let lastOnDataTime = 0
+    termInstance.onData(data => {
+      const now = Date.now()
+      if (now - lastOnDataTime < 15) return
+      lastOnDataTime = now
+      if (data.charCodeAt(0) === 0x1b) return
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(data)
+    })
+    window.addEventListener('resize', () => fitAddon.fit())
+  }).catch(err => {
+    el.textContent = '终端加载失败: ' + (err.message || err)
   })
-  termInstance.open(el)
-  termInstance.write('正在连接...\r\n')
-  const cluster = p.cluster || clusters.value[0]?.name || ''
-  if (!cluster) { termInstance.write('无法确定集群\r\n'); return }
-  const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://'
-  const ws = new WebSocket(protocol + location.host + '/k8s/ws/pod/' + cluster + '/' + p.namespace + '/' + p.name + '/terminal')
-  ws.onopen = () => { termInstance.clear(); termInstance.focus() }
-  ws.onmessage = e => { termInstance.write(e.data) }
-  ws.onerror = () => { termInstance.write('\r\n[连接错误]\r\n') }
-  ws.onclose = () => { termInstance.write('\r\n[连接关闭]\r\n') }
-  termInstance.onData(data => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(data) })
 }
 
 async function openDescribe(p) {

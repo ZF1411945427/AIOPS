@@ -1,0 +1,7 @@
+# 开发/测试依赖
+-r requirements.txt
+
+pytest==9.1.1
+pytest-timeout==2.4.0
+playwright==1.60.0
+virtualenv==20.34.0

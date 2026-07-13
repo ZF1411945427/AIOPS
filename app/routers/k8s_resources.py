@@ -22,15 +22,26 @@ def _get_k8s_client(ds: DataSource):
         k8s_config.load_kube_config_from_dict(cfg["kubeconfig"])
         api_client = client.ApiClient()
     elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+        import socket
+        from urllib.parse import urlparse
+        _u = urlparse(cfg["k8s_api_server"])
+        _host, _port = _u.hostname, _u.port or 443
+        try:
+            with socket.create_connection((_host, _port), timeout=5):
+                pass
+        except Exception as e:
+            raise Exception(f"K8s 集群 [{ds.name}] 连接失败({_host}:{_port}): {e}")
         configuration = client.Configuration()
         configuration.host = cfg["k8s_api_server"]
         configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
         configuration.verify_ssl = cfg.get("verify_ssl", False)
         configuration.timeout = 10
+        configuration.retries = 0
         api_client = client.ApiClient(configuration=configuration)
     else:
         raise Exception(f"K8s 集群 [{ds.name}] 缺少 k8s_api_server/k8s_token 配置")
     api_client.configuration.timeout = 10
+    api_client.configuration.retries = 0
     return client.CoreV1Api(api_client=api_client), client.AppsV1Api(api_client=api_client), client.NetworkingV1Api(api_client=api_client)
 
 
@@ -52,6 +63,8 @@ def _add_cluster_info(ctx: dict, db: Session):
 @router.get("/api/overview")
 def api_overview(db: Session = Depends(get_db)):
     try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        _RT = (5, 10)
         clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
         overviews = []
         errors = []
@@ -63,64 +76,85 @@ def api_overview(db: Session = Depends(get_db)):
         total_namespaces = 0
         total_services = 0
         healthy_clusters = 0
-        for ds in clusters:
+
+        def _ov_unknown(ds):
+            return {
+                "name": ds.name, "endpoint": ds.endpoint, "status": "unknown",
+                "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
+                "pods": 0, "running_pods": 0, "pod_running_rate": 0,
+                "deployments": 0, "namespaces": 0, "services": 0,
+                "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
+            }
+
+        def _ov_error(ds):
+            ov = _ov_unknown(ds)
+            ov["status"] = "error"
+            return ov
+
+        def _probe(ds):
             if not ds.endpoint:
-                overviews.append({
-                    "name": ds.name, "endpoint": ds.endpoint,
-                    "status": "unknown", "nodes": 0, "healthy_nodes": 0,
-                    "node_health_rate": 0, "pods": 0, "running_pods": 0,
-                    "pod_running_rate": 0, "deployments": 0, "namespaces": 0,
-                    "services": 0, "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
-                })
-                continue
+                return ds.name, _ov_unknown(ds), None, None
             try:
                 from kubernetes import client
                 v1, apps_v1, _ = _get_k8s_client(ds)
-                nodes = v1.list_node().items
-                pods = v1.list_pod_for_all_namespaces().items
-                deployments = apps_v1.list_deployment_for_all_namespaces().items
+                nodes = v1.list_node(_request_timeout=_RT).items
+                pods = v1.list_pod_for_all_namespaces(_request_timeout=_RT).items
+                deployments = apps_v1.list_deployment_for_all_namespaces(_request_timeout=_RT).items
                 try:
-                    ns_count = len(v1.list_namespace().items)
+                    ns_count = len(v1.list_namespace(_request_timeout=_RT).items)
                 except Exception:
                     ns_count = 0
                 try:
-                    svc_count = len(v1.list_service_for_all_namespaces().items)
+                    svc_count = len(v1.list_service_for_all_namespaces(_request_timeout=_RT).items)
                 except Exception:
                     svc_count = 0
                 healthy_nodes = sum(1 for n in nodes if all(c.status == "True" for c in n.status.conditions if c.type == "Ready"))
                 running_pods = sum(1 for p in pods if (p.status.phase or "") == "Running")
                 node_rate = round(healthy_nodes / len(nodes) * 100, 1) if nodes else 0
                 pod_rate = round(running_pods / len(pods) * 100, 1) if pods else 0
-                overviews.append({
+                ov = {
                     "name": ds.name, "endpoint": ds.endpoint, "status": "online",
                     "nodes": len(nodes), "healthy_nodes": healthy_nodes, "node_health_rate": node_rate,
                     "pods": len(pods), "running_pods": running_pods, "pod_running_rate": pod_rate,
                     "deployments": len(deployments), "namespaces": ns_count, "services": svc_count,
                     "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
-                })
-                total_nodes += len(nodes)
-                total_healthy_nodes += healthy_nodes
-                total_pods += len(pods)
-                total_running_pods += running_pods
-                total_deployments += len(deployments)
-                total_namespaces += ns_count
-                total_services += svc_count
-                healthy_clusters += 1
+                }
+                stats = (len(nodes), healthy_nodes, len(pods), running_pods, len(deployments), ns_count, svc_count)
+                return ds.name, ov, stats, None
+            except Exception as e:
+                return ds.name, _ov_error(ds), None, str(e)
+
+        results = {}
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            fut_map = {pool.submit(_probe, ds): ds for ds in clusters}
+            for fut in as_completed(fut_map, timeout=45):
+                ds = fut_map[fut]
+                try:
+                    results[ds.name] = fut.result(timeout=45)
+                except Exception as e:
+                    results[ds.name] = (ds.name, _ov_error(ds), None, f"探测超时/异常: {e}")
+
+        for ds in clusters:
+            name, ov, stats, err = results.get(ds.name, (ds.name, _ov_error(ds), None, "未探测"))
+            overviews.append(ov)
+            if err:
+                errors.append(f"{ds.name}: {err}")
+                ds.last_status = "error"
+                ds.last_error = str(err)
+            elif stats:
                 ds.last_status = "online"
                 ds.last_error = ""
-                db.commit()
-            except Exception as e:
-                errors.append(f"{ds.name}: {e}")
-                ds.last_status = "error"
-                ds.last_error = str(e)
-                db.commit()
-                overviews.append({
-                    "name": ds.name, "endpoint": ds.endpoint, "status": "error",
-                    "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
-                    "pods": 0, "running_pods": 0, "pod_running_rate": 0,
-                    "deployments": 0, "namespaces": 0, "services": 0,
-                    "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
-                })
+                healthy_clusters += 1
+                total_nodes += stats[0]
+                total_healthy_nodes += stats[1]
+                total_pods += stats[2]
+                total_running_pods += stats[3]
+                total_deployments += stats[4]
+                total_namespaces += stats[5]
+                total_services += stats[6]
+            else:
+                ds.last_status = "unknown"
+        db.commit()
         summary = {
             "cluster_count": len(clusters), "healthy_clusters": healthy_clusters,
             "total_nodes": total_nodes, "total_healthy_nodes": total_healthy_nodes,
