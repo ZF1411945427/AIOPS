@@ -1,0 +1,54 @@
+node_modules
+.git
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+env
+.pycache
+
+# 数据与日志（挂载卷，不入镜像）
+db
+logs
+
+# 开发/测试
+tests
+.opencode
+.vscode
+.hermes.md
+
+# 文档（非运行必需）
+docs
+*.md
+!README.md
+
+# 二进制工具（helm/ansible，平台相关）
+bin
+
+# 构建产物（镜像内重新构建）
+frontend/dist
+mobile/dist
+
+# 临时/敏感文件
+tok.txt
+license.lic
+license_state.json
+*.tar
+*.tar.gz
+aiops_deploy.tar
+backend_deploy.tar
+frontend_deploy.tar
+mobile_deploy.tar
+
+# 脚本临时文件
+_*_*.py
+_scan*.py
+_probe*.py
+_gen_*.py
+_missing_reqs.txt
+
+# OS 文件
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,25 @@
+services:
+  aiops:
+    build:
+      context: ..
+      dockerfile: docker-build/Dockerfile
+    image: aiops:latest
+    container_name: aiops
+    ports:
+      - "8000:8000"
+    volumes:
+      # 数据库（持久化）
+      - ../db:/app/db
+      # 日志
+      - ../logs:/app/logs
+      # 许可证（客户独有，不入镜像）
+      - ../license.lic:/app/license.lic:ro
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3

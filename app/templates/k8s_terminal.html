@@ -18,7 +18,7 @@ var term = new Terminal({
     cursorBlink: true,
     fontSize: 14,
     fontFamily: "'Cascadia Code','Fira Code',monospace",
-    theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+    theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#e6edf3', selection: '#3b5998' },
 });
 var fitAddon = new FitAddon();
 term.loadAddon(fitAddon);
@@ -26,7 +26,9 @@ term.open(document.getElementById('terminal'));
 fitAddon.fit();
 
 var protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
-var ws = new WebSocket(protocol + location.host + '/k8s/ws/pod/{{ cluster }}/{{ namespace }}/{{ pod }}/terminal');
+var _token = localStorage.getItem('aiops-token') || '';
+var _wsUrl = protocol + location.host + '/k8s/ws/pod/{{ cluster }}/{{ namespace }}/{{ pod }}/terminal';
+var ws = new WebSocket(_token ? _wsUrl + '?token=' + encodeURIComponent(_token) : _wsUrl);
 
 ws.onopen = function() { term.focus(); };
 ws.onmessage = function(e) { term.write(e.data); };

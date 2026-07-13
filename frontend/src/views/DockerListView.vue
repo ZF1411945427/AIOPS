@@ -18,6 +18,7 @@
       </select>
       <button class="btn btn-primary" @click="loadContainers">查询</button>
       <button class="btn" @click="resetFilter">重置</button>
+      <button class="btn btn-primary" @click="scanLocal" :disabled="scanning">{{ scanning ? '扫描中...' : '扫描本地 Docker' }}</button>
     </div>
 
     <div class="panel">
@@ -35,7 +36,11 @@
                 <td><span class="badge" :class="c.state === 'running' ? 'state-run' : 'state-stop'">{{ c.state }}</span></td>
                 <td class="port-cell">{{ c.ports || '-' }}</td>
                 <td>{{ c.created_at || '-' }}</td>
-                <td @click.stop><button class="btn btn-sm btn-primary" @click="openDetail(c)">详情</button></td>
+                <td @click.stop>
+                  <button class="btn btn-sm" @click.stop="openDetail(c)">详情</button>
+                  <button class="btn btn-sm" @click.stop="toggleLogs(c)">日志</button>
+                  <button class="btn btn-sm" @click.stop="toggleTerminal(c)">终端</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -67,14 +72,51 @@
         </div>
         <div class="modal-actions">
           <button class="btn" @click="showDetail = false">关闭</button>
+          <button v-if="detailContainer" class="btn btn-primary" @click="showDetail = false; toggleLogs(detailContainer)">查看日志</button>
+          <button v-if="detailContainer" class="btn btn-primary" @click="showDetail = false; toggleTerminal(detailContainer)">打开终端</button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="showLogs" class="modal-overlay" @click.self="showLogs = false">
+      <div class="modal-box wide log-modal">
+        <div class="log-header">
+          <h3>日志 · {{ logsContainerItem?.name }}</h3>
+          <button class="btn btn-sm" @click="showLogs = false">✕</button>
+        </div>
+        <div class="log-toolbar">
+          <select v-model="logsTail" class="input log-sel" @change="loadLogs(logsContainerItem)">
+            <option :value="100">最近 100 行</option>
+            <option :value="500">最近 500 行</option>
+            <option :value="1000">最近 1000 行</option>
+            <option :value="2000">最近 2000 行</option>
+            <option :value="5000">最近 5000 行</option>
+          </select>
+          <input v-model="logsSearch" class="input log-search" placeholder="搜索关键字（过滤）" />
+          <button class="btn btn-sm" @click="loadLogs(logsContainerItem)">刷新</button>
+        </div>
+        <div v-if="logsMeta" class="log-meta">
+          <span>容器: {{ logsMeta.container }}</span>
+          <span>行数: {{ logsMeta.lines }}</span>
+        </div>
+        <pre class="log-content">{{ logsLoading ? '加载中...' : (logsSearch ? filteredLogs : logsContent) }}</pre>
+      </div>
+    </div>
+
+    <div v-if="showTerm" class="modal-overlay" @click.self="showTerm = false">
+      <div class="modal-box wide term-modal">
+        <div class="log-header">
+          <h3>终端 · {{ termContainer?.name }}</h3>
+          <button class="btn btn-sm" @click="toggleTerminal(termContainer)">✕</button>
+        </div>
+        <div id="xterm-container" class="xterm-box"></div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 
@@ -84,10 +126,29 @@ const hosts = ref([])
 const searchFilter = ref('')
 const hostFilter = ref('')
 const statusFilter = ref('')
+const scanning = ref(false)
 
 const showDetail = ref(false)
 const detailLoading = ref(false)
 const detailContainer = ref(null)
+
+const showLogs = ref(false)
+const logsLoading = ref(false)
+const logsContent = ref('')
+const logsContainerItem = ref(null)
+const logsTail = ref(500)
+const logsSearch = ref('')
+const logsMeta = ref(null)
+
+const showTerm = ref(false)
+const termContainer = ref(null)
+let termInstance = null
+
+const filteredLogs = computed(() => {
+  if (!logsSearch.value || !logsContent.value) return logsContent.value
+  const kw = logsSearch.value.toLowerCase()
+  return logsContent.value.split('\n').filter(l => l.toLowerCase().includes(kw)).join('\n')
+})
 
 function formatVal(v) {
   if (v === null || v === undefined) return '-'
@@ -110,6 +171,23 @@ async function loadContainers() {
 
 function resetFilter() { searchFilter.value = ''; hostFilter.value = ''; statusFilter.value = ''; loadContainers() }
 
+async function scanLocal() {
+  scanning.value = true
+  try {
+    const data = await request.post('/containers/api/docker/local/scan')
+    if (data.ok) {
+      ElMessage.success('扫描完成，共导入 ' + data.count + ' 个容器')
+      await loadContainers()
+    } else {
+      ElMessage.error('扫描失败: ' + (data.error || ''))
+    }
+  } catch (e) {
+    ElMessage.error('扫描失败: ' + (e.message || e))
+  } finally {
+    scanning.value = false
+  }
+}
+
 async function openDetail(c) {
   showDetail.value = true
   detailLoading.value = true
@@ -124,6 +202,117 @@ async function openDetail(c) {
   }
 }
 
+function toggleLogs(c) {
+  if (!c) return
+  if (showLogs.value) { showLogs.value = false; return }
+  showLogs.value = true
+  logsContainerItem.value = c
+  logsMeta.value = null
+  logsSearch.value = ''
+  loadLogs(c)
+}
+
+async function loadLogs(c) {
+  if (!c) return
+  logsLoading.value = true
+  logsContent.value = '加载中...'
+  try {
+    const data = await request.get(`/containers/api/docker/${c.id}/logs`, { params: { tail: logsTail.value } })
+    if (data.ok) {
+      logsContent.value = data.logs || '(无日志输出)'
+      logsMeta.value = { container: data.container, lines: data.lines }
+    } else {
+      logsContent.value = '获取日志失败: ' + (data.error || '')
+    }
+  } catch (e) {
+    logsContent.value = '请求异常: ' + (e.message || e)
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+function toggleTerminal(c) {
+  if (!c) return
+  if (showTerm.value) { showTerm.value = false; disposeTerm(); return }
+  showTerm.value = true
+  termContainer.value = c
+  nextTick(() => initTerminal(c))
+}
+
+function disposeTerm() {
+  if (termInstance) { termInstance.dispose(); termInstance = null }
+}
+
+function initTerminal(c) {
+  nextTick(() => {
+    const el = document.getElementById('xterm-container')
+    if (!el) return
+    initXterm(el, c)
+  })
+}
+
+function initXterm(el, c) {
+  Promise.all([
+    import('@xterm/xterm'),
+    import('@xterm/addon-fit'),
+  ]).then(([{ Terminal }, { FitAddon }]) => {
+    if (termInstance) try { termInstance.dispose() } catch {}
+    const fitAddon = new FitAddon()
+    termInstance = new Terminal({
+      cursorBlink: true, fontSize: 13,
+      fontFamily: "'Consolas','Courier New',monospace",
+      theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#e6edf3', selection: '#3b5998' },
+    })
+    termInstance.loadAddon(fitAddon)
+    termInstance.open(el)
+    fitAddon.fit()
+    termInstance.write('正在连接...\r\n')
+    const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://'
+    const token = localStorage.getItem('aiops-token') || ''
+    const wsUrl = protocol + location.host + '/containers/ws/docker/' + c.id + '/terminal'
+    const ws = new WebSocket(token ? wsUrl + '?token=' + encodeURIComponent(token) : wsUrl)
+    ws.binaryType = 'arraybuffer'
+    ws.onopen = () => { termInstance.clear(); termInstance.focus(); fitAddon.fit() }
+    ws.onmessage = e => {
+      if (e.data instanceof ArrayBuffer) {
+        termInstance.write(new Uint8Array(e.data))
+      } else {
+        termInstance.write(e.data)
+      }
+    }
+    ws.onerror = () => { termInstance.write('\r\n[连接错误]\r\n') }
+    ws.onclose = () => { termInstance.write('\r\n[连接关闭]\r\n') }
+    let inputBuf = []
+    termInstance.onData(data => {
+      if (data.charCodeAt(0) === 0x1b) return
+      if (data === '\x7f') {
+        if (inputBuf.length > 0) {
+          inputBuf.pop()
+          termInstance.write('\b \b')
+        }
+        return
+      }
+      if (data === '\r') {
+        const cmd = inputBuf.join('')
+        inputBuf = []
+        termInstance.write('\r\n')
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd + '\r')
+        return
+      }
+      for (let i = 0; i < data.length; i++) {
+        const ch = data[i]
+        if (ch >= ' ' && ch < '\x7f') {
+          inputBuf.push(ch)
+          termInstance.write(ch)
+        }
+      }
+    })
+    window.addEventListener('resize', () => fitAddon.fit())
+  }).catch(err => {
+    el.textContent = '终端加载失败: ' + (err.message || err)
+  })
+}
+
 onMounted(loadContainers)
 </script>
 
@@ -132,12 +321,13 @@ onMounted(loadContainers)
 .page-header { margin-bottom: 16px; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
-.toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
 .input { padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; min-width: 160px; box-sizing: border-box; }
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-head { padding: 12px 18px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); font-weight: 600; font-size: 0.9rem; color: var(--text, #1e293b); }
@@ -167,4 +357,15 @@ onMounted(loadContainers)
 .ak { width: 140px; flex-shrink: 0; color: var(--text-secondary, #64748b); }
 .av { flex: 1; color: var(--text, #1e293b); word-break: break-all; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.wide { min-width: 700px; max-width: 900px; }
+.log-modal { max-width: 900px; }
+.log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.log-header h3 { margin: 0; font-size: 0.95rem; }
+.log-toolbar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+.log-sel { min-width: 120px; padding: 4px 8px; font-size: 0.78rem; }
+.log-search { min-width: 180px; padding: 4px 8px; font-size: 0.78rem; flex: 1; }
+.log-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.72rem; color: var(--text-secondary, #64748b); margin-bottom: 6px; padding: 4px 8px; background: var(--bg-hover, rgba(0,0,0,0.03)); border-radius: 4px; }
+.log-content { background: #1e293b; color: #e2e8f0; padding: 14px; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow: auto; max-height: 56vh; white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace; }
+.term-modal { max-width: 800px; }
+.xterm-box { height: 50vh; background: #1e1e1e; border-radius: 6px; overflow: hidden; }
 </style>
