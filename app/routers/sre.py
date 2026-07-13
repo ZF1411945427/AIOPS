@@ -506,8 +506,8 @@ def list_burn_rates(db: Session = Depends(get_db_session)):
 class SLARecordCreate(BaseModel):
     service_name: str
     sla_target: float
-    period_start: datetime
-    period_end: datetime
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
     uptime_seconds: int = 0
     downtime_seconds: int = 0
 
