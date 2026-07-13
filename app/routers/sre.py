@@ -516,8 +516,8 @@ class SLARecordResponse(BaseModel):
     id: int
     service_name: str
     sla_target: float
-    period_start: datetime
-    period_end: datetime
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
     uptime_seconds: int
     downtime_seconds: int
     achieved_sla: float
