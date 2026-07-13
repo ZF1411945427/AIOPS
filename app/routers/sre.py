@@ -14,7 +14,6 @@ router = APIRouter(prefix="/api/sre", tags=["sre"])
 
 class SLOConfigCreate(BaseModel):
     service_name: str
-    service_id: Optional[int] = None
     slo_target: float
     window_days: int = 30
     created_by: Optional[str] = None
@@ -25,7 +24,6 @@ class SLOConfigResponse(BaseModel):
 
     id: int
     service_name: str
-    service_id: Optional[int] = None
     slo_target: float
     window_days: int
     total_requests: int
@@ -212,7 +210,6 @@ def create_slo(data: SLOConfigCreate, db: Session = Depends(get_db_session)):
     """创建 SLO 配置"""
     obj = SLOConfig(
         service_name=data.service_name,
-        service_id=data.service_id,
         slo_target=data.slo_target,
         window_days=data.window_days,
         created_by=data.created_by,
