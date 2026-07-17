@@ -244,6 +244,12 @@
             "label": "远程脚本",
             "type": "vue",
             "path": "/script"
+          },
+          {
+            "key": "network-test",
+            "label": "网络测试",
+            "type": "vue",
+            "path": "/network-test"
           }
         ]
       }
