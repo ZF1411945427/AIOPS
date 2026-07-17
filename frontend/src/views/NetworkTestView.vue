@@ -218,6 +218,154 @@
           </template>
         </div>
       </el-tab-pane>
+
+      <!-- HTTP/HTTPS 探测 -->
+      <el-tab-pane name="http">
+        <template #label>
+          <el-icon><Link /></el-icon>
+          <span class="tab-text">HTTP/HTTPS 探测</span>
+        </template>
+        <div class="tool-form">
+          <el-form :inline="true" :model="httpForm" @submit.prevent="runHttp">
+            <el-form-item label="URL">
+              <el-input v-model="httpForm.url" placeholder="https://example.com" style="width: 320px" clearable @keyup.enter="runHttp" />
+            </el-form-item>
+            <el-form-item label="方法">
+              <el-select v-model="httpForm.method" style="width: 90px">
+                <el-option label="GET" value="GET" />
+                <el-option label="HEAD" value="HEAD" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="超时(秒)">
+              <el-input-number v-model="httpForm.timeout" :min="1" :max="30" style="width: 100px" />
+            </el-form-item>
+            <el-form-item label="跟随重定向">
+              <el-switch v-model="httpForm.follow_redirects" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="loading === 'http'" @click="runHttp" :disabled="!httpForm.url">
+                <el-icon><VideoPlay /></el-icon> 发起探测
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+        <div class="result-panel" :class="{ loading: loading === 'http', empty: !loading && !httpResult }">
+          <div v-if="loading === 'http'" class="loading-text">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <span style="margin-left:8px">正在发起 HTTP 探测...</span>
+          </div>
+          <div v-else-if="!httpResult" class="empty-text">暂无结果，填写 URL 后点击探测按钮</div>
+          <template v-else>
+            <div class="result-header">
+              <span class="result-status" :class="httpResult.success ? 'success' : 'fail'">
+                {{ httpResult.success ? '✅ 探测成功' : '❌ 探测失败' }}
+              </span>
+              <span v-if="httpResult.status_code" class="result-code">状态码 {{ httpResult.status_code }} {{ httpResult.reason }}</span>
+              <span v-if="httpResult.elapsed_ms != null" class="result-elapsed">耗时 {{ httpResult.elapsed_ms }}ms</span>
+            </div>
+            <div v-if="httpResult.content_type || httpResult.server" class="result-meta-bar">
+              <el-tag v-if="httpResult.content_type" size="small" type="info">{{ httpResult.content_type }}</el-tag>
+              <el-tag v-if="httpResult.server" size="small">Server: {{ httpResult.server }}</el-tag>
+              <el-tag v-if="httpResult.final_url" size="small" type="success">最终 URL: {{ httpResult.final_url }}</el-tag>
+            </div>
+            <div class="result-sub-title">响应头</div>
+            <pre class="result-output">{{ httpResult.headers || '(无)' }}</pre>
+            <div v-if="httpForm.method === 'GET' && httpResult.body_preview" class="result-sub-title">响应体预览 (前 2000 字符)</div>
+            <pre v-if="httpForm.method === 'GET' && httpResult.body_preview" class="result-output">{{ httpResult.body_preview }}</pre>
+            <div v-if="httpResult.output" class="result-sub-title">错误信息</div>
+            <pre v-if="httpResult.output" class="result-output">{{ httpResult.output }}</pre>
+          </template>
+        </div>
+      </el-tab-pane>
+
+      <!-- TLS 证书查询 -->
+      <el-tab-pane name="tls-cert">
+        <template #label>
+          <el-icon><Lock /></el-icon>
+          <span class="tab-text">TLS 证书查询</span>
+        </template>
+        <div class="tool-form">
+          <el-form :inline="true" :model="tlsForm" @submit.prevent="runTls">
+            <el-form-item label="域名">
+              <el-input v-model="tlsForm.target" placeholder="如 baidu.com" style="width: 240px" clearable @keyup.enter="runTls" />
+            </el-form-item>
+            <el-form-item label="端口">
+              <el-input-number v-model="tlsForm.port" :min="1" :max="65535" style="width: 120px" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="超时(秒)">
+              <el-input-number v-model="tlsForm.timeout" :min="1" :max="30" style="width: 100px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="loading === 'tls-cert'" @click="runTls" :disabled="!tlsForm.target">
+                <el-icon><VideoPlay /></el-icon> 查询证书
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+        <div class="result-panel" :class="{ loading: loading === 'tls-cert', empty: !loading && !tlsResult }">
+          <div v-if="loading === 'tls-cert'" class="loading-text">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <span style="margin-left:8px">正在查询 TLS 证书...</span>
+          </div>
+          <div v-else-if="!tlsResult" class="empty-text">暂无结果，填写域名后点击查询按钮</div>
+          <template v-else>
+            <div class="result-header">
+              <span class="result-status" :class="tlsResult.success ? 'success' : 'fail'">
+                {{ tlsResult.success ? '✅ 查询成功' : '❌ 查询失败' }}
+              </span>
+              <span v-if="tlsResult.days_left != null" class="result-elapsed">
+                剩余 {{ tlsResult.days_left }} 天
+                <el-tag :type="tlsResult.days_left > 30 ? 'success' : tlsResult.days_left > 0 ? 'warning' : 'danger'" size="small" style="margin-left:4px">
+                  {{ tlsResult.days_left > 30 ? '正常' : tlsResult.days_left > 0 ? '即将过期' : '已过期' }}
+                </el-tag>
+              </span>
+            </div>
+            <pre class="result-output">{{ tlsResult.output || '(无输出)' }}</pre>
+          </template>
+        </div>
+      </el-tab-pane>
+
+      <!-- IP 归属地查询 -->
+      <el-tab-pane name="ip-location">
+        <template #label>
+          <el-icon><Location /></el-icon>
+          <span class="tab-text">IP 归属地</span>
+        </template>
+        <div class="tool-form">
+          <el-form :inline="true" :model="ipLocForm" @submit.prevent="runIpLoc">
+            <el-form-item label="IP/域名">
+              <el-input v-model="ipLocForm.target" placeholder="如 8.8.8.8 或 baidu.com" style="width: 280px" clearable @keyup.enter="runIpLoc" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="loading === 'ip-location'" @click="runIpLoc" :disabled="!ipLocForm.target">
+                <el-icon><VideoPlay /></el-icon> 查询归属地
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+        <div class="result-panel" :class="{ loading: loading === 'ip-location', empty: !loading && !ipLocResult }">
+          <div v-if="loading === 'ip-location'" class="loading-text">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <span style="margin-left:8px">正在查询 IP 归属地...</span>
+          </div>
+          <div v-else-if="!ipLocResult" class="empty-text">暂无结果，填写 IP 或域名后点击查询按钮</div>
+          <template v-else>
+            <div class="result-header">
+              <span class="result-status" :class="ipLocResult.success ? 'success' : 'fail'">
+                {{ ipLocResult.success ? '✅ 查询成功' : '❌ 查询失败' }}
+              </span>
+              <span v-if="ipLocResult.ip" class="result-code">IP: {{ ipLocResult.ip }}</span>
+            </div>
+            <div v-if="ipLocResult.success && ipLocResult.country" class="result-meta-bar">
+              <el-tag size="small" type="info">{{ ipLocResult.country }}</el-tag>
+              <el-tag v-if="ipLocResult.region" size="small">{{ ipLocResult.region }}</el-tag>
+              <el-tag v-if="ipLocResult.city" size="small">{{ ipLocResult.city }}</el-tag>
+              <el-tag v-if="ipLocResult.isp" size="small" type="warning">{{ ipLocResult.isp }}</el-tag>
+            </div>
+            <pre class="result-output">{{ ipLocResult.output || '(无输出)' }}</pre>
+          </template>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -225,7 +373,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Share, Monitor, Search, VideoPlay, Loading } from '@element-plus/icons-vue'
+import { Connection, Share, Monitor, Search, VideoPlay, Loading, Link, Lock, Location } from '@element-plus/icons-vue'
 import request from '@/api/request'
 
 const API = '/api/network-test'
@@ -238,11 +386,17 @@ const pingForm = reactive({ target: '', count: 4, timeout: 5 })
 const traceForm = reactive({ target: '', max_hops: 20, timeout: 5 })
 const tcpForm = reactive({ target: '', port: 80, timeout: 3 })
 const dnsForm = reactive({ target: '', record_type: 'A', dns_server: '' })
+const httpForm = reactive({ url: 'https://', method: 'GET', timeout: 10, follow_redirects: true })
+const tlsForm = reactive({ target: '', port: 443, timeout: 10 })
+const ipLocForm = reactive({ target: '' })
 
 const pingResult = ref(null)
 const traceResult = ref(null)
 const tcpResult = ref(null)
 const dnsResult = ref(null)
+const httpResult = ref(null)
+const tlsResult = ref(null)
+const ipLocResult = ref(null)
 
 const commonPorts = [
   { port: 22, label: 'SSH' },
@@ -320,6 +474,45 @@ async function runDns() {
     dnsResult.value = await request.post(`${API}/dns`, payload)
   } catch (e) {
     dnsResult.value = { success: false, output: e.message }
+    ElMessage.error(e.message)
+  } finally {
+    loading.value = null
+  }
+}
+
+async function runHttp() {
+  loading.value = 'http'
+  httpResult.value = null
+  try {
+    httpResult.value = await request.post(`${API}/http`, { ...httpForm })
+  } catch (e) {
+    httpResult.value = { success: false, output: e.message }
+    ElMessage.error(e.message)
+  } finally {
+    loading.value = null
+  }
+}
+
+async function runTls() {
+  loading.value = 'tls-cert'
+  tlsResult.value = null
+  try {
+    tlsResult.value = await request.post(`${API}/tls-cert`, { ...tlsForm })
+  } catch (e) {
+    tlsResult.value = { success: false, output: e.message }
+    ElMessage.error(e.message)
+  } finally {
+    loading.value = null
+  }
+}
+
+async function runIpLoc() {
+  loading.value = 'ip-location'
+  ipLocResult.value = null
+  try {
+    ipLocResult.value = await request.post(`${API}/ip-location`, { ...ipLocForm })
+  } catch (e) {
+    ipLocResult.value = { success: false, output: e.message }
     ElMessage.error(e.message)
   } finally {
     loading.value = null
@@ -427,6 +620,20 @@ onMounted(loadAssets)
 }
 .result-code {
   color: #909399;
+}
+.result-meta-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-bottom: 1px solid #eee;
+  flex-wrap: wrap;
+}
+.result-sub-title {
+  padding: 8px 16px 2px;
+  font-size: 12px;
+  color: #909399;
+  font-weight: 600;
 }
 .result-output {
   padding: 16px;
