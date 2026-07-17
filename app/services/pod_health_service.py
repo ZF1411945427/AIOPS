@@ -13,7 +13,7 @@ def check_pod_anomalies(db: Session):
     events = (
         db.query(K8sEvent)
         .filter(
-            K8sEvent.last_seen >= since,
+            K8sEvent.last_seen_at >= since,
             K8sEvent.severity.in_(["critical", "warning"]),
         )
         .all()
@@ -63,7 +63,7 @@ def get_pod_anomalies(db: Session, pod_name: str, limit: int = 10):
             K8sEvent.name.ilike(f"%{pod_name}%"),
             K8sEvent.severity.in_(["critical", "warning"]),
         )
-        .order_by(K8sEvent.last_seen.desc())
+        .order_by(K8sEvent.last_seen_at.desc())
         .limit(limit)
         .all()
     )

@@ -110,8 +110,8 @@
                 <span class="tl-arrow">→</span>
                 <span class="badge sm" :class="lifecycleClass(h.status)">{{ h.status }}</span>
               </div>
-              <div class="tl-meta">{{ h.created_at }} · {{ h.changed_by || '系统' }}</div>
-              <div v-if="h.comment" class="tl-comment">{{ h.comment }}</div>
+              <div class="tl-meta">{{ h.created_at }} · {{ h.user_id || '系统' }}</div>
+              <div v-if="h.description" class="tl-comment">{{ h.description }}</div>
             </div>
           </div>
         </div>

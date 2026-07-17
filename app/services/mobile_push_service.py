@@ -26,7 +26,7 @@ def _get_getui_config(db: Session) -> Dict[str, str]:
     rows = db.query(SystemConfig).filter(
         SystemConfig.key.in_(["getui_app_id", "getui_app_key", "getui_master_secret"])
     ).all()
-    cfg = {r.key: (r.value or "").strip() for r in rows}
+    cfg = {r.key: (r.config_value or "").strip() for r in rows}
     return cfg
 
 

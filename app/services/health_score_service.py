@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta
+from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models import Alert, Asset, Incident
 
 
-def compute_health_score(db: Session) -> dict:
+def compute_health_score(db: Session, target_asset_id: Optional[int] = None) -> dict:
     total_assets = db.query(func.count(Asset.id)).scalar() or 1
     online_assets = db.query(func.count(Asset.id)).filter(Asset.status == "online").scalar() or 0
     triggered_alerts = db.query(func.count(Alert.id)).filter(Alert.status == "triggered").scalar() or 0

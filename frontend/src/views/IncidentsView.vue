@@ -9,6 +9,7 @@
       <select v-model="filters.status" @change="onStatusChange">
         <option value="">全部状态</option>
         <option value="open">进行中</option>
+        <option value="pending_approval">待审批</option>
         <option value="resolved">已解决</option>
       </select>
       <button class="btn" @click="loadIncidents">刷新</button>
@@ -29,12 +30,13 @@
               <td>{{ inc.id }}</td>
               <td class="title-cell" @click="showDetail(inc.id)">{{ inc.title }}</td>
               <td><span class="badge" :class="inc.severity">{{ severityCn(inc.severity) }}</span></td>
-              <td><span class="badge" :class="inc.status === 'open' ? 'triggered' : 'resolved'">{{ inc.status === 'open' ? '进行中' : '已解决' }}</span></td>
+              <td><span class="badge" :class="inc.status === 'open' ? 'triggered' : inc.status === 'pending_approval' ? 'acknowledged' : 'resolved'">{{ statusCn(inc.status) }}</span></td>
               <td>{{ inc.alert_count }}</td>
               <td>{{ inc.asset_name || inc.asset_id || '-' }}</td>
               <td class="text-sm">{{ formatTime(inc.created_at) }}</td>
               <td>
                 <button v-if="inc.status === 'open'" class="btn btn-sm btn-primary" @click="resolveIncident(inc.id)">解决</button>
+                <button v-if="inc.status === 'open'" class="btn btn-sm btn-approve" @click="submitApprovalFromList(inc.id)">提交审批</button>
                 <button class="btn btn-sm" @click="showDetail(inc.id)">详情</button>
               </td>
             </tr>
@@ -67,7 +69,7 @@
           <div class="detail-grid">
             <div class="detail-item"><span class="detail-label">标题</span><span class="detail-value">{{ detail.incident.title }}</span></div>
             <div class="detail-item"><span class="detail-label">级别</span><span><span class="badge" :class="detail.incident.severity">{{ severityCn(detail.incident.severity) }}</span></span></div>
-            <div class="detail-item"><span class="detail-label">状态</span><span><span class="badge" :class="detail.incident.status === 'open' ? 'triggered' : 'resolved'">{{ detail.incident.status === 'open' ? '进行中' : '已解决' }}</span></span></div>
+            <div class="detail-item"><span class="detail-label">状态</span><span><span class="badge" :class="detail.incident.status === 'open' ? 'triggered' : detail.incident.status === 'pending_approval' ? 'acknowledged' : 'resolved'">{{ statusCn(detail.incident.status) }}</span></span></div>
             <div class="detail-item"><span class="detail-label">关联告警</span><span class="detail-value">{{ detail.incident.alert_count }} 条</span></div>
             <div class="detail-item"><span class="detail-label">关联资产</span><span class="detail-value">{{ detail.asset ? detail.asset.name + ' (' + detail.asset.ip + ')' : '-' }}</span></div>
             <div class="detail-item"><span class="detail-label">创建时间</span><span class="detail-value">{{ detail.incident.created_at }}</span></div>
@@ -75,8 +77,12 @@
           </div>
           <div class="detail-actions">
             <button v-if="detail.incident.status === 'open'" class="btn btn-primary" @click="resolveFromDetail">解决故障单</button>
+            <button v-if="detail.incident.status === 'open'" class="btn btn-approve" @click="submitApprovalFromDetail">提交审批</button>
+            <button v-if="detail.incident.status === 'pending_approval'" class="btn btn-approve" @click="showApprovalPanel = true">审批通过</button>
+            <button v-if="detail.incident.status === 'pending_approval'" class="btn btn-reject" @click="showRejectPanel = true">驳回</button>
             <button class="btn" @click="doRca">根因分析</button>
             <button class="btn btn-ai" :disabled="aiRcaLoading" @click="doAiRca">{{ aiRcaLoading ? 'AI 分析中...' : 'AI 深度分析' }}</button>
+            <button class="btn btn-sop" @click="generateSop(detail.incident.id)">{{ sopGenerating ? '生成中...' : '生成 SOP 知识' }}</button>
           </div>
           <h4 class="sub-title">关联告警 ({{ detail.alerts.length }})</h4>
           <table class="table inner-table">
@@ -100,6 +106,34 @@
           <div v-if="aiRcaResult" class="rca-box ai-rca-box">
             <h4>🤖 AI 深度分析</h4>
             <div class="ai-rca-content" v-html="aiRcaResult"></div>
+          </div>
+
+          <div v-if="detail.incident.status === 'pending_approval' && showApprovalPanel" class="approval-panel">
+            <h4>审批通过</h4>
+            <textarea v-model="approvalComment" class="approval-input" placeholder="审批意见（可选）" rows="2"></textarea>
+            <div class="approval-actions">
+              <button class="btn btn-approve" @click="doApprove">确认通过</button>
+              <button class="btn" @click="showApprovalPanel = false">取消</button>
+            </div>
+          </div>
+
+          <div v-if="detail.incident.status === 'pending_approval' && showRejectPanel" class="approval-panel reject-panel">
+            <h4>驳回</h4>
+            <textarea v-model="rejectComment" class="approval-input" placeholder="驳回理由（必填）" rows="2"></textarea>
+            <div class="approval-actions">
+              <button class="btn btn-reject" @click="doReject">确认驳回</button>
+              <button class="btn" @click="showRejectPanel = false">取消</button>
+            </div>
+          </div>
+
+          <div v-if="approvalHistory.length" class="approval-history">
+            <h4>审批记录</h4>
+            <div v-for="a in approvalHistory" :key="a.id" class="approval-record">
+              <span class="approval-action" :class="a.action">{{ actionLabel(a.action) }}</span>
+              <span class="approval-user">{{ a.approver_name }}</span>
+              <span v-if="a.comment" class="approval-comment">{{ a.comment }}</span>
+              <span class="approval-time">{{ a.created_at }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -126,6 +160,12 @@ const detail = ref(null)
 const rcaResult = ref('')
 const aiRcaResult = ref('')
 const aiRcaLoading = ref(false)
+const sopGenerating = ref(false)
+const showApprovalPanel = ref(false)
+const showRejectPanel = ref(false)
+const approvalComment = ref('')
+const rejectComment = ref('')
+const approvalHistory = ref([])
 
 const pageNumbers = computed(() => {
   const pages = []
@@ -173,13 +213,26 @@ async function loadIncidents() {
 async function showDetail(id) {
   rcaResult.value = ''
   aiRcaResult.value = ''
+  showApprovalPanel.value = false
+  showRejectPanel.value = false
+  approvalComment.value = ''
+  rejectComment.value = ''
+  approvalHistory.value = []
   try {
     const data = await request.get(`/incidents/api/${id}`)
     detail.value = data
     detailVisible.value = true
+    loadApprovalHistory(id)
   } catch (e) {
     ElMessage.error('加载详情失败: ' + e.message)
   }
+}
+
+async function loadApprovalHistory(id) {
+  try {
+    const data = await request.get(`/incidents/api/${id}/approvals`)
+    approvalHistory.value = data.approvals || []
+  } catch (e) { /* ignore */ }
 }
 
 async function resolveIncident(id) {
@@ -237,6 +290,77 @@ async function doAiRca() {
   }
 }
 
+async function generateSop(incidentId) {
+  sopGenerating.value = true
+  try {
+    const data = await request.post(`/knowledge/api/auto-gen/sop/incident/${incidentId}`)
+    if (data.ok === false) {
+      ElMessage.error(data.error || 'SOP 生成失败')
+    } else {
+      ElMessage.success('SOP 草稿已生成，请去「AI 知识草稿」审批入库')
+    }
+  } catch (e) {
+    ElMessage.error('SOP 生成失败: ' + (e.message || e))
+  } finally {
+    sopGenerating.value = false
+  }
+}
+
+async function submitApprovalFromList(id) {
+  try {
+    await ElMessageBox.confirm('确认提交此故障单进行审批？', '提交审批')
+    const data = await request.post(`/incidents/api/${id}/submit-approval`)
+    if (data.ok === false) { ElMessage.error(data.error || '提交失败'); return }
+    ElMessage.success('已提交审批')
+    loadIncidents()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('提交失败: ' + (e.message || e))
+  }
+}
+
+async function submitApprovalFromDetail() {
+  if (!detail.value) return
+  try {
+    await ElMessageBox.confirm('确认提交此故障单进行审批？', '提交审批')
+    const data = await request.post(`/incidents/api/${detail.value.incident.id}/submit-approval`)
+    if (data.ok === false) { ElMessage.error(data.error || '提交失败'); return }
+    ElMessage.success('已提交审批')
+    showDetail(detail.value.incident.id)
+    loadIncidents()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('提交失败: ' + (e.message || e))
+  }
+}
+
+async function doApprove() {
+  if (!detail.value) return
+  try {
+    const data = await request.post(`/incidents/api/${detail.value.incident.id}/approve`, null, { params: { comment: approvalComment.value } })
+    if (data.ok === false) { ElMessage.error(data.error || '审批失败'); return }
+    ElMessage.success('审批通过，故障单已解决')
+    showApprovalPanel.value = false
+    showDetail(detail.value.incident.id)
+    loadIncidents()
+  } catch (e) {
+    ElMessage.error('审批失败: ' + (e.message || e))
+  }
+}
+
+async function doReject() {
+  if (!detail.value) return
+  if (!rejectComment.value.trim()) { ElMessage.warning('请填写驳回理由'); return }
+  try {
+    const data = await request.post(`/incidents/api/${detail.value.incident.id}/reject`, null, { params: { comment: rejectComment.value } })
+    if (data.ok === false) { ElMessage.error(data.error || '驳回失败'); return }
+    ElMessage.success('已驳回，故障单恢复为进行中')
+    showRejectPanel.value = false
+    showDetail(detail.value.incident.id)
+    loadIncidents()
+  } catch (e) {
+    ElMessage.error('驳回失败: ' + (e.message || e))
+  }
+}
+
 function formatTime(s) {
   if (!s) return '-'
   return s.substring(5, 16)
@@ -244,6 +368,14 @@ function formatTime(s) {
 
 function severityCn(s) {
   return { critical: '严重', warning: '警告', info: '提示' }[s] || s
+}
+
+function statusCn(s) {
+  return { open: '进行中', pending_approval: '待审批', resolved: '已解决', closed: '已关闭' }[s] || s
+}
+
+function actionLabel(a) {
+  return { submit: '提交审批', approve: '审批通过', reject: '审批驳回' }[a] || a
 }
 
 onMounted(loadIncidents)
@@ -315,7 +447,7 @@ onMounted(loadIncidents)
 .rca-report :deep(blockquote) { border-left: 3px solid #6366f1; padding: 6px 12px; margin: 8px 0; background: rgba(99,102,241,0.04); border-radius: 0 6px 6px 0; }
 .btn-ai { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; }
 .btn-ai:hover:not(:disabled) { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
-.btn-ai:disabled { opacity: 0.6; cursor: wait; }
+.btn-sop { background: rgba(34,197,94,0.1); color: #22c55e; border-color: rgba(34,197,94,0.3); font-weight: 600; }
 .ai-rca-box { background: linear-gradient(135deg, rgba(99,102,241,0.04), rgba(139,92,246,0.08)); border: 1px solid rgba(99,102,241,0.15); }
 .ai-rca-box h4 { color: #6366f1; }
 .ai-rca-content { font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); }
@@ -330,4 +462,23 @@ onMounted(loadIncidents)
 .ai-rca-content :deep(strong) { color: #6366f1; }
 .ai-rca-content :deep(code) { background: rgba(99,102,241,0.1); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; }
 .ai-rca-content :deep(blockquote) { border-left: 3px solid #6366f1; padding-left: 12px; margin: 8px 0; color: var(--text-secondary, #64748b); }
+.btn-approve { background: rgba(34,197,94,0.1); color: #22c55e; border-color: rgba(34,197,94,0.3); font-weight: 600; }
+.btn-approve:hover { background: rgba(34,197,94,0.2); }
+.btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); font-weight: 600; }
+.btn-reject:hover { background: rgba(239,68,68,0.2); }
+.approval-panel { margin-top: 16px; padding: 14px; background: rgba(34,197,94,0.04); border: 1px solid rgba(34,197,94,0.15); border-radius: 8px; }
+.approval-panel.reject-panel { background: rgba(239,68,68,0.04); border-color: rgba(239,68,68,0.15); }
+.approval-panel h4 { margin: 0 0 8px; font-size: 0.9rem; color: var(--text, #1e293b); }
+.approval-input { width: 100%; padding: 8px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; font-size: 0.82rem; resize: vertical; font-family: inherit; }
+.approval-actions { display: flex; gap: 8px; margin-top: 8px; }
+.approval-history { margin-top: 16px; }
+.approval-history h4 { margin: 0 0 8px; font-size: 0.9rem; color: var(--text, #1e293b); }
+.approval-record { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); font-size: 0.82rem; }
+.approval-action { padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; }
+.approval-action.submit { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.approval-action.approve { background: rgba(34,197,94,0.1); color: #22c55e; }
+.approval-action.reject { background: rgba(239,68,68,0.1); color: #ef4444; }
+.approval-user { font-weight: 600; color: var(--text, #1e293b); }
+.approval-comment { color: var(--text-secondary, #64748b); flex: 1; }
+.approval-time { color: var(--text-tertiary, #94a3b8); font-size: 0.75rem; white-space: nowrap; }
 </style>

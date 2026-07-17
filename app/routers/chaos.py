@@ -5,7 +5,10 @@ import random
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
-import paramiko
+try:
+    import paramiko
+except ImportError:
+    paramiko = None
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
@@ -118,7 +121,7 @@ def _validate_int(value, field: str, lo: int, hi: int) -> int:
     return n
 
 
-def _ssh_connect(asset, timeout: int = 15) -> paramiko.SSHClient:
+def _ssh_connect(asset, timeout: int = 15) -> "paramiko.SSHClient":
     """通过资产 connection_config 建立 SSH 连接（复用 remediation_service 逻辑）。"""
     try:
         cfg = json.loads(asset.connection_config or "{}") if isinstance(asset.connection_config, str) else (asset.connection_config or {})
@@ -314,11 +317,11 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
             exp.result = "failed"
             exp.finished_at = datetime.now()
             run = ChaosRun(
-                experiment_id=exp.id, steady_state_passed=False, alerts_triggered=0,
+                experiment_id=exp.id, is_steady_state_passed=False, alerts_triggered=0,
                 error_budget_impact=0.0, duration_seconds=0,
                 steady_state_before=json.dumps(before),
                 steady_state_after=json.dumps({"error": f"no {env_name}"}),
-                notes=f"❌ 当前无 {env_name}，{fault_type} 故障无法执行。")
+                description=f"❌ 当前无 {env_name}，{fault_type} 故障无法执行。")
             db.add(run)
             db.commit()
             return
@@ -334,11 +337,11 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
                     exp.result = "failed"
                     exp.finished_at = datetime.now()
                     run = ChaosRun(
-                        experiment_id=exp.id, steady_state_passed=False, alerts_triggered=0,
+                        experiment_id=exp.id, is_steady_state_passed=False, alerts_triggered=0,
                         error_budget_impact=0.0, duration_seconds=0,
                         steady_state_before=json.dumps(before),
                         steady_state_after=json.dumps({"error": "tc unavailable"}),
-                        notes="❌ 目标主机缺少 tc 命令且自动安装 iproute-tc 失败，网络故障无法注入。")
+                        description="❌ 目标主机缺少 tc 命令且自动安装 iproute-tc 失败，网络故障无法注入。")
                     db.add(run)
                     db.commit()
                     return
@@ -362,11 +365,11 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
             exp.result = "failed"
             exp.finished_at = datetime.now()
             run = ChaosRun(
-                experiment_id=exp.id, steady_state_passed=False, alerts_triggered=0,
+                experiment_id=exp.id, is_steady_state_passed=False, alerts_triggered=0,
                 error_budget_impact=0.0, duration_seconds=0,
                 steady_state_before=json.dumps(before),
                 steady_state_after=json.dumps({"error": out[:500]}),
-                notes=f"❌ 故障注入命令执行失败: {out[:300]}")
+                description=f"❌ 故障注入命令执行失败: {out[:300]}")
             db.add(run)
             db.commit()
             return
@@ -378,7 +381,10 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
         after = _collect_metrics(asset)
 
         # 7) 主动清理（兜底，即使后台脚本已自清理）
-        _ssh_exec(asset, cleanup_cmd, timeout=15)
+        auto_recovered = False
+        if cleanup_cmd:
+            cleanup_ok, _ = _ssh_exec(asset, cleanup_cmd, timeout=15)
+            auto_recovered = cleanup_ok
 
         # 8) 判定稳态：以"可用性"近似 = 100 - CPU 占用率，对比阈值
         after_avail = 100.0 - after.get("cpu", 0) if isinstance(after.get("cpu"), (int, float)) else 100.0
@@ -399,14 +405,16 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
             f" 实验前 CPU={before.get('cpu','-')}% MEM={before.get('mem','-')}% DISK={before.get('disk','-')}%"
             f" → 实验后 CPU={after.get('cpu','-')}% MEM={after.get('mem','-')}% DISK={after.get('disk','-')}%。"
             f" 稳态阈值 {threshold}%，实际可用性 {after_avail:.1f}%，{'通过' if passed else '未通过'}。"
+            f" 自动回滚 {'✅成功' if auto_recovered else '⚠️未执行/失败'}。"
             f"\n\n【执行的 SSH 命令】\n注入: {inject_cmd}\n清理: {cleanup_cmd}"
         )
         run = ChaosRun(
-            experiment_id=exp.id, steady_state_passed=passed, alerts_triggered=alerts,
+            experiment_id=exp.id, is_steady_state_passed=passed, is_auto_recovered=auto_recovered,
+            alerts_triggered=alerts,
             error_budget_impact=budget_impact, duration_seconds=duration,
             steady_state_before=json.dumps({**before, "availability": round(before_avail, 2)}),
             steady_state_after=json.dumps({**after, "availability": round(after_avail, 2)}),
-            notes=notes)
+            description=notes)
         db.add(run)
         exp.status = "completed"
         exp.result = "passed" if passed else "failed"
@@ -435,14 +443,16 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
 def get_summary(db: Session = Depends(get_db)):
     experiments = db.query(ChaosExperiment).count()
     runs = db.query(ChaosRun).count()
-    passed = db.query(ChaosRun).filter(ChaosRun.steady_state_passed.is_(True)).count()
-    failed = db.query(ChaosRun).filter(ChaosRun.steady_state_passed.is_(False)).count()
+    passed = db.query(ChaosRun).filter(ChaosRun.is_steady_state_passed.is_(True)).count()
+    failed = db.query(ChaosRun).filter(ChaosRun.is_steady_state_passed.is_(False)).count()
     total_alerts = db.query(func.coalesce(func.sum(ChaosRun.alerts_triggered), 0)).scalar() or 0
+    auto_recovered_count = db.query(ChaosRun).filter(ChaosRun.is_auto_recovered.is_(True)).count()
 
     fault_types = db.query(ChaosExperiment.fault_type, func.count(ChaosExperiment.id)).group_by(ChaosExperiment.fault_type).all()
     fault_distribution = {ft: cnt for ft, cnt in fault_types}
 
     pass_rate = round((passed / runs * 100) if runs else 100, 1)
+    auto_recover_rate = round((auto_recovered_count / runs * 100) if runs else 0, 1)
     active_schedules = db.query(ChaosExperiment).filter(ChaosExperiment.status == "running").count()
 
     return {
@@ -454,6 +464,8 @@ def get_summary(db: Session = Depends(get_db)):
         "failed": failed,
         "total_alerts": total_alerts,
         "fault_distribution": fault_distribution,
+        "auto_recovered": auto_recovered_count,
+        "auto_recover_rate": auto_recover_rate,
     }
 
 
@@ -497,7 +509,7 @@ def list_targets(db: Session = Depends(get_db)):
             continue
         results.append({
             "id": a.id, "name": a.name, "ip": a.ip,
-            "ci_type": a.ci_type, "type": a.type,
+            "ci_type": a.ci_type,
         })
     return results
 
@@ -582,14 +594,14 @@ def start_experiment(exp_id: int, db: Session = Depends(get_db)):
         exp.started_at = datetime.now()
         exp.finished_at = datetime.now()
         run = ChaosRun(
-            experiment_id=exp.id, steady_state_passed=False, alerts_triggered=0,
+            experiment_id=exp.id, is_steady_state_passed=False, alerts_triggered=0,
             error_budget_impact=0.0, duration_seconds=0,
             steady_state_before=json.dumps({}),
             steady_state_after=json.dumps({"error": f"no {env_name}"}),
-            notes=f"❌ 当前无 {env_name}，{exp.fault_type} 故障无法执行。请配置真实 {env_name} 后重试，或选择 cpu/mem/disk/network 类故障。")
+            description=f"❌ 当前无 {env_name}，{exp.fault_type} 故障无法执行。请配置真实 {env_name} 后重试，或选择 cpu/mem/disk/network 类故障。")
         db.add(run)
         db.commit()
-        return {"status": "completed", "steady_state_passed": False,
+        return {"status": "completed", "is_steady_state_passed": False,
                 "message": f"{exp.fault_type} 需 {env_name}，当前不可用"}
 
     # 置 running 并启动后台线程
@@ -655,13 +667,14 @@ def get_experiment_runs(exp_id: int, db: Session = Depends(get_db)):
         results.append({
             "id": r.id,
             "experiment_id": r.experiment_id,
-            "steady_state_passed": r.steady_state_passed,
+            "is_steady_state_passed": r.is_steady_state_passed,
+            "is_auto_recovered": r.is_auto_recovered,
             "alerts_triggered": r.alerts_triggered,
             "error_budget_impact": r.error_budget_impact,
             "duration_seconds": r.duration_seconds,
             "steady_state_before": json.loads(r.steady_state_before) if r.steady_state_before else {},
             "steady_state_after": json.loads(r.steady_state_after) if r.steady_state_after else {},
-            "notes": r.notes,
+            "description": r.description,
             "started_at": r.started_at.isoformat() if r.started_at else None,
         })
     return results
@@ -690,11 +703,11 @@ def get_trend(db: Session = Depends(get_db)):
         day_passed = db.query(ChaosRun).filter(
             ChaosRun.started_at >= day_start,
             ChaosRun.started_at < day_end,
-            ChaosRun.steady_state_passed.is_(True)).count()
+            ChaosRun.is_steady_state_passed.is_(True)).count()
         day_failed = db.query(ChaosRun).filter(
             ChaosRun.started_at >= day_start,
             ChaosRun.started_at < day_end,
-            ChaosRun.steady_state_passed.is_(False)).count()
+            ChaosRun.is_steady_state_passed.is_(False)).count()
 
         runs_data.append(day_runs)
         passed_data.append(day_passed)
@@ -719,7 +732,7 @@ def get_resilience_radar(db: Session = Depends(get_db)):
         total = db.query(ChaosRun).join(ChaosExperiment).filter(ChaosExperiment.fault_type == ft).count()
         passed = db.query(ChaosRun).join(ChaosExperiment).filter(
             ChaosExperiment.fault_type == ft,
-            ChaosRun.steady_state_passed.is_(True)).count()
+            ChaosRun.is_steady_state_passed.is_(True)).count()
         score = round((passed / total * 100) if total else random.uniform(60, 95), 1)
         values.append(score)
     return {"dimensions": dimensions, "values": values}

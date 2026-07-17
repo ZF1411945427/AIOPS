@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     User, Asset, Alert, OnCallSchedule, WorkflowRun, AgentWorkflowRun,
-    MobileDevice, PushRecord, CheckinRecord, AIProvider, AgentConfig,
+    MobileDevice, PushRecord, AIProvider, AgentConfig,
 )
 from app.services.mobile_push_service import (
     register_device, unregister_device, send_push,
@@ -23,8 +23,6 @@ from app.services.mobile_push_service import (
 from app.services.agent_service import call_llm
 
 router = APIRouter(prefix="/mobile", tags=["mobile"])
-
-_CHECKIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "checkin")
 
 
 def require_user(request: Request, db: Session = Depends(get_db)) -> int:
@@ -69,15 +67,6 @@ class BiometricLoginBody(BaseModel):
 class VisionDiagnoseBody(BaseModel):
     image_base64: str
     asset_id: Optional[int] = None
-
-
-class CheckinBody(BaseModel):
-    asset_id: Optional[int] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    address: str = ""
-    photo_base64: str = ""
-    note: str = ""
 
 
 def _device_to_dict(d: MobileDevice) -> dict:
@@ -186,13 +175,13 @@ def scan_asset(code: str, user_id: int = Depends(require_user), db: Session = De
         "asset": {
             "id": asset.id,
             "name": asset.name,
-            "type": asset.type,
+            "type": asset.ci_type,
             "ci_type": asset.ci_type or "",
             "ip": asset.ip or "",
             "status": asset.status or "",
             "tags": asset.tags or "",
             "k8s_cluster": asset.k8s_cluster or "",
-            "last_checked": asset.last_checked.strftime("%Y-%m-%d %H:%M:%S") if asset.last_checked else None,
+            "last_checked_at": asset.last_checked_at.strftime("%Y-%m-%d %H:%M:%S") if asset.last_checked_at else None,
             "latency_ms": asset.latency_ms,
         },
     }
@@ -218,7 +207,7 @@ def vision_diagnose(body: VisionDiagnoseBody, user_id: int = Depends(require_use
     if body.asset_id:
         asset = db.query(Asset).filter(Asset.id == body.asset_id).first()
         if asset:
-            asset_hint = f"\n关联资产: {asset.name} ({asset.type}), IP: {asset.ip or '未知'}, 状态: {asset.status}"
+            asset_hint = f"\n关联资产: {asset.name} ({asset.ci_type}), IP: {asset.ip or '未知'}, 状态: {asset.status}"
     messages = [
         {"role": "user", "content": [
             {"type": "text", "text": prompt + asset_hint},
@@ -237,41 +226,6 @@ def vision_diagnose(body: VisionDiagnoseBody, user_id: int = Depends(require_use
     except Exception:
         diagnosis = json.dumps(result, ensure_ascii=False)
     return {"ok": True, "diagnosis": diagnosis, "asset_id": body.asset_id}
-
-
-@router.post("/checkin")
-def checkin(body: CheckinBody, user_id: int = Depends(require_user), db: Session = Depends(get_db)):
-    photo_path = ""
-    if body.photo_base64:
-        b64 = body.photo_base64.strip()
-        if "," in b64 and b64.startswith("data:"):
-            b64 = b64.split(",", 1)[1]
-        try:
-            raw = base64.b64decode(b64)
-        except Exception:
-            return JSONResponse({"ok": False, "error": "photo_base64 不是合法的 Base64"}, status_code=400)
-        try:
-            os.makedirs(_CHECKIN_DIR, exist_ok=True)
-            fname = f"{user_id}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}.jpg"
-            fpath = os.path.join(_CHECKIN_DIR, fname)
-            with open(fpath, "wb") as f:
-                f.write(raw)
-            photo_path = f"/static/checkin/{fname}"
-        except Exception as e:
-            return JSONResponse({"ok": False, "error": f"保存签到照片失败: {e}"}, status_code=500)
-    rec = CheckinRecord(
-        user_id=user_id,
-        asset_id=body.asset_id,
-        latitude=body.latitude,
-        longitude=body.longitude,
-        address=body.address or "",
-        photo_path=photo_path,
-        note=body.note or "",
-    )
-    db.add(rec)
-    db.commit()
-    db.refresh(rec)
-    return {"ok": True, "id": rec.id, "photo_path": photo_path, "created_at": rec.created_at.strftime("%Y-%m-%d %H:%M:%S") if rec.created_at else None}
 
 
 @router.get("/dashboard")
@@ -312,8 +266,8 @@ def dashboard(user_id: int = Depends(require_user), db: Session = Depends(get_db
         alert_stats = {}
 
     oncalls = db.query(OnCallSchedule).filter(
-        OnCallSchedule.current_period_start <= now,
-        OnCallSchedule.current_period_end >= now,
+        OnCallSchedule.current_period_started_at <= now,
+        OnCallSchedule.current_period_ended_at >= now,
     ).order_by(OnCallSchedule.team_name).all()
     import json as _json
     oncall_list = []
@@ -333,8 +287,8 @@ def dashboard(user_id: int = Depends(require_user), db: Session = Depends(get_db
             "team_name": o.team_name,
             "current_oncall": o.current_oncall,
             "phone": phone,
-            "period_start": o.current_period_start.strftime("%Y-%m-%d %H:%M") if o.current_period_start else None,
-            "period_end": o.current_period_end.strftime("%Y-%m-%d %H:%M") if o.current_period_end else None,
+            "period_started_at": o.current_period_started_at.strftime("%Y-%m-%d %H:%M") if o.current_period_started_at else None,
+            "period_ended_at": o.current_period_ended_at.strftime("%Y-%m-%d %H:%M") if o.current_period_ended_at else None,
         })
 
     running_sop = db.query(WorkflowRun).filter(WorkflowRun.status == WorkflowRun.STATUS_RUNNING).count()

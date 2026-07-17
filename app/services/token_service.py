@@ -43,7 +43,7 @@ def validate_token(db: Session, token_str: str) -> ApiToken | None:
 
 
 def use_token(db: Session, token: ApiToken):
-    token.last_used = datetime.now()
+    token.last_used_at = datetime.now()
     db.commit()
 
 

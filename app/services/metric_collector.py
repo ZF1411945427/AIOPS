@@ -111,12 +111,28 @@ def collect_asset_metrics(asset, db):
                         unit=METRIC_UNITS.get(name, ""),
                         timestamp=now,
                     ))
-                    result["metrics"].append({"name": name, "value": val})
+                    result["metrics"].append({"name": name, "value": val, "asset_id": asset.id})
             except Exception:
                 pass
 
         ssh.close()
         db.commit()
+
+        # 双写 VictoriaMetrics
+        if result["metrics"]:
+            try:
+                from app.services.metric_v2_service import write_metrics_batch
+                batch = []
+                for m in result["metrics"]:
+                    batch.append({
+                        "name": m["name"],
+                        "value": m["value"],
+                        "asset_id": m.get("asset_id", asset.id),
+                        "timestamp": now,
+                    })
+                write_metrics_batch(batch)
+            except Exception:
+                pass
     except Exception as e:
         result["error"] = str(e)
     return result
@@ -125,7 +141,7 @@ def collect_asset_metrics(asset, db):
 def collect_all_metrics(db):
     """采集所有 online 资产的指标"""
     assets = db.query(Asset).filter(Asset.status == "online").all()
-    summary = {"total": len(assets), "success": 0, "failed": 0, "metrics_collected": 0, "errors": []}
+    summary = {"total": len(assets), "is_success": 0, "failed": 0, "metrics_collected": 0, "errors": []}
     for asset in assets:
         r = collect_asset_metrics(asset, db)
         if r["error"]:

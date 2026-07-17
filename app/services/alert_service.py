@@ -1,10 +1,41 @@
 from datetime import datetime, timedelta
+import threading
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models import Alert, AlertRule, MetricRecord, AlertSilence, AlertSuppression, AlertEscalation, SystemConfig, NotificationChannel, AlertSilenceSchedule
 from app.services import notification_service
+
+
+def _serialize_alert(a: Alert) -> dict:
+    return {
+        "id": a.id,
+        "rule_id": a.rule_id,
+        "asset_id": a.asset_id,
+        "metric_name": a.metric_name,
+        "actual_value": a.actual_value,
+        "threshold": a.threshold,
+        "severity": a.severity,
+        "status": a.status,
+        "message": a.message,
+        "created_at": a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else None,
+    }
+
+
+def _ws_publish_async(alert_dicts: list):
+    """在新线程中异步推送告警到 WebSocket，不阻塞主流程."""
+    import asyncio
+    from app.services.ws_manager import ws_manager
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(
+            ws_manager.publish_alert({"type": "alert", "alerts": alert_dicts})
+        )
+        loop.close()
+    except Exception:
+        pass
 
 
 def list_rules(db: Session):
@@ -45,12 +76,12 @@ def delete_rule(db: Session, rule_id: int):
 
 def get_active_silences(db: Session):
     now = datetime.now()
-    return db.query(AlertSilence).filter(AlertSilence.until > now).all()
+    return db.query(AlertSilence).filter(AlertSilence.expires_at > now).all()
 
 
 def create_silence(db: Session, rule_id: int, minutes: int, reason: str = ""):
-    until = datetime.now() + timedelta(minutes=minutes)
-    silence = AlertSilence(rule_id=rule_id, until=until, reason=reason)
+    expires_at = datetime.now() + timedelta(minutes=minutes)
+    silence = AlertSilence(rule_id=rule_id, expires_at=expires_at, reason=reason)
     db.add(silence)
     db.commit()
     db.refresh(silence)
@@ -66,7 +97,7 @@ def check_rules(db: Session):
     rules = db.query(AlertRule).filter(AlertRule.enabled == True).all()
     now = datetime.now()
     silenced_rule_ids = {
-        s.rule_id for s in db.query(AlertSilence).filter(AlertSilence.until > now).all()
+        s.rule_id for s in db.query(AlertSilence).filter(AlertSilence.expires_at > now).all()
     }
     silenced_metric_names = set()
     schedules = db.query(AlertSilenceSchedule).filter(AlertSilenceSchedule.enabled == True).all()
@@ -181,6 +212,10 @@ def check_rules(db: Session):
                 call_alert_webhooks(db, a)
         except Exception:
             pass
+        try:
+            _ws_publish_async([_serialize_alert(a) for a in new_alerts])
+        except Exception:
+            pass
     return new_alerts
 
 
@@ -219,6 +254,7 @@ def acknowledge_alert(db: Session, alert_id: int):
     if not alert:
         return None
     alert.status = "acknowledged"
+    alert.acknowledged_at = datetime.now()
     db.commit()
     db.refresh(alert)
     return alert
@@ -266,8 +302,10 @@ def get_suppressions(db: Session, limit: int = 50):
 
 def batch_acknowledge(db: Session):
     alerts = db.query(Alert).filter(Alert.status == "triggered").all()
+    now = datetime.now()
     for a in alerts:
         a.status = "acknowledged"
+        a.acknowledged_at = now
     db.commit()
     return len(alerts)
 
@@ -285,7 +323,7 @@ def batch_resolve(db: Session):
 def get_escalation_minutes(db: Session) -> int:
     cfg = db.query(SystemConfig).filter(SystemConfig.key == "escalation_minutes").first()
     try:
-        return int(cfg.value) if cfg else 5
+        return int(cfg.config_value) if cfg else 5
     except (ValueError, TypeError):
         return 5
 
@@ -391,8 +429,8 @@ def check_k8s_events(db: Session, window_minutes: int = 30):
     since = now - timedelta(minutes=window_minutes)
     events = db.query(K8sEvent).filter(
         K8sEvent.severity.in_(["warning", "critical"]),
-        K8sEvent.last_seen >= since,
-    ).order_by(K8sEvent.last_seen.desc()).all()
+        K8sEvent.last_seen_at >= since,
+    ).order_by(K8sEvent.last_seen_at.desc()).all()
 
     new_alerts = []
     skipped = 0

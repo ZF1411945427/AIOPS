@@ -23,7 +23,7 @@
               <div><span class="meta-label">类型</span><span class="badge type">{{ typeLabel(c.cmdb_type) }}</span></div>
               <div><span class="meta-label">API URL</span><span class="text-sm">{{ c.api_url || '-' }}</span></div>
               <div><span class="meta-label">同步间隔</span><span>{{ c.sync_interval }}s</span></div>
-              <div><span class="meta-label">上次同步</span><span class="text-sm">{{ c.last_sync || '从未' }}</span></div>
+              <div><span class="meta-label">上次同步</span><span class="text-sm">{{ c.last_synced_at || '从未' }}</span></div>
             </div>
             <div class="card-actions">
               <button class="btn btn-sm" @click="toggleConfig(c)">{{ c.enabled ? '禁用' : '启用' }}</button>

@@ -20,7 +20,7 @@ def ingest_span(
     span = Span(
         trace_id=trace_id, span_id=span_id, parent_span_id=parent_span_id,
         service_name=service_name, operation_name=operation_name,
-        start_time=datetime.now(), end_time=datetime.now(),
+        started_at=datetime.now(), ended_at=datetime.now(),
         duration_ms=duration_ms, status=status, tags=tags)
     db.add(span)
     db.commit()

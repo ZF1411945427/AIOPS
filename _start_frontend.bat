@@ -1,3 +1,3 @@
 @echo off
-cd /d D:\AIOPS\project05\frontend
+cd /d %~dp0frontend
 npm run dev

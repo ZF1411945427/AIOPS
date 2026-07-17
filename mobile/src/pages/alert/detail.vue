@@ -65,7 +65,7 @@
 <script setup>
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { getList, acknowledge, resolve, triggerHeal } from '@/api/alert.js'
+import { getList, acknowledge, resolve, triggerHeal, silence } from '@/api/alert.js'
 import { setPendingPreset, openAlertAssistant, setPendingSessionId } from '@/api/agent.js'
 
 const alert = ref(null)
@@ -120,11 +120,22 @@ async function handleResolve() {
 }
 
 function handleSilence() {
-    uni.showModal({
-        title: '静默告警',
-        content: '移动端暂不支持直接静默，请通过 AI 助手或 Web 端执行静默操作。',
-        showCancel: false,
-        success: () => {},
+    uni.showActionSheet({
+        itemList: ['静默 30 分钟', '静默 1 小时', '静默 4 小时', '静默 24 小时'],
+        success: async (res) => {
+            const minutesMap = [30, 60, 240, 1440]
+            const minutes = minutesMap[res.tapIndex]
+            uni.showLoading({ title: '静默中...' })
+            try {
+                await silence(alert.value.id, { minutes: minutes })
+                uni.hideLoading()
+                uni.showToast({ title: `已静默 ${minutes} 分钟`, icon: 'success' })
+                alert.value.status = 'suppressed'
+            } catch (e) {
+                uni.hideLoading()
+                uni.showToast({ title: '静默失败', icon: 'none' })
+            }
+        },
     })
 }
 

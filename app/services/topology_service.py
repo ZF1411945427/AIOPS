@@ -262,9 +262,9 @@ def delete_relation(db: Session, relation_id: int):
 
 
 def build_topo(db: Session):
-    assets = db.query(Asset).order_by(Asset.type, Asset.name).all()
+    assets = db.query(Asset).order_by(Asset.ci_type, Asset.name).all()
     relations = db.query(AssetRelation).all()
-    asset_map = {a.id: {"id": a.id, "name": a.name, "type": a.type, "ci_type": a.ci_type, "status": a.status} for a in assets}
+    asset_map = {a.id: {"id": a.id, "name": a.name, "type": a.ci_type, "ci_type": a.ci_type, "status": a.status} for a in assets}
     children_map = {}
     for r in relations:
         children_map.setdefault(r.parent_id, []).append({

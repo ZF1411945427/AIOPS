@@ -47,8 +47,8 @@ def api_datasource_get(source_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api/create")
-def api_datasource_create(request: Request, db: Session = Depends(get_db)):
-    body = request.json()
+async def api_datasource_create(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
     if not body.get("name") or not body.get("type"):
         return JSONResponse({"error": "name 和 type 为必填项"}, status_code=400)
     source = datasource_service.create_source(db, body)
@@ -56,8 +56,8 @@ def api_datasource_create(request: Request, db: Session = Depends(get_db)):
 
 
 @router.put("/api/{source_id}")
-def api_datasource_update(source_id: int, request: Request, db: Session = Depends(get_db)):
-    body = request.json()
+async def api_datasource_update(source_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
     source = datasource_service.update_source(db, source_id, body)
     if not source:
         return JSONResponse({"error": "数据源不存在"}, status_code=404)

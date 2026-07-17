@@ -28,10 +28,6 @@ export function diagnose(imageBase64, assetId) {
   return request({ url: '/mobile/vision/diagnose', method: 'POST', data: { image_base64: imageBase64, asset_id: assetId } })
 }
 
-export function checkin(data) {
-  return request({ url: '/mobile/checkin', method: 'POST', data })
-}
-
 export function listDevices() {
   return request({ url: '/mobile/devices' })
 }
@@ -48,7 +44,6 @@ export default {
   registerDevice,
   unregisterDevice,
   diagnose,
-  checkin,
   listDevices,
   deleteDevice,
   listPushLogs,

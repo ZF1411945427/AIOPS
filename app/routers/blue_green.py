@@ -1,11 +1,12 @@
 import copy
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import BlueGreenDeploy, DataSource, Asset
+from app.models import BlueGreenDeploy, BlueGreenSwitchRecord, DataSource, Asset
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/blue-green", tags=["blue-green"])
@@ -28,6 +29,7 @@ def _deploy_to_dict(d) -> dict:
         "active_replicas": d.active_replicas or 3,
         "standby_replicas": d.standby_replicas or 3,
         "status": d.status or "active",
+        "last_switched_at": d.last_switched_at.strftime("%Y-%m-%d %H:%M:%S") if d.last_switched_at else None,
         "created_at": d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else None,
     }
 
@@ -157,21 +159,33 @@ def api_deploy_create(
 
 
 @router.post("/api/{did}/switch")
-def api_deploy_switch(did: int, db: Session = Depends(get_db)):
-    """切换蓝绿 JSON API.
-
-    核心逻辑：patch Service 的 selector 指向新的 active 版本。
-    同时调整副本数（active scale up, standby scale down）。
-    """
+def api_deploy_switch(did: int, request: Request, note: str = Form(""), db: Session = Depends(get_db)):
+    """切换蓝绿 JSON API."""
     d = db.query(BlueGreenDeploy).filter(BlueGreenDeploy.id == did).first()
     if not d:
         return JSONResponse({"error": "not found"}, status_code=404)
 
     old_active = d.active_label
     old_standby = d.standby_label
-    # 交换 active/standby
+    from_label = old_active
+    to_label = old_standby
+
     d.active_label, d.standby_label = d.standby_label, d.active_label
     d.active_replicas, d.standby_replicas = d.standby_replicas, d.active_replicas
+    d.last_switched_at = datetime.now()
+
+    from app.models import User
+    user_id = request.session.get("user_id")
+    operator_name = "system"
+    if user_id:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            operator_name = user.username
+
+    rec = BlueGreenSwitchRecord(
+        deploy_id=did, from_label=from_label, to_label=to_label,
+        operator=operator_name, description=note)
+    db.add(rec)
     db.commit()
 
     k8s_msg = ""
@@ -186,22 +200,19 @@ def api_deploy_switch(did: int, db: Session = Depends(get_db)):
                 core_v1 = k8s_client.CoreV1Api(api_client)
                 k8s_name = _k8s_safe_name(d.name)
 
-                # 1. scale up 新 active
                 apps_v1.patch_namespaced_deployment_scale(
                     name=k8s_name + "-" + d.active_label, namespace=d.namespace,
                     body={"spec": {"replicas": d.active_replicas}})
 
-                # 2. scale down 新 standby
                 apps_v1.patch_namespaced_deployment_scale(
                     name=k8s_name + "-" + d.standby_label, namespace=d.namespace,
                     body={"spec": {"replicas": d.standby_replicas}})
 
-                # 3. 切换 Service selector 指向新 active（蓝绿切换核心）
                 core_v1.patch_namespaced_service(
                     name=k8s_name, namespace=d.namespace,
                     body={"spec": {"selector": {"app": k8s_name, "version": d.active_label}}})
 
-                k8s_msg = "Switched: " + old_active + " -> " + d.active_label
+                k8s_msg = "Switched: " + from_label + " -> " + d.active_label
         except Exception as e:
             k8s_msg = "K8s switch error: " + str(e)
 
@@ -212,6 +223,85 @@ def api_deploy_switch(did: int, db: Session = Depends(get_db)):
         "active_replicas": d.active_replicas,
         "standby_replicas": d.standby_replicas,
         "k8s_msg": k8s_msg,
+    })
+
+
+@router.post("/api/{did}/rollback")
+def api_deploy_rollback(did: int, request: Request, db: Session = Depends(get_db)):
+    """回滚到上一次活跃版本（快速回滚）"""
+    d = db.query(BlueGreenDeploy).filter(BlueGreenDeploy.id == did).first()
+    if not d:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    last_record = db.query(BlueGreenSwitchRecord).filter(
+        BlueGreenSwitchRecord.deploy_id == did
+    ).order_by(BlueGreenSwitchRecord.created_at.desc()).first()
+
+    if not last_record:
+        return JSONResponse({"ok": False, "error": "无切换记录，无法回滚"}, status_code=400)
+
+    from_label = d.active_label
+    to_label = last_record.from_label
+
+    d.active_label = to_label
+    d.standby_label = from_label
+    d.last_switched_at = datetime.now()
+
+    from app.models import User
+    user_id = request.session.get("user_id")
+    operator_name = "system"
+    if user_id:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            operator_name = user.username
+
+    rec = BlueGreenSwitchRecord(
+        deploy_id=did, from_label=from_label, to_label=to_label,
+        operator=operator_name, description="回滚")
+    db.add(rec)
+    db.commit()
+
+    k8s_msg = ""
+    cluster = getattr(d, "cluster", "") or ""
+    if cluster:
+        try:
+            api_client, k8s_client, err = _get_k8s_client(cluster, db)
+            if err:
+                k8s_msg = "K8s config error: " + err
+            else:
+                apps_v1 = k8s_client.AppsV1Api(api_client)
+                core_v1 = k8s_client.CoreV1Api(api_client)
+                k8s_name = _k8s_safe_name(d.name)
+                core_v1.patch_namespaced_service(
+                    name=k8s_name, namespace=d.namespace,
+                    body={"spec": {"selector": {"app": k8s_name, "version": d.active_label}}})
+                k8s_msg = "Rolled back: " + from_label + " -> " + d.active_label
+        except Exception as e:
+            k8s_msg = "K8s rollback error: " + str(e)
+
+    return JSONResponse({
+        "ok": True,
+        "active_label": d.active_label,
+        "standby_label": d.standby_label,
+        "k8s_msg": k8s_msg,
+    })
+
+
+@router.get("/api/{did}/records")
+def api_deploy_records(did: int, db: Session = Depends(get_db)):
+    """获取切换历史记录"""
+    records = db.query(BlueGreenSwitchRecord).filter(
+        BlueGreenSwitchRecord.deploy_id == did
+    ).order_by(BlueGreenSwitchRecord.created_at.desc()).limit(50).all()
+    return JSONResponse({
+        "records": [{
+            "id": r.id,
+            "from_label": r.from_label,
+            "to_label": r.to_label,
+            "operator": r.operator,
+            "note": r.description,
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+        } for r in records]
     })
 
 

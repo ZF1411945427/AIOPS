@@ -22,7 +22,7 @@
               <span class="text-sm">{{ r.created_at || '-' }}</span>
             </div>
             <div class="rep-title">{{ r.title }}</div>
-            <div class="rep-period text-sm">{{ r.period_start || '-' }} ~ {{ r.period_end || '-' }}</div>
+            <div class="rep-period text-sm">{{ r.period_started_at || '-' }} ~ {{ r.period_ended_at || '-' }}</div>
             <div class="rep-summary text-sm">{{ (r.summary || '').slice(0, 120) }}{{ (r.summary || '').length > 120 ? '...' : '' }}</div>
           </div>
         </div>

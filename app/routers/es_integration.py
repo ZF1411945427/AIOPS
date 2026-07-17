@@ -41,14 +41,14 @@ def api_sync_events(ds_id: int, db: Session = Depends(get_db)):
         else:
             es = Elasticsearch(ds.endpoint, request_timeout=30)
         since = datetime.now() - timedelta(hours=1)
-        events = db.query(K8sEvent).filter(K8sEvent.last_seen >= since).all()
+        events = db.query(K8sEvent).filter(K8sEvent.last_seen_at >= since).all()
         count = 0
         for ev in events:
             doc = {
                 "cluster": ev.cluster, "namespace": ev.namespace, "name": ev.name,
                 "kind": ev.kind, "reason": ev.reason, "message": ev.message,
                 "count": ev.count, "severity": ev.severity,
-                "timestamp": ev.last_seen.isoformat() if ev.last_seen else None,
+                "timestamp": ev.last_seen_at.isoformat() if ev.last_seen_at else None,
             }
             es.index(index="aiops-events", body=doc, id=f"k8s_event_{ev.id}")
             count += 1

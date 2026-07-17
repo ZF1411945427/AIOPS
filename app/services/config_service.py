@@ -23,6 +23,7 @@ DEFAULT_CONFIGS = {
     "asset_probe_timeout": {"value": "10", "description": "单次探测超时 (秒)"},
     "metric_collect_enabled": {"value": "true", "description": "是否启用指标采集"},
     "metric_collect_interval": {"value": "60", "description": "指标采集间隔 (秒)"},
+    "tenant_mode": {"value": "false", "description": "是否启用多租户模式（true/false）"},
 }
 
 
@@ -31,31 +32,31 @@ def init_configs(db: Session):
         existing = db.query(SystemConfig).filter(SystemConfig.key == key).first()
         if not existing:
             db.add(SystemConfig(
-                key=key, value=cfg["value"], description=cfg["description"],
+                key=key, config_value=cfg["value"], description=cfg["description"],
             ))
     db.commit()
 
 
 def get_config(db: Session, key: str, default: str = "") -> str:
     cfg = db.query(SystemConfig).filter(SystemConfig.key == key).first()
-    return cfg.value if cfg else default
+    return cfg.config_value if cfg else default
 
 
 def get_all_configs(db: Session):
     configs = db.query(SystemConfig).order_by(SystemConfig.id).all()
     result = {}
     for c in configs:
-        result[c.key] = {"value": c.value, "description": c.description}
+        result[c.key] = {"value": c.config_value, "description": c.description}
     return result
 
 
 def update_config(db: Session, key: str, value: str):
     cfg = db.query(SystemConfig).filter(SystemConfig.key == key).first()
     if cfg:
-        cfg.value = value
+        cfg.config_value = value
         cfg.updated_at = datetime.now()
     else:
-        cfg = SystemConfig(key=key, value=value)
+        cfg = SystemConfig(key=key, config_value=value)
         db.add(cfg)
     db.commit()
     return cfg

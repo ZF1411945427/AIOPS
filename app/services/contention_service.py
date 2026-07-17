@@ -11,7 +11,7 @@ def detect_contention(db: Session):
     oom_events = (
         db.query(K8sEvent)
         .filter(
-            K8sEvent.last_seen >= since,
+            K8sEvent.last_seen_at >= since,
             K8sEvent.reason.ilike("%OOM%"),
         )
         .count()
@@ -34,7 +34,7 @@ def detect_contention(db: Session):
     crash_events = (
         db.query(K8sEvent)
         .filter(
-            K8sEvent.last_seen >= since,
+            K8sEvent.last_seen_at >= since,
             K8sEvent.reason.ilike("%CrashLoopBackOff%"),
         )
         .count()
@@ -57,7 +57,7 @@ def detect_contention(db: Session):
     node_not_ready = (
         db.query(K8sEvent)
         .filter(
-            K8sEvent.last_seen >= since,
+            K8sEvent.last_seen_at >= since,
             K8sEvent.reason == "NodeNotReady",
         )
         .count()

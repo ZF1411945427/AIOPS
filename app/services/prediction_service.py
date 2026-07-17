@@ -130,7 +130,7 @@ def get_features_for_prediction(db: Session, metric_name: str, asset_id: Optiona
 
 def predict_with_model(db: Session, model: PredictionModel, hours_back: int = 168) -> Optional[Dict]:
     """Execute prediction using a configured model."""
-    params = json.loads(model.params) if isinstance(model.params, str) else model.params
+    params = json.loads(model.model_params) if isinstance(model.model_params, str) else model.model_params
     window = params.get("window", 20)
     threshold = params.get("threshold")
     degree = params.get("degree", 2)
@@ -246,7 +246,7 @@ def predict_with_model(db: Session, model: PredictionModel, hours_back: int = 16
     else:
         return None
 
-    # Estimate days until threshold
+    # Estimate days expires_at threshold
     days_until = None
     if threshold and slope > 0:
         current_value = values[-1]
@@ -284,7 +284,7 @@ def predict_with_model(db: Session, model: PredictionModel, hours_back: int = 16
 def predict_capacity(db: Session, metric_name: str, hours_back: int = 168, threshold: float = None):
     """
     Predict capacity trend for a given metric (legacy function).
-    Returns dict with trend data, prediction, and estimated days until threshold.
+    Returns dict with trend data, prediction, and estimated days expires_at threshold.
     """
     since = datetime.now() - timedelta(hours=hours_back)
     records = (
@@ -331,7 +331,7 @@ def predict_capacity(db: Session, metric_name: str, hours_back: int = 168, thres
     pred_xs = list(range(last_x + 1, last_x + 1 + future_hours_count))
     pred_ys = [slope * x + intercept for x in pred_xs]
 
-    # Estimate days until threshold
+    # Estimate days expires_at threshold
     days_until = None
     if threshold and slope > 0:
         x_at_threshold = (threshold - intercept) / slope

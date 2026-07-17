@@ -20,7 +20,7 @@ def ingest_flow(
     r = NetFlowRecord(
         src_ip=src_ip, dst_ip=dst_ip, src_port=src_port, dst_port=dst_port,
         protocol=protocol, bytes_sent=bytes_sent, bytes_rcvd=bytes_rcvd,
-        start_time=datetime.now(), end_time=datetime.now())
+        started_at=datetime.now(), ended_at=datetime.now())
     db.add(r)
     db.commit()
     return {"ok": True}

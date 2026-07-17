@@ -16,14 +16,7 @@
       <label class="filter-chk"><input type="checkbox" v-model="hideDeprecated" @change="applyFilter"> 隐藏已废弃</label>
       <label class="filter-chk"><input type="checkbox" v-model="onlyOrphan" @change="applyFilter"> 仅看孤岛</label>
       <a href="javascript:void(0)" class="btn btn-primary" @click="openCreate">+ 新增资产</a>
-      <span class="toolbar-hint">K8s 子资源接入集群后自动发现（三层纳管：持久化 CI / 弱纳管 CI / 实时视图）</span>
-    </div>
-
-    <div class="tier-bar" v-if="k8sStats.total">
-      <div class="tier-item"><span class="tier-dot" style="background:#10b981"></span><span class="tier-name">持久化 CI</span><span class="tier-num">{{ k8sStats.persistent }}</span><span class="tier-sub">集群/节点/命名空间/工作负载/Service/Ingress/PV/PVC</span></div>
-      <div class="tier-item"><span class="tier-dot" style="background:#06b6d4"></span><span class="tier-name">弱纳管 CI</span><span class="tier-num">{{ k8sStats.weak }}</span><span class="tier-sub">ConfigMap/Secret（只存引用关系）</span></div>
-      <div class="tier-item"><span class="tier-dot" style="background:#94a3b8"></span><span class="tier-name">实时视图</span><span class="tier-num">{{ k8sStats.realtime }}</span><span class="tier-sub">Pod/ReplicaSet（不入库，聚合到工作负载）</span></div>
-      <div class="tier-item tier-warn" v-if="k8sStats.orphan > 0"><span class="tier-warn-icon">⚠</span><span class="tier-name">孤岛资源</span><span class="tier-num">{{ k8sStats.orphan }}</span><span class="tier-sub">未被引用，疑似配置漂移</span></div>
+      <span class="toolbar-hint">K8s 子资源（Deployment/Service/Pod 等）由「K8s 资源」页面管理</span>
     </div>
 
     <div class="panel">
@@ -120,7 +113,11 @@
           <div class="form-grid">
             <div class="form-row" v-for="f in ciTypeMeta.specFields" :key="f.key">
               <label>{{ f.label }}</label>
-              <input v-model="specValues[f.key]" class="input" :type="f.type || 'text'" :placeholder="f.placeholder || ''">
+              <select v-if="f.options" v-model="specValues[f.key]" class="input">
+                <option value="" disabled>请选择</option>
+                <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+              <input v-else v-model="specValues[f.key]" class="input" :type="f.type || 'text'" :placeholder="f.placeholder || ''">
             </div>
           </div>
         </div>
@@ -129,14 +126,31 @@
           <div class="section-title">连接配置</div>
           <div class="conn-tip">{{ ciTypeMeta?.connectionTip || '配置该资产的连接信息，用于远程运维和监控。' }}</div>
 
-          <template v-if="isSshType">
+          <template v-if="isSshType && !isWindowsOs">
             <div class="form-grid">
               <div class="form-row"><label>连接方式</label>
                 <select v-model="form.connection_type" class="input"><option value="ssh">SSH</option><option value="agent">Agent</option></select>
               </div>
-              <div class="form-row"><label>登录用户</label><input v-model="form.ssh_user" class="input" placeholder="root"></div>
+              <div class="form-row"><label>登录用户</label><input v-model="form.ssh_user" class="input" placeholder="root" autocomplete="off"></div>
               <div class="form-row"><label>SSH 端口</label><input v-model.number="form.ssh_port" class="input" type="number" placeholder="22"></div>
-              <div class="form-row"><label>密码 / 密钥</label><input v-model="form.ssh_password" class="input" type="password" placeholder="留空则不设置"></div>
+              <div class="form-row"><label>密码 / 密钥</label><input v-model="form.ssh_password" class="input" type="password" placeholder="留空则不设置" autocomplete="new-password"></div>
+            </div>
+          </template>
+
+          <template v-else-if="isWinrmType">
+            <div class="form-grid">
+              <div class="form-row"><label>连接方式</label>
+                <select v-model="form.connection_type" class="input" disabled><option value="winrm">WinRM (Windows)</option></select>
+              </div>
+              <div class="form-row"><label>登录用户</label><input v-model="form.winrm_user" class="input" placeholder="Administrator" autocomplete="off"></div>
+              <div class="form-row"><label>WinRM 端口</label><input v-model.number="form.winrm_port" class="input" type="number" placeholder="5985"></div>
+              <div class="form-row"><label>密码</label><input v-model="form.winrm_password" class="input" type="password" placeholder="Windows 登录密码" autocomplete="new-password"></div>
+              <div class="form-row"><label>传输协议</label>
+                <select v-model="form.winrm_transport" class="input"><option value="ntlm">NTLM</option><option value="kerberos">Kerberos</option><option value="basic">Basic</option></select>
+              </div>
+              <div class="form-row"><label>HTTPS</label>
+                <select v-model="form.winrm_ssl" class="input"><option :value="false">否 (HTTP/5985)</option><option :value="true">是 (HTTPS/5986)</option></select>
+              </div>
             </div>
           </template>
 
@@ -145,7 +159,7 @@
               <div class="form-row"><label>连接方式</label>
                 <select v-model="form.connection_type" class="input"><option value="ssh">SSH</option><option value="snmp">SNMP</option></select>
               </div>
-              <div class="form-row"><label>SNMP 社区</label><input v-model="form.snmp_community" class="input" placeholder="public"></div>
+              <div class="form-row"><label>SNMP 社区</label><input v-model="form.snmp_community" class="input" placeholder="public" autocomplete="off"></div>
               <div class="form-row"><label>SNMP 端口</label><input v-model.number="form.snmp_port" class="input" type="number" placeholder="161"></div>
               <div class="form-row"><label>SNMP 版本</label>
                 <select v-model="form.snmp_version" class="input"><option value="v2c">v2c</option><option value="v3">v3</option></select>
@@ -156,7 +170,7 @@
           <template v-else-if="form.ci_type === 'kubernetes_cluster'">
             <div class="form-grid">
               <div class="form-row full"><label>API Server 地址</label><input v-model="form.k8s_api_server" class="input" placeholder="https://192.168.1.10:6443"></div>
-              <div class="form-row full"><label>Token</label><textarea v-model="form.k8s_token" class="input textarea" rows="2" placeholder="ServiceAccount Token 或 kubeconfig 内容"></textarea></div>
+              <div class="form-row full"><label>Token</label><textarea v-model="form.k8s_token" class="input textarea" rows="2" placeholder="ServiceAccount Token 或 kubeconfig 内容" autocomplete="off"></textarea></div>
             </div>
           </template>
 
@@ -170,8 +184,8 @@
                 </select>
               </div>
               <div class="form-row"><label>端口</label><input v-model.number="form.db_port" class="input" type="number" :placeholder="dbPortPlaceholder"></div>
-              <div class="form-row"><label>用户名</label><input v-model="form.db_user" class="input" placeholder="root"></div>
-              <div class="form-row"><label>密码</label><input v-model="form.db_password" class="input" type="password"></div>
+              <div class="form-row"><label>账户</label><input v-model="form.db_user" class="input" placeholder="root" autocomplete="off"></div>
+              <div class="form-row"><label>密码</label><input v-model="form.db_password" class="input" type="password" autocomplete="new-password"></div>
               <div class="form-row"><label>数据库名</label><input v-model="form.db_name" class="input" placeholder="可选"></div>
             </div>
           </template>
@@ -208,7 +222,7 @@
               <div class="form-row"><label>认证方式</label>
                 <select v-model="form.http_auth" class="input"><option value="">无</option><option value="basic">Basic Auth</option><option value="bearer">Bearer Token</option></select>
               </div>
-              <div class="form-row"><label>凭据</label><input v-model="form.http_credential" class="input" placeholder="用户名:密码 或 Token"></div>
+              <div class="form-row"><label>凭据</label><input v-model="form.http_credential" class="input" placeholder="用户名:密码 或 Token" autocomplete="off"></div>
             </div>
           </template>
 
@@ -248,6 +262,12 @@
         <div class="modal-actions">
           <button class="btn btn-conn-test" :disabled="testingConn || !form.ci_type" @click="testConnection">{{ testingConn ? '测试中...' : '测试连接' }}</button>
           <span v-if="connTestResult" class="conn-test-msg" :class="connTestResult.ok ? 'suc' : 'fail'">{{ connTestResult.ok ? '✅ 连接成功' : '❌ ' + connTestResult.message }}</span>
+          <div v-if="connTestResult && connTestResult.permission_check" class="permission-check" :class="'risk-' + (connTestResult.permission_check.risk_level || 'unknown')" style="margin-left: 12px; font-size: 0.82rem;">
+            <span v-if="connTestResult.permission_check.risk_level === 'safe'">✅ {{ connTestResult.permission_check.risk_desc || '安全' }}</span>
+            <span v-else-if="connTestResult.permission_check.risk_level === 'medium'" style="color:#e6a23c">⚠️ {{ connTestResult.permission_check.risk_desc || '权限警告' }}</span>
+            <span v-else-if="connTestResult.permission_check.risk_level === 'high'" style="color:#f56c6c; cursor:pointer" @click="async () => { try { await ElMessageBox.confirm(`<span style=&quot;color:#f56c6c;font-weight:bold&quot;>🔴 ${connTestResult.permission_check.risk_desc || '该账号拥有极高危权限'}</span><br><br><span style=&quot;color:#e6a23c&quot;>⚠️ 接入 AI 助手后，AI 可能执行危险操作。确认要保存吗？</span>`, '🔴 超高危权限确认', { type: 'warning', confirmButtonText: '确认保存', cancelButtonText: '取消', dangerouslyUseHTMLString: true }) } catch { return } }">🔴 {{ connTestResult.permission_check.risk_desc || '高危权限' }}</span>
+            <span v-else style="color:#909399">❓ {{ connTestResult.permission_check.risk_desc || '权限未知' }}</span>
+          </div>
           <div style="flex:1"></div>
           <button class="btn" @click="closeForm">取消</button>
           <button class="btn btn-primary" :disabled="saving" @click="saveAsset">{{ saving ? '保存中...' : (formMode === 'create' ? '创建' : '保存') }}</button>
@@ -283,16 +303,7 @@ const ciTypeGroups = [
   ]},
   { label: '☁️ 云资源层', items: [
     { value: 'cloud_host', label: '云主机' }, { value: 'kubernetes_cluster', label: 'K8s 集群' },
-  ]},
-  { label: '🐳 K8s 持久化 CI', items: [
     { value: 'node', label: 'Node 节点' }, { value: 'namespace', label: 'Namespace' },
-    { value: 'deployment', label: 'Deployment' }, { value: 'statefulset', label: 'StatefulSet' },
-    { value: 'daemonset', label: 'DaemonSet' }, { value: 'service', label: 'Service' },
-    { value: 'ingress', label: 'Ingress' }, { value: 'pv', label: 'PV 存储卷' },
-    { value: 'pvc', label: 'PVC 存储声明' },
-  ]},
-  { label: '🔒 K8s 弱纳管 CI', items: [
-    { value: 'configmap', label: 'ConfigMap' }, { value: 'secret', label: 'Secret' },
   ]},
   { label: '📊 业务层', items: [
     { value: 'business_app', label: '业务应用' }, { value: 'api_service', label: 'API 服务' },
@@ -301,8 +312,8 @@ const ciTypeGroups = [
   ]},
 ]
 
-const PERSISTENT_TYPES = new Set(['node','namespace','deployment','statefulset','daemonset','service','ingress','pv','pvc','kubernetes_cluster'])
-const WEAK_TYPES = new Set(['configmap','secret'])
+const PERSISTENT_TYPES = new Set(['kubernetes_cluster','node','namespace'])
+const WEAK_TYPES = new Set()
 const CI_TYPE_COLOR = {
   kubernetes_cluster:'#6366f1', cluster:'#6366f1', namespace:'#3b82f6', node:'#10b981',
   deployment:'#f59e0b', statefulset:'#f97316', daemonset:'#ea580c', service:'#8b5cf6',
@@ -313,10 +324,12 @@ const sshTypes = ['server', 'virtual_machine', 'cloud_host']
 const snmpTypes = ['network_device', 'switch', 'router', 'firewall', 'load_balancer', 'storage_device']
 const isSshType = computed(() => sshTypes.includes(form.value.ci_type))
 const isSnmpType = computed(() => snmpTypes.includes(form.value.ci_type))
+const isWindowsOs = computed(() => specValues.value.os === 'windows')
+const isWinrmType = computed(() => isSshType.value && isWindowsOs.value)
 
 const ciTypeMetaMap = {
-  server: { specFields: [{ key: 'cpu_cores', label: 'CPU 核心数', type: 'number' }, { key: 'memory_gb', label: '内存(GB)', type: 'number' }, { key: 'disk_gb', label: '磁盘(GB)', type: 'number' }, { key: 'os', label: '操作系统' }, { key: 'manufacturer', label: '厂商' }, { key: 'model', label: '型号' }], connectionTip: '物理服务器使用 SSH 连接进行远程运维。' },
-  virtual_machine: { specFields: [{ key: 'cpu_cores', label: 'vCPU', type: 'number' }, { key: 'memory_gb', label: '内存(GB)', type: 'number' }, { key: 'disk_gb', label: '系统盘(GB)', type: 'number' }, { key: 'os', label: '操作系统' }, { key: 'hypervisor', label: '虚拟化平台', placeholder: 'VMware/KVM' }], connectionTip: '虚拟机使用 SSH 连接进行远程运维。' },
+  server: { specFields: [{ key: 'cpu_cores', label: 'CPU 核心数', type: 'number' }, { key: 'memory_gb', label: '内存(GB)', type: 'number' }, { key: 'disk_gb', label: '磁盘(GB)', type: 'number' }, { key: 'os', label: '操作系统', options: [{ value: 'linux', label: 'Linux' }, { value: 'windows', label: 'Windows' }, { value: 'other', label: '其他' }] }, { key: 'manufacturer', label: '厂商' }, { key: 'model', label: '型号' }], connectionTip: '物理服务器使用 SSH（Linux）或 WinRM（Windows）连接进行远程运维。' },
+  virtual_machine: { specFields: [{ key: 'cpu_cores', label: 'vCPU', type: 'number' }, { key: 'memory_gb', label: '内存(GB)', type: 'number' }, { key: 'disk_gb', label: '系统盘(GB)', type: 'number' }, { key: 'os', label: '操作系统', options: [{ value: 'linux', label: 'Linux' }, { value: 'windows', label: 'Windows' }, { value: 'other', label: '其他' }] }, { key: 'hypervisor', label: '虚拟化平台', placeholder: 'VMware/KVM' }], connectionTip: '虚拟机使用 SSH（Linux）或 WinRM（Windows）连接进行远程运维。' },
   network_device: { specFields: [{ key: 'manufacturer', label: '厂商', placeholder: 'Cisco/Huawei' }, { key: 'model', label: '型号' }], connectionTip: '网络设备支持 SSH 和 SNMP。' },
   switch: { specFields: [{ key: 'manufacturer', label: '厂商' }, { key: 'model', label: '型号' }, { key: 'ports_count', label: '端口数', type: 'number' }], connectionTip: '交换机建议使用 SNMP 监控。' },
   router: { specFields: [{ key: 'manufacturer', label: '厂商' }, { key: 'model', label: '型号' }], connectionTip: '路由器支持 SSH 和 SNMP。' },
@@ -325,7 +338,7 @@ const ciTypeMetaMap = {
   storage_device: { specFields: [{ key: 'manufacturer', label: '厂商' }, { key: 'model', label: '型号' }], connectionTip: '存储设备支持 SNMP 或 SSH 连接。' },
   database: { specFields: [{ key: 'version', label: '版本' }], connectionTip: '配置数据库连接信息用于监控和巡检。' },
   middleware: { specFields: [{ key: 'version', label: '版本' }], connectionTip: '中间件通过管理端口进行健康检查。' },
-  cloud_host: { specFields: [{ key: 'cpu_cores', label: 'vCPU', type: 'number' }, { key: 'memory_gb', label: '内存(GB)', type: 'number' }, { key: 'disk_gb', label: '系统盘(GB)', type: 'number' }, { key: 'cloud_provider', label: '云厂商', placeholder: '阿里云/AWS' }, { key: 'instance_id', label: '实例 ID' }], connectionTip: '云主机可通过 SSH 管理。' },
+  cloud_host: { specFields: [{ key: 'cpu_cores', label: 'vCPU', type: 'number' }, { key: 'memory_gb', label: '内存(GB)', type: 'number' }, { key: 'disk_gb', label: '系统盘(GB)', type: 'number' }, { key: 'os', label: '操作系统', options: [{ value: 'linux', label: 'Linux' }, { value: 'windows', label: 'Windows' }, { value: 'other', label: '其他' }] }, { key: 'cloud_provider', label: '云厂商', placeholder: '阿里云/AWS' }, { key: 'instance_id', label: '实例 ID' }], connectionTip: '云主机通过 SSH（Linux）或 WinRM（Windows）管理。' },
   kubernetes_cluster: { specFields: [{ key: 'version', label: 'K8s 版本' }, { key: 'node_count', label: '节点数', type: 'number' }], connectionTip: '添加 K8s 集群后系统可通过 API 自动发现集群下的所有子资源（节点、Deployment、Service、Ingress、Pod 等），无需手动逐一添加。' },
   business_app: { specFields: [{ key: 'owner', label: '负责人' }], connectionTip: '业务应用通过 HTTP 健康检查监控可用性。' },
   api_service: { specFields: [{ key: 'owner', label: '负责人' }], connectionTip: 'API 服务配置 HTTP 端点进行健康检查。' },
@@ -355,6 +368,7 @@ const specValues = ref({})
 const defaultForm = {
   id: null, name: '', ci_type: '', ip: '', status: 'online', tags: '',
   connection_type: 'ssh', ssh_user: 'root', ssh_port: 22, ssh_password: '',
+  winrm_user: 'Administrator', winrm_port: 5985, winrm_password: '', winrm_transport: 'ntlm', winrm_ssl: false,
   k8s_api_server: '', k8s_token: '',
   snmp_community: 'public', snmp_port: 161, snmp_version: 'v2c',
   db_type: 'mysql', db_port: 3306, db_user: 'root', db_password: '', db_name: '',
@@ -392,16 +406,9 @@ function goLifecycle(assetId) {
 function connectionTypeLabel(t) { return { ssh: 'SSH', agent: 'Agent', kubernetes: 'K8s API', snmp: 'SNMP', http: 'HTTP', database: '数据库' }[t] || t || '-' }
 
 function tierClass(ci_type) {
-  if (PERSISTENT_TYPES.has(ci_type)) return 'tier-persistent'
-  if (WEAK_TYPES.has(ci_type)) return 'tier-weak'
   return 'tier-default'
 }
-function tierLabel(ci_type) {
-  if (ci_type === 'pod' || ci_type === 'replicaset') return '实时视图'
-  if (PERSISTENT_TYPES.has(ci_type)) return '持久化'
-  if (WEAK_TYPES.has(ci_type)) return '弱纳管'
-  return '标准'
-}
+function tierLabel(ci_type) { return '标准' }
 function ciTypeStyle(ci_type) {
   const c = CI_TYPE_COLOR[ci_type]
   return c ? { background: c + '1a', color: c } : {}
@@ -457,24 +464,17 @@ function jumpPage(e) {
 }
 watch([search, ciType, hideDeprecated, onlyOrphan, pageSize], () => { currentPage.value = 1 })
 watch(() => filteredAssets.value.length, () => { if (currentPage.value > totalPages.value) currentPage.value = totalPages.value })
-
-const k8sStats = computed(() => {
-  const k8sAssets = assets.value.filter(a => a.k8s_cluster || PERSISTENT_TYPES.has(a.ci_type) || WEAK_TYPES.has(a.ci_type))
-  let persistent = 0, weak = 0, realtime = 0, orphan = 0
-  k8sAssets.forEach(a => {
-    if (a.status === 'deprecated') { realtime++; return }
-    if (PERSISTENT_TYPES.has(a.ci_type)) persistent++
-    else if (WEAK_TYPES.has(a.ci_type)) weak++
-    if (a.isOrphan) orphan++
-  })
-  return { total: k8sAssets.length, persistent, weak, realtime, orphan }
+watch(() => specValues.value.os, (newOs) => {
+  if (!isSshType.value) return
+  if (newOs === 'windows') form.value.connection_type = 'winrm'
+  else form.value.connection_type = 'ssh'
 })
 
 function onCiTypeChange() {
   connTestResult.value = null
   const meta = ciTypeMetaMap[form.value.ci_type] || {}
   specValues.value = {}
-  if (meta.specFields) meta.specFields.forEach(f => { specValues.value[f.key] = '' })
+  if (meta.specFields) meta.specFields.forEach(f => { specValues.value[f.key] = f.key === 'os' ? 'linux' : '' })
   if (isSshType.value) form.value.connection_type = 'ssh'
   else if (isSnmpType.value) form.value.connection_type = 'snmp'
   else if (form.value.ci_type === 'kubernetes_cluster') { form.value.connection_type = 'kubernetes'; form.value.ip = '' }
@@ -492,7 +492,7 @@ async function openEdit(id) {
     formMode.value = 'edit'
     // 密码/敏感字段置空（后端返回 ***），保存时空值=不更新
     const safeDetail = { ...detail }
-    ;['ssh_password', 'k8s_token', 'db_password', 'http_credential'].forEach(f => { safeDetail[f] = '' })
+    ;['ssh_password', 'k8s_token', 'db_password', 'http_credential', 'winrm_password'].forEach(f => { safeDetail[f] = '' })
     form.value = { ...defaultForm, ...safeDetail }
     specValues.value = {}
     connTestResult.value = null
@@ -537,6 +537,8 @@ async function testConnection() {
       cfg = { db_type: form.value.db_type, db_port: form.value.db_port, db_user: form.value.db_user, db_password: form.value.db_password, db_name: form.value.db_name }
     } else if (ct === 'snmp') {
       cfg = { snmp_community: form.value.snmp_community, snmp_port: form.value.snmp_port, snmp_version: form.value.snmp_version }
+    } else if (ct === 'winrm') {
+      cfg = { winrm_user: form.value.winrm_user, winrm_password: form.value.winrm_password, winrm_port: form.value.winrm_port, winrm_transport: form.value.winrm_transport, winrm_ssl: form.value.winrm_ssl }
     } else if (ct === 'http') {
       cfg = { http_url: form.value.http_url, http_auth: form.value.http_auth, http_credential: form.value.http_credential }
     }
@@ -614,6 +616,12 @@ function buildPayload() {
   if (isSshType.value) {
     p.ssh_user = form.value.ssh_user; p.ssh_password = form.value.ssh_password; p.ssh_port = form.value.ssh_port
   }
+  if (isWinrmType.value) {
+    p.connection_type = 'winrm'
+    p.winrm_user = form.value.winrm_user; p.winrm_password = form.value.winrm_password
+    p.winrm_port = form.value.winrm_port; p.winrm_transport = form.value.winrm_transport
+    p.winrm_ssl = form.value.winrm_ssl
+  }
   if (isSnmpType.value) {
     p.snmp_community = form.value.snmp_community; p.snmp_port = form.value.snmp_port; p.snmp_version = form.value.snmp_version
   }
@@ -624,6 +632,29 @@ function buildPayload() {
 async function saveAsset() {
   if (!form.value.name.trim()) { ElMessage.warning('资产名称不能为空'); return }
   if (!form.value.ci_type) { ElMessage.warning('请选择 CI 类型'); return }
+  if (form.value.ci_type === 'database' && formMode.value === 'create') {
+    const host = form.value.ip || ''
+    if (!host) { ElMessage.warning('数据库资产需要填写 IP'); return }
+    try {
+      const cfg = { db_type: form.value.db_type, db_port: form.value.db_port, db_user: form.value.db_user, db_password: form.value.db_password, db_name: form.value.db_name }
+      const p2 = new URLSearchParams()
+      p2.append('connection_type', 'database')
+      p2.append('host', host)
+      p2.append('connection_config', JSON.stringify(cfg))
+      saving.value = true
+      const r = await request.post('/assets/api/test-connection', p2, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+      if (r.permission_check && !['safe'].includes(r.permission_check.risk_level)) {
+        const pc = r.permission_check
+        const privHtml = pc.privileges
+          ? `<b>权限详情：</b><br>读=${(pc.privileges.read || []).join(', ')}<br>写(DML)=${(pc.privileges.dml || []).join(', ')}<br>结构(DDL)=${(pc.privileges.ddl || []).join(', ')}<br>授权(DCL)=${(pc.privileges.dcl || []).join(', ')}`
+          : ''
+        const confirmHtml = `<span style="color:#f56c6c;font-weight:bold">${pc.risk_label || ''} ${pc.risk_desc || '权限风险'}</span><br><br>${privHtml}<br><br><span style="color:#e6a23c">⚠️ 接入 AI 助手后，AI 可能执行危险操作。确认要保存吗？</span>`
+        try {
+          await ElMessageBox.confirm(confirmHtml, '数据库权限风险确认', { type: 'warning', confirmButtonText: '确认保存', cancelButtonText: '取消', dangerouslyUseHTMLString: true })
+        } catch { saving.value = false; return }
+      }
+    } catch (e) { ElMessage.warning('权限检测失败: ' + (e.message || e)); saving.value = false; return }
+  }
   saving.value = true
   try {
     const payload = buildPayload()
@@ -637,8 +668,9 @@ async function saveAsset() {
 async function loadAssets() {
   loading.value = true
   try {
-    const data = await request.get('/assets/api/list', { params: { search: search.value, ci_type: ciType.value } })
-    assets.value = (data || []).map(a => ({
+    const resp = await request.get('/assets/api/list', { params: { search: search.value, ci_type: ciType.value } })
+    const list = Array.isArray(resp) ? resp : (resp && resp.items) || []
+    assets.value = list.map(a => ({
       ...a,
       refCount: a.ref_count !== null && a.ref_count !== undefined ? a.ref_count : null,
       isOrphan: !!a.is_orphan,
@@ -727,20 +759,6 @@ onMounted(() => { loadAssets() })
 .filter-chk { font-size: 0.78rem; color: var(--text-secondary, #64748b); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .filter-chk input { cursor: pointer; }
 
-.tier-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; padding: 10px 14px; background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; }
-.tier-item { display: flex; align-items: center; gap: 6px; font-size: 0.74rem; padding: 4px 10px; border-radius: 5px; background: rgba(99,102,241,0.04); }
-.tier-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.tier-name { font-weight: 600; color: var(--text, #1e293b); }
-.tier-num { font-weight: 700; color: var(--accent, #6366f1); min-width: 18px; }
-.tier-sub { color: var(--text-tertiary, #94a3b8); font-size: 0.66rem; }
-.tier-warn { background: rgba(239,68,68,0.08); }
-.tier-warn-icon { color: #ef4444; font-size: 0.85rem; }
-.tier-warn .tier-num { color: #ef4444; }
-
-.tier-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 0.62rem; font-weight: 600; }
-.tier-badge.tier-persistent { background: rgba(16,185,129,0.1); color: #10b981; }
-.tier-badge.tier-weak { background: rgba(6,182,212,0.1); color: #06b6d4; }
-.tier-badge.tier-default { background: rgba(100,116,139,0.1); color: #64748b; }
 
 .asset-fullname { font-size: 0.62rem; color: var(--text-tertiary, #94a3b8); margin-top: 1px; }
 .ref-info { font-size: 0.72rem; color: #06b6d4; font-weight: 500; }

@@ -349,7 +349,7 @@ def _execute_node(db: Session, run: WorkflowRun, nr: WorkflowNodeRun, payload: D
             result = call_mcp_tool(tool_name, payload, db=db, allow_internal=True)
         except Exception as e:
             result = {"status": "error", "message": f"工具执行异常: {e}"}
-        if isinstance(result, dict) and result.get("status") == "success":
+        if isinstance(result, dict) and result.get("status") == "is_success":
             break
         if attempt < max_retry:
             time.sleep(0.5)
@@ -391,12 +391,12 @@ def confirm_node(db: Session, node_run_id: int, user_name: str = "") -> Dict:
     """用户确认写操作节点，执行后推进工作流。"""
     nr = db.query(WorkflowNodeRun).filter(WorkflowNodeRun.id == node_run_id).first()
     if not nr:
-        return {"success": False, "message": "节点不存在"}
+        return {"is_success": False, "message": "节点不存在"}
     if nr.status != WorkflowNodeRun.STATUS_AWAITING_CONFIRM:
-        return {"success": False, "message": f"节点状态为 {nr.status}，无法确认"}
+        return {"is_success": False, "message": f"节点状态为 {nr.status}，无法确认"}
     run = db.query(WorkflowRun).filter(WorkflowRun.id == nr.run_id).first()
     if not run:
-        return {"success": False, "message": "工作流实例不存在"}
+        return {"is_success": False, "message": "工作流实例不存在"}
 
     payload = nr.get_payload()
     _execute_node(db, run, nr, payload)
@@ -405,31 +405,31 @@ def confirm_node(db: Session, node_run_id: int, user_name: str = "") -> Dict:
         run.status = WorkflowRun.STATUS_RUNNING
         db.commit()
     _advance_run(db, run.id)
-    return {"success": True, "status": nr.status, "result": nr.get_result()}
+    return {"is_success": True, "status": nr.status, "result": nr.get_result()}
 
 
 def cancel_node(db: Session, node_run_id: int, reason: str = "") -> Dict:
     """取消 awaiting_confirm 节点（置 skipped），并中止整个 Run。"""
     nr = db.query(WorkflowNodeRun).filter(WorkflowNodeRun.id == node_run_id).first()
     if not nr:
-        return {"success": False, "message": "节点不存在"}
+        return {"is_success": False, "message": "节点不存在"}
     if nr.status != WorkflowNodeRun.STATUS_AWAITING_CONFIRM:
-        return {"success": False, "message": f"节点状态为 {nr.status}，无法取消"}
+        return {"is_success": False, "message": f"节点状态为 {nr.status}，无法取消"}
     nr.status = WorkflowNodeRun.STATUS_SKIPPED
     nr.result = json.dumps({"status": "canceled", "message": f"用户取消: {reason}"}, ensure_ascii=False)
     nr.completed_at = _now()
     db.commit()
     _finalize_run(db, nr.run_id, WorkflowRun.STATUS_ABORTED, f"节点 {nr.node_id} 被用户取消")
-    return {"success": True, "message": "节点已取消，工作流已中止"}
+    return {"is_success": True, "message": "节点已取消，工作流已中止"}
 
 
 def abort_run(db: Session, run_id: int, reason: str = "") -> Dict:
     """中止整个工作流。"""
     run = db.query(WorkflowRun).filter(WorkflowRun.id == run_id).first()
     if not run:
-        return {"success": False, "message": "工作流实例不存在"}
+        return {"is_success": False, "message": "工作流实例不存在"}
     if run.status in (WorkflowRun.STATUS_COMPLETED, WorkflowRun.STATUS_FAILED, WorkflowRun.STATUS_ABORTED):
-        return {"success": False, "message": f"工作流已处于终态 {run.status}"}
+        return {"is_success": False, "message": f"工作流已处于终态 {run.status}"}
     node_runs = db.query(WorkflowNodeRun).filter(WorkflowNodeRun.run_id == run_id).all()
     for nr in node_runs:
         if nr.status in (WorkflowNodeRun.STATUS_PENDING, WorkflowNodeRun.STATUS_RUNNING, WorkflowNodeRun.STATUS_AWAITING_CONFIRM):
@@ -437,19 +437,19 @@ def abort_run(db: Session, run_id: int, reason: str = "") -> Dict:
             nr.completed_at = _now()
     db.commit()
     _finalize_run(db, run_id, WorkflowRun.STATUS_ABORTED, reason or "用户手动中止")
-    return {"success": True, "message": "工作流已中止"}
+    return {"is_success": True, "message": "工作流已中止"}
 
 
 def retry_node(db: Session, node_run_id: int) -> Dict:
     """重试失败节点：重置为 pending 并重新推进。"""
     nr = db.query(WorkflowNodeRun).filter(WorkflowNodeRun.id == node_run_id).first()
     if not nr:
-        return {"success": False, "message": "节点不存在"}
+        return {"is_success": False, "message": "节点不存在"}
     if nr.status != WorkflowNodeRun.STATUS_FAILED:
-        return {"success": False, "message": f"节点状态为 {nr.status}，仅失败节点可重试"}
+        return {"is_success": False, "message": f"节点状态为 {nr.status}，仅失败节点可重试"}
     run = db.query(WorkflowRun).filter(WorkflowRun.id == nr.run_id).first()
     if not run:
-        return {"success": False, "message": "工作流实例不存在"}
+        return {"is_success": False, "message": "工作流实例不存在"}
     nr.status = WorkflowNodeRun.STATUS_PENDING
     nr.result = ""
     nr.started_at = None
@@ -459,7 +459,7 @@ def retry_node(db: Session, node_run_id: int) -> Dict:
         run.status = WorkflowRun.STATUS_RUNNING
         db.commit()
     _advance_run(db, run.id)
-    return {"success": True, "message": "节点已重试"}
+    return {"is_success": True, "message": "节点已重试"}
 
 
 def list_templates(db: Session, category: Optional[str] = None, only_enabled: bool = False, page: Optional[int] = None, per_page: int = 20) -> Dict:

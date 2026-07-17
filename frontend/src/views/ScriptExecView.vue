@@ -2,7 +2,7 @@
   <div class="script-page">
     <div class="page-header">
       <h1>远程脚本执行</h1>
-      <p>通过 SSH 在目标主机执行 Shell 脚本 · 共 {{ historyTotal }} 条历史</p>
+      <p>通过 SSH/WinRM 在目标主机执行脚本 · 共 {{ historyTotal }} 条历史</p>
     </div>
 
     <div class="panel">
@@ -14,7 +14,7 @@
             <select v-model="form.target_id" :disabled="!targets.length">
               <option v-for="t in targets" :key="t.id" :value="t.id">{{ t.name }} ({{ t.host || 'local' }})</option>
             </select>
-            <p v-if="!targets.length" class="form-tip danger">无可用 SSH 目标主机，请先在数据源管理添加 SSH 类型数据源</p>
+            <p v-if="!targets.length" class="form-tip danger">无可用目标主机，请先在资产中心添加 server/virtual_machine/cloud_host 资产并配置连接信息</p>
           </div>
           <div class="form-group">
             <label>超时(秒)</label>
@@ -22,7 +22,7 @@
           </div>
           <div class="form-group full">
             <label>脚本内容</label>
-            <textarea v-model="form.script_content" rows="8" class="mono" placeholder="#!/bin/bash&#10;uptime&#10;df -h"></textarea>
+            <textarea v-model="form.script_content" rows="8" class="mono" placeholder="#!/bin/bash&#10;uptime&#10;df -h&#10;# Windows: whoami / ipconfig"></textarea>
           </div>
         </div>
         <div class="form-actions">

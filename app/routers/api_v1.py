@@ -20,7 +20,7 @@ def _verify_token(authorization: str = Header("")) -> str:
         token = db.query(ApiToken).filter(ApiToken.token == token_str, ApiToken.enabled == True).first()
         if not token:
             raise HTTPException(status_code=403, detail="Invalid or disabled token")
-        token.last_used = datetime.now()
+        token.last_used_at = datetime.now()
         db.commit()
         return token.permissions
     finally:
@@ -92,8 +92,8 @@ def push_events(
             reason=item.get("reason", ""),
             message=item.get("message", ""),
             source=item.get("source", "api"),
-            first_seen=now,
-            last_seen=now,
+            first_seen_at=now,
+            last_seen_at=now,
             count=item.get("count", 1),
             severity=item.get("severity", "info"))
         db.add(event)
@@ -173,7 +173,7 @@ def api_docs_meta(db: Session = Depends(get_db)):
             "name": t.name,
             "permissions": t.permissions,
             "enabled": t.enabled,
-            "last_used": t.last_used.strftime("%Y-%m-%d %H:%M:%S") if t.last_used else None,
+            "last_used_at": t.last_used_at.strftime("%Y-%m-%d %H:%M:%S") if t.last_used_at else None,
             "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else None,
         } for t in tokens]
         return JSONResponse({

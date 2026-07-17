@@ -71,13 +71,28 @@ def reload_menu(db: Session = Depends(get_db)):
     """手动刷新菜单配置"""
     from app.routers.menu import DEFAULT_MENU
     import json
-    
+
     cfg = db.query(SystemConfig).filter(SystemConfig.key == "menu_config").first()
     if cfg:
-        cfg.value = json.dumps(DEFAULT_MENU, ensure_ascii=False)
+        cfg.config_value = json.dumps(DEFAULT_MENU, ensure_ascii=False)
     else:
-        cfg = SystemConfig(key="menu_config", value=json.dumps(DEFAULT_MENU, ensure_ascii=False))
+        cfg = SystemConfig(key="menu_config", config_value=json.dumps(DEFAULT_MENU, ensure_ascii=False))
         db.add(cfg)
     db.commit()
-    
+
     return {"status": "ok", "menus": len(DEFAULT_MENU)}
+
+
+@router.get("/configs")
+def get_configs(db: Session = Depends(get_db)):
+    """获取所有系统配置"""
+    from app.services.config_service import get_all_configs as _get_all_configs
+    return _get_all_configs(db)
+
+
+@router.put("/configs")
+def update_configs(configs: dict, db: Session = Depends(get_db)):
+    """批量更新系统配置"""
+    from app.services.config_service import update_configs as _update_configs
+    _update_configs(db, configs)
+    return {"ok": True}

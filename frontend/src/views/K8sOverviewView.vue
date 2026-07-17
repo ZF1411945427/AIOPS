@@ -47,7 +47,7 @@
             <span class="status-tag" :class="statusClass(o.status)">{{ statusText(o.status) }}</span>
           </div>
           <div class="cluster-endpoint">{{ o.endpoint || '-' }}</div>
-          <div class="cluster-time">采集时间: {{ o.last_scrape || '-' }}</div>
+          <div class="cluster-time">采集时间: {{ o.last_scraped_at || '-' }}</div>
         </div>
         <div class="cluster-stats">
           <div class="mini-stat"><div class="mini-val">{{ o.nodes }}</div><div class="mini-label">节点</div></div>

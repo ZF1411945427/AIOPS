@@ -1,274 +1,145 @@
 [
   {
-    "key": "overview",
-    "label": "运行概览",
+    "key": "duty",
+    "label": "值班驾驶舱",
     "icon": "Odometer",
+    "description": "值班长/值班工程师：日常监控、告警响应、故障处理",
     "items": [
       {
-        "key": "system-posture",
-        "label": "系统态势",
-        "type": "vue",
-        "path": "/system-posture"
+        "key": "monitor-overview",
+        "label": "监控总览",
+        "items": [
+          {
+            "key": "system-posture",
+            "label": "系统态势",
+            "type": "vue",
+            "path": "/system-posture"
+          },
+          {
+            "key": "monitor-view",
+            "label": "实时监控看板",
+            "type": "vue",
+            "path": "/monitor-view"
+          },
+          {
+            "key": "dashboard",
+            "label": "仪表盘",
+            "type": "vue",
+            "path": "/dashboard"
+          },
+          {
+            "key": "dashboard-designer",
+            "label": "自定义仪表盘",
+            "type": "vue",
+            "path": "/dashboard-designer"
+          },
+          {
+            "key": "ops-analytics",
+            "label": "运营分析看板",
+            "type": "vue",
+            "path": "/ops-analytics"
+          }
+        ]
       },
       {
-        "key": "dashboard",
-        "label": "仪表盘",
-        "type": "vue",
-        "path": "/dashboard"
+        "key": "alert-response",
+        "label": "告警响应",
+        "items": [
+          {
+            "key": "alerts",
+            "label": "告警中心",
+            "type": "vue",
+            "path": "/alerts"
+          },
+          {
+            "key": "anomaly",
+            "label": "异常检测",
+            "type": "vue",
+            "path": "/anomaly"
+          },
+          {
+            "key": "event-stats",
+            "label": "事件统计",
+            "type": "vue",
+            "path": "/events/stats"
+          }
+        ]
       },
       {
-        "key": "reports",
-        "label": "运维报表",
-        "type": "vue",
-        "path": "/reports"
+        "key": "incident-handling",
+        "label": "故障处理",
+        "items": [
+          {
+            "key": "incident",
+            "label": "故障单管理",
+            "type": "vue",
+            "path": "/incidents"
+          },
+          {
+            "key": "oncall-schedule",
+            "label": "值班表",
+            "type": "vue",
+            "path": "/oncall-schedule"
+          },
+          {
+            "key": "escalation-policy",
+            "label": "升级策略",
+            "type": "vue",
+            "path": "/escalation-policy"
+          },
+          {
+            "key": "notifications",
+            "label": "通知管理",
+            "type": "vue",
+            "path": "/notifications"
+          }
+        ]
       }
     ]
   },
   {
-    "key": "aiops",
-    "label": "AIOps 智能体",
-    "icon": "Cpu",
-    "items": [
-      {
-        "key": "agent-chat",
-        "label": "AI 智能助手",
-        "type": "vue",
-        "path": "/agent-chat"
-      },
-      {
-        "key": "pending-actions",
-        "label": "待确认动作",
-        "type": "vue",
-        "path": "/agent/pending"
-      },
-      {
-        "key": "agent-workflow-editor",
-        "label": "智能体编排",
-        "type": "vue",
-        "path": "/agent-workflow/editor"
-      },
-      {
-        "key": "agent-workflow-runs",
-        "label": "智能体执行",
-        "type": "vue",
-        "path": "/agent-workflow/runs"
-      },
-      {
-        "key": "ai-providers",
-        "label": "智能体配置",
-        "type": "vue",
-        "path": "/ai/providers"
-      },
-      {
-        "key": "feature-store",
-        "label": "特征仓库",
-        "type": "vue",
-        "path": "/feature-store"
-      },
-      {
-        "key": "prediction-models",
-        "label": "预测模型",
-        "type": "vue",
-        "path": "/prediction-models"
-      },
-      {
-        "key": "audit",
-        "label": "智能体审计",
-        "type": "vue",
-        "path": "/agent-audit"
-      }
-    ]
-  },
-  {
-    "key": "observability",
-    "label": "可观测性",
-    "icon": "DataAnalysis",
-    "items": [
-      {
-        "key": "metrics",
-        "label": "指标监控",
-        "type": "vue",
-        "path": "/metrics-view"
-      },
-      {
-        "key": "logs",
-        "label": "日志中心",
-        "type": "vue",
-        "path": "/logs"
-      },
-      {
-        "key": "traces",
-        "label": "链路追踪",
-        "type": "vue",
-        "path": "/trace-view"
-      },
-      {
-        "key": "discovery",
-        "label": "接入指引",
-        "type": "vue",
-        "path": "/trace-agent-guide"
-      },
-      {
-        "key": "alerts",
-        "label": "告警中心",
-        "type": "vue",
-        "path": "/alerts"
-      },
-      {
-        "key": "datasources",
-        "label": "数据源管理",
-        "type": "vue",
-        "path": "/datasources"
-      },
-      {
-        "key": "k8s-monitor",
-        "label": "K8s 资源监控",
-        "type": "vue",
-        "path": "/k8s-monitor"
-      }
-    ]
-  },
-  {
-    "key": "events",
-    "label": "事件中心",
-    "icon": "Bell",
-    "items": [
-      {
-        "key": "incident",
-        "label": "故障单管理",
-        "type": "vue",
-        "path": "/incidents"
-      },
-      {
-        "key": "event-stats",
-        "label": "事件统计",
-        "type": "vue",
-        "path": "/events/stats"
-      },
-      {
-        "key": "event-sources",
-        "label": "事件源配置",
-        "type": "vue",
-        "path": "/event-sources"
-      },
-      {
-        "key": "anomaly",
-        "label": "异常检测",
-        "type": "vue",
-        "path": "/anomaly"
-      }
-    ]
-  },
-  {
-    "key": "tasks",
-    "label": "任务中心",
+    "key": "ops",
+    "label": "运维工作台",
     "icon": "Tools",
+    "description": "运维工程师：资产运维、K8s管理、自愈、变更、诊断",
     "items": [
       {
-        "key": "remediation",
-        "label": "自愈规则",
-        "type": "vue",
-        "path": "/remediation"
+        "key": "asset-management",
+        "label": "资产管理",
+        "items": [
+          {
+            "key": "asset-list",
+            "label": "资产列表",
+            "type": "vue",
+            "path": "/assets"
+          },
+          {
+            "key": "topology",
+            "label": "拓扑视图",
+            "type": "vue",
+            "path": "/topology"
+          },
+          {
+            "key": "lifecycle",
+            "label": "资产生命周期",
+            "type": "vue",
+            "path": "/lifecycle"
+          },
+          {
+            "key": "asset-discovery",
+            "label": "资产自动发现",
+            "type": "vue",
+            "path": "/asset-discovery"
+          }
+        ]
       },
       {
-        "key": "remediation-workflow",
-        "label": "自愈工作流",
-        "type": "vue",
-        "path": "/remediation-workflows"
-      },
-      {
-        "key": "script-exec",
-        "label": "远程脚本",
-        "type": "vue",
-        "path": "/script"
-      },
-      {
-        "key": "ansible",
-        "label": "Ansible 运维",
-        "type": "vue",
-        "path": "/ansible"
-      },
-      {
-        "key": "blue-green",
-        "label": "蓝绿发布",
-        "type": "vue",
-        "path": "/blue-green"
-      },
-      {
-        "key": "change-workflow",
-        "label": "变更审批",
-        "type": "vue",
-        "path": "/change-workflow"
-      },
-      {
-        "key": "workflow-runs",
-        "label": "工作流执行",
-        "type": "vue",
-        "path": "/workflow/runs"
-      },
-      {
-        "key": "workflow-templates",
-        "label": "工作流模板",
-        "type": "vue",
-        "path": "/workflow/templates"
-      }
-    ]
-  },
-  {
-    "key": "assets",
-    "label": "资产管理",
-    "icon": "Box",
-    "items": [
-      {
-        "key": "asset-list",
-        "label": "资产列表",
-        "type": "vue",
-        "path": "/assets"
-      },
-      {
-        "key": "tags",
-        "label": "标签管理",
-        "type": "vue",
-        "path": "/tags"
-      },
-      {
-        "key": "topology",
-        "label": "拓扑视图",
-        "type": "vue",
-        "path": "/topology"
-      },
-      {
-        "key": "topology-path",
-        "label": "路径查询",
-        "type": "vue",
-        "path": "/topology/path"
-      },
-      {
-        "key": "lifecycle",
-        "label": "资产生命周期",
-        "type": "vue",
-        "path": "/lifecycle"
-      },
-      {
-        "key": "ext-cmdb",
-        "label": "外部 CMDB",
-        "type": "vue",
-        "path": "/ext-cmdb"
-      }
-    ]
-  },
-  {
-    "key": "containers",
-    "label": "容器与 K8s",
-    "icon": "Cloudy",
-    "items": [
-      {
-        "key": "kubernetes",
-        "label": "Kubernetes",
+        "key": "k8s-resources",
+        "label": "K8s 资源",
         "items": [
           {
             "key": "k8s-overview",
-            "label": "集群概览",
+            "label": "集群总览",
             "type": "vue",
             "path": "/k8s/overview"
           },
@@ -286,255 +157,459 @@
           },
           {
             "key": "k8s-deployments",
-            "label": "Deployment 无状态应用",
+            "label": "Deployment 应用",
             "type": "vue",
             "path": "/containers/deployments"
-          },
-          {
-            "key": "k8s-statefulsets",
-            "label": "StatefulSet 有状态应用",
-            "type": "vue",
-            "path": "/k8s/statefulsets"
-          },
-          {
-            "key": "k8s-daemonsets",
-            "label": "DaemonSet 守护进程",
-            "type": "vue",
-            "path": "/k8s/daemonsets"
-          },
-          {
-            "key": "k8s-services",
-            "label": "Service 服务",
-            "type": "vue",
-            "path": "/k8s/services"
-          },
-          {
-            "key": "k8s-ingresses",
-            "label": "Ingress 入口路由",
-            "type": "vue",
-            "path": "/k8s/ingresses"
-          },
-          {
-            "key": "k8s-configmaps",
-            "label": "ConfigMap 配置项",
-            "type": "vue",
-            "path": "/k8s/configmaps"
-          },
-          {
-            "key": "k8s-secrets",
-            "label": "Secret 密钥",
-            "type": "vue",
-            "path": "/k8s/secrets"
-          },
-          {
-            "key": "k8s-hpas",
-            "label": "HPA 弹性伸缩",
-            "type": "vue",
-            "path": "/k8s/hpas"
-          },
-          {
-            "key": "k8s-pvcs",
-            "label": "PVC 存储卷声明",
-            "type": "vue",
-            "path": "/k8s/pvcs"
-          },
-          {
-            "key": "k8s-pvs",
-            "label": "PV 存储卷",
-            "type": "vue",
-            "path": "/k8s/pvs"
           },
           {
             "key": "k8s-namespaces",
             "label": "Namespace 命名空间",
             "type": "vue",
             "path": "/k8s/namespaces"
-          }
-        ]
-      },
-      {
-        "key": "docker",
-        "label": "Docker 容器",
-        "items": [
-          {
-            "key": "docker-overview",
-            "label": "Docker 概览",
-            "type": "vue",
-            "path": "/containers"
           },
           {
-            "key": "docker-list",
-            "label": "容器列表",
+            "key": "k8s-hpa-recommend",
+            "label": "HPA 配置推荐",
             "type": "vue",
-            "path": "/containers/docker"
+            "path": "/k8s/hpa-recommend"
+          },
+          {
+            "key": "k8s-resource-optimize",
+            "label": "资源优化建议",
+            "type": "vue",
+            "path": "/k8s/resource-optimize"
           }
         ]
       },
       {
-        "key": "helm",
-        "label": "Helm",
+        "key": "self-healing",
+        "label": "自愈管理",
         "items": [
           {
-            "key": "helm-releases",
-            "label": "Helm 应用",
+            "key": "remediation",
+            "label": "自愈规则",
             "type": "vue",
-            "path": "/helm/releases"
+            "path": "/remediation"
+          },
+          {
+            "key": "remediation-workflow",
+            "label": "自愈工作流",
+            "type": "vue",
+            "path": "/remediation-workflows"
+          },
+          {
+            "key": "remediation-effect",
+            "label": "自愈效果分析",
+            "type": "vue",
+            "path": "/remediation-effect"
+          }
+        ]
+      },
+      {
+        "key": "change-release",
+        "label": "流程引擎",
+        "items": [
+          {
+            "key": "workflow-runs",
+            "label": "工作流执行",
+            "type": "vue",
+            "path": "/workflow/runs"
+          },
+          {
+            "key": "workflow-templates",
+            "label": "工作流模板",
+            "type": "vue",
+            "path": "/workflow/templates"
+          }
+        ]
+      },
+      {
+        "key": "toolbox",
+        "label": "工具箱",
+        "items": [
+          {
+            "key": "diagnostic-tools",
+            "label": "诊断工具中心",
+            "type": "vue",
+            "path": "/diagnostic-tools"
+          },
+          {
+            "key": "smart-inspection",
+            "label": "智能巡检",
+            "type": "vue",
+            "path": "/smart-inspection"
+          },
+          {
+            "key": "script-exec",
+            "label": "远程脚本",
+            "type": "vue",
+            "path": "/script"
           }
         ]
       }
     ]
   },
   {
-    "key": "sre",
-    "label": "SRE 可靠性",
-    "icon": "DataLine",
+    "key": "analysis",
+    "label": "智能分析室",
+    "icon": "DataAnalysis",
+    "description": "SRE/数据分析师：指标分析、日志分析、链路追踪、异常检测",
     "items": [
       {
-        "key": "error-budget",
-        "label": "错误预算",
-        "type": "vue",
-        "path": "/error-budget"
+        "key": "metrics-analysis",
+        "label": "指标监控",
+        "items": [
+          {
+            "key": "metrics",
+            "label": "指标监控",
+            "type": "vue",
+            "path": "/metrics-view"
+          },
+          {
+            "key": "k8s-monitor",
+            "label": "K8s 资源监控",
+            "type": "vue",
+            "path": "/k8s-monitor"
+          }
+        ]
       },
       {
-        "key": "burn-rate",
-        "label": "预算消耗",
-        "type": "vue",
-        "path": "/burn-rate"
+        "key": "log-analysis",
+        "label": "日志分析",
+        "items": [
+          {
+            "key": "logs",
+            "label": "日志中心",
+            "type": "vue",
+            "path": "/logs"
+          },
+          {
+            "key": "datasources",
+            "label": "数据源管理",
+            "type": "vue",
+            "path": "/datasources"
+          }
+        ]
       },
       {
-        "key": "slo-config",
-        "label": "SLO 配置",
-        "type": "vue",
-        "path": "/slo-config"
+        "key": "trace-analysis",
+        "label": "链路追踪",
+        "items": [
+          {
+            "key": "traces",
+            "label": "链路追踪",
+            "type": "vue",
+            "path": "/trace-view"
+          },
+          {
+            "key": "discovery",
+            "label": "接入指引",
+            "type": "vue",
+            "path": "/trace-agent-guide"
+          }
+        ]
       },
       {
-        "key": "sla-agreement",
-        "label": "SLA 协议",
-        "type": "vue",
-        "path": "/sla-agreement"
+        "key": "anomaly-detection",
+        "label": "异常检测",
+        "items": [
+          {
+            "key": "firemap",
+            "label": "灭火图",
+            "type": "vue",
+            "path": "/firemap"
+          },
+          {
+            "key": "anomaly-benchmark",
+            "label": "异常检测基准",
+            "type": "vue",
+            "path": "/anomaly-benchmark"
+          },
+          {
+            "key": "trace-anomaly-config",
+            "label": "Trace 异常检测",
+            "type": "vue",
+            "path": "/trace-anomaly/configs"
+          }
+        ]
       },
       {
-        "key": "oncall-schedule",
-        "label": "值班表",
-        "type": "vue",
-        "path": "/oncall-schedule"
+        "key": "event-management",
+        "label": "事件管理",
+        "items": [
+          {
+            "key": "event-sources",
+            "label": "事件源配置",
+            "type": "vue",
+            "path": "/event-sources"
+          }
+        ]
       },
       {
-        "key": "escalation-policy",
-        "label": "升级策略",
-        "type": "vue",
-        "path": "/escalation-policy"
-      },
-      {
-        "key": "availability-report",
-        "label": "可用性报表",
-        "type": "vue",
-        "path": "/availability-report"
+        "key": "correlation-analysis",
+        "label": "关联分析",
+        "items": [
+          {
+            "key": "observability-correlation",
+            "label": "日志·指标·链路关联",
+            "type": "vue",
+            "path": "/observability-correlation"
+          }
+        ]
       }
     ]
   },
   {
-    "key": "chaos",
-    "label": "混沌工程",
-    "icon": "Warning",
+    "key": "reliability",
+    "label": "可靠性工程",
+    "icon": "DataLine",
+    "description": "SRE：SLO管理、混沌工程",
     "items": [
       {
-        "key": "chaos-experiment",
-        "label": "实验管理",
-        "type": "vue",
-        "path": "/chaos-experiment"
+        "key": "slo-management",
+        "label": "SLO 管理",
+        "items": [
+          {
+            "key": "slo-config",
+            "label": "SLO 配置",
+            "type": "vue",
+            "path": "/slo-config"
+          },
+          {
+            "key": "error-budget",
+            "label": "错误预算",
+            "type": "vue",
+            "path": "/error-budget"
+          },
+          {
+            "key": "burn-rate",
+            "label": "预算消耗",
+            "type": "vue",
+            "path": "/burn-rate"
+          },
+          {
+            "key": "availability-report",
+            "label": "可用性报表",
+            "type": "vue",
+            "path": "/availability-report"
+          }
+        ]
       },
       {
-        "key": "chaos-report",
-        "label": "实验报告",
-        "type": "vue",
-        "path": "/chaos-report"
-      },
-      {
-        "key": "chaos-scenario",
-        "label": "场景库",
-        "type": "vue",
-        "path": "/chaos-scenario"
+        "key": "chaos-engineering",
+        "label": "混沌工程",
+        "items": [
+          {
+            "key": "chaos-experiment",
+            "label": "混沌实验",
+            "type": "vue",
+            "path": "/chaos-experiment"
+          },
+          {
+            "key": "chaos-report",
+            "label": "实验报告",
+            "type": "vue",
+            "path": "/chaos-report"
+          },
+          {
+            "key": "chaos-scenario",
+            "label": "场景库",
+            "type": "vue",
+            "path": "/chaos-scenario"
+          }
+        ]
       }
     ]
   },
   {
     "key": "knowledge",
-    "label": "知识管理",
+    "label": "知识库",
     "icon": "Reading",
+    "description": "知识管理员：知识检索、SOP管理",
     "items": [
       {
-        "key": "kb-list",
-        "label": "故障知识库",
-        "type": "vue",
-        "path": "/knowledge"
+        "key": "knowledge-management",
+        "label": "知识管理",
+        "items": [
+          {
+            "key": "kb-list",
+            "label": "故障知识库",
+            "type": "vue",
+            "path": "/knowledge"
+          },
+          {
+            "key": "runbooks",
+            "label": "Runbook",
+            "type": "vue",
+            "path": "/runbooks"
+          },
+          {
+            "key": "knowledge-draft",
+            "label": "知识草稿审批",
+            "type": "vue",
+            "path": "/knowledge-draft"
+          },
+          {
+            "key": "kb-documents",
+            "label": "RAG 知识库文档",
+            "type": "vue",
+            "path": "/knowledge/documents"
+          },
+          {
+            "key": "kb-graph",
+            "label": "运维知识图谱",
+            "type": "vue",
+            "path": "/knowledge/graph"
+          },
+          {
+            "key": "graph-inference",
+            "label": "知识图谱推理",
+            "type": "vue",
+            "path": "/knowledge/graph-inference"
+          },
+          {
+            "key": "smart-recommend",
+            "label": "智能推荐",
+            "type": "vue",
+            "path": "/smart-recommend"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "aiops",
+    "label": "AI运维智能体",
+    "icon": "Cpu",
+    "description": "AI运营者：AI助手、Agent管理",
+    "items": [
+      {
+        "key": "ai-assistant",
+        "label": "AI 助手",
+        "items": [
+          {
+            "key": "agent-chat",
+            "label": "智能助手",
+            "type": "vue",
+            "path": "/agent-chat"
+          },
+          {
+            "key": "pending-actions",
+            "label": "待确认动作",
+            "type": "vue",
+            "path": "/agent/pending"
+          }
+        ]
       },
       {
-        "key": "kb-documents",
-        "label": "知识库文档 RAG",
-        "type": "vue",
-        "path": "/knowledge/documents"
-      },
-      {
-        "key": "kb-graph",
-        "label": "运维知识图谱",
-        "type": "vue",
-        "path": "/knowledge/graph"
-      },
-      {
-        "key": "smart-recommend",
-        "label": "智能推荐",
-        "type": "vue",
-        "path": "/smart-recommend"
-      },
-      {
-        "key": "runbooks",
-        "label": "Runbook",
-        "type": "vue",
-        "path": "/runbooks"
+        "key": "agent-management",
+        "label": "Agent 管理",
+        "items": [
+          {
+            "key": "agent-workflow-editor",
+            "label": "智能体编排",
+            "type": "vue",
+            "path": "/agent-workflow/editor"
+          },
+          {
+            "key": "ai-providers",
+            "label": "智能体配置",
+            "type": "vue",
+            "path": "/ai/providers"
+          },
+          {
+            "key": "agent-capabilities",
+            "label": "Agent 能力中心",
+            "type": "vue",
+            "path": "/agent/capabilities"
+          },
+          {
+            "key": "agent-eval",
+            "label": "Agent 评估",
+            "type": "vue",
+            "path": "/agent-eval"
+          },
+          {
+            "key": "ab-test",
+            "label": "A/B 测试",
+            "type": "vue",
+            "path": "/ab-test"
+          },
+          {
+            "key": "agent-ground-truth",
+            "label": "GroundTruth 测试",
+            "type": "vue",
+            "path": "/agent/ground-truth"
+          }
+        ]
       }
     ]
   },
   {
     "key": "system",
-    "label": "系统管理",
+    "label": "系统配置",
     "icon": "Setting",
+    "description": "管理员：用户权限、系统配置、集成",
     "items": [
       {
-        "key": "users",
-        "label": "用户与权限",
-        "type": "vue",
-        "path": "/users"
+        "key": "user-permission",
+        "label": "用户权限",
+        "items": [
+          {
+            "key": "users",
+            "label": "用户管理",
+            "type": "vue",
+            "path": "/users"
+          },
+          {
+            "key": "roles-manage",
+            "label": "角色管理",
+            "type": "vue",
+            "path": "/roles-manage"
+          }
+        ]
       },
       {
-        "key": "notifications",
-        "label": "通知管理",
-        "type": "vue",
-        "path": "/notifications"
+        "key": "system-management",
+        "label": "系统管理",
+        "items": [
+          {
+            "key": "settings",
+            "label": "系统配置",
+            "type": "vue",
+            "path": "/settings"
+          },
+          {
+            "key": "tenant-management",
+            "label": "租户管理",
+            "type": "vue",
+            "path": "/tenant-management"
+          },
+          {
+            "key": "tags",
+            "label": "标签管理",
+            "type": "vue",
+            "path": "/tags"
+          }
+        ]
       },
       {
-        "key": "settings",
-        "label": "系统配置",
-        "type": "vue",
-        "path": "/settings"
-      },
-      {
-        "key": "openapi",
-        "label": "开放接口",
-        "type": "vue",
-        "path": "/api/v1/docs"
-      },
-      {
-        "key": "integration",
+        "key": "integration-management",
         "label": "集成管理",
-        "type": "vue",
-        "path": "/es-integration"
-      },
-      {
-        "key": "license",
-        "label": "授权管理",
-        "type": "vue",
-        "path": "/license"
+        "items": [
+          {
+            "key": "integration",
+            "label": "集成管理",
+            "type": "vue",
+            "path": "/es-integration"
+          },
+          {
+            "key": "openapi",
+            "label": "开放接口",
+            "type": "vue",
+            "path": "/api/v1/docs"
+          }
+        ]
       }
     ]
   }

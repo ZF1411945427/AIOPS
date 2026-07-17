@@ -20,7 +20,7 @@ def api_model_list(db: Session = Depends(get_db), page: int = 1, page_size: int 
             {
                 "id": m.id, "name": m.name, "metric_name": m.metric_name,
                 "asset_id": m.asset_id, "model_type": m.model_type,
-                "params": m.params, "enabled": m.enabled,
+                "params": m.model_params, "enabled": m.enabled,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in models
@@ -34,7 +34,7 @@ def api_model_create(payload: dict = Body(...), db: Session = Depends(get_db)):
         name=payload.get("name", ""), metric_name=payload.get("metric_name", ""),
         asset_id=payload.get("asset_id") or None,
         model_type=payload.get("model_type", "linear"),
-        params=payload.get("params", "{}") or "{}")
+        model_params=payload.get("params", "{}") or "{}")
     db.add(m)
     db.commit()
     db.refresh(m)

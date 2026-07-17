@@ -32,15 +32,15 @@ def api_lifecycle_list(db: Session = Depends(get_db)):
             items.append({
                 "id": a.id,
                 "name": a.name,
-                "type": a.type,
+                "type": a.ci_type,
                 "ci_type": getattr(a, "ci_type", None),
                 "ip": a.ip,
                 "status": a.status,
                 "lifecycle_status": cur_status,
                 "previous_status": lc.previous_status if lc else "",
                 "lifecycle_changed_at": lc.created_at.strftime("%Y-%m-%d %H:%M:%S") if lc and lc.created_at else None,
-                "changed_by": users.get(lc.changed_by) if lc else None,
-                "comment": lc.comment if lc else "",
+                "user_id": users.get(lc.user_id) if lc else None,
+                "comment": lc.description if lc else "",
                 "allowed_transitions": ALLOWED_TRANSITIONS.get(cur_status, []),
             })
         return JSONResponse({"items": items, "error": None})
@@ -61,15 +61,15 @@ def api_lifecycle_history(asset_id: int, db: Session = Depends(get_db)):
             "asset_id": lc.asset_id,
             "status": lc.status,
             "previous_status": lc.previous_status,
-            "changed_by": users.get(lc.changed_by),
-            "changed_by_id": lc.changed_by,
-            "comment": lc.comment or "",
+            "user_id": users.get(lc.user_id),
+            "changed_by_id": lc.user_id,
+            "comment": lc.description or "",
             "created_at": lc.created_at.strftime("%Y-%m-%d %H:%M:%S") if lc.created_at else None,
         } for lc in logs]
         return JSONResponse({
             "items": items,
             "asset": {
-                "id": asset.id, "name": asset.name, "type": asset.type,
+                "id": asset.id, "name": asset.name, "type": asset.ci_type,
                 "ci_type": getattr(asset, "ci_type", None), "status": asset.status, "ip": asset.ip,
             } if asset else None,
             "error": None,
@@ -105,8 +105,8 @@ def api_lifecycle_transition(
         db.add(AssetLifecycle(
             asset_id=asset_id, status=to_status,
             previous_status=prev,
-            changed_by=request.session.get("user_id"),
-            comment=comment))
+            user_id=request.session.get("user_id"),
+            description=comment))
         if to_status == "active":
             asset.status = "online"
         elif to_status == "maintenance":

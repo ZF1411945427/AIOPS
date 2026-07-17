@@ -9,7 +9,13 @@ const routes = [
     { path: '/chaos-experiment', name: 'ChaosExperiment', component: () => import('../views/ChaosExperimentView.vue') },
     { path: '/chaos-report', name: 'ChaosReport', component: () => import('../views/ChaosReportView.vue') },
     { path: '/chaos-scenario', name: 'ChaosScenario', component: () => import('../views/ChaosScenarioView.vue') },
-  {
+    {
+      path: '/product/intro',
+      name: 'ProductIntro',
+      component: () => import('../views/ProductIntroView.vue'),
+      meta: { title: '产品介绍' },
+    },
+    {
     path: '/login',
     name: 'login',
     component: () => import('../views/LoginView.vue'),

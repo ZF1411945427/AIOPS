@@ -54,7 +54,7 @@ def api_script_targets(db: Session = Depends(get_db)):
     """远程脚本目标主机列表 JSON API."""
     ds_targets = db.query(DataSource).filter(DataSource.type.in_(["ssh", "host", "linux"])).all()
     asset_targets = db.query(Asset).filter(
-        Asset.ci_type == "cloud_host",
+        Asset.ci_type.in_(["server", "virtual_machine", "cloud_host"]),
         Asset.connection_config.isnot(None),
         Asset.connection_config != "",
     ).all()
@@ -118,6 +118,7 @@ def api_script_execute(
         target_name = target.name
 
     use_local = cfg.get("local", False) or host in ("localhost", "127.0.0.1")
+    use_winrm = cfg.get("winrm_user") or cfg.get("winrm_transport")
 
     output = ""
     error = ""
@@ -137,17 +138,35 @@ def api_script_execute(
             error = str(e)
     else:
         try:
-            from app.services.ssh_helper import get_ssh_client
-            client = get_ssh_client()
-            if key_path:
-                key = paramiko.RSAKey.from_private_key_file(key_path)
-                client.connect(host, port=port, username=username, pkey=key, timeout=timeout)
+            if use_winrm:
+                import winrm
+                winrm_user = cfg.get("winrm_user", "Administrator")
+                winrm_password = cfg.get("winrm_password", "")
+                winrm_port = cfg.get("winrm_port", 5985)
+                winrm_transport = cfg.get("winrm_transport", "ntlm")
+                winrm_ssl = cfg.get("winrm_ssl", False)
+                scheme = "https" if winrm_ssl else "http"
+                endpoint = f"{scheme}://{host}:{winrm_port}/wsman"
+                session = winrm.Session(endpoint, auth=(winrm_user, winrm_password),
+                                        transport=winrm_transport,
+                                        server_cert_validation="ignore" if winrm_ssl else "validate")
+                r = session.run_cmd(script_content)
+                output = r.std_out if r.std_out else ""
+                error = r.std_err if r.std_err else ""
+                if r.status_code != 0:
+                    error = f"(exit_code={r.status_code}) {error}"
             else:
-                client.connect(host, port=port, username=username, password=password, timeout=timeout)
-            stdin, stdout, stderr = client.exec_command(script_content, timeout=timeout)
-            output = stdout.read().decode(errors="ignore")
-            error = stderr.read().decode(errors="ignore")
-            client.close()
+                from app.services.ssh_helper import get_ssh_client
+                client = get_ssh_client()
+                if key_path:
+                    key = paramiko.RSAKey.from_private_key_file(key_path)
+                    client.connect(host, port=port, username=username, pkey=key, timeout=timeout)
+                else:
+                    client.connect(host, port=port, username=username, password=password, timeout=timeout)
+                stdin, stdout, stderr = client.exec_command(script_content, timeout=timeout)
+                output = stdout.read().decode(errors="ignore")
+                error = stderr.read().decode(errors="ignore")
+                client.close()
         except Exception as e:
             error = str(e)
 

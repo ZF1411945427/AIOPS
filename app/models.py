@@ -6,6 +6,25 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Foreig
 from app.database import Base
 
 
+class Role(Base):
+    __tablename__ = "roles"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(64), unique=True, nullable=False, index=True)
+    description = Column(String(256), default="")
+    is_system = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class RoleMenu(Base):
+    __tablename__ = "role_menus"
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
+    menu_key = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
 class ChaosExperiment(Base):
     __tablename__ = "chaos_experiments"
     id = Column(Integer, primary_key=True, index=True)
@@ -28,13 +47,14 @@ class ChaosRun(Base):
     __tablename__ = "chaos_runs"
     id = Column(Integer, primary_key=True, index=True)
     experiment_id = Column(Integer, ForeignKey("chaos_experiments.id"), nullable=False)
-    steady_state_passed = Column(Boolean, default=False)
+    is_steady_state_passed = Column(Boolean, default=False)
+    is_auto_recovered = Column(Boolean, default=False)
     alerts_triggered = Column(Integer, default=0)
     error_budget_impact = Column(Float, default=0.0)
     duration_seconds = Column(Integer, default=0)
     steady_state_before = Column(Text, default="{}")
     steady_state_after = Column(Text, default="{}")
-    notes = Column(Text, default="")
+    description = Column(Text, default="")
     started_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -60,6 +80,8 @@ class User(Base):
     username = Column(String(64), unique=True, nullable=False, index=True)
     password_hash = Column(String(256), nullable=False)
     role = Column(String(32), default="admin")
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, default=1)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -68,7 +90,6 @@ class Asset(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(128), nullable=False)
-    type = Column(String(64), nullable=False)
     ci_type = Column(String(32), default="server")
     parent_id = Column(Integer, ForeignKey("assets.id"), nullable=True)
     ip = Column(String(64), default="")
@@ -79,8 +100,31 @@ class Asset(Base):
     connection_type = Column(String(32), default="ssh")
     connection_config = Column(Text, default="{}")
     created_at = Column(DateTime, default=lambda: datetime.now())
-    last_checked = Column(DateTime, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
     latency_ms = Column(Integer, nullable=True)
+    health_status = Column(String(16), default="green")
+
+
+class TagCategory(Base):
+    __tablename__ = "tag_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(64), nullable=False, unique=True)
+    label = Column(String(64), nullable=False)
+    color = Column(String(16), default="#6366f1")
+    icon = Column(String(32), default="🏷️")
+    sort_order = Column(Integer, default=0)
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    category_id = Column(Integer, ForeignKey("tag_categories.id"), nullable=True)
+    color = Column(String(16), default="#6366f1")
+    description = Column(String(256), default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
 
 
 class AlertRule(Base):
@@ -100,8 +144,8 @@ class AlertSilence(Base):
     __tablename__ = "alert_silences"
 
     id = Column(Integer, primary_key=True, index=True)
-    rule_id = Column(Integer, ForeignKey("alert_rules.id"), nullable=False)
-    until = Column(DateTime, nullable=False)
+    rule_id = Column(Integer, ForeignKey("alert_rules.id"), nullable=True)
+    expires_at = Column(DateTime, nullable=False)
     reason = Column(String(256), default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -119,6 +163,7 @@ class Alert(Base):
     status = Column(String(32), default="triggered")
     message = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
+    acknowledged_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
 
 
@@ -128,7 +173,7 @@ class NotificationChannel(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(64), nullable=False)
     type = Column(String(32), nullable=False)
-    config = Column(Text, default="")
+    channel_config = Column(Text, default="")
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -142,8 +187,8 @@ class NotificationLog(Base):
     channel_type = Column(String(32), nullable=False)
     recipient = Column(String(256), default="")
     title = Column(String(256), default="")
-    content = Column(Text, default="")
-    success = Column(Boolean, default=False)
+    notification_content = Column(Text, default="")
+    is_success = Column(Boolean, default=False)
     error_message = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -157,6 +202,10 @@ class Incident(Base):
     status = Column(String(32), default="open")
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True)
     alert_count = Column(Integer, default=0)
+    impact = Column(String(32), default="high")
+    description = Column(Text, default="")
+    approver_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    review_comment = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
     resolved_at = Column(DateTime, nullable=True)
 
@@ -167,6 +216,17 @@ class IncidentAlert(Base):
     id = Column(Integer, primary_key=True, index=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False)
     alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+
+
+class IncidentApproval(Base):
+    __tablename__ = "incident_approvals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False)
+    approver_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String(32), nullable=False)  # submit / approve / reject
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
 
 
 class KnowledgeBase(Base):
@@ -180,6 +240,10 @@ class KnowledgeBase(Base):
     tags = Column(String(256), default="")
     severity = Column(String(32), default="warning")
     asset_type = Column(String(32), default="")
+    source_type = Column(String(32), default="manual")
+    sop_steps = Column(Text, default="[]")
+    version_number = Column(Integer, default=1)
+    change_log = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
 
@@ -199,7 +263,7 @@ class AutoRemediation(Base):
     name = Column(String(128), nullable=False)
     rule_id = Column(Integer, ForeignKey("alert_rules.id"), nullable=True)
     action_type = Column(String(32), nullable=False)
-    params = Column(Text, default="")
+    remediation_params = Column(Text, default="")
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -212,8 +276,25 @@ class RemediationLog(Base):
     alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True)
     action_type = Column(String(32), nullable=False)
     target = Column(String(128), default="")
-    success = Column(Boolean, default=False)
+    is_success = Column(Boolean, default=False)
     output = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class RemediationEffect(Base):
+    __tablename__ = "remediation_effects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    remediation_id = Column(Integer, ForeignKey("auto_remediations.id"), nullable=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True)
+    executed_at = Column(DateTime, nullable=False)
+    check_at = Column(DateTime, nullable=False)
+    alert_status_at_execute = Column(String(32), default="triggered")
+    alert_status_at_check = Column(String(32), default="unknown")
+    is_asset_recovered = Column(Boolean, default=False)
+    is_alert_resolved = Column(Boolean, default=False)
+    recovery_time_seconds = Column(Integer, default=0)
+    description = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -240,7 +321,7 @@ class DataSource(Base):
     enabled = Column(Boolean, default=True)
     last_status = Column(String(32), default="unknown")
     last_error = Column(Text, default="")
-    last_scrape = Column(DateTime, nullable=True)
+    last_scraped_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -251,7 +332,7 @@ class ApiToken(Base):
     name = Column(String(128), nullable=False)
     token = Column(String(64), unique=True, nullable=False, index=True)
     permissions = Column(String(256), default="read")
-    last_used = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -261,7 +342,7 @@ class SystemConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String(128), unique=True, nullable=False, index=True)
-    value = Column(Text, default="")
+    config_value = Column(Text, default="")
     description = Column(String(256), default="")
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
 
@@ -272,10 +353,10 @@ class Report(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(256), nullable=False)
     type = Column(String(32), nullable=False)
-    period_start = Column(DateTime, nullable=True)
-    period_end = Column(DateTime, nullable=True)
+    period_started_at = Column(DateTime, nullable=True)
+    period_ended_at = Column(DateTime, nullable=True)
     summary = Column(Text, default="")
-    data = Column(Text, default="")
+    report_data = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -329,8 +410,8 @@ class K8sEvent(Base):
     reason = Column(String(128), default="")
     message = Column(Text, default="")
     source = Column(String(128), default="")
-    first_seen = Column(DateTime, nullable=True)
-    last_seen = Column(DateTime, nullable=True)
+    first_seen_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)
     count = Column(Integer, default=1)
     severity = Column(String(32), default="info")
     created_at = Column(DateTime, default=lambda: datetime.now())
@@ -398,6 +479,7 @@ class LogAnomalyRule(Base):
     source = Column(String(32), default="k8s")
     keyword = Column(String(256), default="")
     regex_pattern = Column(String(512), default="")
+    log_level = Column(String(32), default="")
     threshold = Column(Integer, default=10)
     window_minutes = Column(Integer, default=5)
     severity = Column(String(32), default="warning")
@@ -426,9 +508,23 @@ class DashboardCardConfig(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     card_type = Column(String(64), nullable=False)
     title = Column(String(128), default="")
-    config = Column(Text, default="{}")
+    card_config = Column(Text, default="{}")
     position = Column(Integer, default=0)
-    visible = Column(Boolean, default=True)
+    is_visible = Column(Boolean, default=True)
+
+
+class DashboardLayout(Base):
+    __tablename__ = "dashboard_layouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    layout_config = Column(Text, default="[]")
+    is_default = Column(Boolean, default=False)
+    is_shared = Column(Boolean, default=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
 
 
 class AssetChangeLog(Base):
@@ -452,7 +548,7 @@ class PredictionModel(Base):
     metric_name = Column(String(64), nullable=False)
     asset_id = Column(Integer, nullable=True)
     model_type = Column(String(32), default="linear")
-    params = Column(Text, default="{}")
+    model_params = Column(Text, default="{}")
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -494,8 +590,8 @@ class ChangeRequest(Base):
     priority = Column(String(32), default="medium")
     status = Column(String(32), default="draft")
     risk_level = Column(String(32), default="low")
-    planned_start = Column(DateTime, nullable=True)
-    planned_end = Column(DateTime, nullable=True)
+    planned_started_at = Column(DateTime, nullable=True)
+    planned_ended_at = Column(DateTime, nullable=True)
     requester_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     review_comment = Column(Text, default="")
@@ -513,7 +609,7 @@ class ChangeTask(Base):
     command = Column(String(1024), default="")
     status = Column(String(32), default="pending")
     result = Column(Text, default="")
-    executed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     executed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -538,9 +634,9 @@ class CiAttribute(Base):
     name = Column(String(64), nullable=False)
     display_name = Column(String(128), default="")
     field_type = Column(String(32), default="string")
-    required = Column(Boolean, default=False)
+    is_required = Column(Boolean, default=False)
     default_value = Column(String(256), default="")
-    options = Column(Text, default="")
+    attr_options = Column(Text, default="")
     order = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -555,7 +651,7 @@ class ReportSchedule(Base):
     channel = Column(String(32), default="email")
     channel_config = Column(Text, default="{}")
     enabled = Column(Boolean, default=True)
-    last_run = Column(DateTime, nullable=True)
+    last_run_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -609,8 +705,8 @@ class AssetLifecycle(Base):
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False)
     status = Column(String(32), default="provisioning")
     previous_status = Column(String(32), default="")
-    changed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    comment = Column(Text, default="")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    description = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -635,8 +731,8 @@ class Span(Base):
     parent_span_id = Column(String(64), default="")
     service_name = Column(String(128))
     operation_name = Column(String(256))
-    start_time = Column(DateTime)
-    end_time = Column(DateTime)
+    started_at = Column(DateTime)
+    ended_at = Column(DateTime)
     duration_ms = Column(Float, default=0)
     status = Column(String(32), default="OK")
     tags = Column(Text, default="{}")
@@ -650,7 +746,7 @@ class DiscoveryJob(Base):
     name = Column(String(128))
     job_type = Column(String(32), default="ssh")
     target = Column(String(256))
-    config = Column(Text, default="{}")
+    job_config = Column(Text, default="{}")
     status = Column(String(32), default="pending")
     result_summary = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
@@ -666,7 +762,7 @@ class ExtCmdbConfig(Base):
     api_url = Column(String(512))
     auth_config = Column(Text, default="{}")
     sync_interval = Column(Integer, default=60)
-    last_sync = Column(DateTime, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
     enabled = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -706,7 +802,7 @@ class ExtEventSource(Base):
     api_url = Column(String(512))
     auth_config = Column(Text, default="{}")
     sync_interval = Column(Integer, default=60)
-    last_sync = Column(DateTime, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
     enabled = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -722,8 +818,8 @@ class NetFlowRecord(Base):
     protocol = Column(String(16), default="TCP")
     bytes_sent = Column(Integer, default=0)
     bytes_rcvd = Column(Integer, default=0)
-    start_time = Column(DateTime)
-    end_time = Column(DateTime)
+    started_at = Column(DateTime)
+    ended_at = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -776,6 +872,19 @@ class BlueGreenDeploy(Base):
     active_replicas = Column(Integer, default=3)
     standby_replicas = Column(Integer, default=3)
     status = Column(String(32), default="active")
+    last_switched_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class BlueGreenSwitchRecord(Base):
+    __tablename__ = "blue_green_switch_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    deploy_id = Column(Integer, ForeignKey("blue_green_deploys.id"), nullable=False)
+    from_label = Column(String(64), default="")
+    to_label = Column(String(64), default="")
+    operator = Column(String(64), default="system")
+    description = Column(String(256), default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -788,9 +897,9 @@ class ClusterAnomalyEvent(Base):
     message = Column(Text, default="")
     severity = Column(String(32), default="warning")
     count = Column(Integer, default=1)
-    first_seen = Column(DateTime)
-    last_seen = Column(DateTime)
-    resolved = Column(Boolean, default=False)
+    first_seen_at = Column(DateTime)
+    last_seen_at = Column(DateTime)
+    is_resolved = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -875,6 +984,9 @@ class ChatSession(Base):
     STATUS_ACTIVE = "active"
     STATUS_ARCHIVED = "archived"
 
+    MODE_AGENT = "agent"
+    MODE_CHAT = "chat"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String(128), default="新会话")
@@ -883,6 +995,9 @@ class ChatSession(Base):
     last_message_at = Column(DateTime, default=lambda: datetime.now())
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+    provider_id = Column(Integer, nullable=True)
+    mode = Column(String(16), default=MODE_AGENT)
+    linked_asset_ids = Column(Text, default="[]")
 
 
 class ChatMessage(Base):
@@ -902,10 +1017,10 @@ class ChatMessage(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
     role = Column(String(16), nullable=False)
     message_type = Column(String(16), default=TYPE_TEXT)
-    content = Column(Text, default="")
+    message_content = Column(Text, default="")
     citations = Column(Text, default="[]")
     tool_calls = Column(Text, default="[]")
-    msg_metadata = Column("metadata", Text, default="{}")
+    metadata_json = Column("metadata", Text, default="{}")
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -982,6 +1097,33 @@ class ToolInvocation(Base):
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
+class BackgroundJob(Base):
+    """后台异步任务状态追踪（支持长耗时任务如安装、部署）"""
+    __tablename__ = "background_jobs"
+
+    STATUS_PENDING = "pending"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELED = "canceled"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(String(64), unique=True, nullable=False, index=True)  # UUID，供外部轮询
+    action_type = Column(String(64), nullable=False)  # install_package / run_command / restart_service 等
+    title = Column(String(128), default="")
+    status = Column(String(16), default=STATUS_PENDING)  # pending / running / success / failed / canceled
+    progress = Column(Integer, default=0)  # 0-100
+    progress_message = Column(String(256), default="")  # 当前步骤描述
+    result_payload = Column(Text, default="{}")  # JSON 最终结果
+    error_message = Column(String(512), default="")
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
+    pending_action_id = Column(Integer, ForeignKey("pending_actions.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class SystemPostureRecord(Base):
     """系统态势 SLA 每日快照"""
     __tablename__ = "system_posture_records"
@@ -1023,8 +1165,8 @@ class ErrorBudget(Base):
     id = Column(Integer, primary_key=True)
     slo_id = Column(Integer, ForeignKey('slo_configs.id'))  # 关联的 SLO
     service_name = Column(String(100), nullable=False)
-    period_start = Column(DateTime)                     # 周期开始
-    period_end = Column(DateTime)                     # 周期结束
+    period_started_at = Column(DateTime)                     # 周期开始
+    period_ended_at = Column(DateTime)                     # 周期结束
     budget_total = Column(Float, default=100)       # 总预算 %
     budget_consumed = Column(Float, default=0)      # 已消耗 %
     budget_remaining = Column(Float, default=100)     # 剩余 %
@@ -1042,8 +1184,10 @@ class OnCallSchedule(Base):
     members = Column(Text)                          # 成员列表 JSON
     schedule = Column(Text)                         # 轮值表 JSON
     current_oncall = Column(String(50))             # 当前值班人
-    current_period_start = Column(DateTime)         # 当前周期开始
-    current_period_end = Column(DateTime)          # 当前周期结束
+    current_period_started_at = Column(DateTime)         # 当前周期开始
+    current_period_ended_at = Column(DateTime)          # 当前周期结束
+    is_auto_rotate = Column(Boolean, default=True)     # 是否自动轮转
+    holidays = Column(Text, default="[]")           # 节假日 JSON 列表
     created_by = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1069,8 +1213,8 @@ class SLARecord(Base):
     id = Column(Integer, primary_key=True)
     service_name = Column(String(100), nullable=False)
     sla_target = Column(Float, nullable=False)        # SLA 目标 0.999
-    period_start = Column(DateTime)
-    period_end = Column(DateTime)
+    period_started_at = Column(DateTime)
+    period_ended_at = Column(DateTime)
     uptime_seconds = Column(Integer, default=0)
     downtime_seconds = Column(Integer, default=0)
     achieved_sla = Column(Float, default=0.0)         # 实际达成的 SLA
@@ -1084,7 +1228,7 @@ class AvailabilityReport(Base):
     """可用性报告"""
     id = Column(Integer, primary_key=True)
     service_name = Column(String(100), nullable=False)
-    report_date = Column(DateTime)                     # 报告日期
+    reported_at = Column(DateTime)                     # 报告日期
     total_uptime = Column(Integer, default=0)          # 总运行时间(秒)
     total_downtime = Column(Integer, default=0)        # 总停机时间(秒)
     availability_pct = Column(Float, default=100.0)    # 可用性百分比
@@ -1353,7 +1497,7 @@ class AgentWorkflowNodeRun(Base):
     node_id = Column(String(64), nullable=False)
     node_type = Column(String(32), nullable=False)
     node_name = Column(String(128), default="")
-    config = Column(Text, default="{}")
+    run_config = Column(Text, default="{}")
     status = Column(String(32), default=STATUS_PENDING)
     output = Column(Text, default="{}")
     error = Column(Text, default="")
@@ -1365,7 +1509,7 @@ class AgentWorkflowNodeRun(Base):
 
     def get_config(self):
         try:
-            return json.loads(self.config) if self.config else {}
+            return json.loads(self.run_config) if self.run_config else {}
         except (json.JSONDecodeError, TypeError):
             return {}
 
@@ -1479,16 +1623,346 @@ class PushRecord(Base):
     sent_at = Column(DateTime)
 
 
-class CheckinRecord(Base):
-    """现场签到（资产巡检打卡）"""
-    __tablename__ = "checkin_records"
+# ══════════════════════════════════════════════════════════════
+# 智能巡检模块
+# ══════════════════════════════════════════════════════════════
+
+class InspectionTemplate(Base):
+    """巡检模板 — 定义检查项集合"""
+    __tablename__ = "inspection_templates"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    asset_id = Column(Integer, ForeignKey("assets.id"))
-    latitude = Column(Float)
-    longitude = Column(Float)
-    address = Column(String(256))
-    photo_path = Column(String(256))
-    note = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    target_ci_types = Column(Text, default="[]")
+    check_items = Column(Text, default="[]")
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class InspectionTask(Base):
+    """巡检任务 — 选择模板 + 资产范围"""
+    __tablename__ = "inspection_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    template_id = Column(Integer, ForeignKey("inspection_templates.id"), nullable=False)
+    scope_type = Column(String(32), default="manual")
+    scope_filter = Column(Text, default="{}")
+    asset_ids = Column(Text, default="[]")
+    schedule_cron = Column(String(64), nullable=True)
+    schedule_enabled = Column(Boolean, default=False)
+    ai_analysis = Column(Boolean, default=True)
+    status = Column(String(32), default="idle")
+    last_run_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class InspectionRecord(Base):
+    """巡检记录 — 一次执行的结果"""
+    __tablename__ = "inspection_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("inspection_tasks.id"), nullable=False)
+    triggered_by_alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True)
+    status = Column(String(32), default="running")
+    total_assets = Column(Integer, default=0)
+    checked_assets = Column(Integer, default=0)
+    normal_count = Column(Integer, default=0)
+    warning_count = Column(Integer, default=0)
+    critical_count = Column(Integer, default=0)
+    overall_score = Column(Float, default=0.0)
+    ai_report = Column(Text, default="")
+    ai_risk_summary = Column(Text, default="")
+    ai_recommendations = Column(Text, default="[]")
+    item_results = Column(Text, default="[]")
+    started_at = Column(DateTime, default=lambda: datetime.now())
+    finished_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Float, default=0.0)
+
+
+# ══════════════════════════════════════════════════════════════
+# 智能指标推荐
+# ══════════════════════════════════════════════════════════════
+
+class MetricTemplate(Base):
+    __tablename__ = "metric_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ci_type = Column(String(32), nullable=False, index=True)
+    metric_key = Column(String(64), nullable=False)
+    metric_name = Column(String(128), nullable=False)
+    category = Column(String(32), default="performance")
+    unit = Column(String(32), default="")
+    description = Column(String(256), default="")
+    collect_method = Column(String(32), default="ssh")
+    collect_command = Column(String(512), default="")
+    default_threshold_warn = Column(Float, nullable=True)
+    default_threshold_critical = Column(Float, nullable=True)
+    sort_order = Column(Integer, default=0)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class AssetMetricRecommendation(Base):
+    __tablename__ = "asset_metric_recommendations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
+    metric_key = Column(String(64), nullable=False)
+    metric_name = Column(String(128), default="")
+    category = Column(String(32), default="")
+    unit = Column(String(32), default="")
+    source = Column(String(16), default="template")
+    status = Column(String(16), default="recommended")
+    reason = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+# ══════════════════════════════════════════════════════════════
+# 资产基线安全
+# ══════════════════════════════════════════════════════════════
+
+class SecurityBaselineTemplate(Base):
+    __tablename__ = "security_baseline_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ci_type = Column(String(32), nullable=False, index=True)
+    check_key = Column(String(64), nullable=False)
+    check_name = Column(String(128), nullable=False)
+    category = Column(String(32), default="access")
+    severity = Column(String(16), default="medium")
+    description = Column(String(512), default="")
+    check_method = Column(String(16), default="ssh")
+    check_command = Column(String(512), default="")
+    expect_match = Column(String(256), default="")
+    remediation = Column(Text, default="")
+    sort_order = Column(Integer, default=0)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class AssetBaselineCheck(Base):
+    __tablename__ = "asset_baseline_checks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
+    template_id = Column(Integer, ForeignKey("security_baseline_templates.id"), nullable=False)
+    status = Column(String(16), default="pending")
+    actual_value = Column(String(512), default="")
+    reason = Column(Text, default="")
+    checked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+# ══════════════════════════════════════════════════════════════
+# 知识自动沉淀
+# ══════════════════════════════════════════════════════════════
+
+class KnowledgeDraft(Base):
+    __tablename__ = "knowledge_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True, index=True)
+    title = Column(String(256), nullable=False)
+    symptom = Column(Text, default="")
+    root_cause = Column(Text, default="")
+    solution = Column(Text, default="")
+    tags = Column(String(256), default="")
+    severity = Column(String(32), default="warning")
+    asset_type = Column(String(32), default="")
+    source_data = Column(Text, default="")
+    source_type = Column(String(32), default="auto")
+    sop_steps = Column(Text, default="[]")
+    status = Column(String(16), default="pending")
+    reject_reason = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+# ══════════════════════════════════════════════════════════════
+# 自愈效果追踪 (新结构)
+# ══════════════════════════════════════════════════════════════
+
+class RemediationEffectRecord(Base):
+    __tablename__ = "remediation_effect_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    remediation_id = Column(Integer, ForeignKey("auto_remediations.id"), nullable=True, index=True)
+    log_id = Column(Integer, ForeignKey("remediation_logs.id"), nullable=True, index=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
+    status_before = Column(String(32), default="")
+    status_after = Column(String(32), default="")
+    effect = Column(String(16), default="")
+    checked_at = Column(DateTime, nullable=True)
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+# ══════════════════════════════════════════════════════════════
+# Agent 评估体系
+# ══════════════════════════════════════════════════════════════
+
+class AgentEvaluation(Base):
+    __tablename__ = "agent_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, nullable=True, index=True)
+    provider_id = Column(Integer, nullable=True, index=True)
+    model_name = Column(String(64), default="")
+    task_type = Column(String(32), default="chat")
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    latency_ms = Column(Integer, default=0)
+    round_count = Column(Integer, default=0)
+    tool_call_count = Column(Integer, default=0)
+    is_success = Column(Boolean, default=True)
+    has_hallucination = Column(Boolean, default=False)
+    completion_rate = Column(Float, default=1.0)
+    feedback = Column(String(16), default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# A/B 测试框架
+# ══════════════════════════════════════════════════════════════
+
+class ABTestConfig(Base):
+    __tablename__ = "ab_test_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    provider_a_id = Column(Integer, ForeignKey("ai_providers.id"), nullable=True)
+    provider_b_id = Column(Integer, ForeignKey("ai_providers.id"), nullable=True)
+    model_a = Column(String(64), default="")
+    model_b = Column(String(64), default="")
+    split_ratio = Column(String(8), default="50/50")
+    metric = Column(String(32), default="latency")
+    status = Column(String(16), default="active")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class ABTestRecord(Base):
+    __tablename__ = "ab_test_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    test_id = Column(Integer, ForeignKey("ab_test_configs.id"), nullable=True, index=True)
+    session_id = Column(Integer, nullable=True, index=True)
+    group = Column(String(8), default="a")
+    provider_id = Column(Integer, nullable=True, index=True)
+    model_name = Column(String(64), default="")
+    latency_ms = Column(Integer, default=0)
+    token_count = Column(Integer, default=0)
+    is_success = Column(Boolean, default=True)
+    user_feedback = Column(String(16), default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# 异常检测基准评估
+# ══════════════════════════════════════════════════════════════
+
+class AnomalyBenchmark(Base):
+    __tablename__ = "anomaly_benchmarks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
+    metric_name = Column(String(64), nullable=False)
+    algorithm = Column(String(32), default="")
+    window_minutes = Column(Integer, default=60)
+    precision = Column(Float, default=0.0)
+    recall = Column(Float, default=0.0)
+    f1_score = Column(Float, default=0.0)
+    threshold = Column(Float, default=0.0)
+    labeled_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+# ══════════════════════════════════════════════════════════════
+# 资产自动发现
+# ══════════════════════════════════════════════════════════════
+
+class DiscoverySchedule(Base):
+    __tablename__ = "discovery_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    protocol = Column(String(16), default="ssh")
+    target_range = Column(String(256), default="")
+    port = Column(Integer, default=22)
+    credential_id = Column(Integer, nullable=True)
+    schedule_cron = Column(String(64), default="0 2 * * *")
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class DiscoveryResult(Base):
+    __tablename__ = "discovery_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("discovery_schedules.id"), nullable=True, index=True)
+    ip = Column(String(64), nullable=False)
+    hostname = Column(String(128), default="")
+    port = Column(Integer, default=0)
+    status = Column(String(16), default="discovered")
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
+    os_type = Column(String(32), default="")
+    services = Column(Text, default="")
+    raw_output = Column(Text, default="")
+    discovered_at = Column(DateTime, default=lambda: datetime.now())
+
+# ══════════════════════════════════════════════════════════════
+# 多租户模块
+# ══════════════════════════════════════════════════════════════
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False, unique=True)
+    code = Column(String(64), nullable=False, unique=True, index=True)
+    status = Column(String(16), default="active")
+    quota_assets = Column(Integer, default=1000)
+    quota_users = Column(Integer, default=50)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class AgentGroundTruth(Base):
+    """Agent 评估 GroundTruth 测试集"""
+    __tablename__ = "agent_ground_truths"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    category = Column(String(32), default="qa")           # qa / tool_call / rag / reasoning
+    question = Column(Text, nullable=False)
+    expected_answer = Column(Text, default="")
+    expected_tools = Column(Text, default="[]")           # JSON array of expected tool names
+    tags = Column(String(256), default="")
+    difficulty = Column(String(16), default="medium")     # easy / medium / hard
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class AgentGroundTruthRun(Base):
+    """GroundTruth 测试执行记录"""
+    __tablename__ = "agent_ground_truth_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    test_id = Column(Integer, ForeignKey("agent_ground_truths.id"), nullable=False, index=True)
+    session_id = Column(Integer, nullable=True)
+    provider_id = Column(Integer, nullable=True)
+    model_name = Column(String(64), default="")
+    actual_answer = Column(Text, default="")
+    actual_tools = Column(Text, default="[]")
+    answer_score = Column(Float, default=0.0)             # 语义相似度 0~1
+    tool_score = Column(Float, default=0.0)               # 工具调用匹配度 0~1
+    total_score = Column(Float, default=0.0)              # 综合评分
+    latency_ms = Column(Integer, default=0)
+    error = Column(String(512), default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())

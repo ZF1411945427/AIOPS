@@ -38,10 +38,10 @@ def audit_logs(db: Session = Depends(get_db)):
     for lc in lifecycle:
         logs.append({
             "time": lc.created_at.isoformat() if lc.created_at else "",
-            "user": str(lc.changed_by) if lc.changed_by else "system",
+            "user": str(lc.user_id) if lc.user_id else "system",
             "action": f"资产{ lc.previous_status }→{ lc.status }",
             "target": f"asset_{ lc.asset_id }",
-            "detail": lc.comment or "",
+            "detail": lc.description or "",
             "ip": "",
         })
 

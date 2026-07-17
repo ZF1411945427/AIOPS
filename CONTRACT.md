@@ -1,234 +1,604 @@
-# 资产字段规范契约（Single Source of Truth）
+# AIOps 全库字段规范契约（Single Source of Truth）
 
-> **所有前后端、数据库的字段名必须以本文件为准。**
-> 新增/修改 CI 类型或连接字段时，先改本文件，再同步前后端。
-> 最后更新: 2026-07-12
-
----
-
-## 一、CI 类型枚举（ci_type）
-
-| ci_type 值 | 中文名 | 连接类型(connection_type) | 所属层 |
-|---|---|---|---|
-| `server` | 物理服务器 | ssh | 基础设施 |
-| `virtual_machine` | 虚拟机 | ssh | 基础设施 |
-| `cloud_host` | 云主机 | ssh | 云资源 |
-| `kubernetes_cluster` | K8s 集群 | kubernetes | 云资源 |
-| `network_device` | 网络设备 | snmp | 基础设施 |
-| `switch` | 交换机 | snmp | 基础设施 |
-| `router` | 路由器 | snmp | 基础设施 |
-| `firewall` | 防火墙 | snmp | 基础设施 |
-| `load_balancer` | 负载均衡 | snmp | 基础设施 |
-| `storage_device` | 存储设备 | snmp | 基础设施 |
-| `database` | 数据库 | database | 基础设施 |
-| `middleware` | 中间件 | http | 基础设施 |
-| `business_app` | 业务应用 | http | 业务层 |
-| `api_service` | API 服务 | http | 业务层 |
-| `ssl_certificate` | SSL 证书 | none | 业务层 |
-| `dns_record` | DNS 记录 | none | 业务层 |
-| `monitoring_endpoint` | 监控端点 | http | 业务层 |
-| `node` | K8s 节点 | kubernetes | K8s 持久化 |
-| `namespace` | 命名空间 | kubernetes | K8s 持久化 |
-| `deployment` | Deployment | kubernetes | K8s 持久化 |
-| `statefulset` | StatefulSet | kubernetes | K8s 持久化 |
-| `daemonset` | DaemonSet | kubernetes | K8s 持久化 |
-| `service` | Service | kubernetes | K8s 持久化 |
-| `ingress` | Ingress | kubernetes | K8s 持久化 |
-| `pv` | PV 存储卷 | kubernetes | K8s 持久化 |
-| `pvc` | PVC 存储声明 | kubernetes | K8s 持久化 |
-| `configmap` | ConfigMap | kubernetes | K8s 弱纳管 |
-| `secret` | Secret | kubernetes | K8s 弱纳管 |
-
-**规则：**
-- `cluster` 是旧值，**已废弃**，统一用 `kubernetes_cluster`
-- `pod` / `replicaset` 是实时视图，不入 Asset 表
+> **所有数据库表、前后端代码的字段命名必须以本文件为准。**
+> 新增/修改任何字段，必须先改本文件，再同步前后端代码。
+> 最后更新: 2026-07-15
 
 ---
 
-## 二、连接配置字段（connection_config JSON）
+## 第一章：全局命名规则（适用于所有表）
 
-每种 connection_type 在 `connection_config` JSON 中使用的字段名：
+### 1.1 时间字段
 
-### 2.1 SSH（connection_type = "ssh"）
+所有 `DateTime` 类型字段必须统一后缀：
 
-| 字段名 | 类型 | 默认值 | 说明 | 敏感 |
-|---|---|---|---|---|
-| `ssh_user` | string | "root" | 登录用户 | |
-| `ssh_password` | string | "" | 登录密码 | ✅ |
-| `ssh_port` | int | 22 | SSH 端口 | |
-| `ssh_private_key` | string | "" | 私钥内容 | ✅ |
+| 正确 | 错误 |
+|------|------|
+| `xxx_at` | `xxx_time`, `xxx_date`, `last_xxx`, `until`, `first_seen`, `last_seen` |
 
-**适用 ci_type**: server, virtual_machine, cloud_host
+**例外：** `timestamp` 保留（标准约定）。
 
-### 2.2 Kubernetes（connection_type = "kubernetes"）
+### 1.2 布尔字段
 
-| 字段名 | 类型 | 默认值 | 说明 | 敏感 |
-|---|---|---|---|---|
-| `k8s_api_server` | string | "" | API Server 地址，如 https://1.2.3.4:6443 | |
-| `k8s_token` | string | "" | ServiceAccount Bearer Token | ✅ |
-| `k8s_namespace` | string | "" | 默认命名空间（可选） | |
-| `kubeconfig` | string | "" | kubeconfig JSON（与 api_server/token 二选一） | ✅ |
-| `verify_ssl` | bool | false | 是否验证 SSL 证书 | |
+所有 `Boolean` 类型字段必须加前缀：
 
-**适用 ci_type**: kubernetes_cluster, node, namespace, deployment, statefulset, daemonset, service, ingress, pv, pvc, configmap, secret
+| 语义 | 正确 | 错误 |
+|------|------|------|
+| 判断性质 | `is_xxx` | `xxx` （如 `success` → `is_success`） |
+| 拥有性质 | `has_xxx` | `xxx` （如 `hallucination_flag` → `has_hallucination`） |
+| 开关性质 | `enabled` | `active`, `visible` |
 
-**规则：**
-- ~~`api_server`~~ / ~~`token`~~ 已废弃，统一用 `k8s_api_server` / `k8s_token`
-- `kubeconfig` 与 `k8s_api_server`+`k8s_token` 二选一，优先 kubeconfig
+### 1.3 描述/备注字段
 
-### 2.3 Database（connection_type = "database"）
+统一用 `description`，禁止别名：
 
-| 字段名 | 类型 | 默认值 | 说明 | 敏感 |
-|---|---|---|---|---|
-| `db_type` | string | "mysql" | 数据库类型: mysql/postgresql/redis/mongodb/elasticsearch | |
-| `db_port` | int | 3306 | 端口 | |
-| `db_user` | string | "root" | 用户名 | |
-| `db_password` | string | "" | 密码 | ✅ |
-| `db_name` | string | "" | 数据库名（可选） | |
+| 正确 | 错误 |
+|------|------|
+| `description` | `notes`, `note`, `comment`, `remarks`, `remark`, `memo`, `detail` |
 
-**适用 ci_type**: database
+### 1.4 JSON/配置字段
 
-**规则：**
-- ~~`db_subtype`~~ 已废弃，统一用 `db_type`
-- `db_port` 默认值按 db_type 联动: mysql=3306, postgresql=5432, redis=6379, mongodb=27017, elasticsearch=9200
+必须带业务前缀，禁止泛型名：
 
-### 2.4 HTTP（connection_type = "http"）
+| 正确 | 错误 |
+|------|------|
+| `channel_config` | `config` |
+| `remediation_params` | `params` |
+| `report_data` | `data` |
 
-| 字段名 | 类型 | 默认值 | 说明 | 敏感 |
-|---|---|---|---|---|
-| `http_url` | string | "" | 服务地址，如 https://api.example.com/health | |
-| `http_auth` | string | "" | 认证模式: ""(无) / basic / bearer | |
-| `http_credential` | string | "" | 凭据（用户名:密码 或 Token） | ✅ |
+### 1.5 外键字段
 
-**适用 ci_type**: business_app, api_service, middleware, monitoring_endpoint
+格式：`{referenced_table}_id`
 
-**规则：**
-- ~~`app_url`~~ / ~~`app_auth`~~ / ~~`app_credential`~~ 已废弃，统一用 `http_url` / `http_auth` / `http_credential`
-- ~~`http_user`~~ / ~~`http_password`~~ 已废弃，认证信息统一用 `http_auth` + `http_credential`
-- `mw_subtype` / `mw_port` / `mw_admin_url` 不入 connection_config，存 `ci_attributes`
+| 正确 | 错误 |
+|------|------|
+| `user_id` | `changed_by`, `executed_by` |
 
-### 2.5 SNMP（connection_type = "snmp"）
+### 1.6 状态字段
 
-| 字段名 | 类型 | 默认值 | 说明 | 敏感 |
-|---|---|---|---|---|
-| `snmp_community` | string | "public" | 社区名 | |
-| `snmp_port` | int | 161 | 端口 | |
-| `snmp_version` | string | "v2c" | 版本: v2c / v3 | |
+统一用 `status`，禁止别名。
 
-**适用 ci_type**: network_device, switch, router, firewall, load_balancer, storage_device
+### 1.7 字段长度
 
-**规则：**
-- `snmp_version` 统一用 **`v2c`**（带 v 前缀），后端测试时需做 `version.lstrip("v")` 兼容
-- ~~`community`~~ / ~~`port`~~ 已废弃，统一用 `snmp_community` / `snmp_port`
+同名字段跨表必须统一长度：
 
-### 2.6 无连接（connection_type = "none"）
-
-适用 ci_type: ssl_certificate, dns_record
-
-不生成 connection_config，属性存 `ci_attributes`。
+| 字段名 | 统一长度 |
+|--------|---------|
+| `name` | String(128) |
+| `title` | String(256) |
+| `status` | String(32) |
+| `severity` | String(32) |
+| `metric_name` | String(64) |
+| `category` | String(32) |
+| `ci_type` | String(32) |
+| `risk_level` | String(16) |
+| `source` | String(32) |
+| `description` | Text（长文本）或 String(512)（短文本） |
+| `reason` | String(256) |
+| `tags` | String(256) |
 
 ---
 
-## 三、规格属性字段（ci_attributes JSON）
+## 第二章：各表字段规范
 
-不入 connection_config 的业务属性，存 `ci_attributes`：
+### `chaos_experiments` — 混沌实验
 
-### 3.1 通用规格
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | ✅ |
+| description | Text | — | ✅ |
+| target_type | String(32) | — | |
+| target_layer | String(32) | — | |
+| target_selector | Text | — | |
+| fault_type | String(64) | — | |
+| fault_params | Text | — | |
+| steady_state | Text | — | |
+| status | String(32) | — | ✅ |
+| result | String(32) | — | |
+| started_at | DateTime | — | ✅ |
+| finished_at | DateTime | — | ✅ |
+| created_at | DateTime | — | ✅ |
 
-| ci_type | 字段名 | 类型 | 说明 |
-|---|---|---|---|
-| server | cpu_cores | int | CPU 核心数 |
-| server | memory_gb | int | 内存(GB) |
-| server | disk_gb | int | 磁盘(GB) |
-| server | os | string | 操作系统 |
-| server | manufacturer | string | 厂商 |
-| server | model | string | 型号 |
-| virtual_machine | cpu_cores | int | vCPU |
-| virtual_machine | memory_gb | int | 内存(GB) |
-| virtual_machine | disk_gb | int | 系统盘(GB) |
-| virtual_machine | os | string | 操作系统 |
-| virtual_machine | hypervisor | string | 虚拟化平台 |
-| cloud_host | cpu_cores | int | vCPU |
-| cloud_host | memory_gb | int | 内存(GB) |
-| cloud_host | disk_gb | int | 系统盘(GB) |
-| cloud_host | cloud_provider | string | 云厂商 |
-| cloud_host | instance_id | string | 实例 ID |
-| kubernetes_cluster | version | string | K8s 版本 |
-| kubernetes_cluster | node_count | int | 节点数 |
+### `chaos_runs` — 混沌运行记录
 
-### 3.2 K8s 子资源属性
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| experiment_id | FK | — | ✅ |
+| `steady_state_passed` | Boolean | ✅ | |
+| `auto_recovered` | Boolean | `is_auto_recovered` | ❌ 缺 is_ |
+| alerts_triggered | Integer | — | |
+| error_budget_impact | Float | — | |
+| duration_seconds | Integer | — | |
+| steady_state_before | Text | — | |
+| steady_state_after | Text | — | |
+| **`notes`** | Text | **`description`** | ❌ 描述字段 |
+| started_at | DateTime | — | ✅ |
+| created_at | DateTime | — | ✅ |
 
-| ci_type | 字段名 | 说明 |
-|---|---|---|
-| node | kubelet_version | kubelet 版本 |
-| node | os_image | OS 镜像 |
-| node | cpu / memory | 容量 |
-| node | node_status | Ready/NotReady |
-| namespace | phase | 状态 |
-| deployment/statefulset/daemonset | replicas | 副本数 |
-| deployment/statefulset/daemonset | available | 就绪数 |
-| deployment/statefulset/daemonset | pod_summary | Pod 概要 |
-| service | cluster_ip | 集群 IP |
-| service | type | Service 类型 |
-| service | selector | 选择器 |
-| configmap/secret/pvc | referenced_by | 引用者列表 |
-| configmap/secret/pvc | orphan | 是否孤岛 |
-| configmap/secret | data_keys | 键名列表 |
+### `assets` — 资产主表
 
-### 3.3 其他业务属性
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | ✅ |
+| **`type`** | String(64) | **删除** | ❌ 废弃，ci_type 已覆盖 |
+| ci_type | String(32) | — | ✅ 契约已有 |
+| parent_id | FK | — | ✅ |
+| ip | String(64) | — | |
+| **`os`** | String(16) | **`linux`/`windows`/`other`** | ✅ 新增：server/virtual_machine/cloud_host 操作系统枚举 |
+| status | String(32) | — | ✅ |
+| tags | String(256) | — | |
+| ci_attributes | Text | — | ✅ 契约已有 |
+| k8s_cluster | String(128) | — | |
+| connection_type | String(32) | — | ✅ 契约已有 |
+| connection_config | Text | — | ✅ 契约已有 |
+| created_at | DateTime | — | ✅ |
+| **`last_checked`** | DateTime | **`last_checked_at`** | ❌ 缺 _at |
+| latency_ms | Integer | — | |
+| health_status | String(16) | — | |
 
-| ci_type | 字段名 | 说明 |
-|---|---|---|
-| middleware | mw_subtype | 中间件类型: nginx/tomcat/rabbitmq/kafka |
-| middleware | mw_port | 管理端口 |
-| middleware | mw_admin_url | 管理地址 |
-| storage_device | storage_type | 存储类型: nfs/san/nas/object |
-| storage_device | storage_mount | 挂载路径 |
-| storage_device | storage_capacity | 容量(TB) |
-| ssl_certificate | cert_domain | 域名 |
-| ssl_certificate | cert_issuer | 颁发者 |
-| ssl_certificate | cert_expiry | 到期日期 |
-| dns_record | dns_domain | 域名 |
-| dns_record | dns_type | 记录类型: A/CNAME/MX/TXT |
-| dns_record | dns_value | 记录值 |
-| monitoring_endpoint | monitor_url | 探针地址 |
-| monitoring_endpoint | monitor_type | 探针类型: prometheus/http/tcp/icmp |
-| monitoring_endpoint | monitor_interval | 检查间隔(秒) |
-| database | version | 数据库版本 |
-| business_app | owner | 负责人 |
-| api_service | owner | 负责人 |
+### `alert_silences` — 告警静默
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| rule_id | FK | — | ✅ |
+| **`until`** | DateTime | **`expires_at`** | ❌ 非 _at |
+| reason | String(256) | — | |
+| created_at | DateTime | — | ✅ |
+
+### `alerts` — 告警
+
+✅ 所有字段符合规范。
+
+| 字段名 | 当前 | 说明 |
+|--------|------|------|
+| rule_id | FK | ✅ |
+| asset_id | FK | ✅ |
+| metric_name | String(64) | ✅ |
+| actual_value | Float | ✅ |
+| threshold | Float | ✅ |
+| severity | String(32) | ✅ |
+| status | String(32) | ✅ |
+| message | Text | ✅ |
+| created_at | DateTime | ✅ |
+| resolved_at | DateTime | ✅ |
+
+### `notification_channels` — 通知渠道
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(64) | — | |
+| type | String(32) | — | |
+| **`config`** | Text | **`channel_config`** | ❌ JSON 泛名 |
+| enabled | Boolean | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `notification_logs` — 通知日志
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| alert_id | FK | — | ✅ |
+| channel_id | FK | — | ✅ |
+| channel_type | String(32) | — | |
+| recipient | String(256) | — | |
+| title | String(256) | — | |
+| **`content`** | Text | **`notification_content`** | ❌ JSON 泛名 |
+| **`success`** | Boolean | **`is_success`** | ❌ 缺 is_ |
+| error_message | Text | — | |
+| created_at | DateTime | — | ✅ |
+
+### `remediation_logs` — 自愈日志
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| remediation_id | FK | — | ✅ |
+| alert_id | FK | — | ✅ |
+| action_type | String(32) | — | |
+| target | String(128) | — | |
+| **`success`** | Boolean | **`is_success`** | ❌ 缺 is_ |
+| output | Text | — | |
+| created_at | DateTime | — | ✅ |
+
+### `remediation_effects` — 自愈效果
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| remediation_id | FK | — | ✅ |
+| alert_id | FK | — | ✅ |
+| executed_at | DateTime | — | ✅ |
+| check_at | DateTime | — | ✅ |
+| alert_status_at_execute | String(32) | — | |
+| alert_status_at_check | String(32) | — | |
+| **`asset_recovered`** | Boolean | **`is_asset_recovered`** | ❌ 缺 is_ |
+| **`alert_resolved`** | Boolean | **`is_alert_resolved`** | ❌ 缺 is_ |
+| recovery_time_seconds | Integer | — | |
+| **`notes`** | Text | **`description`** | ❌ 描述字段 |
+| created_at | DateTime | — | ✅ |
+
+### `auto_remediations` — 自动响应规则
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | ✅ |
+| rule_id | FK | — | ✅ |
+| action_type | String(32) | — | |
+| **`params`** | Text | **`remediation_params`** | ❌ JSON 泛名 |
+| enabled | Boolean | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `reports` — 报告
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| title | String(256) | — | ✅ |
+| type | String(32) | — | |
+| **`period_start`** | DateTime | **`period_started_at`** | ❌ 缺 _at |
+| **`period_end`** | DateTime | **`period_ended_at`** | ❌ 缺 _at |
+| summary | Text | — | |
+| **`data`** | Text | **`report_data`** | ❌ JSON 泛名 |
+| created_at | DateTime | — | ✅ |
+
+### `dashboard_card_configs` — 仪表盘卡片
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| user_id | FK | — | ✅ |
+| card_type | String(64) | — | |
+| title | String(128) | — | |
+| **`config`** | Text | **`card_config`** | ❌ JSON 泛名 |
+| position | Integer | — | |
+| **`visible`** | Boolean | **`is_visible`** | ❌ 缺 is_ |
+
+### `prediction_models` — 预测模型
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | ✅ |
+| metric_name | String(64) | — | ✅ |
+| asset_id | Integer | — | |
+| model_type | String(32) | — | |
+| **`params`** | Text | **`model_params`** | ❌ JSON 泛名 |
+| enabled | Boolean | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `data_sources` — 数据源
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | ✅ |
+| type | String(32) | — | |
+| endpoint | String(512) | — | |
+| auth_type | String(32) | — | |
+| auth_config | Text | — | ✅ 有前缀 |
+| scrape_interval | Integer | — | |
+| mapping_config | Text | — | |
+| enabled | Boolean | — | ✅ |
+| last_status | String(32) | — | |
+| last_error | Text | — | |
+| **`last_scrape`** | DateTime | **`last_scraped_at`** | ❌ 缺 _at |
+| created_at | DateTime | — | ✅ |
+
+### `change_requests` — 变更请求
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| title | String(256) | — | ✅ |
+| description | Text | — | ✅ |
+| ci_type | String(64) | — | |
+| asset_id | Integer | — | |
+| change_type | String(32) | — | |
+| priority | String(32) | — | |
+| status | String(32) | — | ✅ |
+| risk_level | String(32) | — | |
+| **`planned_start`** | DateTime | **`planned_started_at`** | ❌ 缺 _at |
+| **`planned_end`** | DateTime | **`planned_ended_at`** | ❌ 缺 _at |
+| requester_id | FK | — | ✅ |
+| reviewer_id | FK | — | ✅ |
+| review_comment | Text | — | |
+| created_at | DateTime | — | ✅ |
+| updated_at | DateTime | — | ✅ |
+
+### `spans` — 链路追踪
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| trace_id | String(64) | — | |
+| span_id | String(64) | — | |
+| parent_span_id | String(64) | — | |
+| service_name | String(128) | — | |
+| operation_name | String(256) | — | |
+| **`start_time`** | DateTime | **`started_at`** | ❌ _time 后缀 |
+| **`end_time`** | DateTime | **`ended_at`** | ❌ _time 后缀 |
+| duration_ms | Float | — | |
+| status | String(32) | — | ✅ |
+| tags | Text | — | |
+| created_at | DateTime | — | ✅ |
+
+### `netflow_records` — 网络流量
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| src_ip | String(64) | — | |
+| dst_ip | String(64) | — | |
+| src_port | Integer | — | |
+| dst_port | Integer | — | |
+| protocol | String(16) | — | |
+| bytes_sent | Integer | — | |
+| bytes_rcvd | Integer | — | |
+| **`start_time`** | DateTime | **`started_at`** | ❌ _time 后缀 |
+| **`end_time`** | DateTime | **`ended_at`** | ❌ _time 后缀 |
+| created_at | DateTime | — | ✅ |
+
+### `asset_lifecycles` — 资产生命周期
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| asset_id | FK | — | ✅ |
+| status | String(32) | — | ✅ |
+| previous_status | String(32) | — | |
+| **`changed_by`** | FK | **`user_id`** | ❌ 外键不匹配 users.id |
+| **`comment`** | Text | **`description`** | ❌ 描述字段 |
+| created_at | DateTime | — | ✅ |
+
+### `change_tasks` — 变更任务
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| change_id | FK | — | ✅ |
+| step_order | Integer | — | |
+| description | String(512) | — | ✅ |
+| command | String(1024) | — | |
+| status | String(32) | — | ✅ |
+| result | Text | — | |
+| **`executed_by`** | FK | **`user_id`** | ❌ 外键不匹配 users.id |
+| executed_at | DateTime | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `error_budgets` — 错误预算
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| slo_id | FK | — | ✅ |
+| service_name | String(100) | — | |
+| **`period_start`** | DateTime | **`period_started_at`** | ❌ 缺 _at |
+| **`period_end`** | DateTime | **`period_ended_at`** | ❌ 缺 _at |
+| budget_total | Float | — | |
+| budget_consumed | Float | — | |
+| budget_remaining | Float | — | |
+| burn_rate | Float | — | |
+| status | String(20) | — | |
+| created_at | DateTime | — | ✅ |
+
+### `sla_records` — SLA 记录
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| service_name | String(100) | — | |
+| sla_target | Float | — | |
+| **`period_start`** | DateTime | **`period_started_at`** | ❌ 缺 _at |
+| **`period_end`** | DateTime | **`period_ended_at`** | ❌ 缺 _at |
+| uptime_seconds | Integer | — | |
+| downtime_seconds | Integer | — | |
+| achieved_sla | Float | — | |
+| penalty | String(50) | — | |
+| status | String(20) | — | |
+| created_at | DateTime | — | ✅ |
+
+### `availability_reports` — 可用性报告
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| service_name | String(100) | — | |
+| **`report_date`** | DateTime | **`reported_at`** | ❌ _date 后缀 |
+| total_uptime | Integer | — | |
+| total_downtime | Integer | — | |
+| availability_pct | Float | — | |
+| incident_count | Integer | — | |
+| total_duration | Integer | — | |
+| created_at | DateTime | — | ✅ |
+
+### `ci_attributes` — CI 属性
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| ci_model_id | FK | — | ✅ |
+| name | String(64) | — | |
+| display_name | String(128) | — | |
+| field_type | String(32) | — | |
+| **`required`** | Boolean | **`is_required`** | ❌ 缺 is_ |
+| default_value | String(256) | — | |
+| **`options`** | Text | **`attr_options`** | ❌ JSON 泛名 |
+| order | Integer | — | |
+| created_at | DateTime | — | ✅ |
+
+### `cluster_anomaly_events` — 集群异常事件
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| anomaly_type | String(64) | — | |
+| cluster | String(128) | — | |
+| message | Text | — | |
+| severity | String(32) | — | ✅ |
+| count | Integer | — | |
+| **`first_seen`** | DateTime | **`first_seen_at`** | ❌ 缺 _at |
+| **`last_seen`** | DateTime | **`last_seen_at`** | ❌ 缺 _at |
+| **`resolved`** | Boolean | **`is_resolved`** | ❌ 缺 is_ |
+| created_at | DateTime | — | ✅ |
+
+### `api_tokens` — API Token
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | |
+| token | String(64) | — | |
+| permissions | String(256) | — | |
+| **`last_used`** | DateTime | **`last_used_at`** | ❌ 缺 _at |
+| enabled | Boolean | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `k8s_events` — K8s 事件
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| cluster | String(128) | — | |
+| namespace | String(128) | — | |
+| name | String(256) | — | |
+| kind | String(64) | — | |
+| reason | String(128) | — | |
+| message | Text | — | |
+| source | String(128) | — | |
+| **`first_seen`** | DateTime | **`first_seen_at`** | ❌ 缺 _at |
+| **`last_seen`** | DateTime | **`last_seen_at`** | ❌ 缺 _at |
+| count | Integer | — | |
+| severity | String(32) | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `discovery_schedules` — 发现调度
+
+✅ 全部可用。
+
+### `discovery_jobs` — 发现任务
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | |
+| job_type | String(32) | — | |
+| target | String(256) | — | |
+| **`config`** | Text | **`job_config`** | ❌ JSON 泛名 |
+| status | String(32) | — | ✅ |
+| result_summary | Text | — | |
+| created_at | DateTime | — | ✅ |
+| finished_at | DateTime | — | ✅ |
+
+### `report_schedules` — 报告调度
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | |
+| report_type | String(32) | — | |
+| cron_expr | String(128) | — | |
+| channel | String(32) | — | |
+| channel_config | Text | — | ✅ 有前缀 |
+| enabled | Boolean | — | ✅ |
+| **`last_run`** | DateTime | **`last_run_at`** | ❌ 缺 _at |
+| created_at | DateTime | — | ✅ |
+
+### `ext_cmdb_configs` — 外部 CMDB
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | |
+| cmdb_type | String(32) | — | |
+| api_url | String(512) | — | |
+| auth_config | Text | — | ✅ 有前缀 |
+| sync_interval | Integer | — | |
+| **`last_sync`** | DateTime | **`last_synced_at`** | ❌ 缺 _at |
+| enabled | Boolean | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `ext_event_sources` — 外部事件源
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| name | String(128) | — | |
+| source_type | String(32) | — | |
+| api_url | String(512) | — | |
+| auth_config | Text | — | ✅ 有前缀 |
+| sync_interval | Integer | — | |
+| **`last_sync`** | DateTime | **`last_synced_at`** | ❌ 缺 _at |
+| enabled | Boolean | — | ✅ |
+| created_at | DateTime | — | ✅ |
+
+### `system_configs` — 系统配置
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| key | String(128) | — | |
+| **`value`** | Text | **`config_value`** | ❌ JSON 泛名 |
+| description | String(256) | — | ✅ |
+| updated_at | DateTime | — | ✅ |
+
+### `incident_approvals` — 审批记录
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| incident_id | FK | — | ✅ |
+| approver_id | FK | — | ✅ |
+| action | String(32) | — | |
+| **`comment`** | Text | **`description`** | ❌ 描述字段 |
+| created_at | DateTime | — | ✅ |
+
+### `blue_green_switch_records` — 蓝绿切换记录
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| deploy_id | FK | — | ✅ |
+| from_label | String(64) | — | |
+| to_label | String(64) | — | |
+| operator | String(64) | — | |
+| **`note`** | String(256) | **`description`** | ❌ 描述字段 |
+| created_at | DateTime | — | ✅ |
+
+### `remediation_effect_records` — 效果追踪记录
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| (已有字段) | | | |
+| **`notes`** | Text | **`description`** | ❌ 描述字段 |
+
+### `agent_evaluations` — Agent 评估
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| **`success`** | Boolean | **`is_success`** | ❌ 缺 is_ |
+| **`hallucination_flag`** | Boolean | **`has_hallucination`** | ❌ 缺 has_ |
+
+### `ab_test_records` — A/B 测试记录
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| **`success`** | Boolean | **`is_success`** | ❌ 缺 is_ |
+
+### `oncall_schedules` — 值班表
+
+| 字段名 | 当前 | 修正 | 说明 |
+|--------|------|------|------|
+| **`current_period_start`** | DateTime | **`current_period_started_at`** | ❌ 缺 _at |
+| **`current_period_end`** | DateTime | **`current_period_ended_at`** | ❌ 缺 _at |
+| **`auto_rotate`** | Boolean | **`is_auto_rotate`** | ❌ 缺 is_ |
 
 ---
 
-## 四、资产主表字段（assets 表）
+## 第三章：跨表同语义字段长度统一
 
-| 列名 | 类型 | 说明 |
-|---|---|---|
-| id | int PK | 自增主键 |
-| name | string | 资产名称（K8s 子资源含 `/` 路径前缀） |
-| type | string | 旧字段，值 = ci_type（兼容） |
-| ci_type | string | CI 类型（见第一节） |
-| ip | string | IP 或地址 |
-| status | string | online / offline / degraded / deprecated |
-| lifecycle_status | string | 生命周期（从 AssetLifecycle 表关联） |
-| tags | string | 标签（逗号分隔或 JSON） |
-| k8s_cluster | string | 所属 K8s 集群名（K8s 子资源用） |
-| parent_id | int FK | 父资产 ID |
-| connection_type | string | ssh / kubernetes / database / http / snmp / none |
-| connection_config | JSON string | 连接配置（见第二节） |
-| ci_attributes | JSON string | 规格属性（见第三节） |
-| created_at | datetime | 创建时间 |
-| last_checked | datetime | 最后检查时间 |
-| latency_ms | int | 延迟(ms) |
+| 字段名 | 统一长度 | 涉及表 |
+|--------|---------|--------|
+| name | String(128) | chaos_experiments, chaos_scenarios, assets, tags, alert_rules, notification_channels, auto_remediations, data_sources, api_tokens, anomaly_configs, notification_templates, remediation_workflows, log_anomaly_rules, prediction_models, alert_webhooks, metric_records(改为128), ci_models, ci_attributes, report_schedules, saved_filters, discovery_jobs, ext_cmdb_configs, trace_anomaly_configs, kafka_pipelines, ext_event_sources, netflow_collectors, service_mesh_configs, blue_green_deploys, escalation_policies(改为128), ab_test_configs, discovery_schedules, mcp_servers, agent_configs |
+| title | String(256) | notification_logs, incidents, knowledge_base, reports, runbooks, dashboard_card_configs(改为256), change_requests, knowledge_drafts |
+| status | String(32) | chaos_experiments, assets, alerts, incidents, change_requests, change_tasks, asset_lifecycles, spans, discovery_jobs, blue_green_deploys, asset_metric_recommendations(改为32), asset_baseline_checks(改为32), knowledge_drafts(改为32), ab_test_configs(改为32), discovery_results(改为32) |
+| severity | String(32) | alert_rules, alerts, incidents, knowledge_base, k8s_events, runbooks, notification_templates, log_anomaly_rules, cluster_anomaly_events, security_baseline_templates(改为32), knowledge_drafts |
+| metric_name | String(64) | alert_rules, alerts, alert_suppressions, anomaly_configs, alert_silence_schedules, hotspot_analyses, prediction_models, metric_templates(改为64), asset_metric_recommendations(改为64), anomaly_benchmarks |
+| category | String(32) | chaos_scenarios, runbooks(改为32), metric_templates, asset_metric_recommendations, security_baseline_templates, workflow_templates |
+| source | String(32) | log_anomaly_rules, feature_store_items(改为32), asset_metric_recommendations, k8s_events(改为32) |
+| service_name | String(128) | slo_configs(改为128), sla_records(改为128), availability_reports(改为128), spans, trace_anomaly_configs |
+| reason | String(256) | alert_silences, alert_suppressions(改为256), alert_escalations, k8s_events(改为256), alert_silence_schedules |
+| tags | String(256) | assets, knowledge_base, runbooks, kb_documents, kb_chunks |
+| cron_expr | String(128) | alert_silence_schedules(改为128), report_schedules |
 
 ---
 
-## 五、敏感字段掩码规则
+## 第四章：废弃字段清单
 
-后端 `detail` 接口返回时，敏感字段用 `"***"` 掩码，同时返回 `has_<field>` 布尔标记：
+| 表 | 废弃字段 | 替代 | 原因 |
+|----|---------|------|------|
+| assets | `type` | `ci_type` | 两者语义重复，ci_type 更精确 |
+| — | `cluster` (ci_type 枚举值) | `kubernetes_cluster` | 契约已标注废弃 |
+
+---
+
+## 第五章：敏感字段掩码规则（沿用）
 
 | 字段 | 掩码标记 |
-|---|---|
+|------|---------|
 | ssh_password | has_ssh_password |
 | ssh_private_key | has_ssh_private_key |
 | k8s_token | has_k8s_token |
@@ -236,77 +606,15 @@
 | db_password | has_db_password |
 | http_credential | has_http_credential |
 
-**前端编辑规则：**
-- `openEdit` 加载后，所有密码字段置空（不显示 `***`）
-- 保存时：密码字段为空 → 不更新（后端保留原值）；非空 → 更新
-- 前端用 `has_*` 标记显示「已设置 / 未设置」提示
+**前端编辑规则：** 加载后密码字段置空，保存时空值不更新，用 `has_*` 标记显示「已设置」。
 
 ---
 
-## 六、DataSource 表字段映射
+## 第六章：字段命名总则
 
-`data_sources` 表的 `auth_config` JSON 字段名必须与 `connection_config` 保持一致：
-
-| DataSource type | auth_config 字段 | 与 assets.connection_config 的关系 |
-|---|---|---|
-| kubernetes | k8s_api_server, k8s_token, verify_ssl | 完全一致 |
-| ssh | ssh_user, ssh_password, ssh_port | 完全一致（不再用 username/password/port） |
-| prometheus | endpoint | 直接用 data_sources.endpoint 列 |
-| docker | docker_host | 独立字段 |
-
-**规则：**
-- DataSource.auth_config 不再使用 `username` / `password` / `port`，统一用 `ssh_*` 前缀
-- 跨表复用连接配置时直接复制 JSON，无需字段映射
-
----
-
-## 七、字段命名规范
-
-1. **前缀即类型**：`ssh_*`、`k8s_*`、`db_*`、`http_*`、`snmp_*` 一目了然
-2. **不缩写**：`password` 不写 `passwd`，`credential` 不写 `cred`
-3. **snake_case**：全小写 + 下划线，前后端一致
-4. **废弃字段标注**：本文件中 ~~删除线~~ 标注的字段为已废弃值，新代码不得使用
-5. **单一数据源**：本文件是唯一权威，代码中不得自行发明字段名
-
----
-
-## 八、AI 会话关联表字段规范
-
-### 1. alert_session_links（告警-会话关联）
-
-| 字段名 | 类型 | 说明 |
-|---|---|---|
-| id | int | 主键 |
-| alert_id | int | 关联告警 ID (FK → alerts.id) |
-| session_id | int | 关联会话 ID (FK → chat_sessions.id) |
-| context_summary | text | 关联时的上下文摘要 |
-| created_at | datetime | 创建时间 |
-
-### 2. asset_session_links（资产-会话关联）
-
-| 字段名 | 类型 | 说明 |
-|---|---|---|
-| id | int | 主键 |
-| asset_id | int | 关联资产 ID (FK → assets.id) |
-| session_id | int | 关联会话 ID (FK → chat_sessions.id) |
-| context_summary | text | 关联时的上下文摘要 |
-| created_at | datetime | 创建时间 |
-
-### 3. chat_sessions.context（会话上下文 JSON）
-
-用于存储当前会话关联的告警或资产 ID，Agent 在处理消息时会自动读取此字段注入 Prompt。
-
-```json
-{
-  "alert_id": 42,
-  "alert_metric": "cpu_usage",
-  "alert_severity": "critical",
-  "asset_id": 10,
-  "asset_name": "web-server-01",
-  "asset_ip": "192.168.1.100"
-}
-```
-
-**更新逻辑：**
-- 关联告警时：写入 `alert_id` + 告警元数据 + `asset_id`
-- 关联资产时：写入 `asset_id` + 资产元数据（若已有 alert_id，清空告警上下文以避免冲突）
+1. **snake_case** — 全小写下划线，前后端一致
+2. **不缩写** — `password` 不写 `passwd`，`credential` 不写 `cred`，`description` 不写 `desc`
+3. **前缀即类型** — `is_` 布尔、`has_` 拥有、`ssh_` SSH 字段、`k8s_` K8s 字段
+4. **后缀即语义** — `_at` 时间、`_id` 外键、`_type` 类型、`_config` JSON 配置
+5. **一义一名** — 同一种含义全库用一个字段名（禁止 `name/title/label` 混用）
+6. **本文件唯一权威** — 代码中不得自行发明字段名，新增字段必须先改本契约

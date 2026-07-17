@@ -99,11 +99,11 @@
             </div>
             <div class="form-group">
               <label>计划开始</label>
-              <input v-model="form.planned_start" type="datetime-local" />
+              <input v-model="form.planned_started_at" type="datetime-local" />
             </div>
             <div class="form-group">
               <label>计划结束</label>
-              <input v-model="form.planned_end" type="datetime-local" />
+              <input v-model="form.planned_ended_at" type="datetime-local" />
             </div>
           </div>
           <div class="form-actions">
@@ -132,8 +132,8 @@
             <div class="detail-item"><span class="detail-label">审批人</span><span class="detail-value">{{ detail.reviewer_name || '-' }}</span></div>
             <div class="detail-item"><span class="detail-label">CI 类型</span><span class="detail-value">{{ detail.ci_type || '-' }}</span></div>
             <div class="detail-item"><span class="detail-label">资产 ID</span><span class="detail-value">{{ detail.asset_id || '-' }}</span></div>
-            <div class="detail-item"><span class="detail-label">计划开始</span><span class="detail-value">{{ detail.planned_start || '-' }}</span></div>
-            <div class="detail-item"><span class="detail-label">计划结束</span><span class="detail-value">{{ detail.planned_end || '-' }}</span></div>
+            <div class="detail-item"><span class="detail-label">计划开始</span><span class="detail-value">{{ detail.planned_started_at || '-' }}</span></div>
+            <div class="detail-item"><span class="detail-label">计划结束</span><span class="detail-value">{{ detail.planned_ended_at || '-' }}</span></div>
           </div>
 
           <div v-if="detail.description" class="desc-block">
@@ -267,7 +267,7 @@ const reviewComment = ref('')
 const newTask = reactive({ description: '', command: '', step_order: 1 })
 const form = reactive({
   title: '', description: '', ci_type: '', change_type: 'normal',
-  priority: 'medium', risk_level: 'low', planned_start: '', planned_end: '',
+  priority: 'medium', risk_level: 'low', planned_started_at: '', planned_ended_at: '',
 })
 
 const currentPage = ref(1)
@@ -312,7 +312,7 @@ async function loadChanges() {
 }
 
 function openCreate() {
-  Object.assign(form, { title: '', description: '', ci_type: '', change_type: 'normal', priority: 'medium', risk_level: 'low', planned_start: '', planned_end: '' })
+  Object.assign(form, { title: '', description: '', ci_type: '', change_type: 'normal', priority: 'medium', risk_level: 'low', planned_started_at: '', planned_ended_at: '' })
   createVisible.value = true
 }
 
@@ -328,8 +328,8 @@ async function createChange() {
     fd.append('change_type', form.change_type)
     fd.append('priority', form.priority)
     fd.append('risk_level', form.risk_level)
-    fd.append('planned_start', form.planned_start)
-    fd.append('planned_end', form.planned_end)
+    fd.append('planned_started_at', form.planned_started_at)
+    fd.append('planned_ended_at', form.planned_ended_at)
     const data = await request.post('/change-workflow/api/create', fd)
     ElMessage.success('创建成功')
     createVisible.value = false

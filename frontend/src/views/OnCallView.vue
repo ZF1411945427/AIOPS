@@ -22,7 +22,7 @@
           style="margin-bottom: 12px"
         >
           <template #default>
-            <div>{{ formatTime(c.period_start) }} ~ {{ formatTime(c.period_end) }}</div>
+            <div>{{ formatTime(c.period_started_at) }} ~ {{ formatTime(c.period_ended_at) }}</div>
           </template>
         </el-alert>
       </template>
@@ -46,12 +46,12 @@
         <el-table-column prop="current_oncall" label="当前值班人" width="110" />
         <el-table-column label="周期开始" width="170">
           <template #default="{row}">
-            {{ formatTime(row.current_period_start) }}
+            {{ formatTime(row.current_period_started_at) }}
           </template>
         </el-table-column>
         <el-table-column label="周期结束" width="170">
           <template #default="{row}">
-            {{ formatTime(row.current_period_end) }}
+            {{ formatTime(row.current_period_ended_at) }}
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
@@ -113,11 +113,11 @@
             <el-option v-for="m in form.members" :key="m.name" :label="m.name" :value="m.name" />
           </el-select>
         </el-form-item>
-        <el-form-item label="周期开始" prop="current_period_start">
-          <el-date-picker v-model="form.current_period_start" type="date" value-format="YYYY-MM-DD" @change="autoPeriodEnd" style="width: 100%" />
+        <el-form-item label="周期开始" prop="current_period_started_at">
+          <el-date-picker v-model="form.current_period_started_at" type="date" value-format="YYYY-MM-DD" @change="autoPeriodEnd" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="周期结束" prop="current_period_end">
-          <el-date-picker v-model="form.current_period_end" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+        <el-form-item label="周期结束" prop="current_period_ended_at">
+          <el-date-picker v-model="form.current_period_ended_at" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -191,8 +191,8 @@ const form = reactive({
   rotation_type: "weekly",
   members: [{ name: "", phone: "" }],
   current_oncall: "",
-  current_period_start: new Date().toISOString().slice(0, 10),
-  current_period_end: ""
+  current_period_started_at: new Date().toISOString().slice(0, 10),
+  current_period_ended_at: ""
 })
 
 const currentItems = computed(() => currentOncall.value.items || [])
@@ -234,12 +234,12 @@ const rules = {
       trigger: "change"
     }
   ],
-  current_period_start: [{ required: true, message: "请选择周期开始", trigger: "change" }],
-  current_period_end: [
+  current_period_started_at: [{ required: true, message: "请选择周期开始", trigger: "change" }],
+  current_period_ended_at: [
     { required: true, message: "请选择周期结束", trigger: "change" },
     {
       validator: (rule, value, callback) => {
-        if (value && form.current_period_start && new Date(value) <= new Date(form.current_period_start)) {
+        if (value && form.current_period_started_at && new Date(value) <= new Date(form.current_period_started_at)) {
           callback(new Error("周期结束必须晚于开始"))
         } else {
           callback()
@@ -269,17 +269,17 @@ const pickMember = (name) => {
 }
 
 const autoPeriodEnd = () => {
-  if (!form.current_period_start) return
+  if (!form.current_period_started_at) return
   const step = form.rotation_type === "weekly" ? 7 : 30
-  const start = new Date(form.current_period_start)
+  const start = new Date(form.current_period_started_at)
   if (isNaN(start.getTime())) return
   const end = new Date(start.getTime() + step * 86400000)
-  form.current_period_end = end.toISOString().slice(0, 10)
+  form.current_period_ended_at = end.toISOString().slice(0, 10)
 }
 
 const buildSchedule = () => {
-  if (!form.current_period_start) return []
-  const start = new Date(form.current_period_start)
+  if (!form.current_period_started_at) return []
+  const start = new Date(form.current_period_started_at)
   if (isNaN(start.getTime())) return []
   const step = form.rotation_type === "weekly" ? 7 : 30
   const dayMs = 86400000
@@ -327,7 +327,7 @@ const showCreateDialog = () => {
   form.rotation_type = "weekly"
   form.members = [{ name: "", phone: "" }]
   form.current_oncall = ""
-  form.current_period_start = new Date().toISOString().slice(0, 10)
+  form.current_period_started_at = new Date().toISOString().slice(0, 10)
   autoPeriodEnd()
   loadMemberCandidates()
   dialogVisible.value = true
@@ -343,8 +343,8 @@ const showEditDialog = (row) => {
     phone: m.phone || ""
   }))
   form.current_oncall = row.current_oncall
-  form.current_period_start = row.current_period_start ? new Date(row.current_period_start).toISOString().slice(0, 10) : ""
-  form.current_period_end = row.current_period_end ? new Date(row.current_period_end).toISOString().slice(0, 10) : ""
+  form.current_period_started_at = row.current_period_started_at ? new Date(row.current_period_started_at).toISOString().slice(0, 10) : ""
+  form.current_period_ended_at = row.current_period_ended_at ? new Date(row.current_period_ended_at).toISOString().slice(0, 10) : ""
   loadMemberCandidates()
   dialogVisible.value = true
   formRef.value?.clearValidate()
@@ -368,8 +368,8 @@ const saveOncall = async () => {
       })),
       schedule: buildSchedule(),
       current_oncall: form.current_oncall,
-      current_period_start: form.current_period_start,
-      current_period_end: form.current_period_end
+      current_period_started_at: form.current_period_started_at,
+      current_period_ended_at: form.current_period_ended_at
     }
     if (editingId.value) {
       await axios.put(`/api/sre/oncall/${editingId.value}`, payload)

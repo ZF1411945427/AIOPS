@@ -9,76 +9,11 @@ from app.models import Asset, Alert, Incident
 router = APIRouter(prefix="/api/system/posture", tags=["system_posture"])
 
 
-def _get_asset_ids_and_total(base_q):
-    rows = base_q.with_entities(Asset.id).all()
-    ids = [r[0] for r in rows]
-    return ids, len(ids)
-
-
-def _compute_day_sla(db, cluster, day_start, day_end):
-    base_q = db.query(Asset).filter(Asset.k8s_cluster == cluster)
-    asset_ids, total = _get_asset_ids_and_total(base_q)
-    if total == 0:
-        return None
-    online = base_q.filter(Asset.status == "online").count()
-    alerts = _count_alerts(db, asset_ids, day_start, day_end)
-    incidents = _count_incidents(db, asset_ids, day_start, day_end)
-    return _sla_result(online, total, alerts, incidents)
-
-
-def _compute_day_sla_by_filter(db, base_q, day_start, day_end):
-    asset_ids, total = _get_asset_ids_and_total(base_q)
-    if total == 0:
-        return None
-    online = base_q.filter(Asset.status == "online").count()
-    alerts = _count_alerts(db, asset_ids, day_start, day_end)
-    incidents = _count_incidents(db, asset_ids, day_start, day_end)
-    return _sla_result(online, total, alerts, incidents)
-
-
-def _count_alerts(db, asset_ids, day_start, day_end):
-    if not asset_ids:
-        return 0
-    return db.query(func.count(Alert.id)).filter(
-        Alert.asset_id.in_(asset_ids),
-        Alert.created_at >= day_start,
-        Alert.created_at < day_end
-    ).scalar() or 0
-
-
-def _count_incidents(db, asset_ids, day_start, day_end):
-    if not asset_ids:
-        return 0
-    return db.query(func.count(Incident.id)).filter(
-        Incident.asset_id.in_(asset_ids),
-        Incident.created_at >= day_start,
-        Incident.created_at < day_end
-    ).scalar() or 0
-
-
-def _sla_result(online, total, alerts, incidents):
-    uptime_rate = online / total * 100
-    sla_value = max(0, min(100, uptime_rate - alerts * 0.5 - incidents * 5))
-    health_score = int(sla_value)
-    status = "healthy" if sla_value >= 99 else "warning" if sla_value >= 95 else "critical"
-    return {
-        "sla_value": round(sla_value, 3),
-        "health_score": health_score,
-        "status": status,
-        "alerts": alerts,
-        "incidents": incidents,
-    }
-
-
 def _build_systems(db):
-    now = datetime.now()
     systems = []
-
-    # 1. Group by k8s_cluster
     clusters = [c[0] for c in db.query(distinct(Asset.k8s_cluster)).filter(
         Asset.k8s_cluster != "", Asset.k8s_cluster != None).all() if c[0]]
     for cluster in clusters:
-        base_q = db.query(Asset).filter(Asset.k8s_cluster == cluster)
         systems.append({
             "system_key": "k8s_" + cluster,
             "system_name": cluster,
@@ -87,46 +22,91 @@ def _build_systems(db):
             "type": "k8s_cluster",
             "filter": {"k8s_cluster": cluster},
         })
-
-    # 2. Group by Asset.type for non-K8s assets (those without k8s_cluster)
-    types = db.query(Asset.type, func.count(Asset.id).label("cnt")).filter(
+    types = db.query(Asset.ci_type, func.count(Asset.id).label("cnt")).filter(
         (Asset.k8s_cluster == "") | (Asset.k8s_cluster == None)
-    ).group_by(Asset.type).having(func.count(Asset.id) >= 2).order_by(text("cnt desc")).all()
+    ).group_by(Asset.ci_type).having(func.count(Asset.id) >= 2).order_by(text("cnt desc")).all()
+    domain_map = {
+        "server": "基础设施", "virtual_machine": "基础设施", "vm": "基础设施",
+        "database": "数据库", "middleware": "中间件",
+        "network": "网络", "storage": "存储",
+        "container": "容器", "docker": "容器",
+        "loadbalancer": "负载均衡",
+    }
     for t, cnt in types:
-        domain_map = {
-            "server": "基础设施", "virtual_machine": "基础设施", "vm": "基础设施",
-            "database": "数据库", "middleware": "中间件",
-            "network": "网络", "storage": "存储",
-            "container": "容器", "docker": "容器",
-            "loadbalancer": "负载均衡",
-        }
-        domain = domain_map.get(t, "其他")
         systems.append({
             "system_key": "type_" + t,
             "system_name": t + " (" + str(cnt) + ")",
-            "domain": domain,
+            "domain": domain_map.get(t, "其他"),
             "environment": "prod",
             "type": "asset_type",
             "filter": {"type": t},
         })
-
-    # 3. 虚拟 demo 系统已移除 — REAL 模式只展示真实资产数据
-    # 原来硬编码的"核心支付系统""CDN加速网络""旧版监控平台"用 random 生成假 SLA，已删除
-
     return systems
 
 
-def _process_system(sys, db, day_start, day_end):
-    # 虚拟系统的 random 假数据已移除 — 只查真实数据
-    filt = sys.get("filter")
-    if not filt:
-        return None
-    if "k8s_cluster" in filt:
-        return _compute_day_sla(db, filt["k8s_cluster"], day_start, day_end)
-    if "type" in filt:
-        base_q = db.query(Asset).filter(Asset.type == filt["type"])
-        return _compute_day_sla_by_filter(db, base_q, day_start, day_end)
-    return None
+def _collect_asset_ids(db, systems):
+    """为每个 system 收集 asset_ids，返回 dict[system_key, list[asset_id]]"""
+    result = {}
+    for sys in systems:
+        filt = sys.get("filter")
+        if "k8s_cluster" in filt:
+            ids = [r[0] for r in db.query(Asset.id).filter(
+                Asset.k8s_cluster == filt["k8s_cluster"]).all()]
+        elif "type" in filt:
+            ids = [r[0] for r in db.query(Asset.id).filter(
+                Asset.ci_type == filt["type"]).all()]
+        else:
+            ids = []
+        result[sys["system_key"]] = ids
+    return result
+
+
+def _batch_alert_incident_counts(db, all_asset_ids, day_start, day_end):
+    """批量查询所有 asset 在时间范围内的每日告警/故障数"""
+    alert_by_day_asset = {}
+    incident_by_day_asset = {}
+    if not all_asset_ids:
+        return alert_by_day_asset, incident_by_day_asset
+
+    rows = db.query(
+        func.date(Alert.created_at).label("day"),
+        Alert.asset_id,
+        func.count(Alert.id).label("cnt")
+    ).filter(
+        Alert.asset_id.in_(all_asset_ids),
+        Alert.created_at >= day_start,
+        Alert.created_at < day_end
+    ).group_by(func.date(Alert.created_at), Alert.asset_id).all()
+    for day_str, asset_id, cnt in rows:
+        alert_by_day_asset[(day_str, asset_id)] = cnt
+
+    rows = db.query(
+        func.date(Incident.created_at).label("day"),
+        Incident.asset_id,
+        func.count(Incident.id).label("cnt")
+    ).filter(
+        Incident.asset_id.in_(all_asset_ids),
+        Incident.created_at >= day_start,
+        Incident.created_at < day_end
+    ).group_by(func.date(Incident.created_at), Incident.asset_id).all()
+    for day_str, asset_id, cnt in rows:
+        incident_by_day_asset[(day_str, asset_id)] = cnt
+
+    return alert_by_day_asset, incident_by_day_asset
+
+
+def _sla_result(online_count, total, day_alerts, day_incidents):
+    uptime_rate = online_count / total * 100 if total > 0 else 0
+    sla_value = max(0, min(100, uptime_rate - day_alerts * 0.5 - day_incidents * 5))
+    health_score = int(sla_value)
+    status = "healthy" if sla_value >= 99 else "warning" if sla_value >= 95 else "critical"
+    return {
+        "sla_value": round(sla_value, 3),
+        "health_score": health_score,
+        "status": status,
+        "alerts": day_alerts,
+        "incidents": day_incidents,
+    }
 
 
 @router.get("")
@@ -134,24 +114,40 @@ def get_posture(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_d
     now = datetime.now()
     start = now - timedelta(days=days)
     systems = _build_systems(db)
+    sys_asset_map = _collect_asset_ids(db, systems)
+
+    all_ids = list(set(aid for ids in sys_asset_map.values() for aid in ids))
+    alert_batch, incident_batch = _batch_alert_incident_counts(db, all_ids, start, now)
+
+    online_set = set()
+    if all_ids:
+        online_set = set(r[0] for r in db.query(Asset.id).filter(
+            Asset.id.in_(all_ids), Asset.status == "online").all())
+    online_map = {sk: sum(1 for aid in aids if aid in online_set)
+                  for sk, aids in sys_asset_map.items()}
+
     result_systems = []
     for sys in systems:
+        sk = sys["system_key"]
+        asset_ids = sys_asset_map.get(sk, [])
+        total = len(asset_ids)
+        online = online_map.get(sk, 0)
+
+        total_alerts = sum(v for (d, aid), v in alert_batch.items() if aid in asset_ids)
+        total_incidents = sum(v for (d, aid), v in incident_batch.items() if aid in asset_ids)
+
+        r = _sla_result(online, total, total_alerts, total_incidents)
         entry = {
-            "system_key": sys["system_key"],
+            "system_key": sk,
             "system_name": sys["system_name"],
             "domain": sys["domain"],
             "environment": sys["environment"],
-            "status": "unknown",
-            "sla_value": 0,
-            "health_score": 0,
-            "alerts_count": 0,
-            "incidents_count": 0,
+            "status": r["status"],
+            "sla_value": r["sla_value"],
+            "health_score": r["health_score"],
+            "alerts_count": r["alerts"],
+            "incidents_count": r["incidents"],
         }
-        result = _process_system(sys, db, start, now)
-        if result:
-            entry.update(result)
-            entry["alerts_count"] = result["alerts"]
-            entry["incidents_count"] = result["incidents"]
         result_systems.append(entry)
 
     return JSONResponse({
@@ -171,30 +167,46 @@ def get_posture(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_d
 @router.get("/heatmap")
 def get_heatmap(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db)):
     now = datetime.now()
+    start = now - timedelta(days=days)
     systems = _build_systems(db)
+    sys_asset_map = _collect_asset_ids(db, systems)
+
+    all_ids = list(set(aid for ids in sys_asset_map.values() for aid in ids))
+    alert_batch, incident_batch = _batch_alert_incident_counts(db, all_ids, start, now)
+
+    online_set = set()
+    if all_ids:
+        online_set = set(r[0] for r in db.query(Asset.id).filter(
+            Asset.id.in_(all_ids), Asset.status == "online").all())
+    online_map = {sk: sum(1 for aid in aids if aid in online_set)
+                  for sk, aids in sys_asset_map.items()}
+
+    date_labels = []
+    for i in range(days - 1, -1, -1):
+        date_labels.append((now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0))
+
     result = []
     for sys in systems:
+        sk = sys["system_key"]
+        asset_ids = sys_asset_map.get(sk, [])
+        total = len(asset_ids)
+        online = online_map.get(sk, 0)
         cells = []
-        for i in range(days - 1, -1, -1):
-            day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = day_start + timedelta(days=1)
-            r = _process_system(sys, db, day_start, day_end)
-            if r:
-                cells.append({
-                    "day": day_start.strftime("%Y-%m-%d"),
-                    "sla_value": r["sla_value"],
-                    "health_score": r["health_score"],
-                    "status": r["status"],
-                    "alerts": r["alerts"],
-                    "incidents": r["incidents"],
-                })
-            else:
-                cells.append({
-                    "day": day_start.strftime("%Y-%m-%d"),
-                    "sla_value": None, "health_score": None, "status": "unknown", "alerts": 0, "incidents": 0,
-                })
+        for ds in date_labels:
+            day_str = ds.strftime("%Y-%m-%d")
+            day_alerts = sum(alert_batch.get((day_str, aid), 0) for aid in asset_ids)
+            day_incidents = sum(incident_batch.get((day_str, aid), 0) for aid in asset_ids)
+            r = _sla_result(online, total, day_alerts, day_incidents)
+            cells.append({
+                "day": day_str,
+                "sla_value": r["sla_value"],
+                "health_score": r["health_score"],
+                "status": r["status"],
+                "alerts": r["alerts"],
+                "incidents": r["incidents"],
+            })
         result.append({
-            "system_key": sys["system_key"],
+            "system_key": sk,
             "system_name": sys["system_name"],
             "cells": cells,
         })

@@ -1,12 +1,16 @@
 <template>
     <view class="page-wrap">
+        <view class="toolbar-row">
+            <button class="create-btn" @tap="goCreate">+ 新建故障单</button>
+        </view>
+
         <view class="tab-bar">
             <view v-for="t in tabs" :key="t.value" class="tab-item" :class="{ active: activeTab === t.value }" @tap="switchTab(t.value)">
                 <text class="tab-text">{{ t.label }}</text>
             </view>
         </view>
 
-        <view v-if="loading" class="loading-state">
+        <view v-if="loading && list.length === 0" class="loading-state">
             <text class="text-muted">加载中...</text>
         </view>
 
@@ -88,6 +92,10 @@ function loadMore() {
     setTimeout(() => { loadingMore.value = false }, 500)
 }
 
+function goCreate() {
+    uni.navigateTo({ url: '/pages/incident/create' })
+}
+
 function goDetail(id) {
     uni.navigateTo({ url: '/pages/incident/detail?id=' + id })
 }
@@ -101,6 +109,22 @@ fetchList(true)
 </script>
 
 <style lang="scss" scoped>
+.toolbar-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 16rpx;
+}
+.create-btn {
+    height: 64rpx;
+    line-height: 64rpx;
+    padding: 0 32rpx;
+    background: $primary;
+    color: #fff;
+    border-radius: 32rpx;
+    font-size: $font-sm;
+    border: none;
+}
+.create-btn::after { border: none; }
 .tab-bar {
     display: flex; background: $bg-card-solid; border-radius: $card-radius; padding: 8rpx; margin-bottom: 24rpx;
 }

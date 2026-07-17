@@ -46,10 +46,11 @@ class _MultiStaticFiles(_FastStaticFiles):
 StaticFiles = _FastStaticFiles  # alias so existing mounts keep working
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
 from app import config as _config
-from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, knowledge_v2, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license, mobile
+from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, knowledge_v2, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, agent_sse, ws, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license, mobile, health_map, inspection, baseline, knowledge_autogen, remediation_effect, agent_eval, ab_test, anomaly_eval, asset_discovery, ops_analytics, diagnostic_tools, tenant_management, roles, observability_correlation, agent_ground_truth
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
-from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service
+from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service, trace_anomaly_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
+from app.services.synthetic_monitor import check_all_synthetics
 from app.services.report_service import generate_report
 from app.services.license_service import LicenseMiddleware
 from app.seed_data import seed_all
@@ -73,6 +74,41 @@ _MIGRATIONS = {
     ],
     "agent_workflow_runs": [
         "triggered_by VARCHAR(64)",
+    ],
+    "oncall_schedules": [
+        "is_auto_rotate BOOLEAN DEFAULT 0",
+        "holidays TEXT DEFAULT '[]'",
+    ],
+    "chaos_runs": [
+        "is_auto_recovered BOOLEAN DEFAULT 0",
+    ],
+    "inspection_records": [
+        "triggered_by_alert_id INTEGER",
+    ],
+    "knowledge_base": [
+        "source_type VARCHAR(32) DEFAULT 'manual'",
+        "sop_steps TEXT DEFAULT '[]'",
+        "version_number INTEGER DEFAULT 1",
+        "change_log TEXT DEFAULT ''",
+    ],
+    "knowledge_drafts": [
+        "source_type VARCHAR(32) DEFAULT 'auto'",
+        "reject_reason TEXT DEFAULT ''",
+        "sop_steps TEXT DEFAULT '[]'",
+    ],
+    "incidents": [
+        "approver_id INTEGER",
+        "review_comment TEXT DEFAULT ''",
+        "impact VARCHAR(32) DEFAULT 'high'",
+        "description TEXT DEFAULT ''",
+    ],
+    "users": [
+        "role_id INTEGER",
+    ],
+    "chat_sessions": [
+        "provider_id INTEGER",
+        "mode VARCHAR(16) DEFAULT 'agent'",
+        "linked_asset_ids TEXT DEFAULT '[]'",
     ],
 }
 for _eng in get_all_engines().values():
@@ -125,7 +161,7 @@ for _eng in get_all_engines().values():
             "CREATE INDEX IF NOT EXISTS idx_alerts_status_created ON alerts (status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_alerts_severity_created ON alerts (severity, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_alerts_asset_id ON alerts (asset_id)",
-            "CREATE INDEX IF NOT EXISTS idx_k8s_events_cluster_ns ON k8s_events (cluster, namespace, last_seen)",
+            "CREATE INDEX IF NOT EXISTS idx_k8s_events_cluster_ns ON k8s_events (cluster, namespace, last_seen_at)",
             "CREATE INDEX IF NOT EXISTS idx_notif_logs_alert_id ON notification_logs (alert_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_spans_service_time ON spans (service_name, start_time)",
             "CREATE INDEX IF NOT EXISTS idx_asset_changes_asset_ts ON asset_change_logs (asset_id, created_at)",
@@ -165,7 +201,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
         return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
     return JSONResponse({"error": "服务器内部错误"}, status_code=500)
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz", "/health-map"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -251,8 +287,10 @@ app.add_middleware(CacheControlMiddleware)
 _MOBILE_STATIC_TAB = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/static/tab"
 if _MOBILE_STATIC_TAB.is_dir():
     app.mount("/static/tab", StaticFiles(directory=str(_MOBILE_STATIC_TAB)), name="mobile_static_tab")
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
-app.mount("/vue-assets", StaticFiles(directory="frontend/dist"), name="vue_assets")
+_STATIC_DIR = str(Path(__file__).resolve().parent / "static")
+_VUE_DIST_DIR = str(Path(__file__).resolve().parent.parent / "frontend/dist")
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+app.mount("/vue-assets", StaticFiles(directory=_VUE_DIST_DIR), name="vue_assets")
 _MOBILE_DIST = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5"
 if _MOBILE_DIST.is_dir():
     app.mount("/mobile-app", StaticFiles(directory=str(_MOBILE_DIST), html=True), name="mobile_app")
@@ -342,6 +380,8 @@ app.include_router(cluster_anomaly.router)
 app.include_router(trace_rca.router)
 app.include_router(ai_providers.router)
 app.include_router(agent_chat.router)
+app.include_router(agent_sse.router)
+app.include_router(ws.router)
 app.include_router(audit.router)
 app.include_router(menu.router)
 app.include_router(system.router)
@@ -356,24 +396,79 @@ app.include_router(ansible.router)
 app.include_router(license.router)
 app.include_router(mobile.router)
 app.include_router(knowledge_v2.router)
+app.include_router(health_map.router)
+app.include_router(inspection.router)
+app.include_router(baseline.router)
+app.include_router(knowledge_autogen.router)
+app.include_router(remediation_effect.router)
+app.include_router(agent_eval.router)
+app.include_router(ab_test.router)
+app.include_router(anomaly_eval.router)
+app.include_router(asset_discovery.router)
+app.include_router(ops_analytics.router)
+app.include_router(diagnostic_tools.router)
+app.include_router(tenant_management.router)
+app.include_router(roles.router)
+app.include_router(observability_correlation.router)
+app.include_router(agent_ground_truth.router)
+
+
+def _collect_all_menu_keys():
+    """从 menu_config.json 收集所有菜单 key"""
+    _p = _os.path.join(_os.path.dirname(__file__), "routers", "menu_config.json")
+    if _os.path.exists(_p):
+        with open(_p, encoding="utf-8") as _f:
+            _menu = json.load(_f)
+    else:
+        _menu = []
+    _keys = set()
+    for _g in _menu:
+        _keys.add(_g["key"])
+        for _i in _g.get("items", []):
+            _keys.add(_i["key"])
+            for _s in _i.get("items", []):
+                _keys.add(_s["key"])
+    return list(_keys)
 
 
 def init_admin():
     db = get_session_for(get_db_mode())()
+    # ── 种子角色（幂等）──
+    from app.models import Role as _Role, RoleMenu as _RoleMenu
+    _preset_roles = [
+        {"name": "admin", "description": "系统管理员，拥有全部权限", "is_system": True, "sort_order": 0},
+        {"name": "operator", "description": "运维工程师，可执行操作", "is_system": True, "sort_order": 1},
+        {"name": "viewer", "description": "只读用户，仅可查看", "is_system": True, "sort_order": 2},
+    ]
+    for _pr in _preset_roles:
+        _existing = db.query(_Role).filter(_Role.name == _pr["name"]).first()
+        if not _existing:
+            db.add(_Role(**_pr))
+    db.commit()
     user = db.query(User).filter(User.username == "admin").first()
     if not user:
         from app.security import hash_password
         default_pwd = _os.environ.get("AIOPS_ADMIN_PASSWORD", "admin123")
+        _admin_role = db.query(_Role).filter(_Role.name == "admin").first()
         admin = User(
             username="admin",
             password_hash=hash_password(default_pwd),
             role="admin",
+            role_id=_admin_role.id if _admin_role else None,
         )
         db.add(admin)
         db.commit()
+        # admin 角色默认拥有所有菜单权限
+        if _admin_role:
+            _existing_menus = db.query(_RoleMenu).filter(_RoleMenu.role_id == _admin_role.id).count()
+            if _existing_menus == 0:
+                _all_keys = _collect_all_menu_keys()
+                for _k in _all_keys:
+                    db.add(_RoleMenu(role_id=_admin_role.id, menu_key=_k))
+                db.commit()
     log_channel = db.query(NotificationChannel).filter(NotificationChannel.type == "log").first()
     if not log_channel:
-        db.add(NotificationChannel(name="系统日志", type="log", config="{}", enabled=True))
+        db.add(NotificationChannel(name="系统日志", type="log", channel_config="{}", enabled=True))
         db.commit()
     config_service.init_configs(db)
     try:
@@ -478,7 +573,9 @@ def background_loop():
             ("datasource_scrape", datasource_service.scrape_all_sources),
             ("pod_health", pod_health_service.check_pod_anomalies),
             ("log_anomaly", log_anomaly_service.check_log_anomalies),
+            ("trace_anomaly", trace_anomaly_service.check_trace_anomalies),
             ("contention", contention_service.detect_contention),
+            ("synthetic_monitor", check_all_synthetics),
         ]
         _pool = ThreadPoolExecutor(max_workers=5)
         futures = {_pool.submit(_run_bg_service, name, fn, _mode): name
@@ -565,7 +662,7 @@ def background_loop():
                             cron_hour = int(parts[1])
                             if now.minute == cron_min and now.hour == cron_hour:
                                 report = generate_report(db, s.report_type)
-                                s.last_run = now
+                                s.last_run_at = now
                                 db.commit()
                     except Exception:
                         pass

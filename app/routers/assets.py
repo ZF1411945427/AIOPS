@@ -22,6 +22,11 @@ CI_TYPES = [
     "business_app", "api_service", "ssl_certificate", "dns_record", "monitoring_endpoint",
 ]
 
+# K8s 子资源不在 CMDB 台账中展示，由 K8sResourceListView 管理
+ASSET_EXCLUDE_CI_TYPES = {"deployment", "statefulset", "daemonset", "pod", "job",
+                          "service", "ingress", "pvc", "configmap", "secret",
+                          "replicaset"}
+
 
 @router.get("/api/list")
 def asset_api_list(
@@ -40,6 +45,9 @@ def asset_api_list(
             lc_map[lc.asset_id] = lc.status
     result = []
     for a in assets:
+        # 排除 K8s 子资源（不在 CMDB 台账展示）
+        if a.ci_type in ASSET_EXCLUDE_CI_TYPES:
+            continue
         # 解析 ci_attributes 取引用关系/孤岛标记（三层纳管模型）
         ref_count = None
         is_orphan = False
@@ -53,11 +61,11 @@ def asset_api_list(
             pass
         lifecycle_status = lc_map.get(a.id, "provisioning")
         result.append({
-            "id": a.id, "name": a.name, "type": a.type, "ci_type": getattr(a, 'ci_type', None),
+            "id": a.id, "name": a.name, "type": a.ci_type, "ci_type": getattr(a, 'ci_type', None),
             "ip": a.ip, "status": a.status,
             "lifecycle_status": lifecycle_status,
             "connection_type": getattr(a, 'connection_type', None),
-            "last_checked": a.last_checked.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, 'last_checked', None) else None,
+            "last_checked_at": a.last_checked_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, 'last_checked_at', None) else None,
             "latency_ms": getattr(a, 'latency_ms', None),
             "k8s_cluster": getattr(a, 'k8s_cluster', None) or "",
             "tags": getattr(a, 'tags', None) or "",
@@ -109,7 +117,7 @@ def asset_api_get(asset_id: int, db: Session = Depends(get_db)):
     return JSONResponse({
         "id": asset.id,
         "name": asset.name,
-        "type": asset.type,
+        "type": asset.ci_type,
         "ci_type": getattr(asset, 'ci_type', None),
         "ip": asset.ip,
         "status": asset.status,
@@ -144,6 +152,14 @@ def _build_connection_config(payload: dict) -> dict:
             "ssh_user": payload.get("ssh_user", base.get("ssh_user", "root")),
             "ssh_password": payload.get("ssh_password", base.get("ssh_password", "")),
             "ssh_port": int(payload.get("ssh_port", base.get("ssh_port", 22))),
+        }
+    elif ct == "winrm":
+        return {
+            "winrm_user": payload.get("winrm_user", base.get("winrm_user", "Administrator")),
+            "winrm_password": payload.get("winrm_password", base.get("winrm_password", "")),
+            "winrm_port": int(payload.get("winrm_port", base.get("winrm_port", 5985))),
+            "winrm_transport": payload.get("winrm_transport", base.get("winrm_transport", "ntlm")),
+            "winrm_ssl": payload.get("winrm_ssl", base.get("winrm_ssl", False)),
         }
     elif ct == "kubernetes":
         cfg = dict(base)
@@ -197,11 +213,26 @@ def api_asset_create(payload: dict, db: Session = Depends(get_db)):
         try:
             result = ConnectionTester.test(connection_type, ip, config)
             probe_status = "online" if result.get("ok") else "offline"
+            connection_result = result
         except Exception:
             probe_status = status
+            connection_result = None
+    else:
+        connection_result = None
+
+    # 数据库资产强制权限检测，非 safe 附加风险警告
+    risk_warning = None
+    if connection_result and connection_result.get("permission_check"):
+        pc = connection_result["permission_check"]
+        if pc.get("risk_level") == "high":
+            risk_warning = f"🔴 高危权限警告：该数据库账号拥有极高危权限（DCL/DDL/授权），接入 AI 存在重大风险。建议更换为只读账号后再接入。详细：{pc.get('risk_desc', '')}"
+        elif pc.get("risk_level") == "medium":
+            risk_warning = f"⚠️ 权限警告：该数据库账号拥有 DML 权限，AI 可能修改业务数据。确认要接入吗？详细：{pc.get('risk_desc', '')}"
+        elif pc.get("risk_level") == "unknown":
+            risk_warning = f"❓ 权限未知：无法判定该账号权限等级，人工确认后再接入 AI。详细：{pc.get('risk_desc', '')}"
+
     data = {
         "name": name,
-        "type": ci_type,
         "ci_type": ci_type,
         "ip": ip,
         "status": probe_status,
@@ -209,6 +240,7 @@ def api_asset_create(payload: dict, db: Session = Depends(get_db)):
         "k8s_cluster": payload.get("k8s_cluster") or "",
         "connection_type": connection_type,
         "connection_config": json.dumps(config, ensure_ascii=False),
+        "ci_attributes": json.dumps(payload.get("ci_attributes") or {}, ensure_ascii=False),
     }
     if payload.get("parent_id"):
         data["parent_id"] = int(payload["parent_id"])
@@ -216,7 +248,10 @@ def api_asset_create(payload: dict, db: Session = Depends(get_db)):
     # K8s 集群自动同步 DataSource
     if ci_type == "kubernetes_cluster" and config.get("k8s_api_server") and config.get("k8s_token"):
         _sync_k8s_datasource(db, asset, config)
-    return JSONResponse({"ok": True, "id": asset.id, "status": probe_status})
+    resp = {"ok": True, "id": asset.id, "status": probe_status}
+    if risk_warning:
+        resp["risk_warning"] = risk_warning
+    return JSONResponse(resp)
 
 
 @router.post("/api/{asset_id}/update")
@@ -228,12 +263,10 @@ def api_asset_update(asset_id: int, payload: dict, db: Session = Depends(get_db)
     for k in ("name", "ci_type", "ip", "status", "tags", "k8s_cluster", "connection_type"):
         if k in payload:
             data[k] = payload[k]
-    if "ci_type" in data and "type" not in data:
-        data["type"] = data["ci_type"]
     if "connection_config" in payload:
         cfg = payload["connection_config"]
         data["connection_config"] = json.dumps(cfg, ensure_ascii=False) if isinstance(cfg, dict) else cfg
-    elif any(k in payload for k in ("ssh_user", "ssh_password", "ssh_port", "k8s_api_server", "k8s_token", "http_url", "http_auth", "http_credential", "db_type", "db_port", "db_user", "db_password", "db_name", "snmp_community", "snmp_port", "snmp_version")):
+    elif any(k in payload for k in ("ssh_user", "ssh_password", "ssh_port", "k8s_api_server", "k8s_token", "http_url", "http_auth", "http_credential", "db_type", "db_port", "db_user", "db_password", "db_name", "snmp_community", "snmp_port", "snmp_version", "winrm_user", "winrm_password", "winrm_port", "winrm_transport", "winrm_ssl")):
         config = _build_connection_config(payload)
         data["connection_config"] = json.dumps(config, ensure_ascii=False)
     if data.get("connection_config") and data.get("connection_type"):
@@ -246,6 +279,8 @@ def api_asset_update(asset_id: int, payload: dict, db: Session = Depends(get_db)
                 data["status"] = "online" if result.get("ok") else "offline"
         except Exception:
             pass
+    if "ci_attributes" in payload:
+        data["ci_attributes"] = json.dumps(payload["ci_attributes"], ensure_ascii=False) if isinstance(payload["ci_attributes"], dict) else payload["ci_attributes"]
     if "parent_id" in payload:
         data["parent_id"] = int(payload["parent_id"]) if payload["parent_id"] else None
     updated = asset_service.update_asset(db, asset_id, data)
@@ -278,7 +313,7 @@ def api_asset_detail(asset_id: int, db: Session = Depends(get_db)):
     except Exception:
         attrs = {}
     return JSONResponse({
-        "id": asset.id, "name": asset.name, "type": asset.type, "ci_type": asset.ci_type,
+        "id": asset.id, "name": asset.name, "ci_type": asset.ci_type,
         "ip": asset.ip, "status": asset.status, "tags": asset.tags or "",
         "k8s_cluster": asset.k8s_cluster or "", "parent_id": asset.parent_id,
         "connection_type": asset.connection_type or "ssh",
@@ -304,6 +339,12 @@ def api_asset_detail(asset_id: int, db: Session = Depends(get_db)):
         "snmp_community": config.get("snmp_community", "public"),
         "snmp_port": config.get("snmp_port", 161),
         "snmp_version": config.get("snmp_version", "v2c"),
+        "winrm_user": config.get("winrm_user", "Administrator"),
+        "winrm_password": "***" if config.get("winrm_password") else "",
+        "has_winrm_password": bool(config.get("winrm_password")),
+        "winrm_port": config.get("winrm_port", 5985),
+        "winrm_transport": config.get("winrm_transport", "ntlm"),
+        "winrm_ssl": config.get("winrm_ssl", False),
         "mw_subtype": attrs.get("mw_subtype", config.get("mw_subtype", "nginx")),
         "mw_port": attrs.get("mw_port", config.get("mw_port", 80)),
         "mw_admin_url": attrs.get("mw_admin_url", config.get("mw_admin_url", "")),
@@ -447,7 +488,7 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
             attrs_json = json.dumps(attrs, ensure_ascii=False)
             if existing:
                 existing.ci_attributes = attrs_json
-                existing.last_checked = now
+                existing.last_checked_at = now
                 existing.status = "online"
                 existing.k8s_cluster = asset.name
                 if parent:
@@ -459,7 +500,7 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
                     k8s_cluster=asset.name, parent_id=parent,
                     connection_type="kubernetes",
                     ci_attributes=attrs_json,
-                    created_at=now, last_checked=now,
+                    created_at=now, last_checked_at=now,
                 )
                 db.add(a)
             key = ci_type_val + "s" if ci_type_val[-1] != 'y' else ci_type_val[:-1] + "ies"
@@ -657,13 +698,13 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
         ).all()
         for s in stale:
             s.status = "deprecated"
-            s.last_checked = now
+            s.last_checked_at = now
             synced["stale_cleaned"] += 1
         synced["pods_skipped"] = len(pods)
 
         db.commit()
         ds.last_status = "healthy"
-        ds.last_scrape = now
+        ds.last_scraped_at = now
         db.commit()
 
         return JSONResponse({"ok": True, "synced": synced, "model": "tiered-dynamic-ci"})
@@ -719,3 +760,20 @@ def open_assistant_from_asset(asset_id: int, request: Request, db: Session = Dep
     add_message(db, session.id, "system", summary_content, message_type="text")
 
     return JSONResponse({"session_id": session.id, "new": True})
+
+
+@router.get("/api/health-score")
+def api_asset_health_score(asset_id: int = 0, db: Session = Depends(get_db)):
+    """查询资产健康评分（可指定 asset_id 或查全部）."""
+    from app.services.asset_change_service import get_asset_health_score, get_all_asset_health
+    if asset_id > 0:
+        return get_asset_health_score(db, asset_id)
+    return get_all_asset_health(db)
+
+
+@router.post("/api/health-scan")
+def api_health_scan(db: Session = Depends(get_db)):
+    """触发所有资产健康扫描，记录变更日志."""
+    from app.services.asset_change_service import scan_asset_health_changes
+    changed = scan_asset_health_changes(db)
+    return {"ok": True, "changed": changed}

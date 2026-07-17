@@ -124,9 +124,12 @@
             </div>
           </el-popover>
           <el-dropdown trigger="click" @command="handleUserCommand" placement="bottom-end">
-            <el-avatar :size="28" class="header-avatar">
-              <el-icon :size="16"><User /></el-icon>
-            </el-avatar>
+            <div class="user-info-trigger">
+              <span v-if="userInfo && userInfo.tenant_name" class="tenant-badge">{{ userInfo.tenant_name }}</span>
+              <el-avatar :size="28" class="header-avatar">
+                <el-icon :size="16"><User /></el-icon>
+              </el-avatar>
+            </div>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="profile">个人中心</el-dropdown-item>
@@ -140,7 +143,8 @@
 
       <main class="content">
         <div class="content-inner">
-          <DashboardView v-if="activeView === 'dashboard'" />
+          <MonitorView v-if="activeView === 'monitor-view'" />
+          <DashboardView v-else-if="activeView === 'dashboard'" />
           <SystemPosture v-else-if="activeView === 'system-posture'" />
       <AgentAudit v-else-if="activeView === 'audit'" />
       <OperationAudit v-else-if="activeView === 'op-audit'" />
@@ -151,6 +155,7 @@
       <MetricsView v-else-if="activeView === 'metrics'" />
           <ErrorBudgetView v-else-if="activeView === 'error-budget'" />
           <BurnRateView v-else-if="activeView === 'burn-rate'" />
+          <SloDashboardView v-else-if="activeView === 'slo-dashboard'" />
           <SLOConfigView v-else-if="activeView === 'slo-config'" />
           <SLAView v-else-if="activeView === 'sla-agreement'" />
           <OnCallView v-else-if="activeView === 'oncall-schedule'" />
@@ -173,7 +178,8 @@
       <BlueGreenView v-else-if="activeView === 'blue-green'" />
       <ChangeWorkflowView v-else-if="activeView === 'change-workflow'" />
       <PendingActionsView v-else-if="activeView === 'pending-actions'" />
-      <AiProvidersView v-else-if="activeView === 'ai-providers'" />
+          <AiProvidersView v-else-if="activeView === 'ai-providers'" />
+          <AgentCapabilitiesView v-else-if="activeView === 'agent-capabilities'" />
           <FeatureStoreView v-else-if="activeView === 'feature-store'" />
           <PredictionModelsView v-else-if="activeView === 'prediction-models'" />
           <UsersView v-else-if="activeView === 'users'" />
@@ -203,6 +209,7 @@
           <KnowledgeView v-else-if="activeView === 'kb-list'" />
           <KnowledgeDocumentsView v-else-if="activeView === 'kb-documents'" />
           <KnowledgeGraphView v-else-if="activeView === 'kb-graph'" />
+          <GraphInferenceView v-else-if="activeView === 'graph-inference'" />
           <SmartRecommendView v-else-if="activeView === 'smart-recommend'" />
           <RunbooksView v-else-if="activeView === 'runbooks'" />
           <LifecycleView v-else-if="activeView === 'lifecycle'" />
@@ -216,6 +223,25 @@
           <HelmView v-else-if="activeView === 'helm-releases'" />
           <AnsibleView v-else-if="activeView === 'ansible'" />
           <LicenseView v-else-if="activeView === 'license'" />
+          <FireMapView v-else-if="activeView === 'firemap'" />
+          <InspectionView v-else-if="activeView === 'smart-inspection'" />
+          <KnowledgeDraftView v-else-if="activeView === 'knowledge-draft'" />
+          <RemediationEffectView v-else-if="activeView === 'remediation-effect'" />
+          <AgentEvalView v-else-if="activeView === 'agent-eval'" />
+          <ABTestView v-else-if="activeView === 'ab-test'" />
+          <RAGRerankView v-else-if="activeView === 'rag-rerank'" />
+          <AnomalyBenchmarkView v-else-if="activeView === 'anomaly-benchmark'" />
+          <AssetDiscoveryView v-else-if="activeView === 'asset-discovery'" />
+          <OpsAnalyticsView v-else-if="activeView === 'ops-analytics'" />
+          <DashboardDesignerView v-else-if="activeView === 'dashboard-designer'" />
+          <DiagnosticToolsView v-else-if="activeView === 'diagnostic-tools'" />
+          <TenantManagementView v-else-if="activeView === 'tenant-management'" />
+          <RolesView v-else-if="activeView === 'roles-manage'" />
+          <ObservabilityCorrelationView v-else-if="activeView === 'observability-correlation'" />
+          <TraceAnomalyConfigView v-else-if="activeView === 'trace-anomaly-config'" />
+          <AgentGroundTruthView v-else-if="activeView === 'agent-ground-truth'" />
+          <K8sHpaRecommendView v-else-if="activeView === 'k8s-hpa-recommend'" />
+          <K8sResourceOptimizeView v-else-if="activeView === 'k8s-resource-optimize'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -250,6 +276,7 @@ const ErrorBudgetView = defineAsyncComponent(() => import('@/views/ErrorBudgetVi
 const OnCallView = defineAsyncComponent(() => import('@/views/OnCallView.vue'))
 const BurnRateView = defineAsyncComponent(() => import('@/views/BurnRateView.vue'))
 const SLOConfigView = defineAsyncComponent(() => import('@/views/SLOConfigView.vue'))
+const SloDashboardView = defineAsyncComponent(() => import('@/views/SloDashboardView.vue'))
 const SLAView = defineAsyncComponent(() => import('@/views/SLAView.vue'))
 const EscalationPolicyView = defineAsyncComponent(() => import('@/views/EscalationPolicyView.vue'))
 const AvailabilityReportView = defineAsyncComponent(() => import('@/views/AvailabilityReportView.vue'))
@@ -291,6 +318,7 @@ const DockerListView = defineAsyncComponent(() => import('@/views/DockerListView
 const KnowledgeView = defineAsyncComponent(() => import('@/views/KnowledgeView.vue'))
 const KnowledgeDocumentsView = defineAsyncComponent(() => import('@/views/KnowledgeDocumentsView.vue'))
 const KnowledgeGraphView = defineAsyncComponent(() => import('@/views/KnowledgeGraphView.vue'))
+const GraphInferenceView = defineAsyncComponent(() => import('@/views/GraphInferenceView.vue'))
 const SmartRecommendView = defineAsyncComponent(() => import('@/views/SmartRecommendView.vue'))
 const RunbooksView = defineAsyncComponent(() => import('@/views/RunbooksView.vue'))
 const LifecycleView = defineAsyncComponent(() => import('@/views/LifecycleView.vue'))
@@ -304,6 +332,27 @@ const AgentWorkflowRunsView = defineAsyncComponent(() => import('@/views/AgentWo
 const HelmView = defineAsyncComponent(() => import('@/views/HelmView.vue'))
 const AnsibleView = defineAsyncComponent(() => import('@/views/AnsibleView.vue'))
 const LicenseView = defineAsyncComponent(() => import('@/views/LicenseView.vue'))
+const FireMapView = defineAsyncComponent(() => import('@/views/FireMapView.vue'))
+const InspectionView = defineAsyncComponent(() => import('@/views/InspectionView.vue'))
+const KnowledgeDraftView = defineAsyncComponent(() => import('@/views/KnowledgeDraftView.vue'))
+const RemediationEffectView = defineAsyncComponent(() => import('@/views/RemediationEffectView.vue'))
+const AgentEvalView = defineAsyncComponent(() => import('@/views/AgentEvalView.vue'))
+const ABTestView = defineAsyncComponent(() => import('@/views/ABTestView.vue'))
+const RAGRerankView = defineAsyncComponent(() => import('@/views/RAGRerankView.vue'))
+const AnomalyBenchmarkView = defineAsyncComponent(() => import('@/views/AnomalyBenchmarkView.vue'))
+const AssetDiscoveryView = defineAsyncComponent(() => import('@/views/AssetDiscoveryView.vue'))
+const OpsAnalyticsView = defineAsyncComponent(() => import('@/views/OpsAnalyticsView.vue'))
+const DashboardDesignerView = defineAsyncComponent(() => import('@/views/DashboardDesignerView.vue'))
+const DiagnosticToolsView = defineAsyncComponent(() => import('@/views/DiagnosticToolsView.vue'))
+const TenantManagementView = defineAsyncComponent(() => import('@/views/TenantManagementView.vue'))
+const AgentCapabilitiesView = defineAsyncComponent(() => import('@/views/AgentCapabilitiesView.vue'))
+const RolesView = defineAsyncComponent(() => import('@/views/RolesView.vue'))
+const ObservabilityCorrelationView = defineAsyncComponent(() => import('@/views/ObservabilityCorrelationView.vue'))
+const TraceAnomalyConfigView = defineAsyncComponent(() => import('@/views/TraceAnomalyConfigView.vue'))
+const AgentGroundTruthView = defineAsyncComponent(() => import('@/views/AgentGroundTruthView.vue'))
+const K8sHpaRecommendView = defineAsyncComponent(() => import('@/views/K8sHpaRecommendView.vue'))
+const K8sResourceOptimizeView = defineAsyncComponent(() => import('@/views/K8sResourceOptimizeView.vue'))
+const MonitorView = defineAsyncComponent(() => import('@/views/MonitorView.vue'))
 import request from '@/api/request'
 
 const appStore = useAppStore()
@@ -318,6 +367,7 @@ const currentTitle = ref(_savedMenu ? '' : '运行概览')
 const activeMenu = ref(_savedMenu || 'dashboard')
 const noticeCount = ref(0)
 const notifications = ref([])
+const userInfo = ref(null)
 let notifTimer = null
 
 async function loadNotifications() {
@@ -328,6 +378,17 @@ async function loadNotifications() {
   } catch (e) {
     // 静默失败，不打扰用户（顶栏通知非关键路径）
     console.error('load notifications:', e)
+  }
+}
+
+async function loadUserInfo() {
+  try {
+    const data = await request.get('/me')
+    if (data.ok && data.user) {
+      userInfo.value = data.user
+    }
+  } catch (e) {
+    console.error('load user info:', e)
   }
 }
 const menuGroups = ref([])
@@ -342,7 +403,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['dashboard', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces'])
+const VUE_PAGES = new Set(['dashboard', 'roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'graph-inference', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'ab-test', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'agent-ground-truth', 'k8s-hpa-recommend', 'k8s-resource-optimize'])
 
 function _flattenItems(items) {
   const result = []
@@ -432,6 +493,9 @@ onMounted(async () => {
   // 加载真实系统通知 + 30s 定时刷新
   loadNotifications()
   notifTimer = setInterval(loadNotifications, 30000)
+
+  // 加载用户信息（含租户）
+  loadUserInfo()
 
   try {
     const data = await request.get('/api/menu')
@@ -525,5 +589,20 @@ async function handleDbModeSwitch() {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+.user-info-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.tenant-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  font-weight: 500;
+  white-space: nowrap;
 }
 </style>

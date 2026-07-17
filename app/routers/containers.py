@@ -269,8 +269,8 @@ def _event_to_dict(e):
         "reason": e.reason,
         "message": e.message,
         "source": e.source,
-        "first_seen": e.first_seen.isoformat() if e.first_seen else None,
-        "last_seen": e.last_seen.isoformat() if e.last_seen else None,
+        "first_seen_at": e.first_seen_at.isoformat() if e.first_seen_at else None,
+        "last_seen_at": e.last_seen_at.isoformat() if e.last_seen_at else None,
         "count": e.count,
         "severity": e.severity,
         "created_at": e.created_at.isoformat() if e.created_at else None,
@@ -315,7 +315,7 @@ def _pod_to_dict(p):
         "tags": p.tags,
         "attrs": attrs,
         "created_at": p.created_at.isoformat() if p.created_at else None,
-        "last_checked": p.last_checked.isoformat() if p.last_checked else None,
+        "last_checked_at": p.last_checked_at.isoformat() if p.last_checked_at else None,
     }
 
 
@@ -334,7 +334,7 @@ def _deployment_to_dict(d):
         "tags": d.tags,
         "attrs": attrs,
         "created_at": d.created_at.isoformat() if d.created_at else None,
-        "last_checked": d.last_checked.isoformat() if d.last_checked else None,
+        "last_checked_at": d.last_checked_at.isoformat() if d.last_checked_at else None,
     }
 
 
@@ -344,7 +344,7 @@ def _cluster_to_dict(c):
         "name": c.name,
         "endpoint": c.ip or "-",
         "status": c.status,
-        "last_scrape": c.last_checked.isoformat() if c.last_checked else None,
+        "last_scraped_at": c.last_checked_at.isoformat() if c.last_checked_at else None,
     }
 
 

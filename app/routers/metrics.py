@@ -8,6 +8,7 @@ from app.template_utils import get_templates
 from app.database import get_db
 from app.models import MetricRecord
 from app.services import metric_service, asset_service
+from app.services import metric_v2_service
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
@@ -95,5 +96,53 @@ def metrics_names(db: Session = Depends(get_db)):
     """Return distinct metric names."""
     rows = db.query(MetricRecord.name).distinct().all()
     return JSONResponse(sorted([r[0] for r in rows]))
+
+
+# === VictoriaMetrics v2 查询接口 ===
+
+@router.get("/api/v2/query")
+def metrics_v2_query(q: str = "", asset_id: int = 0):
+    """执行 PromQL 查询，返回 VM 查询结果."""
+    if not q:
+        return JSONResponse({"error": "q 参数必填"}, status_code=400)
+    if asset_id > 0:
+        q = f'{q}{{asset_id="{asset_id}"}}'
+    result = metric_v2_service.query_promql(q)
+    return JSONResponse(result)
+
+
+@router.get("/api/v2/latest")
+def metrics_v2_latest(asset_id: int = 0):
+    """查询最新指标值（走 VM），返回格式兼容旧 /metrics/latest."""
+    latest = metric_v2_service.query_latest_values(asset_id=asset_id if asset_id else None)
+    return JSONResponse(latest)
+
+
+@router.get("/api/v2/range")
+def metrics_v2_range(asset_id: int = 0, name: str = "", hours: int = 24):
+    """查询指标历史范围数据（走 VM），返回格式兼容旧 /metrics/data.
+    不传 name 时返回所有指标的历史数据."""
+    if name:
+        data = metric_v2_service.query_range_data(asset_id=asset_id, name=name, hours=hours)
+        return JSONResponse(data)
+    names = metric_v2_service.query_metric_names()
+    all_data = []
+    for n in names:
+        all_data.extend(metric_v2_service.query_range_data(asset_id=asset_id, name=n, hours=hours))
+    return JSONResponse(all_data)
+
+
+@router.get("/api/v2/names")
+def metrics_v2_names():
+    """查询 VM 中所有指标名."""
+    names = metric_v2_service.query_metric_names()
+    return JSONResponse(sorted(names))
+
+
+@router.get("/api/v2/status")
+def metrics_v2_status():
+    """查询 VM 健康状态."""
+    available = metric_v2_service.is_vm_available()
+    return JSONResponse({"available": available, "url": metric_v2_service.VM_URL})
 
 

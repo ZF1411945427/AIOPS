@@ -18,7 +18,7 @@ def test_provider(provider_id: int, db: Session = Depends(get_db)):
         return {"status": "error", "message": "Provider not found"}
 
     test_messages = [{"role": "user", "content": "ping"}]
-    result = call_llm(provider, test_messages)
+    result = call_llm(provider, test_messages, timeout_override=10, max_tokens_override=10)
 
     if "error" in result:
         return {"status": "error", "message": result["error"]}

@@ -104,6 +104,19 @@
             }
         },
         {
+            "path": "pages/incident/create",
+            "style": {
+                "navigationBarTitleText": "新建故障单"
+            }
+        },
+        {
+            "path": "pages/agent/sessions",
+            "style": {
+                "navigationBarTitleText": "历史会话",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
             "path": "pages/settings/index",
             "style": {
                 "navigationBarTitleText": "我的"

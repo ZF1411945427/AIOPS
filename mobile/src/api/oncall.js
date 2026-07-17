@@ -44,9 +44,19 @@ export function getMySchedule(username) {
   })
 }
 
+export function handover(id, toName) {
+  return request({ url: `/api/sre/oncall/${id}/handover?to_name=${encodeURIComponent(toName)}`, method: 'POST' })
+}
+
+export function autoRotate(id) {
+  return request({ url: `/api/sre/oncall/${id}/auto-rotate`, method: 'POST' })
+}
+
 export default {
   getCurrentOncall,
   listOncall,
   listOncallMembers,
   getMySchedule,
+  handover,
+  autoRotate,
 }

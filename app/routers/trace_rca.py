@@ -30,7 +30,7 @@ def analyze_trace_rca(spans: list) -> dict:
     if not spans:
         return {"error": "No spans found"}
 
-    total_duration = max(s.end_time for s in spans) - min(s.start_time for s in spans)
+    total_duration = max(s.ended_at for s in spans) - min(s.started_at for s in spans)
     total_duration_ms = total_duration.total_seconds() * 1000 if total_duration else 0
 
     root_spans = children_of.get("root", [])
@@ -121,7 +121,7 @@ def analyze_trace(
             q = q.filter(Span.trace_id == trace_id)
         else:
             since = datetime.now() - timedelta(hours=hours)
-            q = q.filter(Span.start_time >= since).order_by(desc(Span.start_time)).limit(500)
+            q = q.filter(Span.started_at >= since).order_by(desc(Span.started_at)).limit(500)
         spans = q.all()
         if not spans:
             return JSONResponse({"error": "No spans found"}, status_code=404)
@@ -143,9 +143,9 @@ def list_recent_traces(
     try:
         since = datetime.now() - timedelta(hours=hours)
         rows = (
-            db.query(Span.trace_id, Span.service_name, Span.start_time, Span.duration_ms, Span.status)
-            .filter(Span.start_time >= since)
-            .order_by(desc(Span.start_time))
+            db.query(Span.trace_id, Span.service_name, Span.started_at, Span.duration_ms, Span.status)
+            .filter(Span.started_at >= since)
+            .order_by(desc(Span.started_at))
             .limit(limit * 10)
             .all()
         )

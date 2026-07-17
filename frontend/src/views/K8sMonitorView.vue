@@ -18,7 +18,7 @@
         <option :value="24">最近 24 小时</option>
       </select>
       <button class="btn" @click="loadMonitor">刷新</button>
-      <span v-if="clusterInfo" class="cluster-info-tag">{{ clusterInfo.name }} · {{ clusterInfo.status }} · {{ clusterInfo.last_scrape || '-' }}</span>
+      <span v-if="clusterInfo" class="cluster-info-tag">{{ clusterInfo.name }} · {{ clusterInfo.status }} · {{ clusterInfo.last_scraped_at || '-' }}</span>
     </div>
 
     <div class="stat-cards">

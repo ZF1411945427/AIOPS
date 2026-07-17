@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AIProvider, AgentConfig, ChatSession, ChatMessage,
-    PendingAction, ToolInvocation, MCPServer,
+    PendingAction, ToolInvocation, MCPServer, Asset, ABTestConfig,
 )
 from app.services.mcp_registry import get_mcp_manifest, call_mcp_tool, get_mcp_tool
+from app.services import ab_test_service
+from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
 from app.database import get_session_for, get_db_mode
 
 # confirm 接口同步等待后台线程完成用
@@ -24,16 +26,87 @@ _execution_events_lock = threading.Lock()
 DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 
 1. **查询资源**：查看资产、告警、指标、日志、K8s 资源等
-2. **分析问题**：分析告警根因、异常检测结果、调用链等
+2. **分析问题**：分析告警根因、异常检测结果、调用链、多维信号关联分析（告警+指标+日志+链路四维度聚合）等
 3. **查询操作流程**：通过 `query_runbook` 检索标准操作流程（Runbook），包含操作步骤、诊断方法、适用场景
 4. **执行运维操作**：通过"提议-确认"闭环执行写操作（重启服务、清理磁盘、确认/解决告警、管理规则与资产等）
+5. **安装部署**：在远程主机上安装和部署软件（Elasticsearch/Nginx/MySQL 等）
 
-## 📋 工具选择指南（重要！）
+## 工具选择指南（重要！）
 - **用户问"怎么操作/怎么处理/操作步骤/修复步骤"** → 优先调用 `query_runbook` 检索标准操作流程
 - **用户问"知识库有没有/历史案例"** → 调用 `query_knowledge_rag` 语义检索知识库
 - **用户问"资产信息/主机信息"** → 调用 `query_assets`
 - **用户问"告警信息/当前告警"** → 调用 `query_alerts`
+- **用户问"有什么日志/查一下日志/告警前后有什么日志/错误日志"** → 先 `query_log_sources` 查有哪些日志源，再 `query_logs` 精确查询
+- **用户问"链路/调用链/trace/慢请求"** → 调用 `query_traces` 查分布式链路追踪
+- **用户问"关联分析/多维分析/信号关联/全域分析/综合诊断/看看整体情况"** → 调用 `query_correlation_analysis` 同时分析告警+指标+日志+链路四维信号，快速了解系统全局状态和关联资产评分
+- **用户问"数据库/库/表/数据/查一下DB"** → 调用 `query_mysql` 执行 SQL 查询（资产需已关联）
+- **用户要求"创建/删除/修改数据库/表/数据"** → 数据库写操作（CREATE/ALTER/DROP/INSERT/UPDATE/DELETE），先 `list_executable_actions` 查看可用动作找到 `mysql`，再通过 `propose_action(action_type="mysql", ...)` 提议，payload 需包含 asset_id 和 sql
 - **多个工具可并行调用**，不要等一个结果再调下一个
+
+## 🔔 关联告警场景（重要！）
+当用户提到某个告警、资产或服务时，**主动关联查询**同资产/同时段的告警：
+- 用户提到某告警时 → 先用 `query_alerts(asset_id=XXX, hours=2)` 查同资产最近2小时告警，分析时序关系
+- 用户提到某资产时 → 主动查询该资产的历史告警（`query_alerts(asset_id=XXX, hours=24)`）和配置变更（`query_change_records(asset_id=XXX, hours=24)`）
+- 分析告警时序：关注告警之间的前后关系（CPU告警→内存告警→服务重启，可能是OOM Kill自愈）
+
+## 🔍 关联资产场景（重要！）
+用户查询资产时，主动展示关联信息：
+- 调用 `query_assets` 定位资产后 → 主动查该资产的告警、指标、变更记录
+- 评估资产健康状态：结合告警数量+指标异常+变更记录给出综合评分
+- 展示上下游拓扑：关联该资产相关的链路追踪和调用关系
+
+## 📊 关联分析场景（重要！）
+- AI 应主动调用 `query_correlation_analysis` 进行多维信号关联分析
+- 关注变更记录：`query_correlation_analysis` 返回结果中包含 `change_records`，用于分析"配置变更 → 告警"的因果链
+- 时序分析：关注"30分钟前配置变更"与"当前告警"的关联性
+
+## 📚 知识沉淀场景（重要！）
+当故障/告警处理完毕后，用户要求生成知识沉淀时：
+- 从故障单生成：调用 `generate_knowledge_from_incident(incident_id=故障单ID)`，适用于完整故障的沉淀
+- 从告警生成：调用 `generate_knowledge_from_alert(alert_id=告警ID)`，适用于单个告警的沉淀
+- 知识草稿包含：标题、故障现象、根因、解决方案、标签，状态为"待审批"
+- **多维度知识沉淀**：如果一次故障涉及多个告警和资产，先用 `query_incidents` 找到关联的故障单，再整体生成知识
+
+## 🌀 告警风暴场景（重要！）
+当用户反馈"告警刷屏"、"短时间大量告警"、"系统炸了"时：
+1. 先调用 `query_alerts(hours=1, limit=200)` 获取近期所有告警
+2. **按资产聚合**：按 `asset_id` 统计告警数量，识别告警最多的资产（根因候选）
+3. **按信号类型聚合**：区分 CPU/内存/连接数/慢查询等不同类型的告警
+4. **识别级联网关**：上游服务（如 api-gateway）的告警往往是被下游拖累的级联告警
+5. 展示聚合后的根因簇（Root Cause Clusters），而非逐条罗列
+6. 输出格式：簇 #N（N 条 → 1 簇）资产名 - 问题类型 - 根因判断
+
+## 🔗 级联故障拓扑溯源（重要！）
+当用户反馈"服务响应慢"、"P99 飙升"、"调用链路有问题"时：
+1. 调用 `query_traces` 查询链路追踪，找到 P99 最高的 trace
+2. 沿调用链**从下游往上追溯**：A → B → C → D，逐层检查每层状态
+3. 最下层的异常通常是根因（如 D 出问题 → C 慢查询 → B 超时 → A 的 P99 飙升）
+4. 调用 `query_alerts` 查询各节点告警，调用 `query_metrics` 查各节点资源指标
+5. 给出完整拓扑溯源路径和根因定位
+
+## 🎯 用户纠正处理（重要！）
+当用户指出你的根因判断错误时：
+1. **接受纠正**：明确承认之前判断有误，感谢用户提供新信息
+2. **重新验证**：根据用户提供的线索（如"刚做了部署"、"改了配置"）重新查询变更记录/部署记录
+3. **修正判断**：给出新的根因分析，对比前后差异
+4. **不固执己见**：即使之前置信度很高，有了新证据也必须调整
+5. 修正后主动问是否需要基于新根因做进一步分析
+
+## 🔄 实时动态跟踪（重要！）
+当用户要求"盯着"、"看着"、"跟踪"某个问题时：
+1. 明确告知这是实时快照，不是持续推送
+2. 给出当前状态（告警/指标/P99/错误率）
+3. 建议用户过几分钟追问"现在呢"
+4. 当用户再次追问时，**对比上一轮数据**输出"变化量"而非全量重复
+5. 变化量格式：指标名：旧值 → 新值（变化百分比，好转/恶化）
+6. 当指标恢复正常时，主动建议生成知识沉淀
+
+## 💬 话题切换识别（重要！）
+当用户说"对了"、"另外"、"回到刚才"、"换个话题"时：
+1. "对了/另外" → 识别为话题切换，不强制关联之前的话题
+2. "回到刚才" → 识别为回到之前的话题，恢复上下文
+3. 多人协同：接受第三方补充信息作为新证据，更新分析结论
+4. 保留话题标记（话题A/话题B），避免混淆
 
 ## 🖥️ 资产类型说明（重要！）
 - **服务器类**：`server`（物理机/虚拟机）、`cloud_host`（云主机）、`vm`（虚拟机）都是服务器，搜索主机时应同时查这三种类型
@@ -41,6 +114,7 @@ DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 - **数据库类**：`database`、`middleware`
 - **网络类**：`network`、`loadbalancer`、`storage`
 - 搜索"服务器/主机"时，用 `ci_type` 不传或传空，通过 `search` 关键字匹配名称和 IP，这样能搜到所有类型的主机
+- **数据库资产操作**：数据库类资产（`database`/`middleware`）不能使用 `run_command` 通过 SSH 执行，必须通过 `mysql` action_type 用 pymysql 直连 SQL。用户要求创建/删除/修改数据库或表时，先用 `query_mysql` 执行 `SHOW DATABASES` 检查状态，再用 `propose_action(action_type="mysql")` 提议写 SQL。
 
 ## ⚠️ 严禁模拟执行（极重要！）
 - **禁止在回复文本中假装已执行操作**。你不能自己说"已执行"、"执行中"、"操作完成"等，除非你真正调用了 propose_action 工具并看到返回的 _pending_action。
@@ -93,16 +167,98 @@ DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 - 提议前应先用 query_assets 查询资产，把目标主机的 asset_id 填入 payload。切勿使用 localhost 或本机 IP。
 - execute_run_command 会拦截危险命令（rm -rf /、mkfs、dd、shutdown、reboot 等），不要尝试绕过。
 
+## 安装部署任务（重要！必读）
+当用户说"安装 XX"、"部署 XX"、"在 XX 上装 YY"时，按以下流程处理：
+
+### 流程一：多步骤复杂部署 → 用 propose_workflow（推荐）
+如果安装需要多个步骤（检测OS → 加仓库 → 安装 → 配置 → 启动 → 验证），优先调用 `propose_workflow`。
+```
+propose_workflow({
+  title: "在 {主机名} 上安装 Elasticsearch",
+  context: { asset_id: 123 },
+  nodes: [
+    { name: "检测操作系统", action_type: "run_command", payload_template: { command: "cat /etc/os-release" }, requires_confirm: false },
+    { name: "安装依赖", action_type: "run_command", payload_template: { command: "apt-get install -y openjdk-17-jdk" }, requires_confirm: true },
+    { name: "下载 ES", action_type: "run_command", payload_template: { command: "wget ..." }, requires_confirm: true },
+    ...
+  ],
+  edges: [...]
+})
+```
+
+### 流程二：单包安装 → 用 propose_action + execute_install_package（异步任务）
+如果只需要安装一个软件包（Elasticsearch/Nginx/MySQL），用 propose_action 提议 `install_package` 动作：
+```
+propose_action({
+  action_type: "install_package",
+  title: "在 192.168.1.10 安装 Elasticsearch 8.19.0",
+  payload: {
+    package_name: "elasticsearch",
+    asset_id: 123,        // ← 必须，先用 query_assets 查到
+    version: "8.19.0",
+    install_type: "binary",
+    options: { start_service: true }
+  },
+  risk_level: "critical",
+  auto_confirm: false
+})
+```
+系统会立即返回 `job_id`，**不要等待安装完成**。安装是异步的，用户确认后后台执行。
+安装过程中，用 `get_task_status(job_id=...)` **轮询**进度，每轮 LLM 调用可查一次。
+当任务状态变为 `success` 或 `failed` 时，安装已完成，可给出最终结果。
+
+### 长耗时任务轮询规范（极重要！）
+- propose_action 返回后，立即用 `get_task_status` 查询一次，获取初始状态
+- 如果状态是 `running` 或 `pending`，在回复中告知用户"安装进行中，稍等片刻后再次查询"
+- **不要反复立即轮询**（每次回复最多查一次），避免浪费 token
+- 安装完成后，系统返回 `result` 字段含完整执行步骤和最终状态，据此给用户完整汇报
+
+## 日志查询规范（重要！）
+
+当用户问"日志/错误日志/告警前后有什么日志"时，必须：
+
+1. **先查有哪些日志源**：`query_log_sources` 返回所有已配置的 ES 数据源
+2. **再按源查询日志**：`query_logs(source_id=X, query="关键词", time_range="1h", level="error")`
+   - `level` 可选：`error` / `warning` / `info`
+   - `time_range` 可选：`15m` / `1h` / `6h` / `24h` / `7d`
+   - 不带 level 时返回所有级别日志
+
+**典型诊断场景**：
+- "告警前后有什么日志" → `query_logs(source_id=3, query="error", time_range="1h")`
+- "nginx 有没有错误日志" → `query_logs(source_id=3, query="nginx", level="error")`
+- "某主机最近 6h 日志" → `query_logs(source_id=3, host="web-server-01", time_range="6h")`
+
 ## 回答格式
 1. 先给出结论
 2. 列出证据（引用数据来源）
 3. 分析风险（如果有操作建议）
 4. 给出具体建议或下一步操作"""
 
+# ── LLM 连接池（复用 TCP+TLS，避免每次三次握手） ──
+_LLM_SESSION = None
+_LLM_SESSION_LOCK = threading.Lock()
 
-def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Dict]] = None, timeout_override: Optional[int] = None, proxies: Optional[Dict] = None) -> Dict:
+def _get_llm_session() -> requests.Session:
+    global _LLM_SESSION
+    if _LLM_SESSION is None:
+        with _LLM_SESSION_LOCK:
+            if _LLM_SESSION is None:
+                s = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=10, pool_maxsize=20, max_retries=0,
+                )
+                s.mount("https://", adapter)
+                s.mount("http://", adapter)
+                _LLM_SESSION = s
+    return _LLM_SESSION
+
+
+def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Dict]] = None,
+             timeout_override: Optional[int] = None, proxies: Optional[Dict] = None,
+             max_tokens_override: Optional[int] = None) -> Dict:
     """Call OpenAI-compatible API. timeout_override 可覆盖 provider.timeout_seconds 防卡死.
-    proxies 默认 {"http": None, "https": None} 禁用系统代理，避免本地代理(如 7897)对 LLM 长连接读超时."""
+    max_tokens_override 可覆盖 max_tokens（测试场景建议传小值如 10）。
+    proxies 默认 {"http": None, "https": None} 禁用系统代理，避免本地代理对 LLM 长连接读超时."""
     if not provider or not provider.is_enabled:
         return {"error": "Provider not available"}
 
@@ -119,14 +275,15 @@ def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Di
         "model": model,
         "messages": messages,
         "temperature": provider.temperature,
-        "max_tokens": provider.max_tokens,
+        "max_tokens": max_tokens_override if max_tokens_override is not None else provider.max_tokens,
     }
 
     if tools:
         payload["tools"] = tools
 
     try:
-        resp = requests.post(
+        session = _get_llm_session()
+        resp = session.post(
             f"{base_url}/chat/completions",
             headers=headers,
             json=payload,
@@ -243,7 +400,7 @@ def get_message_history(db: Session, session: ChatSession, config: AgentConfig) 
 
     result = []
     for msg in messages:
-        result.append({"role": msg.role, "content": msg.content or ""})
+        result.append({"role": msg.role, "content": msg.message_content or ""})
     return result
 
 
@@ -256,7 +413,7 @@ def add_message(
         session_id=session_id,
         role=role,
         message_type=message_type,
-        content=content or "",
+        message_content=content or "",
         citations=json.dumps(citations or [], ensure_ascii=False),
         tool_calls=json.dumps(tool_calls or [], ensure_ascii=False),
     )
@@ -292,15 +449,30 @@ def process_chat_message(
         )
 
     provider = None
-    if config.default_provider_id:
-        provider = db.query(AIProvider).filter(
-            AIProvider.id == config.default_provider_id,
-            AIProvider.is_enabled == True,
-        ).first()
+    ab_test_group = None
+    ab_test_cfg = None
+    active_ab_test = db.query(ABTestConfig).filter(
+        ABTestConfig.status == "active"
+    ).first()
+    if active_ab_test:
+        ab_provider_id, ab_test_group, ab_test_cfg = ab_test_service.get_provider_for_request(
+            active_ab_test.id, session.id, db
+        )
+        if ab_provider_id:
+            provider = db.query(AIProvider).filter(
+                AIProvider.id == ab_provider_id,
+                AIProvider.is_enabled == True,
+            ).first()
     if not provider:
-        provider = db.query(AIProvider).filter(
-            AIProvider.is_enabled == True
-        ).first()
+        if config.default_provider_id:
+            provider = db.query(AIProvider).filter(
+                AIProvider.id == config.default_provider_id,
+                AIProvider.is_enabled == True,
+            ).first()
+        if not provider:
+            provider = db.query(AIProvider).filter(
+                AIProvider.is_enabled == True
+            ).first()
 
     # Save user message
     user_msg = add_message(db, session.id, "user", user_message)
@@ -321,24 +493,72 @@ def process_chat_message(
     # 注入会话上下文（告警/资产关联）
     session_ctx = json.loads(session.context or "{}")
     if session_ctx.get("alert_id"):
+        alert_id = session_ctx["alert_id"]
+        asset_id = session_ctx.get("asset_id") or session_ctx.get("asset", {}).get("id") if isinstance(session_ctx.get("asset"), dict) else None
+        asset_name = session_ctx.get("asset_name", "")
+        asset_ip = session_ctx.get("asset_ip", "")
+        asset_ci_type = session_ctx.get("asset_ci_type", "")
+        db_type = session_ctx.get("db_type", "")
+
+        # 尝试从数据库补全资产类型信息
+        if not asset_ci_type and asset_id:
+            asset_row = db.query(Asset).filter(Asset.id == asset_id).first()
+            if asset_row:
+                asset_ci_type = asset_row.ci_type or ""
+                if not db_type and asset_row.connection_config:
+                    try:
+                        cfg = json.loads(asset_row.connection_config)
+                        db_type = cfg.get("db_type", "")
+                    except Exception:
+                        pass
+
         ctx_injection = (
             f"\n\n## ⚠️ 当前告警上下文（系统自动注入，请优先分析此告警）\n"
-            f"- 告警 ID: #{session_ctx['alert_id']}\n"
+            f"- 告警 ID: #{alert_id}\n"
             f"- 指标: {session_ctx.get('alert_metric', '')}\n"
             f"- 级别: {session_ctx.get('alert_severity', '')}\n"
             f"- 当前值: {session_ctx.get('alert_value', '')}，阈值: {session_ctx.get('alert_threshold', '')}\n"
-            f"- 涉事资产: {session_ctx.get('asset_name', '')} (IP: {session_ctx.get('asset_ip', '')})\n"
-            f"用户正在处理此告警，你应该优先调用 get_alert_detail(id={session_ctx['alert_id']}) 获取详情，并进行根因分析和操作建议。\n"
+            f"- 涉事资产: {asset_name} (IP: {asset_ip})\n"
+            f"用户正在处理此告警，你应该优先调用 get_alert_detail(id={alert_id}) 获取详情，并进行根因分析和操作建议。\n"
         )
+        if db_type or asset_ci_type == "database":
+            ctx_injection += (
+                f"- 涉事资产类型: 数据库（{db_type or asset_ci_type}）\n"
+                f"⚠️ 该涉事资产是数据库，可使用 `query_mysql` 工具执行 SQL 查询。\n"
+                f"示例：query_mysql(asset_id={asset_id}, sql=\"SHOW DATABASES\")\n"
+                f"示例：query_mysql(asset_id={asset_id}, sql=\"SHOW TABLES\")\n"
+            )
         system_prompt += ctx_injection
     elif session_ctx.get("asset_id"):
+        asset_id = session_ctx["asset_id"]
+        asset_name = session_ctx.get("asset_name", "")
+        asset_ip = session_ctx.get("asset_ip", "")
+        asset_ci_type = session_ctx.get("asset_ci_type", "")
+        db_type = session_ctx.get("db_type", "")
+
+        if not db_type and asset_ci_type == "database":
+            cfg_raw = db.query(Asset).filter(Asset.id == asset_id).first()
+            if cfg_raw and cfg_raw.connection_config:
+                try:
+                    cfg = json.loads(cfg_raw.connection_config)
+                    db_type = cfg.get("db_type", "")
+                except Exception:
+                    pass
+
         ctx_injection = (
             f"\n\n## 🏢 当前资产上下文（系统自动注入）\n"
-            f"- 资产 ID: {session_ctx['asset_id']}\n"
-            f"- 资产名称: {session_ctx.get('asset_name', '')}\n"
-            f"- IP: {session_ctx.get('asset_ip', '')}\n"
-            f"用户正在关注此资产，请优先分析其状态、指标和关联告警。\n"
+            f"- 资产 ID: {asset_id}\n"
+            f"- 资产名称: {asset_name}\n"
+            f"- IP: {asset_ip}\n"
         )
+        if db_type or asset_ci_type == "database":
+            ctx_injection += (
+                f"- 资产类型: 数据库（{db_type or asset_ci_type}）\n"
+                f"⚠️ 该资产是数据库，可使用 `query_mysql` 工具执行 SQL 查询。\n"
+                f"示例：query_mysql(asset_id={asset_id}, sql=\"SHOW DATABASES\")  # 查看所有库\n"
+                f"示例：query_mysql(asset_id={asset_id}, sql=\"SHOW TABLES\")      # 查看当前库所有表\n"
+                f"示例：query_mysql(asset_id={asset_id}, sql=\"DESC table_name\")  # 查看表结构\n"
+            )
         system_prompt += ctx_injection
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -467,6 +687,10 @@ def process_chat_message(
                             action_payload=json.dumps(pa_payload, ensure_ascii=False),
                         )
                         db.add(pa)
+                        db.commit()
+                        # 把 PendingAction ID 注入 payload，让 confirm → execute_* 知道关联哪个 PA
+                        pa_payload["_pending_action_id"] = pa.id
+                        pa.action_payload = json.dumps(pa_payload, ensure_ascii=False)
                         db.commit()
                         pending_actions.append({
                             "id": pa.id,
@@ -619,7 +843,7 @@ def process_chat_message(
                 db.commit()
                 tool_results.append({"tool_name": t_name, "result": t_result, "tool_call_id": tc.get("id", "")})
                 # 创建 PendingAction
-                if t_name == "propose_action" and t_result.get("status") == "success":
+                if t_name == "propose_action" and t_result.get("status") == "is_success":
                     r_data = t_result.get("result", {})
                     if isinstance(r_data, dict) and r_data.get("_pending_action"):
                         pa_data = r_data["_pending_action"]
@@ -665,7 +889,7 @@ def process_chat_message(
         _exec_msgs = []
         for tr in tool_results:
             r = tr.get("result", {})
-            if r.get("status") == "success":
+            if r.get("status") == "is_success":
                 _rr = r.get("result", {}) or {}
                 msg = _rr.get("message", "") if isinstance(_rr, dict) else ""
                 if not msg:
@@ -729,6 +953,23 @@ def process_chat_message(
 
     session.last_message_at = datetime.now()
     db.commit()
+
+    # 记录 A/B 测试结果（如有活跃测试）
+    if active_ab_test and ab_test_group:
+        try:
+            token_usage = response.get("usage", {}) if isinstance(response, dict) else {}
+            ab_test_service.record_result(
+                db, test_id=active_ab_test.id,
+                session_id=session.id, group=ab_test_group,
+                provider_id=provider.id if provider else None,
+                model_name=provider.model if provider else "",
+                latency_ms=latency,
+                token_count=token_usage.get("total_tokens", 0),
+                success=True,
+            )
+            db.commit()
+        except Exception:
+            pass
 
     result = {
         "session_id": session.id,
@@ -794,7 +1035,7 @@ def confirm_pending_action(db: Session, action_id: int, user_name: str) -> Dict:
         PendingAction.id == action_id
     ).with_for_update().first()
     if not action or action.status != PendingAction.STATUS_PENDING:
-        return {"success": False, "status": "not_found", "message": "待确认动作不存在或已被处理"}
+        return {"is_success": False, "status": "not_found", "message": "待确认动作不存在或已被处理"}
 
     # 读取配置开关（查不到配置则按默认值 True 处理）
     config = db.query(AgentConfig).filter(AgentConfig.name == "default").first()
@@ -808,7 +1049,7 @@ def confirm_pending_action(db: Session, action_id: int, user_name: str) -> Dict:
         fail_result = {"status": "error", "message": message}
         action.result_payload = json.dumps(fail_result, ensure_ascii=False)
         db.commit()
-        return {"success": False, "status": PendingAction.STATUS_FAILED, "result": fail_result}
+        return {"is_success": False, "status": PendingAction.STATUS_FAILED, "result": fail_result}
 
     # 早退出：管理员已全局禁止动作执行
     if not allow_exec:
@@ -847,10 +1088,10 @@ def confirm_pending_action(db: Session, action_id: int, user_name: str) -> Dict:
         _execution_events.pop(action.id, None)
 
     if completed:
-        return {"success": True, "status": "completed",
+        return {"is_success": True, "status": "completed",
                 "result": {"status": "completed", "message": "执行完成"}}
     else:
-        return {"success": True, "status": PendingAction.STATUS_EXECUTING,
+        return {"is_success": True, "status": PendingAction.STATUS_EXECUTING,
                 "result": {"status": "executing", "message": "命令正在远程执行中，请稍候..."}}
 
 
@@ -1145,7 +1386,7 @@ def _continue_after_execution(db: Session, action: PendingAction, result: Dict, 
                 })
 
                 # propose_action 成功 → 创建 PendingAction 或 auto_confirm 执行
-                if tool_result.get("status") == "success":
+                if tool_result.get("status") == "is_success":
                     result_data = tool_result.get("result", {})
                     if isinstance(result_data, dict) and result_data.get("_pending_action"):
                         pa_data = result_data["_pending_action"]

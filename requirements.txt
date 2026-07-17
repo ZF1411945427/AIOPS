@@ -24,7 +24,6 @@ defusedxml==0.7.1
 Deprecated==1.3.1
 distro==1.9.0
 durationpy==0.10
-edge-tts==7.2.7
 elastic-transport==8.17.1
 elasticsearch==8.6.2
 et_xmlfile==2.0.0
@@ -59,7 +58,6 @@ loguru==0.7.3
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
 matplotlib==3.10.8
-mcp==1.26.0
 mdurl==0.1.2
 milvus-lite==3.0
 mpmath==1.3.0
@@ -69,7 +67,6 @@ networkx==3.6.1
 numpy==2.4.6
 oauthlib==3.3.1
 openai==2.6.0
-openpyxl==3.1.5
 orjson==3.11.7
 ormsgpack==1.11.0
 packaging==25.0
@@ -118,7 +115,6 @@ sse-starlette==2.1.0
 starlette==0.41.3
 statsmodels==0.14.6
 sympy==1.14.0
-tabulate==0.10.0
 tenacity==9.1.2
 threadpoolctl==3.6.0
 tokenizers==0.22.2
@@ -145,4 +141,6 @@ zstandard==0.25.0
 # python-docx      # Word 文档解析（RAG）
 # pypdf            # PDF 文档解析（RAG）
 # docker           # Docker 数据源采集
-# pysnmp           # SNMP 监控采集
+# netsnmp          # SNMP 监控采集（注意：是 netsnmp-python，非 pysnmp）
+# neo4j            # 知识图谱（neo4j_graph_service.py）
+# pywinrm          # Windows 远程管理（script_exec.py / connection_service.py）

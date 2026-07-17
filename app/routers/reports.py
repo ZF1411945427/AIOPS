@@ -15,8 +15,8 @@ def api_report_list(db: Session = Depends(get_db)):
         "reports": [
             {
                 "id": r.id, "title": r.title, "type": r.type,
-                "period_start": r.period_start.isoformat() if r.period_start else None,
-                "period_end": r.period_end.isoformat() if r.period_end else None,
+                "period_started_at": r.period_started_at.isoformat() if r.period_started_at else None,
+                "period_ended_at": r.period_ended_at.isoformat() if r.period_ended_at else None,
                 "summary": r.summary, "created_at": r.created_at.isoformat() if r.created_at else None,
             }
             for r in reports
@@ -38,8 +38,8 @@ def api_report_detail(report_id: int, db: Session = Depends(get_db)):
             data = {}
     return {
         "id": report.id, "title": report.title, "type": report.type,
-        "period_start": report.period_start.isoformat() if report.period_start else None,
-        "period_end": report.period_end.isoformat() if report.period_end else None,
+        "period_started_at": report.period_started_at.isoformat() if report.period_started_at else None,
+        "period_ended_at": report.period_ended_at.isoformat() if report.period_ended_at else None,
         "summary": report.summary, "data": data,
         "created_at": report.created_at.isoformat() if report.created_at else None,
     }

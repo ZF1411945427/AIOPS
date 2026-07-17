@@ -274,82 +274,82 @@ def _detect_prophet(db: Session, config: AnomalyConfig, records: list) -> Alert 
 
 
 def _detect_lstm(db: Session, config: AnomalyConfig, records: list) -> Alert | None:
-    """Simple numpy-based sliding window prediction simulating LSTM behavior."""
+    """IsolationForest 时间窗异常检测（替代 LSTM 模拟）."""
     import numpy as np
-    values = np.array([r.value for r in records])
-    if len(values) < 10:
+    from sklearn.ensemble import IsolationForest
+    from sklearn.preprocessing import StandardScaler
+    values = np.array([r.value for r in records]).reshape(-1, 1)
+    if len(values) < 15:
         return None
-    window = max(3, len(values) // 4)
-    predictions = []
-    actuals = []
-    for i in range(window, len(values)):
-        x = values[i - window:i]
-        y = values[i]
-        w = np.arange(window)
-        slope = (np.sum(w * x) - window * np.mean(w) * np.mean(x)) / (np.sum(w ** 2) - window * np.mean(w) ** 2) if (np.sum(w ** 2) - window * np.mean(w) ** 2) != 0 else 0
-        intercept = np.mean(x) - slope * np.mean(w)
-        pred = slope * window + intercept
-        predictions.append(pred)
-        actuals.append(y)
-    if not predictions:
+    window = max(5, len(values) // 4)
+    X = np.column_stack([
+        values[i - window:i].flatten()
+        for i in range(window, len(values))
+    ]).T
+    if X.shape[0] < 10:
         return None
-    preds = np.array(predictions)
-    acts = np.array(actuals)
-    residuals = np.abs(acts - preds)
-    threshold = np.mean(residuals) + 2 * np.std(residuals)
-    latest_residual = residuals[-1]
-    if latest_residual > threshold and latest_residual > np.mean(residuals) * 1.5:
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    clf = IsolationForest(contamination=0.05, random_state=42, n_estimators=100)
+    clf.fit(X_scaled)
+    latest = X_scaled[-1:]
+    pred = clf.predict(latest)[0]
+    score = clf.decision_function(latest)[0]
+    if pred == -1:
+        actual_val = float(values[-1][0])
+        threshold_val = float(np.mean(values) + 2 * np.std(values))
         if _has_recent_alert(db, config.metric_name, config.asset_id, "lstm", config.name):
             return None
         return Alert(
             rule_id=None,
             asset_id=config.asset_id or records[0].asset_id,
             metric_name=config.metric_name,
-            actual_value=round(float(acts[-1]), 2),
-            threshold=round(float(preds[-1] + threshold), 2),
+            actual_value=round(actual_val, 2),
+            threshold=round(threshold_val, 2),
             severity="warning",
             status="triggered",
-            message=f"LSTM预测异常- {config.name}: 实际={round(float(acts[-1]),2)}, "
-                    f"预测={round(float(preds[-1]),2)}, 残差={round(float(latest_residual),2)}",
+            message=f"LSTM预测异常(IsolationForest)- {config.name}: 实际={round(actual_val,2)}, "
+                    f"异常得分={round(float(score),4)}, 窗口={window}",
         )
     return None
 
 
 def _detect_transformer(db: Session, config: AnomalyConfig, records: list) -> Alert | None:
-    """Simple self-attention style anomaly detection using numpy."""
+    """LocalOutlierFactor 密度异常检测（替代 Transformer 模拟）."""
     import numpy as np
-    values = np.array([r.value for r in records])
-    if len(values) < 10:
+    from sklearn.neighbors import LocalOutlierFactor
+    from sklearn.preprocessing import StandardScaler
+    values = np.array([r.value for r in records]).reshape(-1, 1)
+    if len(values) < 15:
         return None
-    n = len(values)
-    d = 4
-    Q = np.column_stack([np.roll(values, i) for i in range(d)]) if n >= d else None
-    if Q is None or np.any(np.isnan(Q)):
+    window = max(4, len(values) // 5)
+    X = np.column_stack([
+        values[i - window:i].flatten()
+        for i in range(window, len(values))
+    ]).T
+    if X.shape[0] < 10:
         return None
-    Q = Q[:n-d+1] if n > d else Q
-    K = Q.copy()
-    V = Q[:, 0:1].copy()
-    scores = np.dot(Q, K.T) / np.sqrt(d)
-    weights = np.exp(scores - np.max(scores, axis=1, keepdims=True))
-    weights = weights / np.sum(weights, axis=1, keepdims=True)
-    attn_output = np.dot(weights, V).flatten()
-    residuals = np.abs(values[d-1:d-1+len(attn_output)] - attn_output)
-    if len(residuals) < 3:
-        return None
-    threshold = np.mean(residuals) + 2 * np.std(residuals)
-    if residuals[-1] > threshold:
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    clf = LocalOutlierFactor(n_neighbors=min(10, X_scaled.shape[0] - 1), contamination=0.05)
+    pred = clf.fit_predict(X_scaled)
+    latest_pred = pred[-1]
+    latest_score = clf.negative_outlier_factor_[-1]
+    if latest_pred == -1:
+        actual_val = float(values[-1][0])
+        threshold_val = float(np.mean(values) + 2 * np.std(values))
         if _has_recent_alert(db, config.metric_name, config.asset_id, "transformer", config.name):
             return None
         return Alert(
             rule_id=None,
             asset_id=config.asset_id or records[0].asset_id,
             metric_name=config.metric_name,
-            actual_value=round(float(values[d-1+d-1+len(attn_output)-1]), 2) if len(values) > d-1+len(attn_output) else round(float(values[-1]), 2),
-            threshold=round(float(threshold), 2),
+            actual_value=round(actual_val, 2),
+            threshold=round(threshold_val, 2),
             severity="warning",
             status="triggered",
-            message=f"Transformer异常检测- {config.name}: 残差={round(float(residuals[-1]),2)}, "
-                    f"阈值={round(float(threshold),2)}",
+            message=f"Transformer异常检测(LOF)- {config.name}: 实际={round(actual_val,2)}, "
+                    f"LOF得分={round(float(latest_score),4)}, 窗口={window}",
         )
     return None
 

@@ -5,6 +5,9 @@
                 <text class="new-icon">+</text>
                 <text class="new-text">新会话</text>
             </view>
+            <view class="history-btn" @tap="goHistory">
+                <text class="history-icon">📜</text>
+            </view>
         </view>
 
         <view class="msg-list" id="msg-list">
@@ -141,6 +144,10 @@ function newSession() {
     sessionId.value = ''
     aiPending.value = false
     uni.showToast({ title: '已新建会话', icon: 'none' })
+}
+
+function goHistory() {
+    uni.navigateTo({ url: '/pages/agent/sessions' })
 }
 
 async function confirmAction(action) {
@@ -306,11 +313,24 @@ onHide(() => {
     padding: 16rpx 24rpx;
     background: $bg-card-solid;
     border-bottom: 2rpx solid $border;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .new-session {
     display: inline-flex;
     align-items: center;
+}
+
+.history-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 8rpx 16rpx;
+}
+
+.history-icon {
+    font-size: $font-lg;
 }
 
 .new-icon {

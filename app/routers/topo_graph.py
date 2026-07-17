@@ -18,7 +18,7 @@ def topo_graph_data(db: Session = Depends(get_db)):
 
     nodes = []
     for a in assets:
-        ci = a.ci_type or a.type or "unknown"
+        ci = a.ci_type or "unknown"
         color = "#ef4444" if a.id in alert_asset_ids else "#3b82f6"
         if ci == "kubernetes_cluster": color = "#8b5cf6"
         elif ci == "namespace": color = "#06b6d4"

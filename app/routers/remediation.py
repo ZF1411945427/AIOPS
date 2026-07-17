@@ -15,7 +15,7 @@ def _remediation_to_dict(r) -> dict:
     import json as _json
     params = {}
     try:
-        params = _json.loads(r.params) if r.params else {}
+        params = _json.loads(r.remediation_params) if r.remediation_params else {}
     except Exception:
         params = {}
     return {
@@ -36,7 +36,7 @@ def _log_to_dict(lg) -> dict:
         "alert_id": lg.alert_id,
         "action_type": lg.action_type or "",
         "target": lg.target or "",
-        "success": bool(lg.success),
+        "is_success": bool(lg.is_success),
         "output": lg.output or "",
         "created_at": lg.created_at.strftime("%Y-%m-%d %H:%M:%S") if lg.created_at else None,
     }
@@ -103,5 +103,52 @@ def api_remediation_delete(remediation_id: int, db: Session = Depends(get_db)):
     """删除自愈规则 JSON API."""
     remediation_service.delete_remediation(db, remediation_id)
     return JSONResponse({"ok": True})
+
+
+def _effect_to_dict(e) -> dict:
+    return {
+        "id": e.id,
+        "remediation_id": e.remediation_id,
+        "alert_id": e.alert_id,
+        "executed_at": e.executed_at.strftime("%Y-%m-%d %H:%M:%S") if e.executed_at else None,
+        "check_at": e.check_at.strftime("%Y-%m-%d %H:%M:%S") if e.check_at else None,
+        "alert_status_at_execute": e.alert_status_at_execute or "",
+        "alert_status_at_check": e.alert_status_at_check or "",
+        "is_asset_recovered": bool(e.is_asset_recovered),
+        "is_alert_resolved": bool(e.is_alert_resolved),
+        "recovery_time_seconds": e.recovery_time_seconds or 0,
+        "notes": e.description or "",
+        "created_at": e.created_at.strftime("%Y-%m-%d %H:%M:%S") if e.created_at else None,
+    }
+
+
+@router.get("/api/effect-stats")
+def api_effect_stats(days: int = 30, db: Session = Depends(get_db)):
+    """自愈成功率统计 JSON API."""
+    from app.services import remediation_effect_service
+    stats = remediation_effect_service.get_effect_stats(db, days=days)
+    return JSONResponse(stats)
+
+
+@router.get("/api/effect-history")
+def api_effect_history(page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
+    """自愈效果历史 JSON API."""
+    from app.services import remediation_effect_service
+    items, total, total_pages = remediation_effect_service.get_effect_history(db, page, per_page)
+    return JSONResponse({
+        "items": [_effect_to_dict(e) for e in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    })
+
+
+@router.get("/api/effect-recommendations")
+def api_effect_recommendations(limit: int = 5, db: Session = Depends(get_db)):
+    """自愈规则效果推荐 JSON API."""
+    from app.services import remediation_effect_service
+    recs = remediation_effect_service.get_remediation_recommendations(db, limit=limit)
+    return JSONResponse({"items": recs})
 
 

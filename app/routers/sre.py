@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from app.database import get_db as get_db_session
 from app.models import SLOConfig, ErrorBudget, OnCallSchedule, EscalationPolicy, SLARecord, AvailabilityReport
+from app.services import slo_service
 
 router = APIRouter(prefix="/api/sre", tags=["sre"])
 
@@ -35,8 +36,8 @@ class SLOConfigResponse(BaseModel):
 class ErrorBudgetCreate(BaseModel):
     slo_id: int
     service_name: str
-    period_start: datetime
-    period_end: datetime
+    period_started_at: datetime
+    period_ended_at: datetime
     budget_total: float = 100
     budget_consumed: float = 0
 
@@ -47,8 +48,8 @@ class ErrorBudgetResponse(BaseModel):
     id: int
     slo_id: int
     service_name: str
-    period_start: datetime
-    period_end: datetime
+    period_started_at: datetime
+    period_ended_at: datetime
     budget_total: float
     budget_consumed: float
     budget_remaining: float
@@ -77,8 +78,10 @@ class OnCallScheduleCreate(BaseModel):
     members: List[dict]
     schedule: List[dict] = []
     current_oncall: str
-    current_period_start: datetime
-    current_period_end: datetime
+    current_period_started_at: datetime
+    current_period_ended_at: datetime
+    is_auto_rotate: bool = True
+    holidays: List[str] = []
     created_by: Optional[str] = None
 
     @field_validator("team_name")
@@ -121,7 +124,7 @@ class OnCallScheduleCreate(BaseModel):
             names = [m["name"] for m in self.members]
             if self.current_oncall not in names:
                 raise ValueError("当前值班人必须在成员列表中")
-        if self.current_period_end <= self.current_period_start:
+        if self.current_period_ended_at <= self.current_period_started_at:
             raise ValueError("周期结束时间必须晚于开始时间")
         return self
 
@@ -135,8 +138,8 @@ class OnCallScheduleResponse(BaseModel):
     members: List[dict]
     schedule: List[dict]
     current_oncall: str
-    current_period_start: datetime
-    current_period_end: datetime
+    current_period_started_at: datetime
+    current_period_ended_at: datetime
     created_by: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -260,12 +263,12 @@ def create_error_budget(data: ErrorBudgetCreate, db: Session = Depends(get_db_se
     obj = ErrorBudget(
         slo_id=data.slo_id,
         service_name=data.service_name,
-        period_start=data.period_start,
-        period_end=data.period_end,
+        period_started_at=data.period_started_at,
+        period_ended_at=data.period_ended_at,
         budget_total=data.budget_total,
         budget_consumed=data.budget_consumed,
         budget_remaining=budget_remaining,
-        burn_rate=round(data.budget_consumed / max(1, (data.period_end - data.period_start).days), 2),
+        burn_rate=round(data.budget_consumed / max(1, (data.period_ended_at - data.period_started_at).days), 2),
         status='healthy' if budget_remaining > 50 else 'warning' if budget_remaining > 20 else 'critical'
     )
     db.add(obj)
@@ -306,8 +309,10 @@ def create_oncall(data: OnCallScheduleCreate, db: Session = Depends(get_db_sessi
         members=json.dumps(data.members, ensure_ascii=False),
         schedule=json.dumps(data.schedule, ensure_ascii=False),
         current_oncall=data.current_oncall,
-        current_period_start=data.current_period_start,
-        current_period_end=data.current_period_end,
+        current_period_started_at=data.current_period_started_at,
+        current_period_ended_at=data.current_period_ended_at,
+        is_auto_rotate=data.is_auto_rotate,
+        holidays=json.dumps(data.holidays, ensure_ascii=False),
         created_by=data.created_by
     )
     db.add(obj)
@@ -347,8 +352,10 @@ def update_oncall(oncall_id: int, data: OnCallScheduleCreate, db: Session = Depe
     obj.members = json.dumps(data.members, ensure_ascii=False)
     obj.schedule = json.dumps(data.schedule, ensure_ascii=False)
     obj.current_oncall = data.current_oncall
-    obj.current_period_start = data.current_period_start
-    obj.current_period_end = data.current_period_end
+    obj.current_period_started_at = data.current_period_started_at
+    obj.current_period_ended_at = data.current_period_ended_at
+    obj.is_auto_rotate = data.is_auto_rotate
+    obj.holidays = json.dumps(data.holidays, ensure_ascii=False)
     db.commit()
     db.refresh(obj)
     return obj
@@ -368,41 +375,144 @@ def delete_oncall(oncall_id: int, db: Session = Depends(get_db_session)):
 @router.get("/oncall/current")
 def get_current_oncall(db: Session = Depends(get_db_session)):
     """获取当前值班人（返回所有当前周期内的值班表，按团队名排序）
+    若当前周期已过期且 is_auto_rotate=True，自动轮转到下一位。
     顶层及 items 内均带 phone（当前值班人联系电话），供 App 拨号"""
     now = datetime.now()
-    rows = db.query(OnCallSchedule).filter(
-        OnCallSchedule.current_period_start <= now,
-        OnCallSchedule.current_period_end >= now
-    ).order_by(OnCallSchedule.team_name).all()
-    if not rows:
-        return {"items": [], "current_oncall": None, "phone": None}
+    rows = db.query(OnCallSchedule).order_by(OnCallSchedule.team_name).all()
     items = []
     for r in rows:
-        phone = ""
-        try:
-            mems = json.loads(r.members) if r.members else []
-            for m in mems:
-                coerced = _coerce_member(m)
-                if coerced["name"] == r.current_oncall:
-                    phone = coerced["phone"]
-                    break
-        except (json.JSONDecodeError, TypeError):
-            pass
-        items.append({
-            "team_name": r.team_name,
-            "current_oncall": r.current_oncall,
-            "phone": phone,
-            "period_start": r.current_period_start,
-            "period_end": r.current_period_end
-        })
+        if r.is_auto_rotate and r.current_period_ended_at and r.current_period_ended_at < now:
+            _do_auto_rotate(db, r)
+        if r.current_period_started_at <= now and r.current_period_ended_at >= now:
+            phone = ""
+            try:
+                mems = json.loads(r.members) if r.members else []
+                for m in mems:
+                    coerced = _coerce_member(m)
+                    if coerced["name"] == r.current_oncall:
+                        phone = coerced["phone"]
+                        break
+            except (json.JSONDecodeError, TypeError):
+                pass
+            items.append({
+                "team_name": r.team_name,
+                "current_oncall": r.current_oncall,
+                "phone": phone,
+                "period_started_at": r.current_period_started_at,
+                "period_ended_at": r.current_period_ended_at
+            })
+    if not items:
+        return {"items": [], "current_oncall": None, "phone": None}
     return {
         "items": items,
         "current_oncall": items[0]["current_oncall"],
         "team_name": items[0]["team_name"],
         "phone": items[0]["phone"],
-        "period_start": items[0]["period_start"],
-        "period_end": items[0]["period_end"]
+        "period_started_at": items[0]["period_started_at"],
+        "period_ended_at": items[0]["period_ended_at"]
     }
+
+
+def _do_auto_rotate(db: Session, obj: OnCallSchedule):
+    """执行自动轮转：将当前值班人切换为下一位，重置周期"""
+    members = []
+    try:
+        members = json.loads(obj.members) if obj.members else []
+    except (json.JSONDecodeError, TypeError):
+        members = []
+    names = [m.get("name") or "" for m in members]
+    names = [n for n in names if n]
+    if not names:
+        return
+    if obj.current_oncall and obj.current_oncall in names:
+        current_idx = names.index(obj.current_oncall)
+        next_idx = (current_idx + 1) % len(names)
+    else:
+        next_idx = 0
+    now = datetime.now()
+    if obj.rotation_type == "weekly":
+        next_end = now + timedelta(weeks=1)
+    else:
+        next_end = now + timedelta(days=30)
+    obj.current_oncall = names[next_idx]
+    obj.current_period_started_at = now
+    obj.current_period_ended_at = next_end
+    db.commit()
+
+
+@router.post("/oncall/{oncall_id}/auto-rotate")
+def trigger_oncall_rotate(oncall_id: int, db: Session = Depends(get_db_session)):
+    """手动触发一次自动轮转：将当前值班人切换为下一位"""
+    obj = db.query(OnCallSchedule).filter(OnCallSchedule.id == oncall_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="值班表不存在")
+    members = []
+    try:
+        members = json.loads(obj.members) if obj.members else []
+    except (json.JSONDecodeError, TypeError):
+        members = []
+    if not members:
+        raise HTTPException(status_code=400, detail="成员列表为空，无法轮转")
+
+    names = [m.get("name") or "" for m in members]
+    names = [n for n in names if n]
+    if not names:
+        raise HTTPException(status_code=400, detail="成员名为空，无法轮转")
+
+    if obj.current_oncall and obj.current_oncall in names:
+        current_idx = names.index(obj.current_oncall)
+        next_idx = (current_idx + 1) % len(names)
+    else:
+        next_idx = 0
+
+    now = datetime.now()
+    if obj.rotation_type == "weekly":
+        next_end = now + timedelta(weeks=1)
+    else:
+        next_end = now + timedelta(days=30)
+
+    obj.current_oncall = names[next_idx]
+    obj.current_period_started_at = now
+    obj.current_period_ended_at = next_end
+    db.commit()
+    db.refresh(obj)
+    return {"ok": True, "current_oncall": obj.current_oncall, "next_rotation_at": next_end.strftime("%Y-%m-%d %H:%M:%S")}
+
+
+@router.post("/oncall/{oncall_id}/handover")
+def handover_oncall(oncall_id: int, to_name: str = None, db: Session = Depends(get_db_session)):
+    """交接班：将当前值班人转给其他人"""
+    obj = db.query(OnCallSchedule).filter(OnCallSchedule.id == oncall_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="值班表不存在")
+    members = []
+    try:
+        members = json.loads(obj.members) if obj.members else []
+    except (json.JSONDecodeError, TypeError):
+        members = []
+    names = [m.get("name") or "" for m in members]
+    names = [n for n in names if n]
+
+    if to_name and to_name not in names:
+        raise HTTPException(status_code=400, detail=f"交接班对象 {to_name} 不在成员列表中")
+
+    if not to_name:
+        if len(names) >= 2:
+            current_idx = names.index(obj.current_oncall) if obj.current_oncall in names else 0
+            to_name = names[(current_idx + 1) % len(names)]
+        else:
+            raise HTTPException(status_code=400, detail="成员不足，无法交接班")
+
+    obj.current_oncall = to_name
+    now = datetime.now()
+    obj.current_period_started_at = now
+    if obj.rotation_type == "weekly":
+        obj.current_period_ended_at = now + timedelta(weeks=1)
+    else:
+        obj.current_period_ended_at = now + timedelta(days=30)
+    db.commit()
+    db.refresh(obj)
+    return {"ok": True, "current_oncall": obj.current_oncall, "period_started_at": obj.current_period_started_at, "period_ended_at": obj.current_period_ended_at}
 
 
 # ==================== Escalation 接口 ====================
@@ -501,13 +611,26 @@ def list_burn_rates(db: Session = Depends(get_db_session)):
     return results
 
 
+@router.get("/slo/dashboard")
+def api_slo_dashboard(db: Session = Depends(get_db_session)):
+    """SLO Dashboard 数据：从 VM 实时查询所有 SLO 的可用性、燃烧速率、错误预算."""
+    return slo_service.get_slo_dashboard(db)
+
+
+@router.post("/slo/calculate")
+def api_slo_calculate(db: Session = Depends(get_db_session)):
+    """手动触发所有 SLO 的自动计算（更新 SLOConfig + ErrorBudget 表）."""
+    result = slo_service.calculate_all_slo(db)
+    return {"ok": True, **result}
+
+
 # ==================== SLA 接口 ====================
 
 class SLARecordCreate(BaseModel):
     service_name: str
     sla_target: float
-    period_start: Optional[datetime] = None
-    period_end: Optional[datetime] = None
+    period_started_at: Optional[datetime] = None
+    period_ended_at: Optional[datetime] = None
     uptime_seconds: int = 0
     downtime_seconds: int = 0
 
@@ -516,8 +639,8 @@ class SLARecordResponse(BaseModel):
     id: int
     service_name: str
     sla_target: float
-    period_start: Optional[datetime] = None
-    period_end: Optional[datetime] = None
+    period_started_at: Optional[datetime] = None
+    period_ended_at: Optional[datetime] = None
     uptime_seconds: int
     downtime_seconds: int
     achieved_sla: float
@@ -546,8 +669,8 @@ def create_sla_record(data: SLARecordCreate, db: Session = Depends(get_db_sessio
     obj = SLARecord(
         service_name=data.service_name,
         sla_target=data.sla_target,
-        period_start=data.period_start,
-        period_end=data.period_end,
+        period_started_at=data.period_started_at,
+        period_ended_at=data.period_ended_at,
         uptime_seconds=data.uptime_seconds,
         downtime_seconds=data.downtime_seconds,
         achieved_sla=achieved,
@@ -575,7 +698,7 @@ class AvailabilityReportResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     service_name: str
-    report_date: datetime
+    reported_at: datetime
     total_uptime: int
     total_downtime: int
     availability_pct: float
@@ -605,7 +728,7 @@ def generate_availability_report(db: Session = Depends(get_db_session)):
         total_downtime = 0
         for b in budgets:
             consumed_pct = b.budget_consumed / max(1, b.budget_total)
-            window_secs = (b.period_end - b.period_start).total_seconds()
+            window_secs = (b.period_ended_at - b.period_started_at).total_seconds()
             total_downtime += int(window_secs * (consumed_pct / 100))
 
         total_uptime_secs = 30 * 24 * 3600 - total_downtime
@@ -613,7 +736,7 @@ def generate_availability_report(db: Session = Depends(get_db_session)):
 
         report = AvailabilityReport(
             service_name=slo.service_name,
-            report_date=now,
+            reported_at=now,
             total_uptime=total_uptime_secs,
             total_downtime=total_downtime,
             availability_pct=avail_pct,

@@ -47,8 +47,14 @@
       </select>
       <button class="btn" @click="checkAlerts">触发检查</button>
       <button class="btn" @click="checkK8sEvents">K8S 事件检测</button>
-      <button class="btn" @click="batchAck">全部确认</button>
-      <button class="btn btn-primary" @click="batchResolve">全部解决</button>
+      <div class="batch-actions" v-if="selected.size">
+        <span class="batch-tip">已选 {{ selected.size }} 条</span>
+        <button class="btn" @click="batchAckSelected">批量确认</button>
+        <button class="btn btn-primary" @click="batchResolveSelected">批量解决</button>
+        <button class="btn" @click="selected.clear(); selected = selected">取消</button>
+      </div>
+      <button v-else class="btn" @click="batchAck">全部确认</button>
+      <button v-if="!selected.size" class="btn btn-primary" @click="batchResolve">全部解决</button>
     </div>
 
     <div class="panel">
@@ -57,12 +63,14 @@
         <table v-else-if="alerts.length" class="table">
           <thead>
             <tr>
+              <th class="col-check"><input type="checkbox" :checked="allSelected" @change="toggleAll" /></th>
               <th>ID</th><th>时间</th><th>指标</th><th>当前值</th><th>阈值</th>
               <th>级别</th><th>状态</th><th>消息</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="a in alerts" :key="a.id" :class="`severity-${a.severity}`">
+              <td class="col-check"><input type="checkbox" :checked="selected.has(a.id)" @change="toggleSelect(a.id)" /></td>
               <td>{{ a.id }}</td>
               <td class="text-sm">{{ formatTime(a.created_at) }}</td>
               <td>{{ a.metric_name }}</td>
@@ -176,11 +184,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import request from '@/api/request'
+import { connectAlertsWs, disconnectAlertsWs, onAlert } from '@/utils/websocket'
 
 
 
@@ -193,6 +202,54 @@ const totalPages = ref(1)
 const stats = ref({})
 const filters = reactive({ status: '', severity: '', page: 1 })
 const jumpPage = ref(1)
+const selected = ref(new Set())
+
+const allSelected = computed(() => {
+  return alerts.value.length > 0 && alerts.value.every(a => selected.value.has(a.id))
+})
+
+function toggleSelect(id) {
+  const s = new Set(selected.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  selected.value = s
+}
+
+function toggleAll() {
+  if (allSelected.value) {
+    selected.value = new Set()
+  } else {
+    selected.value = new Set(alerts.value.map(a => a.id))
+  }
+}
+
+async function batchAckSelected() {
+  if (!selected.value.size) return
+  try {
+    await ElMessageBox.confirm(`确认将选中的 ${selected.value.size} 条告警标记为已确认？`, '批量确认')
+    const ids = [...selected.value]
+    await request.post('/alerts/api/batch-acknowledge', { ids })
+    ElMessage.success(`已确认 ${ids.length} 条告警`)
+    selected.value = new Set()
+    loadAlerts()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('批量确认失败: ' + (e.message || e))
+  }
+}
+
+async function batchResolveSelected() {
+  if (!selected.value.size) return
+  try {
+    await ElMessageBox.confirm(`确认将选中的 ${selected.value.size} 条告警标记为已解决？`, '批量解决')
+    const ids = [...selected.value]
+    await request.post('/alerts/api/batch-resolve', { ids })
+    ElMessage.success(`已解决 ${ids.length} 条告警`)
+    selected.value = new Set()
+    loadAlerts()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('批量解决失败: ' + (e.message || e))
+  }
+}
 
 const pageNumbers = computed(() => {
   const pages = []
@@ -378,7 +435,26 @@ async function openAssistant(alertId) {
   }
 }
 
-onMounted(loadAlerts)
+function insertAlertAtTop(alert) {
+  const exists = alerts.value.find(a => a.id === alert.id)
+  if (exists) return
+  alerts.value.unshift(alert)
+  total.value++
+  if (stats.value.triggered !== undefined && alert.status === 'triggered') {
+    stats.value.triggered++
+  }
+}
+
+onMounted(() => {
+  loadAlerts()
+  connectAlertsWs('')
+  onAlert(insertAlertAtTop)
+})
+
+onBeforeUnmount(() => {
+  disconnectAlertsWs()
+})
+
 </script>
 
 <style scoped>
@@ -399,6 +475,8 @@ onMounted(loadAlerts)
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .toolbar select { padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; }
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; transition: all 0.2s; }
+.batch-actions { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 5px 12px; border-radius: 6px; }
+.batch-tip { color: #fff; font-size: 0.8rem; font-weight: 600; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
@@ -411,6 +489,9 @@ onMounted(loadAlerts)
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-body { padding: 16px 18px; }
 .table { width: 100%; border-collapse: collapse; }
+.col-check { width: 32px; }
+.table th.col-check { text-align: center; }
+.table td.col-check { text-align: center; }
 .table th { text-align: left; padding: 10px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary, #64748b); border-bottom: 1px solid var(--border-strong, rgba(0,0,0,0.12)); text-transform: uppercase; letter-spacing: 0.3px; }
 .table td { padding: 10px 12px; font-size: 0.85rem; color: var(--text, #1e293b); border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
 .table tr:hover td { background: var(--bg-hover, rgba(0,0,0,0.03)); }

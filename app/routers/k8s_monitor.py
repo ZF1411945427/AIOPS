@@ -56,7 +56,7 @@ def api_k8s_monitor_list(cluster: str = "", hours: int = 1, db: Session = Depend
                     "name": ds.name,
                     "endpoint": ds.endpoint,
                     "status": ds.last_status,
-                    "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
+                    "last_scraped_at": str(ds.last_scraped_at) if ds.last_scraped_at else None,
                 }
         return JSONResponse({
             "clusters": [{"name": c.name, "endpoint": c.endpoint, "status": c.last_status} for c in clusters],

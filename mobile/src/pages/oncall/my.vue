@@ -61,7 +61,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
-import { getCurrentOncall, listOncall } from '@/api/oncall.js'
+import { getCurrentOncall, listOncall, handover } from '@/api/oncall.js'
 import { useUserStore } from '@/store/user.js'
 const userStore = useUserStore()
 const currentData = ref(null)
@@ -74,7 +74,7 @@ const dutyDates = ref({})
 
 const remainText = computed(() => {
     if (!myOncall.value) return '-'
-    const end = myOncall.value.current_period_end || myOncall.value.end_time || myOncall.value.ends_at
+    const end = myOncall.value.current_period_ended_at || myOncall.value.ended_at || myOncall.value.ends_at
     if (!end) return '-'
     const diff = new Date(end).getTime() - Date.now()
     if (diff <= 0) return '0小时'
@@ -228,14 +228,45 @@ function extractPhone(item) {
     return ''
 }
 
-function handleHandover() {
-    uni.showModal({
-        title: '交接班',
-        content: '确认进行交接班操作？',
-        success: (r) => {
-            if (r.confirm) uni.showToast({ title: '交接班已提交', icon: 'success' })
-        },
+async function handleHandover() {
+    if (!myOncall.value || !myOncall.value.id) {
+        uni.showToast({ title: '当前无值班任务，无法交接', icon: 'none' })
+        return
+    }
+    const members = parseMembers(myOncall.value.members)
+    const otherMembers = members.filter(m => {
+        if (typeof m === 'string') return m !== (userStore.userInfo?.username || userStore.userInfo?.name)
+        return m && m.username !== (userStore.userInfo?.username || userStore.userInfo?.name)
     })
+    if (!otherMembers.length) {
+        uni.showToast({ title: '值班表无其他成员可交接', icon: 'none' })
+        return
+    }
+    const choices = otherMembers.map(m => typeof m === 'string' ? m : (m.name || m.username || '')).filter(Boolean)
+    if (choices.length === 1) {
+        doHandover(choices[0])
+    } else {
+        uni.showModal({
+            title: '选择接班人',
+            content: choices.join('\n'),
+            success: (r) => {
+                if (r.tapIndex >= 0) doHandover(choices[r.tapIndex])
+            },
+        })
+    }
+}
+
+async function doHandover(toName) {
+    uni.showLoading({ title: '交接中...' })
+    try {
+        await handover(myOncall.value.id, toName)
+        uni.hideLoading()
+        uni.showToast({ title: '交接班成功', icon: 'success' })
+        fetchData()
+    } catch (e) {
+        uni.hideLoading()
+        uni.showToast({ title: '交接失败: ' + (e.message || ''), icon: 'none' })
+    }
 }
 
 onPullDownRefresh(async () => {

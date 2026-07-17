@@ -19,6 +19,7 @@ from app.models import (
     KafkaPipeline, FeatureStoreItem, PredictionModel,
     DashboardCardConfig, ReportSchedule, ApiToken,
     AIProvider, AgentConfig, ServiceMeshConfig, NetFlowCollector,
+    TagCategory, Tag,
 )
 from app.services import config_service
 
@@ -27,7 +28,6 @@ def seed_all():
     db = get_session_for(get_db_mode())()
 
     # AgentConfig 播种（独立于 marker 版本，确保已部署环境也能生效）
-    # 保证配置开关有持久化记录，用户可通过管理界面修改；幂等：已存在则跳过
     if not db.query(AgentConfig).first():
         db.add(AgentConfig(
             name="default", is_enabled=True,
@@ -35,10 +35,25 @@ def seed_all():
         ))
         db.commit()
 
+    # TagCategory 预设分类（幂等）
+    default_categories = [
+        {"name": "env", "label": "环境", "color": "#3b82f6", "icon": "🌐", "sort_order": 1},
+        {"name": "biz", "label": "业务", "color": "#8b5cf6", "icon": "🏢", "sort_order": 2},
+        {"name": "tech", "label": "技术", "color": "#10b981", "icon": "⚙️", "sort_order": 3},
+        {"name": "severity", "label": "告警级别", "color": "#f59e0b", "icon": "🚨", "sort_order": 4},
+        {"name": "team", "label": "团队", "color": "#ec4899", "icon": "👥", "sort_order": 5},
+        {"name": "other", "label": "其他", "color": "#6b7280", "icon": "🏷️", "sort_order": 99},
+    ]
+    existing_cats = db.query(TagCategory).count()
+    if existing_cats == 0:
+        for c in default_categories:
+            db.add(TagCategory(**c))
+        db.commit()
+
     # Use a marker to track if seed has been applied
     from app.models import SystemConfig
     marker = db.query(SystemConfig).filter(SystemConfig.key == "seed_data_applied").first()
-    if marker and marker.value == "v2":
+    if marker and marker.config_value == "v2":
         db.close()
         return
     marker_v = "v2"
@@ -157,7 +172,7 @@ def seed_all():
             db.add(AssetLifecycle(
                 asset_id=a.id, status=status,
                 previous_status="provisioning" if status == "running" else "unknown",
-                changed_by=demo_users[0].id, comment="自动部署",
+                user_id=demo_users[0].id, description="自动部署",
                 created_at=days_ago(random.randint(5, 60)),
             ))
 
@@ -232,8 +247,8 @@ def seed_all():
                 "Failed to schedule pod: insufficient memory",
             ]),
             source=random.choice(["kubelet", "scheduler", "controller-manager"]),
-            first_seen=hours_ago(random.randint(0, 720)),
-            last_seen=hours_ago(random.randint(0, 24)),
+            first_seen_at=hours_ago(random.randint(0, 720)),
+            last_seen_at=hours_ago(random.randint(0, 24)),
             count=random.randint(1, 50),
             severity=random.choice(["warning", "warning", "warning", "critical", "normal"]),
         )
@@ -275,18 +290,18 @@ def seed_all():
             db.add(DataSource(
                 name=name, type=ds_type, endpoint=endpoint,
                 auth_type="none", scrape_interval=30, enabled=enabled,
-                mapping_config=json.dumps({"default_asset_type": "server"}),
+                mapping_channel_config=json.dumps({"default_asset_type": "server"}),
                 last_status="healthy" if enabled else "unknown",
-                last_scrape=hours_ago(random.randint(0, 2)),
+                last_scraped_at=hours_ago(random.randint(0, 2)),
             ))
 
     # ── Notification Channels ──
     if not db.query(NotificationChannel).filter(NotificationChannel.type == "email").first():
-        db.add(NotificationChannel(name="邮件通知", type="email", config=json.dumps({"smtp_host": "smtp.example.com", "smtp_port": 587}), enabled=True))
+        db.add(NotificationChannel(name="邮件通知", type="email", channel_config=json.dumps({"smtp_host": "smtp.example.com", "smtp_port": 587}), enabled=True))
     if not db.query(NotificationChannel).filter(NotificationChannel.type == "webhook").first():
-        db.add(NotificationChannel(name="企业微信", type="webhook", config=json.dumps({"url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"}), enabled=True))
+        db.add(NotificationChannel(name="企业微信", type="webhook", channel_config=json.dumps({"url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"}), enabled=True))
     if not db.query(NotificationChannel).filter(NotificationChannel.type == "slack").first():
-        db.add(NotificationChannel(name="Slack 告警", type="slack", config=json.dumps({"webhook_url": "https://hooks.slack.com/services/xxx"}), enabled=False))
+        db.add(NotificationChannel(name="Slack 告警", type="slack", channel_config=json.dumps({"webhook_url": "https://hooks.slack.com/services/xxx"}), enabled=False))
 
     # ── Notification Logs ──
     channels = db.query(NotificationChannel).all()
@@ -299,7 +314,7 @@ def seed_all():
             recipient=random.choice(["admin@example.com", "ops@example.com", "dev@example.com"]),
             title=f"告警通知: {alert.metric_name}",
             content=f"{alert.message} — 来自 {alert.created_at}",
-            success=random.random() > 0.15,
+            is_success=random.random() > 0.15,
             error_message=None if random.random() > 0.15 else "Connection timeout",
             created_at=alert.created_at,
         ))
@@ -356,8 +371,8 @@ def seed_all():
             priority=random.choice(["P0", "P1", "P2", "P3"]),
             status=random.choice(["pending", "pending", "approved", "in_progress", "completed", "completed", "rejected"]),
             risk_level=random.choice(["low", "medium", "high"]),
-            planned_start=days_ago(random.randint(1, 14)),
-            planned_end=days_ago(random.randint(0, 13)),
+            planned_started_at=days_ago(random.randint(1, 14)),
+            planned_ended_at=days_ago(random.randint(0, 13)),
             requester_id=random.choice(demo_users).id,
             reviewer_id=random.choice(demo_users).id if random.random() > 0.3 else None,
             review_comment=random.choice(["审批通过", "需要更多评估", None, None, None]),
@@ -370,7 +385,7 @@ def seed_all():
                 description=f"步骤 {step+1}: {random.choice(['备份数据', '停止服务', '执行变更', '验证状态', '启动服务'])}",
                 command=random.choice(["systemctl stop nginx", "kubectl rollout restart", "ansible-playbook upgrade.yml", "echo 'done'"]),
                 status=random.choice(["pending", "running", "completed", "completed", "failed"]) if cr.status == "completed" else "pending",
-                executed_by=random.choice(demo_users).id if random.random() > 0.5 else None,
+                user_id=random.choice(demo_users).id if random.random() > 0.5 else None,
                 created_at=cr.created_at + timedelta(hours=step),
             ))
 
@@ -433,8 +448,8 @@ def seed_all():
             protocol=random.choice(["TCP", "TCP", "TCP", "UDP"]),
             bytes_sent=random.randint(100, 1000000),
             bytes_rcvd=random.randint(100, 10000000),
-            start_time=hours_ago(random.randint(0, 720)),
-            end_time=hours_ago(random.randint(0, 719)),
+            started_at=hours_ago(random.randint(0, 720)),
+            ended_at=hours_ago(random.randint(0, 719)),
         ))
 
     # ── SystemPostureRecords ──
@@ -518,7 +533,7 @@ def seed_all():
     # ── K8s DataSource ──
     if not db.query(DataSource).filter(DataSource.type == "kubernetes").first():
         db.add(DataSource(name="生产 K8s 集群", type="kubernetes", endpoint="https://k8s-api.prod.local:6443",
-            auth_config=json.dumps({"k8s_api_server": "https://k8s-api.prod.local:6443", "k8s_token": "seed-k8s-token", "verify_ssl": False}),
+            auth_channel_config=json.dumps({"k8s_api_server": "https://k8s-api.prod.local:6443", "k8s_token": "seed-k8s-token", "verify_ssl": False}),
             last_status="unknown", enabled=False))
 
     # ── AutoRemediation (5) ──
@@ -556,7 +571,7 @@ def seed_all():
     if db.query(DiscoveryJob).count() < 2:
         for name, jtype, target in [("内网资产扫描", "ssh", "192.168.1.0/24"),
             ("K8s 节点发现", "kubernetes", "prod-cluster"), ("云资产同步", "subnet", "10.0.0.0/8")]:
-            db.add(DiscoveryJob(name=name, job_type=jtype, target=target, config=json.dumps({"timeout": 30}),
+            db.add(DiscoveryJob(name=name, job_type=jtype, target=target, channel_config=json.dumps({"timeout": 30}),
                 status=random.choice(["completed", "completed", "failed"]),
                 result_summary=json.dumps({"found": random.randint(5, 20), "new": random.randint(0, 5)}),
                 finished_at=hours_ago(random.randint(1, 48))))
@@ -626,7 +641,7 @@ def seed_all():
             ("incident_list", "最近故障"), ("health_gauge", "系统健康度"), ("ai_chat", "AI 助手")]
         for i, (ct, title) in enumerate(cards):
             db.add(DashboardCardConfig(user_id=1, card_type=ct, title=title, position=i, visible=True,
-                config=json.dumps({"span": 2 if ct == "alert_chart" else 1})))
+                channel_config=json.dumps({"span": 2 if ct == "alert_chart" else 1})))
 
     # ── ReportSchedule (3) ──
     if db.query(ReportSchedule).count() < 2:
@@ -634,7 +649,7 @@ def seed_all():
             ("每周汇总", "weekly", "0 9 * * 1", "wecom"),
             ("月度SLA报告", "monthly", "0 10 1 * *", "email")]:
             db.add(ReportSchedule(name=name, report_type=rtype, cron_expr=cron, channel=ch,
-                channel_config=json.dumps({"recipients": ["admin@aiops.local"]}), enabled=True))
+                channel_channel_config=json.dumps({"recipients": ["admin@aiops.local"]}), enabled=True))
 
     # ── ApiToken (3) ──
     if db.query(ApiToken).count() < 2:
@@ -772,7 +787,7 @@ def seed_all():
             db.add(Span(
                 trace_id=trace_id, span_id=root_span_id, parent_span_id="",
                 service_name=root_svc, operation_name=root_op,
-                start_time=t0, end_time=t0 + timedelta(milliseconds=root_dur),
+                started_at=t0, ended_at=t0 + timedelta(milliseconds=root_dur),
                 duration_ms=root_dur, status=root_status,
                 tags=json.dumps({
                     "http.method": root_op.split()[0],
@@ -787,8 +802,8 @@ def seed_all():
                 db.add(Span(
                     trace_id=trace_id, span_id=sid, parent_span_id=span_parent,
                     service_name=svc, operation_name=op,
-                    start_time=span_start,
-                    end_time=span_start + timedelta(milliseconds=dur),
+                    started_at=span_start,
+                    ended_at=span_start + timedelta(milliseconds=dur),
                     duration_ms=dur, status=status,
                     tags=json.dumps({
                         "component": "rpc" if parent or True else "http",
@@ -814,7 +829,7 @@ def seed_all():
     # ── AgentConfig 已在 seed_all() 开头独立播种（独立于 marker，确保已部署环境也能生效）──
 
     # Mark seed as applied
-    marker_obj = SystemConfig(key="seed_data_applied", value=marker_v, description="Seed data version marker")
+    marker_obj = SystemConfig(key="seed_data_applied", config_value=marker_v, description="Seed data version marker")
     db.add(marker_obj)
 
     db.commit()

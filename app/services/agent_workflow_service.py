@@ -806,9 +806,9 @@ def _finalize_run(db: Session, run_id: int, status: str, message: str):
 def abort_run(db: Session, run_id: int, reason: str = "", operator: str = "") -> Dict:
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run_id).first()
     if not run:
-        return {"success": False, "message": "工作流实例不存在"}
+        return {"is_success": False, "message": "工作流实例不存在"}
     if run.status in (AgentWorkflowRun.STATUS_COMPLETED, AgentWorkflowRun.STATUS_FAILED, AgentWorkflowRun.STATUS_ABORTED):
-        return {"success": False, "message": f"工作流已处于终态 {run.status}"}
+        return {"is_success": False, "message": f"工作流已处于终态 {run.status}"}
     node_runs = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.run_id == run_id).all()
     for nr in node_runs:
         if nr.status in (AgentWorkflowRun.STATUS_PENDING, AgentWorkflowRun.STATUS_RUNNING):
@@ -818,18 +818,18 @@ def abort_run(db: Session, run_id: int, reason: str = "", operator: str = "") ->
     _finalize_run(db, run_id, AgentWorkflowRun.STATUS_ABORTED, reason or "用户手动中止")
     _audit(db, run_id=run_id, action=WorkflowAuditLog.ACTION_RUN_ABORT, operator=operator,
            detail={"reason": reason or "用户手动中止"})
-    return {"success": True, "message": "工作流已中止"}
+    return {"is_success": True, "message": "工作流已中止"}
 
 
 def retry_node(db: Session, node_run_id: int, operator: str = "") -> Dict:
     nr = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.id == node_run_id).first()
     if not nr:
-        return {"success": False, "message": "节点不存在"}
+        return {"is_success": False, "message": "节点不存在"}
     if nr.status != AgentWorkflowNodeRun.STATUS_FAILED:
-        return {"success": False, "message": f"节点状态为 {nr.status}，仅失败节点可重试"}
+        return {"is_success": False, "message": f"节点状态为 {nr.status}，仅失败节点可重试"}
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == nr.run_id).first()
     if not run:
-        return {"success": False, "message": "工作流实例不存在"}
+        return {"is_success": False, "message": "工作流实例不存在"}
     nr.status = AgentWorkflowNodeRun.STATUS_PENDING
     nr.output = "{}"
     nr.error = ""
@@ -843,19 +843,19 @@ def retry_node(db: Session, node_run_id: int, operator: str = "") -> Dict:
            action=WorkflowAuditLog.ACTION_NODE_RETRY, operator=operator,
            detail={"node_name": nr.node_name})
     _advance_run(db, run.id)
-    return {"success": True, "message": "节点已重试"}
+    return {"is_success": True, "message": "节点已重试"}
 
 
 def confirm_workflow_node(db: Session, node_run_id: int, user_name: str) -> Dict:
     """确认执行工作流中的待确认节点。"""
     nr = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.id == node_run_id).first()
     if not nr:
-        return {"success": False, "message": "节点不存在"}
+        return {"is_success": False, "message": "节点不存在"}
     if nr.status != AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM:
-        return {"success": False, "message": f"节点状态为 {nr.status}，无法确认"}
+        return {"is_success": False, "message": f"节点状态为 {nr.status}，无法确认"}
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == nr.run_id).first()
     if not run:
-        return {"success": False, "message": "工作流实例不存在"}
+        return {"is_success": False, "message": "工作流实例不存在"}
 
     pending_action = None
     if nr.pending_action_id:
@@ -892,7 +892,7 @@ def confirm_workflow_node(db: Session, node_run_id: int, user_name: str) -> Dict
                    risk_level=pending_action.risk_level if pending_action else "",
                    detail={"parameters": parameters, "status": "failed", "error": result.get("message", "")})
             _advance_run(db, run.id)
-            return {"success": False, "message": result.get("message", "")}
+            return {"is_success": False, "message": result.get("message", "")}
 
         output = rdata if isinstance(rdata, dict) else {"data": rdata}
         nr.status = AgentWorkflowNodeRun.STATUS_COMPLETED
@@ -915,7 +915,7 @@ def confirm_workflow_node(db: Session, node_run_id: int, user_name: str) -> Dict
                risk_level=pending_action.risk_level if pending_action else "",
                detail={"parameters": parameters, "status": "completed", "result_summary": str(output)[:500]})
         _advance_run(db, run.id)
-        return {"success": True, "message": "执行完成"}
+        return {"is_success": True, "message": "执行完成"}
     except Exception as e:
         nr.status = AgentWorkflowNodeRun.STATUS_FAILED
         nr.error = f"执行异常: {e}"
@@ -932,16 +932,16 @@ def confirm_workflow_node(db: Session, node_run_id: int, user_name: str) -> Dict
                risk_level=pending_action.risk_level if pending_action else "",
                detail={"parameters": parameters, "status": "error", "error": str(e)})
         _advance_run(db, run.id)
-        return {"success": False, "message": f"执行异常: {e}"}
+        return {"is_success": False, "message": f"执行异常: {e}"}
 
 
 def cancel_workflow_node(db: Session, node_run_id: int, operator: str = "") -> Dict:
     """取消执行工作流中的待确认节点，标记为已跳过。"""
     nr = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.id == node_run_id).first()
     if not nr:
-        return {"success": False, "message": "节点不存在"}
+        return {"is_success": False, "message": "节点不存在"}
     if nr.status != AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM:
-        return {"success": False, "message": f"节点状态为 {nr.status}，无法取消"}
+        return {"is_success": False, "message": f"节点状态为 {nr.status}，无法取消"}
 
     if nr.pending_action_id:
         pa = db.query(PendingAction).filter(PendingAction.id == nr.pending_action_id).first()
@@ -965,7 +965,7 @@ def cancel_workflow_node(db: Session, node_run_id: int, operator: str = "") -> D
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == nr.run_id).first()
     if run:
         _advance_run(db, run.id)
-    return {"success": True, "message": "已取消"}
+    return {"is_success": True, "message": "已取消"}
 
 
 def list_runs(db: Session, status: Optional[str] = None, limit: int = 50) -> List[Dict]:
@@ -1051,12 +1051,8 @@ def export_run_pdf(db: Session, run_id: int) -> Optional[bytes]:
     _fonts_dir = _os.path.join(_proj, "fonts")
     _regular = _os.path.join(_fonts_dir, "msyh.ttc")
     _bold = _os.path.join(_fonts_dir, "msyhbd.ttc")
-    if _os.path.isfile(_regular) and _os.path.isfile(_bold):
-        pdf.add_font("YaHei", "", _regular)
-        pdf.add_font("YaHei", "B", _bold)
-    else:
-        pdf.add_font("YaHei", "", r"C:\Windows\Fonts\msyh.ttc")
-        pdf.add_font("YaHei", "B", r"C:\Windows\Fonts\msyhbd.ttc")
+    pdf.add_font("YaHei", "", _regular)
+    pdf.add_font("YaHei", "B", _bold)
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.set_margins(20, 20, 20)
     _page_w = pdf.w - pdf.l_margin - pdf.r_margin  # 可用宽度
