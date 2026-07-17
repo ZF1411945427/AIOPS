@@ -3,6 +3,31 @@
 > 每次会话开始时读取本文件了解项目背景和之前的决策。
 > 按照时间倒序排列。完整历史见 `MEMORY.md.bak.20260712`。
 
+### 2026-07-17: 网络测试工具开发 + 智能助手时间显示修复 + 依赖审计 + 推送 GitHub
+
+**网络测试功能**（新增）：
+- 后端 `app/routers/network_test.py`：Ping/Traceroute/TCP端口/DNS 4 大工具，`/api/network-test/*` 5 个接口
+- 前端 `frontend/src/views/NetworkTestView.vue`：4 Tab + 合规警示横幅 + 资产快选 + 常用端口快选
+- 合规防护：命令注入字符过滤 + 频率限制(1s/目标) + 审计日志 + 合规警示
+- 菜单入口：侧边栏「运维工作台→工具箱→网络测试」
+- 注册：`menu_config.json` 工具箱下新增 `network-test`，`AppLayout.vue` 注册组件+VUE_PAGES，`main.py` import+include_router
+- 测试：本地+服务器共 6 轮测试全通过（Ping/Traceroute/TCP/DNS/命令注入防护/频率限制）
+- 部署：已部署到服务器 39.96.51.45
+
+**智能助手时间显示修复**：
+- `AgentChatView.vue` formatDate 非当天只显示 `月/日` 缺年份 → 改为 `今天 HH:MM` / `YYYY-MM-DD HH:MM`
+- `AgentChatView.vue` + `AIOpsChatWidget.vue` formatTime 永远只显示时分 → 非当天显示完整日期
+- `mobile/src/pages/agent/sessions.vue` formatTime 同步修复
+
+**依赖审计**：
+- requirements.txt 清理多余依赖（mcp/edge-tts/tabulate/openpyxl）
+- 补全可选依赖注释（neo4j/pywinrm/netsnmp）
+- 修正注释错误（pysnmp → netsnmp）
+
+**推送 GitHub**：
+- commit 07f6b66，287 files changed，推送到 github.com/ZF1411945427/AIOPS.git main 分支
+- .gitignore 排除 .opencode/skills/、data/victoriametrics/、bin/ 大二进制文件
+
 ### 2026-07-17: 文档与系统实现对齐审查
 
 **发现的主要不一致问题**：

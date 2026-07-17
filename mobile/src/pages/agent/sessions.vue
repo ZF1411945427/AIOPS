@@ -89,8 +89,10 @@ async function deleteSession(id) {
 function formatTime(ts) {
     if (!ts) return ''
     const d = new Date(ts)
-    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' +
-        d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    const now = new Date()
+    const p = (n) => String(n).padStart(2, '0')
+    if (d.toDateString() === now.toDateString()) return `今天 ${p(d.getHours())}:${p(d.getMinutes())}`
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 onMounted(loadSessions)
