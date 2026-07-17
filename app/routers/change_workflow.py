@@ -23,8 +23,8 @@ def _change_to_dict(c, users: dict) -> dict:
         "priority": c.priority or "medium",
         "status": c.status or "draft",
         "risk_level": c.risk_level or "low",
-        "planned_start": c.planned_start.strftime("%Y-%m-%d %H:%M") if c.planned_start else None,
-        "planned_end": c.planned_end.strftime("%Y-%m-%d %H:%M") if c.planned_end else None,
+        "planned_started_at": c.planned_started_at.strftime("%Y-%m-%d %H:%M") if c.planned_started_at else None,
+        "planned_ended_at": c.planned_ended_at.strftime("%Y-%m-%d %H:%M") if c.planned_ended_at else None,
         "requester_id": c.requester_id,
         "requester_name": requester.username if requester else "",
         "reviewer_id": c.reviewer_id,
@@ -36,7 +36,7 @@ def _change_to_dict(c, users: dict) -> dict:
 
 
 def _task_to_dict(t, users: dict) -> dict:
-    executor = users.get(t.executed_by)
+    executor = users.get(t.user_id)
     return {
         "id": t.id,
         "change_id": t.change_id,
@@ -45,7 +45,7 @@ def _task_to_dict(t, users: dict) -> dict:
         "command": t.command or "",
         "status": t.status or "pending",
         "result": t.result or "",
-        "executed_by": t.executed_by,
+        "user_id": t.user_id,
         "executor_name": executor.username if executor else "",
         "executed_at": t.executed_at.strftime("%Y-%m-%d %H:%M:%S") if t.executed_at else None,
         "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else None,
@@ -80,8 +80,8 @@ def api_change_create(
     change_type: str = Form("normal"),
     priority: str = Form("medium"),
     risk_level: str = Form("low"),
-    planned_start: str = Form(""),
-    planned_end: str = Form(""),
+    planned_started_at: str = Form(""),
+    planned_ended_at: str = Form(""),
     db: Session = Depends(get_db)):
     """创建变更 JSON API."""
     user_id = request.session.get("user_id")
@@ -90,8 +90,8 @@ def api_change_create(
         asset_id=asset_id if asset_id else None,
         change_type=change_type, priority=priority, risk_level=risk_level,
         requester_id=user_id,
-        planned_start=datetime.fromisoformat(planned_start) if planned_start else None,
-        planned_end=datetime.fromisoformat(planned_end) if planned_end else None)
+        planned_started_at=datetime.fromisoformat(planned_started_at) if planned_started_at else None,
+        planned_ended_at=datetime.fromisoformat(planned_ended_at) if planned_ended_at else None)
     db.add(c)
     db.commit()
     db.refresh(c)
@@ -232,7 +232,7 @@ def api_task_update_status(
         return JSONResponse({"error": "not found"}, status_code=404)
     t.status = status
     t.result = result
-    t.executed_by = request.session.get("user_id")
+    t.user_id = request.session.get("user_id")
     if status in ("completed", "failed"):
         t.executed_at = datetime.now()
     db.commit()

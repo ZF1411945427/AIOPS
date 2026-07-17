@@ -73,7 +73,7 @@
               <div v-for="e in anomalies" :key="e.id" class="event-item">
                 <div class="event-line"><span class="ev-reason">{{ e.reason || '-' }}</span><span class="badge" :class="severityClass(e.severity)">{{ e.severity || 'info' }}</span><span class="ev-count">×{{ e.count || 1 }}</span></div>
                 <div class="event-msg">{{ e.message || '-' }}</div>
-                <div class="event-time">{{ e.first_seen }} ~ {{ e.last_seen }}</div>
+                <div class="event-time">{{ e.first_seen_at }} ~ {{ e.last_seen_at }}</div>
               </div>
             </div>
             <div v-else class="empty-state">无异常事件</div>

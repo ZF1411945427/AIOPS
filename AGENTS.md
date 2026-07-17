@@ -30,6 +30,29 @@ MEMORY.md 按时间倒序记录，最新的在最上面。
 
 **违反契约会导致：** 前后端字段不匹配 → 静默数据丢失（保存了但实际没存进去）→ 功能失效且不报错，极难排查
 
+## ⚠️ 路径规范契约（重要！）
+**所有文件路径必须基于 `__file__` 或 `%~dp0` 动态计算，禁止硬编码绝对路径（如 `D:\AIOPS\project08\xxx`）。**
+
+### 适用场景
+| 场景 | 规范写法 |
+|------|---------|
+| Python 脚本追加 `sys.path` / `os.chdir` | `os.path.dirname(os.path.abspath(__file__))` |
+| Python 引用项目内资源（static、logs、models、fonts） | `Path(__file__).resolve().parent.parent / "logs"` |
+| 日志目录默认值 | `os.environ.get("AIOPS_LOG_DIR", str(PROJECT_ROOT / "logs"))` |
+| `.bat` 启动脚本的 `cd` | `cd /d %~dp0` |
+| `.bat` 引用项目内目录 | `cd /d %~dp0frontend` |
+| 测试脚本截图目录 | `os.path.join(os.path.dirname(__file__), "screenshots", "e2e_xxx")` |
+| 部署脚本项目根目录 | `os.path.dirname(os.path.abspath(__file__))` |
+| e2e 测试引用项目数据库 | `os.path.dirname(os.path.dirname(os.path.dirname(__file__))) / "db"` |
+
+### 禁止行为
+1. **禁止**在 `.py` 中写 `sys.path.insert(0, 'D:/AIOPS/project08')` 或 `os.chdir('D:/AIOPS/project08')`
+2. **禁止**在 `.bat` 中写 `cd /d D:\AIOPS\project08` 或硬编码 `python.exe` 绝对路径
+3. **禁止**在测试脚本中硬编码 `E:\Program Files\hermes\` 或 `E:\AIOPS\project03\` 等外机路径
+4. **禁止**在代码中硬编码 `C:\Windows\Fonts\` — 应使用项目 `fonts/` 目录
+
+**违反路径规范会导致：** 项目换机器/目录后全部路径失效 → 后端拒绝启动 → 所有功能不可用，且排查极其困难。
+
 ## 更新格式
 在 MEMORY.md 顶部插入新条目，格式为：
 ### YYYY-MM-DD: 标题
@@ -37,7 +60,7 @@ MEMORY.md 按时间倒序记录，最新的在最上面。
 
 ## 开发流程
 ### 启动项目
-终端1: D:\AIOPS\project07\.venv\Scripts\python.exe run.py          # FastAPI 后端 (端口 8000)
+终端1: python run.py          # FastAPI 后端 (端口 8000，需在项目根目录执行)
 终端2: npm run dev --prefix frontend  # Vue 前端 (端口 3000，自动代理 API 到 8000)
 
 浏览器访问 http://localhost:3000 使用 Vue 前端 (Vite dev server，开发热更新)
@@ -60,8 +83,8 @@ powershell -Command "Get-Process python* | Stop-Process -Force"
 # 2. 确认端口已释放
 python -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',8000)); s.close(); print('OK')"
 
-# 3. 重新启动（用项目 .venv 的 Python）
-D:\AIOPS\project07\.venv\Scripts\python.exe run.py
+# 3. 重新启动
+python run.py
 ```
 
 **不要依赖** `npx kill-port 8000` 或 `taskkill`，它们常杀不干净。
@@ -97,17 +120,31 @@ if (tab) { activeTab.value = tab; app.globalData.alertTab = null }
 - 改完必须重新 `npm run build:h5 --prefix mobile`，新产物 `dist/build/h5/index.html` 资源路径变为 `/mobile-app/assets/*`
 - **教训**：uni-app 的 H5 资源前缀由 `manifest.json` 决定，`vite.config.js` 的 base 会被覆盖；同一 `/assets` 路径既是静态资源又是 API，需通过前缀隔离
 
+### ⚠️ Vue SPA 路由 404 坑（新增页面必须加 catch-all 路由！）
+**FastAPI + Vue SPA 架构下，所有非根路径的 Vue 路由（如 `/alerts`、`/logs`、`/observability-correlation`）必须加 catch-all 兜底路由！**
+- 现象：新增的 Vue 页面，点击菜单后 **Network 出现 `GET /xxx 404`**，页面空白
+- 根因：FastAPI 只在 `/` 返回 `index.html`，其他路径没有兜底，被 API 路由匹配后返回 404
+- 修复：在 `main.py` 的 `@app.get("/")` 后加 catch-all 路由：
+  ```python
+  @app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+  def serve_vue_spa(path: str):
+      content = _VUE_INDEX.read_text(encoding="utf-8")
+      return HTMLResponse(content=content)
+  ```
+- **注意**：这个 catch-all 必须在所有 `app.include_router()` **之后**定义，否则会拦截 API 路由（如 `/api/menu` 返回 HTML 而不是 JSON）
+- **教训**：新增 Vue 页面后必须同时修改 `main.py` 加兜底路由，且位置必须在所有 `include_router` 之后
+
 ### ⚠️ 后端启动方式（重要！）
 在 opencode 的 bash 工具中直接运行 `python run.py` 会**随 bash 会话超时而终止进程**。
 必须在新窗口中启动（PowerShell 环境用 `Start-Process`，cmd 环境用 `start`）：
 
 ```powershell
 # PowerShell（opencode bash 工具实际是 PowerShell）
-Start-Process -FilePath 'D:\AIOPS\project07\.venv\Scripts\python.exe' -ArgumentList 'run.py' -WorkingDirectory 'D:\AIOPS\project07' -WindowStyle Normal
+Start-Process -FilePath 'D:\AIOPS\project08\.venv\Scripts\python.exe' -ArgumentList 'run.py' -WorkingDirectory 'D:\AIOPS\project08' -WindowStyle Normal
 ```
 ```bash
 # cmd 环境
-start "AIOps Backend" D:\AIOPS\project07\.venv\Scripts\python.exe run.py
+start "AIOps Backend" python run.py
 ```
 
 ### ⚠️ uni-app H5 页面组件缓存大坑（重要！）
@@ -121,6 +158,14 @@ start "AIOps Backend" D:\AIOPS\project07\.venv\Scripts\python.exe run.py
 1. 先把补丁逻辑写在 `main.js` 里验证（入口文件改动一定生效）
 2. 确认逻辑正确后，再排查页面组件缓存问题（可能需 `npm run build:h5` 全量构建）
 3. 绕过方案：通过全局事件拦截 + 直接调 API 来实现功能，不依赖页面组件内的代码
+
+### ⚠️ menu_config.json 分组与叶子 key 冲突（重要！）
+**`menu_config.json` 中同一层分组的 key 不能与叶子节点 key 相同。**
+- 现象：菜单项可见，点击后无任何响应（无 Network 请求，页面不跳转，Console 无报错）
+- 根因：`AppLayout.vue` 的 `qe()` 函数遍历菜单数据，先匹配到分组层（key 相同），返回分组对象（无 `type` 属性）；`ce()` 函数检查 `!b.type` 为 true → **提前 return**，不设 `activeView`
+- 修复：确保分组 key 与叶子 key 不同名
+  - 分组（items 容器）用 `correlation-analysis`，叶子用 `observability-correlation`
+- 排查：在浏览器 Console 执行 `window._navigateTo('xxx')` 看 `activeView` 是否被设置
 
 ### ⚠️ @tap 事件的 DOM 拦截
 - uni-app 的 `@tap` 事件在 H5 中同时触发 `touchstart` 和 `click` 事件

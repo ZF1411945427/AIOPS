@@ -13,6 +13,8 @@ class ConnectionTester:
         try:
             if connection_type == "ssh":
                 return ConnectionTester._test_ssh(host, config)
+            elif connection_type == "winrm":
+                return ConnectionTester._test_winrm(host, config)
             elif connection_type == "kubernetes":
                 return ConnectionTester._test_kubernetes(host, config)
             elif connection_type == "snmp":
@@ -80,6 +82,48 @@ class ConnectionTester:
             return {"ok": False, "message": f"SSH错误: {e}"}
         except Exception as e:
             return {"ok": False, "message": f"连接异常: {e}"}
+
+    @staticmethod
+    def _test_winrm(host: str, config: dict) -> dict:
+        """测试 WinRM 连接（Windows 资产专用）"""
+        if not host:
+            return {"ok": False, "message": "IP地址不能为空"}
+
+        winrm_user = config.get("winrm_user", "Administrator")
+        winrm_password = config.get("winrm_password", "")
+        winrm_port = config.get("winrm_port", 5985)
+        winrm_transport = config.get("winrm_transport", "ntlm")
+        winrm_ssl = config.get("winrm_ssl", False)
+        scheme = "https" if winrm_ssl else "http"
+        endpoint = f"{scheme}://{host}:{winrm_port}/wsman"
+        timeout = 10
+
+        start = datetime.now()
+
+        try:
+            import winrm as pywinrm
+            session = pywinrm.Session(
+                endpoint,
+                auth=(winrm_user, winrm_password),
+                transport=winrm_transport,
+                server_cert_validation="ignore" if winrm_ssl else "validate",
+            )
+            r = session.run_cmd("whoami")
+            latency = (datetime.now() - start).total_seconds() * 1000
+
+            if r.status_code == 0:
+                return {
+                    "ok": True,
+                    "message": f"WinRM 连接成功 (用户: {r.std_out.strip()}, 延迟 {latency:.0f}ms)",
+                    "latency_ms": latency,
+                }
+            else:
+                return {"ok": False, "message": f"WinRM 命令执行失败 (exit={r.status_code}): {r.std_err}"}
+
+        except ImportError:
+            return {"ok": False, "message": "pywinrm 未安装，请执行: pip install pywinrm"}
+        except Exception as e:
+            return {"ok": False, "message": f"WinRM 连接异常: {e}"}
 
     @staticmethod
     def _test_kubernetes(host: str, config: dict) -> dict:
@@ -238,27 +282,85 @@ class ConnectionTester:
                     host=host, port=int(port), user=username, password=password,
                     database=database if database else None, connect_timeout=timeout
                 )
+                latency = (datetime.now() - start).total_seconds() * 1000
+                result = {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+                try:
+                    perm_result = ConnectionTester._check_mysql_permissions_conn(conn, username)
+                    result["permission_check"] = perm_result
+                except Exception as e:
+                    result["permission_check"] = {"error": str(e)}
                 conn.close()
+                return result
             elif db_type == "postgresql":
                 import psycopg2
                 conn = psycopg2.connect(
                     host=host, port=int(port), user=username, password=password,
                     dbname=database if database else None, connect_timeout=timeout
                 )
+                latency = (datetime.now() - start).total_seconds() * 1000
                 conn.close()
+                return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
             elif db_type == "redis":
                 import redis
                 r = redis.Redis(host=host, port=int(port), password=password or None, socket_connect_timeout=timeout)
                 r.ping()
+                latency = (datetime.now() - start).total_seconds() * 1000
+                return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
             else:
                 return {"ok": False, "message": f"不支持的数据库类型: {db_type}"}
-
-            latency = (datetime.now() - start).total_seconds() * 1000
-            return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
         except ImportError as e:
             return {"ok": False, "message": f"缺少驱动: {e}"}
         except Exception as e:
             return {"ok": False, "message": f"连接失败: {e}"}
+
+    @staticmethod
+    def _check_mysql_permissions_conn(conn, user: str) -> dict:
+        """从已有 MySQL 连接检测账号权限"""
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT * FROM mysql.user WHERE User=%s AND Host=%s", (user, "%"))
+            privs = []
+            if cur.description:
+                cols = [d[0] for d in cur.description]
+                for row in cur.fetchall():
+                    priv_map = dict(zip(cols, row))
+                    for col, val in priv_map.items():
+                        if val in (True, 1, "Y", "y"):
+                            privs.append(col)
+
+            try:
+                cur.execute(f"SHOW GRANTS FOR '{user}'@'%'")
+                grants = [r[0] for r in cur.fetchall()]
+            except Exception:
+                grants = []
+
+            ddl = [p for p in privs if p in ("Drop_priv", "Alter_priv", "Create_priv", "Index_priv", "References_priv")]
+            dml = [p for p in privs if p in ("Insert_priv", "Update_priv", "Delete_priv", "Execute_priv")]
+            dcl = [p for p in privs if p in ("Grant_priv", "Super_priv", "Shutdown_priv", "Process_priv", "File_priv")]
+            read = [p for p in privs if p in ("Select_priv", "Show_db_priv", "Show_view_priv", "Lock_tables_priv")]
+
+            has_grant = "Grant_priv" in privs or any("GRANT OPTION" in g for g in grants)
+            is_super = "Super_priv" in privs
+
+            if has_grant or is_super or ddl or "File_priv" in privs:
+                risk_level, risk_label, risk_desc = "high", "🔴 高危", "该账号拥有极高危权限，AI 可能导致数据丢失或权限失控"
+            elif dml:
+                risk_level, risk_label, risk_desc = "medium", "⚠️ 警告", "该账号拥有 DML 权限，AI 可修改业务数据"
+            elif read and not dml and not ddl:
+                risk_level, risk_label, risk_desc = "safe", "✅ 安全", "该账号仅有读权限，AI 仅能查询无法修改数据"
+            else:
+                risk_level, risk_label, risk_desc = "unknown", "❓ 未知", "无法明确判定权限等级"
+
+            return {
+                "risk_level": risk_level,
+                "risk_label": risk_label,
+                "risk_desc": risk_desc,
+                "privileges": {"read": read, "dml": dml, "ddl": ddl, "dcl": dcl},
+                "has_grant_option": has_grant,
+                "is_super_user": is_super,
+            }
+        finally:
+            cur.close()
 
 
 def test_asset_connection(asset) -> dict:

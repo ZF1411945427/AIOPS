@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from app.template_utils import get_templates
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.services import alert_service, rca_service
@@ -88,6 +88,11 @@ def api_acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
 @router.post("/api/{alert_id}/resolve")
 def api_resolve_alert(alert_id: int, db: Session = Depends(get_db)):
     alert_service.resolve_alert(db, alert_id)
+    try:
+        from app.services import knowledge_autogen_service
+        knowledge_autogen_service.generate_draft(alert_id, db)
+    except Exception:
+        pass
     return JSONResponse({"ok": True})
 
 
@@ -125,10 +130,10 @@ def api_heal_alert(alert_id: int, db: Session = Depends(get_db)):
             alert_id=alert.id,
             action_type=action_type,
             target=target,
-            success=success,
+            is_success=success,
             output=f"[Step {step_idx+1}/{len(steps)}] {output}")
         db.add(log)
-        results.append({"step": step_idx + 1, "action": action_type, "success": success, "output": output})
+        results.append({"step": step_idx + 1, "action": action_type, "is_success": success, "output": output})
         if not success:
             break
 
@@ -136,6 +141,31 @@ def api_heal_alert(alert_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return JSONResponse({"ok": True, "alert_id": alert.id, "workflow": wf.name, "steps": results})
+
+
+@router.post("/api/{alert_id}/silence")
+def api_silence_alert(alert_id: int, request_body: dict = None, db: Session = Depends(get_db)):
+    """静默指定告警：创建一条 AlertSilence 记录，使该告警规则在指定时间内不再触发."""
+    from app.models import AlertSilence
+    from fastapi import Request
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        return JSONResponse({"error": "告警不存在"}, status_code=404)
+    minutes = 60
+    reason = ""
+    if request_body:
+        minutes = request_body.get("minutes", 60)
+        reason = request_body.get("reason", f"移动端静默告警 #{alert_id}")
+    expires_at = datetime.now() + timedelta(minutes=minutes)
+    silence = AlertSilence(
+        rule_id=alert.rule_id if alert.rule_id else 0,
+        expires_at=expires_at,
+        reason=reason or f"静默告警 #{alert_id}",
+    )
+    db.add(silence)
+    alert.status = "suppressed"
+    db.commit()
+    return JSONResponse({"ok": True, "silence_id": silence.id, "expires_at": expires_at.strftime("%Y-%m-%d %H:%M:%S")})
 
 
 # ─── 告警根因分析 ───
@@ -154,13 +184,13 @@ def api_alert_rca(alert_id: int, db: Session = Depends(get_db)):
     if asset:
         ev_q = db.query(K8sEvent).filter(
             K8sEvent.severity.in_(["warning", "critical"]),
-            K8sEvent.last_seen >= datetime.now().replace(hour=0, minute=0, second=0),
+            K8sEvent.last_seen_at >= datetime.now().replace(hour=0, minute=0, second=0),
         )
         ev_q = ev_q.filter(
             (K8sEvent.name.ilike(f"%{asset.name}%")) |
             (K8sEvent.name.ilike(f"%{asset.name.split('/')[-1]}%") if '/' in asset.name else K8sEvent.name.ilike(f"%{asset.name}%"))
         )
-        k8s_events = ev_q.order_by(K8sEvent.last_seen.desc()).limit(10).all()
+        k8s_events = ev_q.order_by(K8sEvent.last_seen_at.desc()).limit(10).all()
 
     # 2. 查同资产近期其他告警
     related_alerts = db.query(Alert).filter(
@@ -193,7 +223,7 @@ def api_alert_rca(alert_id: int, db: Session = Depends(get_db)):
         for pid in parent_map.get(asset.id, []):
             p = db.query(Asset).filter(Asset.id == pid).first()
             if p:
-                root_candidates.append({"id": p.id, "name": p.name, "type": p.type, "ci_type": getattr(p, 'ci_type', '')})
+                root_candidates.append({"id": p.id, "name": p.name, "type": p.ci_type, "ci_type": getattr(p, 'ci_type', '')})
 
     return JSONResponse({
         "alert": {
@@ -211,7 +241,7 @@ def api_alert_rca(alert_id: int, db: Session = Depends(get_db)):
             for a in related_alerts
         ],
         "k8s_events": [
-            {"id": e.id, "reason": e.reason, "message": e.message or "", "kind": e.kind, "namespace": e.namespace, "severity": e.severity, "last_seen": e.last_seen.strftime("%Y-%m-%d %H:%M:%S") if e.last_seen else ""}
+            {"id": e.id, "reason": e.reason, "message": e.message or "", "kind": e.kind, "namespace": e.namespace, "severity": e.severity, "last_seen_at": e.last_seen_at.strftime("%Y-%m-%d %H:%M:%S") if e.last_seen_at else ""}
             for e in k8s_events
         ],
         "metric_history": [
@@ -320,14 +350,14 @@ def api_alert_ai_rca(alert_id: int, db: Session = Depends(get_db)):
     if asset_obj:
         ev_q = db.query(K8sEvent).filter(
             K8sEvent.severity.in_(["warning", "critical"]),
-            K8sEvent.last_seen >= datetime.now().replace(hour=0, minute=0, second=0),
+            K8sEvent.last_seen_at >= datetime.now().replace(hour=0, minute=0, second=0),
         )
         short_name = asset_obj.name.split('/')[-1] if '/' in asset_obj.name else asset_obj.name
         ev_q = ev_q.filter(
             (K8sEvent.name.ilike(f"%{asset_obj.name}%")) |
             (K8sEvent.name.ilike(f"%{short_name}%"))
         )
-        k8s_events = ev_q.order_by(K8sEvent.last_seen.desc()).limit(10).all()
+        k8s_events = ev_q.order_by(K8sEvent.last_seen_at.desc()).limit(10).all()
     related_alerts = db.query(Alert).filter(
         Alert.asset_id == alert.asset_id, Alert.id != alert.id,
         Alert.created_at >= datetime.now().replace(hour=0, minute=0, second=0),

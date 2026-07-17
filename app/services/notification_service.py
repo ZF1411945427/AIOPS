@@ -49,7 +49,7 @@ def send_email(config: dict, title: str, content: str) -> tuple[bool, str]:
 
 
 def send_notification(db: Session, alert: Alert, channel: NotificationChannel) -> NotificationLog:
-    config = json.loads(channel.config) if channel.config else {}
+    config = json.loads(channel.channel_config) if channel.channel_config else {}
     title = f"[AIOPS] 鍛婅: {alert.metric_name} - {alert.severity}"
     content = (
         f"鍛婅ID: {alert.id}\n"
@@ -102,7 +102,7 @@ def send_notification(db: Session, alert: Alert, channel: NotificationChannel) -
         recipient=recipient,
         title=title,
         content=content,
-        success=success,
+        is_success=success,
         error_message=error,
     )
     db.add(log)

@@ -66,7 +66,7 @@ def recent_notifications(db: Session = Depends(get_db)):
     offline_assets = (
         db.query(Asset)
         .filter(Asset.status != "online")
-        .order_by(Asset.last_checked.desc())
+        .order_by(Asset.last_checked_at.desc())
         .limit(3)
         .all()
     )
@@ -74,7 +74,7 @@ def recent_notifications(db: Session = Depends(get_db)):
         notifications.append({
             "icon": "📉",
             "title": f"资产离线: {ast.name} ({ast.ip})",
-            "time": _relative_time(ast.last_checked, now) if ast.last_checked else "未知",
+            "time": _relative_time(ast.last_checked_at, now) if ast.last_checked_at else "未知",
             "route": "asset-list",
             "severity": "warning",
         })
@@ -141,7 +141,7 @@ def api_channels_list(db: Session = Depends(get_db)):
     return {
         "channels": [
             {
-                "id": c.id, "name": c.name, "type": c.type, "config": _mask_config(c.config),
+                "id": c.id, "name": c.name, "type": c.type, "config": _mask_config(c.channel_config),
                 "enabled": c.enabled,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
             }
@@ -175,7 +175,7 @@ def api_logs_list(db: Session = Depends(get_db)):
             {
                 "id": lg.id, "alert_id": lg.alert_id, "channel_id": lg.channel_id,
                 "channel_type": lg.channel_type, "recipient": lg.recipient,
-                "title": lg.title, "success": lg.success, "error_message": lg.error_message,
+                "title": lg.title, "is_success": lg.is_success, "error_message": lg.error_message,
                 "created_at": lg.created_at.isoformat() if lg.created_at else None,
             }
             for lg in logs

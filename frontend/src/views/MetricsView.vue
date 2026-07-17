@@ -196,10 +196,10 @@ async function loadMetrics() {
   loading.value = true
   try {
     const [namesRes, latestRes] = await Promise.all([
-      request.get('/metrics/names'),
-      request.get('/metrics/latest?asset_id=' + selectedAsset.value)
+      request.get('/metrics/api/v2/names'),
+      request.get('/metrics/api/v2/latest?asset_id=' + selectedAsset.value)
     ])
-    const allNames = namesRes
+    const allNames = Array.isArray(namesRes) ? namesRes : []
     allMetrics.value = allNames.filter(n => latestRes[n] !== undefined)
     latestValues.value = latestRes
 
@@ -214,7 +214,7 @@ async function loadMetrics() {
 
 async function loadChartData() {
   try {
-    const allData = await request.get('/metrics/data?asset_id=' + selectedAsset.value + '&hours=24')
+    const allData = await request.get('/metrics/api/v2/range?asset_id=' + selectedAsset.value + '&hours=24')
     const grouped = {}
     allData.forEach(d => {
       if (!grouped[d.name]) grouped[d.name] = []

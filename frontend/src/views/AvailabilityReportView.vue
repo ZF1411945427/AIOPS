@@ -41,8 +41,8 @@
 
       <el-table :data="reportList" stripe>
         <el-table-column prop="service_name" label="服务名" />
-        <el-table-column prop="report_date" label="报告日期">
-          <template #default="{row}">{{ formatTime(row.report_date) }}</template>
+        <el-table-column prop="reported_at" label="报告日期">
+          <template #default="{row}">{{ formatTime(row.reported_at) }}</template>
         </el-table-column>
         <el-table-column prop="availability_pct" label="可用性">
           <template #default="{row}">

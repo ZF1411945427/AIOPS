@@ -23,7 +23,7 @@ def list_traces(
         Span.trace_id,
         func.count(Span.id).label("span_count"),
         func.sum(Span.duration_ms).label("total_dur"),
-        func.min(Span.start_time).label("root_time"),
+        func.min(Span.started_at).label("root_time"),
         func.max(Span.status).label("worst_status")).group_by(Span.trace_id)
 
     # 过滤
@@ -42,7 +42,7 @@ def list_traces(
             | Span.trace_id.ilike(f"%{keyword}%")
         )
 
-    subq = subq.order_by(desc(func.min(Span.start_time))).limit(limit).offset(offset)
+    subq = subq.order_by(desc(func.min(Span.started_at))).limit(limit).offset(offset)
     rows = subq.all()
 
     # 获取所有服务列表
@@ -56,7 +56,7 @@ def list_traces(
             Span.parent_span_id == ""
         ).first()
         if not root:
-            root = db.query(Span).filter(Span.trace_id == r.trace_id).order_by(Span.start_time).first()
+            root = db.query(Span).filter(Span.trace_id == r.trace_id).order_by(Span.started_at).first()
 
         results.append({
             "trace_id": r.trace_id,
@@ -64,7 +64,7 @@ def list_traces(
             "total_duration_ms": round(r.total_dur or 0, 1),
             "root_service": root.service_name if root else "",
             "root_operation": root.operation_name if root else "",
-            "start_time": r.root_time.strftime("%Y-%m-%d %H:%M:%S") if r.root_time else "",
+            "started_at": r.root_time.strftime("%Y-%m-%d %H:%M:%S") if r.root_time else "",
             "worst_status": r.worst_status or "OK",
         })
 
@@ -75,7 +75,7 @@ def list_traces(
 @router.get("/{trace_id}")
 def get_trace(trace_id: str, db: Session = Depends(get_db)):
     """获取单个调用链的完整 Span 详情"""
-    spans = db.query(Span).filter(Span.trace_id == trace_id).order_by(Span.start_time).all()
+    spans = db.query(Span).filter(Span.trace_id == trace_id).order_by(Span.started_at).all()
     if not spans:
         return JSONResponse({"spans": []})
 
@@ -87,8 +87,8 @@ def get_trace(trace_id: str, db: Session = Depends(get_db)):
     if not root_span:
         root_span = spans[0]
 
-    root_start = root_span.start_time
-    root_end = root_span.end_time
+    root_start = root_span.started_at
+    root_end = root_span.ended_at
     root_dur = (root_end - root_start).total_seconds() * 1000 if root_end and root_start else 0
     if root_dur <= 0:
         root_dur = 1
@@ -106,7 +106,7 @@ def get_trace(trace_id: str, db: Session = Depends(get_db)):
             "parent_span_id": s.parent_span_id or "",
             "service_name": s.service_name,
             "operation_name": s.operation_name,
-            "start_time": s.start_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] if s.start_time else "",
+            "started_at": s.started_at.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] if s.started_at else "",
             "duration_ms": s.duration_ms,
             "status": s.status,
             "tags": tags,

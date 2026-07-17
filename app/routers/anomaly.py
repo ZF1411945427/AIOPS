@@ -5,6 +5,7 @@ from app.template_utils import get_templates
 from app.database import get_db
 from app.models import MetricRecord
 from app.services import anomaly_service
+from app.services import anomaly_eval_service
 from sqlalchemy.orm import Session
 from sqlalchemy import distinct
 
@@ -24,6 +25,22 @@ def _config_to_dict(c) -> dict:
         "period": c.period or 12,
         "enabled": bool(c.enabled),
         "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else None,
+    }
+
+
+def _bench_to_dict(b) -> dict:
+    return {
+        "id": b.id,
+        "asset_id": b.asset_id,
+        "metric_name": b.metric_name,
+        "algorithm": b.algorithm,
+        "window_minutes": b.window_minutes,
+        "precision": b.precision,
+        "recall": b.recall,
+        "f1_score": b.f1_score,
+        "threshold": b.threshold,
+        "labeled_at": b.labeled_at.strftime("%Y-%m-%d %H:%M:%S") if b.labeled_at else None,
+        "created_at": b.created_at.strftime("%Y-%m-%d %H:%M:%S") if b.created_at else None,
     }
 
 
@@ -77,5 +94,67 @@ def api_metric_list(db: Session = Depends(get_db)):
     """动态获取指标名列表（从 MetricRecord 表去重查询）."""
     names = db.query(distinct(MetricRecord.name)).order_by(MetricRecord.name).all()
     return JSONResponse({"metrics": [n[0] for n in names]})
+
+
+@router.get("/api/benchmark/stats")
+def api_benchmark_stats(days: int = 90, db: Session = Depends(get_db)):
+    stats = anomaly_eval_service.get_benchmark_stats(db, days=days)
+    return JSONResponse(stats)
+
+
+@router.get("/api/benchmark")
+def api_benchmark_list(
+    algorithm: str = "",
+    page: int = 1,
+    per_page: int = 20,
+    db: Session = Depends(get_db)
+):
+    items, total = anomaly_eval_service.get_benchmarks(db, algorithm=algorithm, page=page, per_page=per_page)
+    return JSONResponse({
+        "items": [_bench_to_dict(b) for b in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    })
+
+
+@router.post("/api/benchmark")
+def api_benchmark_create(
+    algorithm: str = Form(...),
+    precision: float = Form(0.0),
+    recall: float = Form(0.0),
+    f1_score: float = Form(0.0),
+    metric_name: str = Form(""),
+    asset_id: int = Form(0),
+    window_minutes: int = Form(60),
+    threshold: float = Form(0.0),
+    db: Session = Depends(get_db)
+):
+    bench_id = anomaly_eval_service.record_benchmark(
+        db=db,
+        asset_id=asset_id or None,
+        metric_name=metric_name,
+        algorithm=algorithm,
+        window_minutes=window_minutes,
+        precision=precision,
+        recall=recall,
+        f1_score=f1_score,
+        threshold=threshold,
+    )
+    return JSONResponse({"ok": True, "id": bench_id})
+
+
+@router.get("/api/benchmark/recommend")
+def api_benchmark_recommend(
+    asset_id: int = 0,
+    metric_name: str = "",
+    db: Session = Depends(get_db)
+):
+    rec = anomaly_eval_service.recommend_algorithm(
+        db,
+        asset_id=asset_id or None,
+        metric_name=metric_name,
+    )
+    return JSONResponse(rec)
 
 

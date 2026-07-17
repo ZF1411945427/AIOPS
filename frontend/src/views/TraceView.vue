@@ -77,7 +77,7 @@
               </div>
               <div class="trace-meta">
                 <span class="trace-id-label">{{ tr.trace_id }}</span>
-                <span class="trace-time">{{ tr.start_time }}</span>
+                <span class="trace-time">{{ tr.started_at }}</span>
               </div>
             </div>
             <div class="trace-stats">
@@ -157,7 +157,7 @@
               <div class="span-meta-row"><span class="meta-key">父 Span</span><span class="meta-val">{{ selectedSpan.parent_span_id || '根Span' }}</span></div>
               <div class="span-meta-row"><span class="meta-key">服务</span><span class="meta-val">{{ selectedSpan.service_name }}</span></div>
               <div class="span-meta-row"><span class="meta-key">操作</span><span class="meta-val">{{ selectedSpan.operation_name }}</span></div>
-              <div class="span-meta-row"><span class="meta-key">开始时间</span><span class="meta-val">{{ selectedSpan.start_time }}</span></div>
+              <div class="span-meta-row"><span class="meta-key">开始时间</span>                <span class="meta-val">{{ selectedSpan.started_at }}</span></div>
               <div class="span-meta-row"><span class="meta-key">耗时</span><span class="meta-val">{{ selectedSpan.duration_ms }}ms</span></div>
               <div class="span-meta-row"><span class="meta-key">状态</span><span class="meta-val">
                 <el-tag :type="selectedSpan.status === 'OK' ? 'success' : 'danger'" size="small">{{ selectedSpan.status }}</el-tag>
@@ -307,9 +307,9 @@ function hasTags(span) {
 
 function wfBarStyle(span) {
   const rootSpan = detailData.value.spans?.find(s => !s.parent_span_id)
-  if (!rootSpan || !rootSpan.start_time) return { width: '4px', left: '0%' }
-  const rootStart = new Date(rootSpan.start_time).getTime()
-  const spanStart = new Date(span.start_time).getTime()
+  if (!rootSpan || !rootSpan.started_at) return { width: '4px', left: '0%' }
+  const rootStart = new Date(rootSpan.started_at).getTime()
+  const spanStart = new Date(span.started_at).getTime()
   const offset = Math.max(0, spanStart - rootStart)
   const rootDur = rootSpan.duration_ms || 1
   const leftPct = (offset / rootDur) * 100

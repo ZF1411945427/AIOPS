@@ -68,8 +68,8 @@
         </el-table-column>
         <el-table-column label="稳态验证" width="100">
           <template #default="{row}">
-            <el-tag :type="row.steady_state_passed ? 'success' : 'danger'" effect="dark" size="small">
-              {{ row.steady_state_passed ? '通过' : '未通过' }}
+            <el-tag :type="row.is_steady_state_passed ? 'success' : 'danger'" effect="dark" size="small">
+              {{ row.is_steady_state_passed ? '通过' : '未通过' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -186,7 +186,7 @@ async function loadAllRuns() {
       } catch {}
     }
     allRuns.value = all.sort((a, b) => b.id - a.id)
-    failedRuns.value = all.filter(r => !r.steady_state_passed)
+    failedRuns.value = all.filter(r => !r.is_steady_state_passed)
   } catch {}
 }
 

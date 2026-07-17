@@ -69,7 +69,7 @@
               <td>{{ t.name }}</td>
               <td><span class="perm-badge" :class="permClass(t.permissions)">{{ t.permissions }}</span></td>
               <td><span class="badge" :class="t.enabled ? 'badge-green' : 'badge-gray'">{{ t.enabled ? '启用' : '禁用' }}</span></td>
-              <td>{{ t.last_used || '未使用' }}</td>
+              <td>{{ t.last_used_at || '未使用' }}</td>
               <td>{{ t.created_at || '-' }}</td>
             </tr>
           </tbody>

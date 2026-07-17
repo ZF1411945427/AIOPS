@@ -49,7 +49,7 @@ def api_path_find(payload: dict = Body(...), db: Session = Depends(get_db)):
                 nodes.append({
                     "id": a.id,
                     "name": a.name,
-                    "type": a.type,
+                    "type": a.ci_type,
                     "ci_type": getattr(a, "ci_type", None),
                     "status": a.status,
                     "ip": a.ip,

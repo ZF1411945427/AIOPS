@@ -107,7 +107,9 @@ def preload_model():
         try:
             _get_bge_model()
         except Exception as e:
-            logger.warning(f"预加载 BGE-M3 失败: {e}")
+            if "atexit" not in str(e) and "shutdown" not in str(e):
+                from app.logger import logger
+                logger.warning(f"预加载 BGE-M3 失败: {e}")
     t = threading.Thread(target=_load, daemon=True)
     t.start()
 

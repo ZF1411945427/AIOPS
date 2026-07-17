@@ -110,7 +110,7 @@ def ingest_otlp_json(db: Session, otlp_data: dict) -> dict:
     """
     resource_spans = otlp_data.get("resourceSpans", [])
     if not resource_spans:
-        return {"success": False, "message": "No resourceSpans found", "ingested": 0}
+        return {"is_success": False, "message": "No resourceSpans found", "ingested": 0}
 
     total = 0
     errors = 0
@@ -164,8 +164,8 @@ def ingest_otlp_json(db: Session, otlp_data: dict) -> dict:
                         # 更已有 span
                         existing.service_name = service_name
                         existing.operation_name = sp.get("name", "")
-                        existing.start_time = start_time
-                        existing.end_time = end_time
+                        existing.started_at = start_time
+                        existing.ended_at = end_time
                         existing.duration_ms = duration_ms
                         existing.status = status
                         existing.tags = json.dumps(tags, ensure_ascii=False)
@@ -176,8 +176,8 @@ def ingest_otlp_json(db: Session, otlp_data: dict) -> dict:
                             parent_span_id=parent_span_id,
                             service_name=service_name,
                             operation_name=sp.get("name", ""),
-                            start_time=start_time,
-                            end_time=end_time,
+                            started_at=start_time,
+                            ended_at=end_time,
                             duration_ms=round(duration_ms, 1),
                             status=status,
                             tags=json.dumps(tags, ensure_ascii=False),
@@ -189,7 +189,7 @@ def ingest_otlp_json(db: Session, otlp_data: dict) -> dict:
 
     db.commit()
     return {
-        "success": True,
+        "is_success": True,
         "message": f"Ingested {total} spans from {len(services_seen)} services",
         "ingested": total,
         "errors": errors,
@@ -278,8 +278,8 @@ def fetch_from_jaeger(db: Session, jaeger_url: str, service: str = "", limit: in
                 if existing:
                     existing.service_name = service_name
                     existing.operation_name = jsp.get("operationName", "")
-                    existing.start_time = start_time
-                    existing.end_time = end_time
+                    existing.started_at = start_time
+                    existing.ended_at = end_time
                     existing.duration_ms = round(duration_ms, 1)
                     existing.status = status
                     existing.tags = json.dumps(tags, ensure_ascii=False)
@@ -290,8 +290,8 @@ def fetch_from_jaeger(db: Session, jaeger_url: str, service: str = "", limit: in
                         parent_span_id=parent_span_id,
                         service_name=service_name,
                         operation_name=jsp.get("operationName", ""),
-                        start_time=start_time,
-                        end_time=end_time,
+                        started_at=start_time,
+                        ended_at=end_time,
                         duration_ms=round(duration_ms, 1),
                         status=status,
                         tags=json.dumps(tags, ensure_ascii=False),
@@ -300,12 +300,12 @@ def fetch_from_jaeger(db: Session, jaeger_url: str, service: str = "", limit: in
 
         db.commit()
         return {
-            "success": True,
+            "is_success": True,
             "message": f"Fetched {total} spans from {len(services_seen)} services via Jaeger",
             "ingested": total,
             "services": list(services_seen),
         }
     except urllib.error.URLError as e:
-        return {"success": False, "message": f"Jaeger 连接失败: {e}", "ingested": 0}
+        return {"is_success": False, "message": f"Jaeger 连接失败: {e}", "ingested": 0}
     except Exception as e:
-        return {"success": False, "message": f"Jaeger 拉取异常: {e}", "ingested": 0}
+        return {"is_success": False, "message": f"Jaeger 拉取异常: {e}", "ingested": 0}

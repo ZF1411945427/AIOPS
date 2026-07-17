@@ -9,6 +9,7 @@ from app.database import get_session_for, get_db_mode
 from app.models import Alert, AlertRule, Asset, ChatSession, MetricRecord, K8sEvent, Incident, KnowledgeBase
 from app.services.mcp_registry import register_mcp_tool, get_internal_tools, get_mcp_tool
 from app.services import remediation_service, alert_service, incident_service, asset_service, rag_service
+from app.routers.observability_correlation import run_correlation_analysis, format_correlation_for_llm
 
 
 def _get_db():
@@ -19,12 +20,14 @@ def _get_db():
 
 @register_mcp_tool(
     name="query_alerts",
-    description="查询告警列表，支持按状态、级别、时间范围筛选",
+    description="查询告警列表，支持按状态、级别、资产ID、时间范围筛选",
     input_schema={
         "type": "object",
         "properties": {
             "status": {"type": "string", "description": "告警状态: triggered, acknowledged, resolved"},
             "severity": {"type": "string", "description": "严重级别: warning, critical"},
+            "asset_id": {"type": "integer", "description": "资产 ID（可选，查询该资产的所有告警）"},
+            "hours": {"type": "integer", "description": "查询最近多少小时的告警（可选，默认查所有）"},
             "limit": {"type": "integer", "description": "返回数量限制", "default": 10},
         },
     },
@@ -41,6 +44,11 @@ def query_alerts(db: Optional[Session] = None, user_id: Optional[int] = None, **
             query = query.filter(Alert.status == kwargs["status"])
         if kwargs.get("severity"):
             query = query.filter(Alert.severity == kwargs["severity"])
+        if kwargs.get("asset_id"):
+            query = query.filter(Alert.asset_id == kwargs["asset_id"])
+        if kwargs.get("hours"):
+            cutoff = datetime.now() - timedelta(hours=int(kwargs["hours"]))
+            query = query.filter(Alert.created_at >= cutoff)
         limit = kwargs.get("limit", 10)
         alerts = query.order_by(Alert.created_at.desc()).limit(limit).all()
         return {
@@ -48,6 +56,7 @@ def query_alerts(db: Optional[Session] = None, user_id: Optional[int] = None, **
             "alerts": [
                 {
                     "id": a.id,
+                    "asset_id": a.asset_id,
                     "metric_name": a.metric_name,
                     "actual_value": a.actual_value,
                     "threshold": a.threshold,
@@ -144,7 +153,6 @@ def query_assets(db: Optional[Session] = None, user_id: Optional[int] = None, **
                 {
                     "id": a.id,
                     "name": a.name,
-                    "type": a.type,
                     "ci_type": a.ci_type,
                     "ip": a.ip,
                     "status": a.status,
@@ -257,7 +265,132 @@ def query_incidents(db: Optional[Session] = None, user_id: Optional[int] = None,
             db.close()
 
 
+# ─── Change Record Tools ────────────────────────────────────────
+
+@register_mcp_tool(
+    name="query_change_records",
+    description="查询资产变更记录，支持按资产ID和时间范围筛选。变更记录包括配置变更、部署、健康状态变化等。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "asset_id": {"type": "integer", "description": "资产 ID（可选，查询该资产的变更记录）"},
+            "hours": {"type": "integer", "description": "查询最近多少小时的变更记录（可选，默认查所有）"},
+            "limit": {"type": "integer", "description": "返回数量限制", "default": 50},
+        },
+    },
+    risk_level="read_only",
+)
+def query_change_records(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    from app.models import AssetChangeLog
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        query = db.query(AssetChangeLog)
+        if kwargs.get("asset_id"):
+            query = query.filter(AssetChangeLog.asset_id == kwargs["asset_id"])
+        if kwargs.get("hours"):
+            cutoff = datetime.now() - timedelta(hours=int(kwargs["hours"]))
+            query = query.filter(AssetChangeLog.created_at >= cutoff)
+        limit = kwargs.get("limit", 50)
+        logs = query.order_by(AssetChangeLog.created_at.desc()).limit(limit).all()
+        return {
+            "count": len(logs),
+            "changes": [
+                {
+                    "id": lg.id,
+                    "asset_id": lg.asset_id,
+                    "asset_name": lg.asset_name,
+                    "field": lg.field,
+                    "old_value": lg.old_value,
+                    "new_value": lg.new_value,
+                    "operator": lg.operator,
+                    "created_at": str(lg.created_at),
+                }
+                for lg in logs
+            ],
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
 # ─── Knowledge Tools ───────────────────────────────────────────
+
+@register_mcp_tool(
+    name="generate_knowledge_from_incident",
+    description="从已解决的故障单生成知识草稿并提交审批。当用户要求'把这次故障记录到知识库'、'生成知识沉淀'时调用此工具。知识草稿包含故障现象、根因分析、解决方案、标签。草稿状态为 pending 需人工审批。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "incident_id": {"type": "integer", "description": "已解决的故障单 ID"},
+        },
+        "required": ["incident_id"],
+    },
+    risk_level="medium",
+    expose_to_llm=True,
+)
+def generate_knowledge_from_incident(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        from app.services.knowledge_autogen_service import generate_from_incident
+        incident_id = kwargs.get("incident_id")
+        if not incident_id:
+            return {"error": "缺少必填参数: incident_id"}
+        result = generate_from_incident(incident_id, db)
+        if result.get("ok"):
+            return {
+                "status": "success",
+                "draft_id": result["draft_id"],
+                "title": result["title"],
+                "message": f"知识草稿已生成（ID: {result['draft_id']}），标题：{result['title']}，状态：待审批",
+            }
+        return {"error": result.get("error", "生成失败")}
+    finally:
+        if close_db:
+            db.close()
+
+
+@register_mcp_tool(
+    name="generate_knowledge_from_alert",
+    description="从已解决的告警生成知识草稿。适用场景：告警处理后用户要求'把这个告警记下来'。知识草稿包含告警指标、根因、解决方案。草稿状态为 pending 需人工审批。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "alert_id": {"type": "integer", "description": "已解决的告警 ID"},
+        },
+        "required": ["alert_id"],
+    },
+    risk_level="medium",
+    expose_to_llm=True,
+)
+def generate_knowledge_from_alert(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        from app.services.knowledge_autogen_service import generate_draft
+        alert_id = kwargs.get("alert_id")
+        if not alert_id:
+            return {"error": "缺少必填参数: alert_id"}
+        result = generate_draft(alert_id, db)
+        if result.get("ok"):
+            return {
+                "status": "success",
+                "draft_id": result["draft_id"],
+                "title": result["title"],
+                "message": f"知识草稿已生成（ID: {result['draft_id']}），标题：{result['title']}，状态：待审批",
+            }
+        return {"error": result.get("error", "生成失败")}
+    finally:
+        if close_db:
+            db.close()
+
 
 @register_mcp_tool(
     name="query_knowledge",
@@ -538,6 +671,46 @@ def analyze_incident_rca(db: Optional[Session] = None, user_id: Optional[int] = 
             db.close()
 
 
+@register_mcp_tool(
+    name="query_correlation_analysis",
+    description="查询多维度可观测性关联分析结果。同时分析告警、指标异常(Z-Score)、日志异常(K8s Events)、链路追踪(慢调用+错误率)四个信号维度，按资产加权评分聚合。适用于：系统出现异常时快速了解全局状态、告警风暴时定位根因资产、故障复盘时查看多信号关联关系。返回关联分析概览+告警列表+指标异常+日志异常+链路追踪+资产评分+RCA预判建议。支持按时间范围、服务名、资产ID筛选。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "hours": {"type": "integer", "description": "分析时间范围（最近多少小时）", "default": 1},
+            "service": {"type": "string", "description": "服务名过滤（可选，模糊匹配）"},
+            "asset_id": {"type": "integer", "description": "资产 ID 过滤（可选）"},
+        },
+    },
+    risk_level="read_only",
+)
+def query_correlation_analysis(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        hours = int(kwargs.get("hours", 1))
+        service = kwargs.get("service", "")
+        asset_id = int(kwargs.get("asset_id", 0))
+        data = run_correlation_analysis(db, hours, service, asset_id)
+        formatted = format_correlation_for_llm(data)
+        return {
+            "summary": data.get("summary", {}),
+            "alert_count": len(data.get("alerts", [])),
+            "metric_anomaly_count": len(data.get("metric_anomalies", [])),
+            "log_anomaly_count": len(data.get("log_anomalies", [])),
+            "trace_error_rate_pct": data.get("trace_anomalies", {}).get("error_rate_pct", 0),
+            "correlated_asset_count": data.get("summary", {}).get("correlated_assets", 0),
+            "change_record_count": len(data.get("change_records", [])),
+            "rca_suggestions": data.get("rca_suggestions", []),
+            "detail": formatted,
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
 # ─── Execute Tools (待确认动作执行链路, expose_to_llm=False) ───
 # 以下 execute_* 工具供 confirm_pending_action 通过 call_mcp_tool 调用,
 # 不暴露给 LLM (expose_to_llm=False), 防止绕过人工确认直接执行高危操作.
@@ -572,18 +745,29 @@ def execute_restart_service(db: Optional[Session] = None, user_id: Optional[int]
     try:
         service = kwargs.get("service")
         asset_id = kwargs.get("asset_id")
+        pending_action_id = kwargs.get("_pending_action_id")
         if not service:
             raise ValueError("缺少必填参数: service")
         if asset_id is None:
             raise ValueError("缺少必填参数: asset_id")
-        # 查资产记录：执行目标必须是 CMDB 中已登记的资产，绝不本机执行
         asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
         if not asset:
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
         if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行")
+            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
+        # 异步路径：有 pending_action_id（来自 propose → confirm 链路）则走 BackgroundJob
+        if pending_action_id:
+            from app.services.background_task import submit_restart_job
+            job_id = submit_restart_job(service=service, asset_id=int(asset_id),
+                                      pending_action_id=pending_action_id)
+            return {
+                "status": "executing",
+                "message": f"重启任务已提交，job_id={job_id}",
+                "data": {"job_id": job_id, "service": service, "asset_id": asset_id, "ip": asset.ip},
+            }
+        # 同步路径：兼容其他调用方
         success, message = remediation_service.execute_action("restart", {"service": service}, asset)
         if not success:
             raise RuntimeError(message)
@@ -625,7 +809,7 @@ def execute_clean_disk(db: Optional[Session] = None, user_id: Optional[int] = No
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
         if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行")
+            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
         success, message = remediation_service.execute_action("clean", {"path": path}, asset)
         if not success:
             raise RuntimeError(message)
@@ -657,6 +841,7 @@ def execute_run_script(db: Optional[Session] = None, user_id: Optional[int] = No
     try:
         script = kwargs.get("script")
         asset_id = kwargs.get("asset_id")
+        pending_action_id = kwargs.get("_pending_action_id")
         if not script:
             raise ValueError("缺少必填参数: script")
         if asset_id is None:
@@ -667,7 +852,18 @@ def execute_run_script(db: Optional[Session] = None, user_id: Optional[int] = No
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
         if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行")
+            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
+        # 异步路径
+        if pending_action_id:
+            from app.services.background_task import submit_script_job
+            job_id = submit_script_job(script=script, asset_id=int(asset_id),
+                                   pending_action_id=pending_action_id)
+            return {
+                "status": "executing",
+                "message": f"脚本执行任务已提交，job_id={job_id}",
+                "data": {"job_id": job_id, "script": script, "asset_id": asset_id, "ip": asset.ip},
+            }
+        # 同步路径
         success, output = remediation_service.execute_action("script", {"script": script}, asset)
         if not success:
             raise RuntimeError(output)
@@ -709,7 +905,7 @@ def execute_run_command(db: Optional[Session] = None, user_id: Optional[int] = N
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
         if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行")
+            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
         success, output = remediation_service.execute_action("run_command", {"command": command}, asset)
         if not success:
             raise RuntimeError(output)
@@ -839,7 +1035,7 @@ def execute_silence_alert(db: Optional[Session] = None, user_id: Optional[int] =
         if rule_id is None or minutes is None:
             raise ValueError("缺少必填参数: rule_id, minutes")
         silence = alert_service.create_silence(db, int(rule_id), int(minutes), reason)
-        return {"status": "success", "message": f"规则 {rule_id} 已静默 {minutes} 分钟", "data": {"silence_id": silence.id, "rule_id": silence.rule_id, "until": str(silence.until)}}
+        return {"status": "success", "message": f"规则 {rule_id} 已静默 {minutes} 分钟", "data": {"silence_id": silence.id, "rule_id": silence.rule_id, "expires_at": str(silence.expires_at)}}
     finally:
         if close_db:
             db.close()
@@ -1530,6 +1726,613 @@ def run_agent_workflow(db: Optional[Session] = None, user_id: Optional[int] = No
             "error": run_data.get("error", ""),
             "message": f"智能体工作流 #{run.id} 执行完成，状态: {run.status}",
         }
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── 后台任务 Tools ──────────────────────────────────────────────
+
+@register_mcp_tool(
+    name="get_task_status",
+    description="查询后台异步任务的最新状态（进度/结果/错误），LLM 应定期轮询此工具获取长耗时任务（如安装、部署）的执行进度",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "job_id": {"type": "string", "description": "后台任务 ID（由 propose_action 返回的 job_id）"},
+        },
+        "required": ["job_id"],
+    },
+    risk_level="read_only",
+    expose_to_llm=True,
+)
+def get_task_status(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    from app.services.background_task import get_background_job
+    job_id = kwargs.get("job_id")
+    if not job_id:
+        raise ValueError("缺少必填参数: job_id")
+    result = get_background_job(job_id)
+    if not result:
+        return {"error": f"任务 {job_id} 未找到"}
+    return result
+
+
+@register_mcp_tool(
+    name="list_recent_tasks",
+    description="列出最近执行的后台任务（当前会话），用于查看有哪些任务在后台运行或刚结束",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "integer", "description": "会话 ID，不传则查所有"},
+            "limit": {"type": "integer", "description": "返回数量上限", "default": 20},
+        },
+    },
+    risk_level="read_only",
+    expose_to_llm=True,
+)
+def list_recent_tasks(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    from app.services.background_task import list_running_jobs
+    session_id = kwargs.get("session_id")
+    limit = kwargs.get("limit", 20)
+    jobs = list_running_jobs(session_id=session_id, limit=limit)
+    return {"tasks": jobs, "count": len(jobs)}
+
+
+@register_mcp_tool(
+    name="execute_install_package",
+    description="在远程资产上异步安装软件包（支持 Elasticsearch/Nginx/MySQL 等），任务在后台执行不受 LLM 超时限制，通过 get_task_status 轮询进度。安装完成后自动返回最终结果",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "package_name": {"type": "string", "description": "软件包名，如 elasticsearch、nginx、mysql"},
+            "asset_id": {"type": "integer", "description": "目标资产 ID（CMDB 资产记录，必须为 online 状态且连接类型为 ssh）"},
+            "version": {"type": "string", "description": "版本号，如 8.19.0（不传则默认安装可用版本）"},
+            "install_type": {"type": "string", "description": "安装方式: package（系统包）/ binary（二进制tar.gz）/ docker，默认 binary"},
+            "options": {
+                "type": "object",
+                "description": "高级选项",
+                "properties": {
+                    "os_type": {"type": "string", "description": "操作系统类型: auto / debian / rhel / alpine，默认 auto（自动检测）"},
+                    "extra_packages": {"type": "array", "items": {"type": "string"}, "description": "额外需要安装的依赖包"},
+                    "start_service": {"type": "boolean", "description": "安装后是否启动服务，默认 true"},
+                    "open_ports": {"type": "array", "items": {"type": "integer"}, "description": "需要开放的端口"},
+                },
+            },
+        },
+        "required": ["package_name", "asset_id"],
+    },
+    risk_level="critical",
+    expose_to_llm=False,  # 不直调，必须经 propose_action
+)
+def execute_install_package(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        package_name = kwargs.get("package_name")
+        asset_id = kwargs.get("asset_id")
+        version = kwargs.get("version", "latest")
+        install_type = kwargs.get("install_type", "binary")
+        options = kwargs.get("options", {})
+
+        if not package_name:
+            raise ValueError("缺少必填参数: package_name")
+        if asset_id is None:
+            raise ValueError("缺少必填参数: asset_id")
+
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            raise ValueError(f"资产 id={asset_id} 不存在")
+        if asset.status != "online":
+            raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可操作")
+        if asset.connection_type != "ssh":
+            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
+
+        # 提交后台任务
+        from app.services.background_task import submit_install_job
+        job_id = submit_install_job(
+            package_name=package_name,
+            asset_id=int(asset_id),
+            version=version,
+            options={**options, "install_type": install_type},
+            session_id=None,
+            pending_action_id=None,
+        )
+        return {
+            "status": "success",
+            "message": f"安装任务已提交，job_id={job_id}",
+            "data": {
+                "job_id": job_id,
+                "package": package_name,
+                "asset_id": asset_id,
+                "ip": asset.ip,
+                "status": "pending",
+                "hint": "使用 get_task_status(job_id=...) 轮询任务进度",
+            },
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── 日志查询 Tool ──────────────────────────────────────────────
+
+@register_mcp_tool(
+    name="query_logs",
+    description="查询日志（支持多日志源：Elasticsearch 等），根据关键词/主机/级别/时间范围过滤日志",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "source_id": {"type": "integer", "description": "数据源 ID（从 query_log_sources 查询可用数据源）"},
+            "query": {"type": "string", "description": "搜索关键词（支持多字段匹配 message/host/service/level），如 error / nginx / 192.168.1"},
+            "time_range": {"type": "string", "description": "时间范围: 15m / 1h / 6h / 24h / 7d，默认 1h"},
+            "level": {"type": "string", "description": "日志级别过滤: error / warning / info（可选）"},
+            "host": {"type": "string", "description": "主机名过滤（如 web-server-01）"},
+            "limit": {"type": "integer", "description": "返回条数，默认 20，最大 200"},
+        },
+        "required": ["source_id"],
+    },
+    risk_level="read_only",
+    expose_to_llm=True,
+)
+def query_logs(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    from app.services.log_query_service import query_logs as _query_logs
+    source_id = kwargs.get("source_id")
+    query_str = kwargs.get("query", "*")
+    time_range = kwargs.get("time_range", "1h")
+    level = kwargs.get("level", "")
+    host = kwargs.get("host", "")
+    limit = kwargs.get("limit", 20)
+
+    if not source_id:
+        raise ValueError("缺少必填参数: source_id")
+
+    logs, total, error = _query_logs(
+        source_id=int(source_id),
+        query=query_str,
+        time_range=time_range,
+        level=level,
+        host=host,
+        limit=limit,
+    )
+
+    if error:
+        return {"error": error, "logs": [], "total": 0}
+
+    return {
+        "logs": logs,
+        "total": total,
+        "query": query_str,
+        "time_range": time_range,
+        "level": level,
+        "host": host,
+    }
+
+
+@register_mcp_tool(
+    name="query_log_sources",
+    description="查询当前系统已配置的所有日志数据源，返回 id / name / type / endpoint，用于后续 query_logs 查询",
+    input_schema={
+        "type": "object",
+        "properties": {},
+    },
+    risk_level="read_only",
+    expose_to_llm=True,
+)
+def query_log_sources(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    from app.models import DataSource
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        sources = db.query(DataSource).filter(
+            DataSource.type.in_(["elasticsearch"])
+        ).all()
+        return {
+            "sources": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "type": s.type,
+                    "endpoint": s.endpoint or "",
+                    "enabled": bool(s.enabled),
+                }
+                for s in sources
+            ],
+            "count": len(sources),
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── 链路追踪 Tool ─────────────────────────────────────
+
+@register_mcp_tool(
+    name="query_traces",
+    description="查询分布式链路追踪（Trace），返回调用链路树，包含每个 Span 的服务/操作/耗时/状态，用于定位慢链路和错误根因",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "trace_id": {"type": "string", "description": "链路 ID（可选，精确查单条）"},
+            "service": {"type": "string", "description": "服务名过滤（如 api-gateway / payment-service）"},
+            "status": {"type": "string", "description": "状态过滤: OK / ERROR / WARN"},
+            "time_range": {"type": "string", "description": "时间范围: 15m / 1h / 6h / 24h / 7d，默认 1h"},
+            "limit": {"type": "integer", "description": "返回条数，默认 20"},
+        },
+    },
+    risk_level="read_only",
+    expose_to_llm=True,
+)
+def query_traces(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    import json as _json
+    from datetime import timedelta as _td
+    from app.models import Span as _Span
+    from sqlalchemy import func as _func, desc as _desc
+
+    trace_id = kwargs.get("trace_id", "")
+    service = kwargs.get("service", "")
+    status_filter = kwargs.get("status", "")
+    time_range = kwargs.get("time_range", "1h")
+    limit = min(kwargs.get("limit", 20), 100)
+
+    # 解析时间范围
+    now = datetime.now()
+    m = re.match(r"^(\d+)([mhd])$", time_range.strip())
+    if m:
+        num, unit = int(m.group(1)), m.group(2)
+        delta = _td(minutes=num) if unit == "m" else (_td(hours=num) if unit == "h" else _td(days=num))
+        since = now - delta
+    else:
+        since = now - _td(hours=1)
+
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        # 构造子查询：每个 trace_id 最小的 start_time
+        subq = (
+            db.query(
+                _Span.trace_id,
+                _func.min(_Span.started_at).label("min_start")
+            )
+            .filter(_Span.started_at >= since)
+            .group_by(_Span.trace_id)
+            .subquery()
+        )
+        root_q = (
+            db.query(_Span)
+            .join(subq, _Span.trace_id == subq.c.trace_id)
+            .filter(_Span.started_at == subq.c.min_start)
+        )
+        if trace_id:
+            root_q = root_q.filter(_Span.trace_id == trace_id)
+        if service:
+            root_q = root_q.filter(_Span.service_name.ilike(f"%{service}%"))
+        if status_filter:
+            root_q = root_q.filter(_Span.status == status_filter)
+        root_q = root_q.order_by(_desc(_Span.started_at)).limit(limit)
+
+        traces = []
+        for root in root_q.all():
+            all_spans = (
+                db.query(_Span)
+                .filter(_Span.trace_id == root.trace_id)
+                .order_by(_Span.started_at)
+                .all()
+            )
+            spans_data = []
+            for s in all_spans:
+                tags = {}
+                try:
+                    tags = _json.loads(s.tags or "{}")
+                except Exception:
+                    pass
+                spans_data.append({
+                    "span_id": s.span_id or "",
+                    "service": s.service_name or "",
+                    "operation": s.operation_name or "",
+                    "duration_ms": s.duration_ms or 0,
+                    "status": s.status or "OK",
+                    "parent_span_id": s.parent_span_id or "",
+                    "start_time": s.started_at.isoformat() if s.started_at else "",
+                })
+            root_durations = [sp["duration_ms"] for sp in spans_data]
+            root_duration = max(root_durations) if root_durations else 0
+            traces.append({
+                "trace_id": root.trace_id or "",
+                "root_service": root.service_name or "",
+                "root_operation": root.operation_name or "",
+                "root_duration_ms": root_duration,
+                "root_status": root.status or "OK",
+                "root_start": root.started_at.isoformat() if root.started_at else "",
+                "spans_count": len(all_spans),
+                "spans": spans_data,
+            })
+
+        return {"traces": traces, "count": len(traces), "time_range": time_range}
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── MySQL Query Tool ─────────────────────────────────────
+
+@register_mcp_tool(
+    name="query_mysql",
+    description="连接 MySQL 数据库执行 SQL 查询（仅支持 SELECT/DESC/SHOW 语句），返回查询结果。连接信息从资产 connection_config 中读取。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "asset_id": {"type": "integer", "description": "资产 ID（从 assets 表）"},
+            "sql": {"type": "string", "description": "SQL 查询语句（仅支持读操作：SELECT/SHOW/DESC/DESCRIBE）"},
+            "limit": {"type": "integer", "description": "最大返回行数，默认 100"},
+        },
+        "required": ["asset_id", "sql"],
+    },
+    risk_level="medium",
+    expose_to_llm=True,
+)
+def query_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    import pymysql
+    import json as _json
+
+    asset_id = kwargs.get("asset_id")
+    sql = kwargs.get("sql", "").strip()
+    limit = min(kwargs.get("limit", 100), 1000)
+
+    if not asset_id:
+        return {"error": "缺少必填参数: asset_id"}
+    if not sql:
+        return {"error": "缺少必填参数: sql"}
+
+    # 只允许读操作
+    safe_sql = sql.upper()
+    allowed = ["SELECT", "SHOW", "DESC", "DESCRIBE", "EXPLAIN"]
+    if not any(safe_sql.startswith(a) for a in allowed):
+        return {"error": "只允许 SELECT/SHOW/DESC/DESCRIBE/EXPLAIN 语句"}
+
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+
+    try:
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            return {"error": f"资产 {asset_id} 不存在"}
+
+        cfg = _json.loads(asset.connection_config) if asset.connection_config else {}
+        host = cfg.get("db_host") or cfg.get("mysql_host") or asset.ip
+        port = int(cfg.get("db_port") or cfg.get("mysql_port") or 3306)
+        user = cfg.get("db_user") or cfg.get("mysql_user") or "root"
+        password = cfg.get("db_password") or cfg.get("mysql_password") or ""
+        database = cfg.get("db_name") or cfg.get("mysql_database") or ""
+
+        try:
+            conn = pymysql.connect(
+                host=host, port=port, user=user, password=password,
+                database=database, charset="utf8mb4",
+                connect_timeout=10, read_timeout=30
+            )
+        except pymysql.Error as e:
+            return {"error": f"MySQL 连接失败: {e}", "host": host, "port": port, "user": user}
+
+        try:
+            cur = conn.cursor()
+            cur.execute(sql + (" LIMIT %d" % limit if limit else ""))
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description] if cur.description else []
+            return {
+                "columns": cols,
+                "rows": [list(r) for r in rows],
+                "row_count": len(rows),
+                "sql": sql,
+                "asset": {"id": asset.id, "name": asset.name, "ip": asset.ip},
+            }
+        finally:
+            conn.close()
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── MySQL 权限安全检测 ─────────────────────────────────
+
+@register_mcp_tool(
+    name="check_mysql_permissions",
+    description="检测 MySQL 账号的权限等级，评估 AI 连接该数据库的安全风险。用于新增数据库资产时自动检测，辅助判断是否允许 AI 使用。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "asset_id": {"type": "integer", "description": "数据库资产 ID"},
+        },
+        "required": ["asset_id"],
+    },
+    risk_level="read_only",
+    expose_to_llm=True,
+)
+def check_mysql_permissions(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    import pymysql
+    import json as _json
+
+    asset_id = kwargs.get("asset_id")
+    if not asset_id:
+        return {"error": "缺少必填参数: asset_id"}
+
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+
+    try:
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            return {"error": f"资产 {asset_id} 不存在"}
+
+        cfg = _json.loads(asset.connection_config) if asset.connection_config else {}
+        host = cfg.get("db_host") or cfg.get("mysql_host") or asset.ip
+        port = int(cfg.get("db_port") or cfg.get("mysql_port") or 3306)
+        user = cfg.get("db_user") or cfg.get("mysql_user") or "root"
+        password = cfg.get("db_password") or cfg.get("mysql_password") or ""
+        database = cfg.get("db_name") or ""
+
+        try:
+            conn = pymysql.connect(
+                host=host, port=port, user=user, password=password,
+                database=database, charset="utf8mb4",
+                connect_timeout=10, read_timeout=30
+            )
+        except pymysql.Error as e:
+            return {"error": f"MySQL 连接失败: {e}", "host": host, "port": port, "user": user}
+
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM mysql.user WHERE User=%s AND Host=%s", (user, "%" if user != "root" else "%"))
+            privs = []
+            is_super = False
+            if cur.description:
+                cols = [d[0] for d in cur.description]
+                for row in cur.fetchall():
+                    priv_map = dict(zip(cols, row))
+                    for col, val in priv_map.items():
+                        if val in (True, 1, "Y", "y"):
+                            privs.append(col)
+
+            if conn and database:
+                try:
+                    cur.execute(f"SHOW GRANTS FOR '{user}'@'%'")
+                    grants = [r[0] for r in cur.fetchall()]
+                except Exception:
+                    grants = []
+            else:
+                grants = []
+
+            ddl_privs = [p for p in privs if p in ("Drop_priv", "Alter_priv", "Create_priv", "Index_priv", "References_priv")]
+            dml_privs = [p for p in privs if p in ("Insert_priv", "Update_priv", "Delete_priv", "Execute_priv")]
+            dcl_privs = [p for p in privs if p in ("Grant_priv", "Super_priv", "Shutdown_priv", "Process_priv", "File_priv")]
+            read_privs = [p for p in privs if p in ("Select_priv", "Show_db_priv", "Show_view_priv", "Lock_tables_priv")]
+
+            has_grant_option = "Grant_priv" in privs or any("GRANT OPTION" in g for g in grants)
+            is_super_user = "Super_priv" in privs
+
+            if has_grant_option or is_super_user or ddl_privs or "File_priv" in privs:
+                risk_level = "high"
+                risk_label = "🔴 高危"
+                risk_desc = "该账号拥有极高危权限（DCL/DDL/文件操作/授权），AI 可能导致数据丢失或权限失控"
+            elif dml_privs:
+                risk_level = "medium"
+                risk_label = "⚠️ 警告"
+                risk_desc = "该账号拥有 DML 权限（INSERT/UPDATE/DELETE），AI 可修改业务数据"
+            elif read_privs and not dml_privs and not ddl_privs:
+                risk_level = "safe"
+                risk_label = "✅ 安全"
+                risk_desc = "该账号仅有读权限，AI 仅能查询无法修改数据"
+            else:
+                risk_level = "unknown"
+                risk_label = "❓ 未知"
+                risk_desc = "无法明确判定权限等级，建议人工确认"
+
+            return {
+                "asset_id": asset_id,
+                "asset_name": asset.name,
+                "asset_ip": host,
+                "mysql_user": user,
+                "risk_level": risk_level,
+                "risk_label": risk_label,
+                "risk_desc": risk_desc,
+                "privileges": {
+                    "read": read_privs,
+                    "dml": dml_privs,
+                    "ddl": ddl_privs,
+                    "dcl": dcl_privs,
+                },
+                "has_grant_option": has_grant_option,
+                "is_super_user": is_super_user,
+                "grants": grants,
+                "recommendation": "仅【✅ 安全】权限的数据库建议接入 AI 助手；其他权限等级请评估风险后决定",
+            }
+        finally:
+            conn.close()
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── MySQL Write Tool ─────────────────────────────────────
+
+@register_mcp_tool(
+    name="execute_mysql",
+    description="通过资产记录的 MySQL 连接信息执行 SQL 语句（支持 DDL/DML：CREATE/ALTER/DROP/INSERT/UPDATE/DELETE/TRUNCATE 等写操作），必须经用户确认后才执行。适用于创建数据库、建表、插入数据等操作。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "asset_id": {"type": "integer", "description": "MySQL 数据库资产 ID"},
+            "sql": {"type": "string", "description": "要执行的 SQL 语句（支持 CREATE/ALTER/DROP/INSERT/UPDATE/DELETE 等写操作）"},
+        },
+        "required": ["asset_id", "sql"],
+    },
+    risk_level="high",
+    expose_to_llm=False,
+)
+def execute_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    import pymysql
+    import json as _json
+
+    asset_id = kwargs.get("asset_id")
+    sql = kwargs.get("sql", "").strip()
+
+    if not asset_id:
+        return {"error": "缺少必填参数: asset_id"}
+    if not sql:
+        return {"error": "缺少必填参数: sql"}
+
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+
+    try:
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            return {"error": f"资产 {asset_id} 不存在"}
+
+        cfg = _json.loads(asset.connection_config) if asset.connection_config else {}
+        host = cfg.get("db_host") or cfg.get("mysql_host") or asset.ip
+        port = int(cfg.get("db_port") or cfg.get("mysql_port") or 3306)
+        user = cfg.get("db_user") or cfg.get("mysql_user") or "root"
+        password = cfg.get("db_password") or cfg.get("mysql_password") or ""
+        database = cfg.get("db_name") or cfg.get("mysql_database") or ""
+
+        try:
+            conn = pymysql.connect(
+                host=host, port=port, user=user, password=password,
+                database=database, charset="utf8mb4",
+                connect_timeout=10, read_timeout=60
+            )
+        except pymysql.Error as e:
+            return {"error": f"MySQL 连接失败: {e}", "host": host, "port": port, "user": user}
+
+        try:
+            cur = conn.cursor()
+            cur.execute(sql)
+            conn.commit()
+            affected = cur.rowcount
+            return {
+                "status": "success",
+                "message": f"SQL 执行成功，影响行数: {affected}",
+                "affected_rows": affected,
+                "sql": sql,
+                "asset": {"id": asset.id, "name": asset.name, "ip": asset.ip},
+            }
+        except pymysql.Error as e:
+            conn.rollback()
+            return {"error": f"SQL 执行失败: {e}", "sql": sql}
+        finally:
+            conn.close()
     finally:
         if close_db:
             db.close()

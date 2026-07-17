@@ -39,7 +39,7 @@ def _wf_log_to_dict(lg) -> dict:
         "alert_id": lg.alert_id,
         "action_type": lg.action_type or "",
         "target": lg.target or "",
-        "success": bool(lg.success),
+        "is_success": bool(lg.is_success),
         "output": lg.output or "",
         "created_at": lg.created_at.strftime("%Y-%m-%d %H:%M:%S") if lg.created_at else None,
     }
@@ -141,7 +141,7 @@ def api_workflow_run(wf_id: int, db: Session = Depends(get_db)):
                 alert_id=alert.id,
                 action_type=action_type,
                 target=target,
-                success=success,
+                is_success=success,
                 output=f"[Step {step_idx+1}/{len(steps)}] {output}")
             db.add(log)
             if not success:

@@ -56,7 +56,7 @@ def _add_cluster_info(ctx: dict, db: Session):
     if cluster_name:
         ds = db.query(DataSource).filter(DataSource.type == "kubernetes", DataSource.name == cluster_name).first()
         if ds:
-            ctx["cluster_info"] = {"name": ds.name, "endpoint": ds.endpoint, "status": ds.last_status, "last_scrape": ds.last_scrape}
+            ctx["cluster_info"] = {"name": ds.name, "endpoint": ds.endpoint, "status": ds.last_status, "last_scraped_at": ds.last_scraped_at}
     return ctx
 
 
@@ -83,7 +83,7 @@ def api_overview(db: Session = Depends(get_db)):
                 "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
                 "pods": 0, "running_pods": 0, "pod_running_rate": 0,
                 "deployments": 0, "namespaces": 0, "services": 0,
-                "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
+                "last_scraped_at": str(ds.last_scraped_at) if ds.last_scraped_at else None,
             }
 
         def _ov_error(ds):
@@ -117,7 +117,7 @@ def api_overview(db: Session = Depends(get_db)):
                     "nodes": len(nodes), "healthy_nodes": healthy_nodes, "node_health_rate": node_rate,
                     "pods": len(pods), "running_pods": running_pods, "pod_running_rate": pod_rate,
                     "deployments": len(deployments), "namespaces": ns_count, "services": svc_count,
-                    "last_scrape": str(ds.last_scrape) if ds.last_scrape else None,
+                    "last_scraped_at": str(ds.last_scraped_at) if ds.last_scraped_at else None,
                 }
                 stats = (len(nodes), healthy_nodes, len(pods), running_pods, len(deployments), ns_count, svc_count)
                 return ds.name, ov, stats, None
@@ -1408,3 +1408,229 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
             await websocket.close()
         except Exception:
             pass
+
+
+@router.get("/api/hpa/recommend")
+def api_hpa_recommend(cluster: str = "", namespace: str = "", db: Session = Depends(get_db)):
+    """基于当前资源用量推荐 HPA 配置"""
+    try:
+        clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
+        ds = _get_k8s_ds(db, cluster) if cluster else (clusters[0] if clusters else None)
+        if not ds:
+            return JSONResponse({"error": "无可用 K8s 集群"}, status_code=404)
+
+        _, apps_v1, _ = _get_k8s_client(ds)
+        raw = apps_v1.list_namespaced_deployment(namespace) if namespace else apps_v1.list_deployment_for_all_namespaces().items
+
+        v1, _, _ = _get_k8s_client(ds)
+
+        recommendations = []
+        for d in raw:
+            name = d.metadata.name
+            ns = d.metadata.namespace
+            replicas = d.spec.replicas or 1
+            available = d.status.available_replicas or 0
+
+            containers = d.spec.template.spec.containers or []
+            cpu_request = 0
+            mem_request = 0
+            for c in containers:
+                if c.resources and c.resources.requests:
+                    cpu_request += _parse_k8s_resource(c.resources.requests.get("cpu", "0"))
+                    mem_request += _parse_k8s_resource(c.resources.requests.get("memory", "0"), is_memory=True)
+
+            # 从 metrics 获取实际使用率（若无 metrics server 则基于 replicas 估算）
+            actual_cpu_usage = 0
+            actual_mem_usage = 0
+            try:
+                from kubernetes.client import CustomObjectsApi
+                custom = CustomObjectsApi(v1.api_client)
+                metrics_data = custom.list_namespaced_custom_object(
+                    group="metrics.k8s.io", version="v1beta1",
+                    namespace=ns, plural="pods",
+                )
+                pod_metrics = metrics_data.get("items", [])
+                for pm in pod_metrics:
+                    p_name = pm.get("metadata", {}).get("name", "")
+                    if p_name.startswith(name):
+                        containers_metrics = pm.get("containers", [])
+                        for cm in containers_metrics:
+                            actual_cpu_usage += _parse_k8s_resource(cm.get("usage", {}).get("cpu", "0"))
+                            actual_mem_usage += _parse_k8s_resource(cm.get("usage", {}).get("memory", "0"), is_memory=True)
+            except Exception:
+                pass
+
+            if replicas > 0:
+                avg_cpu_per_pod = actual_cpu_usage / replicas if actual_cpu_usage else cpu_request * 0.3
+                avg_mem_per_pod = actual_mem_usage / replicas if actual_mem_usage else mem_request * 0.4
+                cpu_util_pct = round(avg_cpu_per_pod / cpu_request * 100, 1) if cpu_request else 0
+                mem_util_pct = round(avg_mem_per_pod / mem_request * 100, 1) if mem_request else 0
+            else:
+                cpu_util_pct = 0
+                mem_util_pct = 0
+
+            target_cpu = 50
+            target_mem = 50
+            if cpu_util_pct > 0:
+                suggested_cpu_replicas = max(1, round(replicas * cpu_util_pct / target_cpu))
+            else:
+                suggested_cpu_replicas = replicas
+            if mem_util_pct > 0:
+                suggested_mem_replicas = max(1, round(replicas * mem_util_pct / target_mem))
+            else:
+                suggested_mem_replicas = replicas
+
+            suggested_replicas = max(suggested_cpu_replicas, suggested_mem_replicas, 1)
+
+            needs_hpa = (cpu_util_pct > 60 or mem_util_pct > 60 or replicas <= 1)
+            recommendations.append({
+                "name": name,
+                "namespace": ns,
+                "cluster": ds.name,
+                "current_replicas": replicas,
+                "available_replicas": available,
+                "cpu_request_m": cpu_request,
+                "mem_request_mb": round(mem_request / (1024 * 1024), 1),
+                "cpu_util_pct": cpu_util_pct,
+                "mem_util_pct": mem_util_pct,
+                "suggested_min_replicas": max(1, suggested_replicas),
+                "suggested_max_replicas": max(suggested_replicas * 3, 3),
+                "target_cpu_util_pct": target_cpu,
+                "target_mem_util_pct": target_mem,
+                "needs_hpa": needs_hpa,
+                "has_metrics": bool(actual_cpu_usage or actual_mem_usage),
+            })
+
+        recommendations.sort(key=lambda x: x["needs_hpa"], reverse=True)
+        return JSONResponse({
+            "items": recommendations,
+            "total": len(recommendations),
+            "cluster": ds.name,
+            "cluster_count": len(clusters),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/resource-optimization")
+def api_resource_optimization(cluster: str = "", namespace: str = "", db: Session = Depends(get_db)):
+    """分析 Pod 资源请求/限制，给出优化建议"""
+    try:
+        clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
+        ds = _get_k8s_ds(db, cluster) if cluster else (clusters[0] if clusters else None)
+        if not ds:
+            return JSONResponse({"error": "无可用 K8s 集群"}, status_code=404)
+
+        v1, apps_v1, _ = _get_k8s_client(ds)
+        raw_pods = v1.list_pod_for_all_namespaces().items
+        raw_deployments = apps_v1.list_deployment_for_all_namespaces().items
+
+        ns_filter = namespace or None
+
+        suggestions = []
+        dep_map = {}
+        for d in raw_deployments:
+            key = f"{d.metadata.namespace}/{d.metadata.name}"
+            dep_map[key] = d
+
+        for pod in raw_pods:
+            ns = pod.metadata.namespace
+            if ns_filter and ns != ns_filter:
+                continue
+
+            owner_refs = pod.metadata.owner_references or []
+            is_controlled = any(r.controller for r in owner_refs if r.controller)
+
+            containers = pod.spec.containers or []
+            for c in containers:
+                name = c.name
+                req = c.resources.requests if c.resources else None
+                lim = c.resources.limits if c.resources else None
+
+                c_req_cpu = _parse_k8s_resource(req.get("cpu", "0")) if req else 0
+                c_req_mem = _parse_k8s_resource(req.get("memory", "0"), is_memory=True) if req else 0
+                c_lim_cpu = _parse_k8s_resource(lim.get("cpu", "0")) if lim else 0
+                c_lim_mem = _parse_k8s_resource(lim.get("memory", "0"), is_memory=True) if lim else 0
+
+                issues = []
+                if c_req_cpu == 0 and c_req_mem == 0:
+                    issues.append("未设置资源请求 (resources.requests)")
+                if c_lim_cpu == 0 and c_lim_mem == 0:
+                    issues.append("未设置资源限制 (resources.limits)")
+                if c_lim_cpu > 0 and c_req_cpu > 0 and c_lim_cpu / c_req_cpu > 5:
+                    issues.append(f"CPU limits/requests 比例过大 ({c_lim_cpu//c_req_cpu}x)")
+                if c_lim_mem > 0 and c_req_mem > 0 and c_lim_mem / c_req_mem > 5:
+                    issues.append(f"内存 limits/requests 比例过大 ({c_lim_mem//c_req_mem}x)")
+                if c_req_cpu > 8000:
+                    issues.append(f"CPU request 过大 ({c_req_cpu}m)")
+                if c_req_mem > 8 * 1024 * 1024 * 1024:
+                    issues.append(f"内存 request 过大 ({c_req_mem/(1024*1024*1024):.1f}Gi)")
+
+                suggestions.append({
+                    "pod_name": pod.metadata.name,
+                    "namespace": ns,
+                    "container": name,
+                    "cluster": ds.name,
+                    "is_controlled": is_controlled,
+                    "cpu_request_m": c_req_cpu,
+                    "cpu_limit_m": c_lim_cpu,
+                    "mem_request_mb": round(c_req_mem / (1024 * 1024), 1) if c_req_mem else 0,
+                    "mem_limit_mb": round(c_lim_mem / (1024 * 1024), 1) if c_lim_mem else 0,
+                    "issues": issues,
+                    "severity": "critical" if not c_req_cpu else ("warning" if issues else "ok"),
+                })
+
+        critical = [s for s in suggestions if s["severity"] == "critical"]
+        warning = [s for s in suggestions if s["severity"] == "warning"]
+        ok = [s for s in suggestions if s["severity"] == "ok"]
+
+        return JSONResponse({
+            "suggestions": suggestions,
+            "summary": {
+                "total": len(suggestions),
+                "critical": len(critical),
+                "warning": len(warning),
+                "ok": len(ok),
+            },
+            "cluster": ds.name,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _parse_k8s_resource(value: str, is_memory: bool = False) -> int:
+    """解析 K8s 资源值为 millicores (cpu) 或 bytes (memory)"""
+    value = str(value).strip()
+    if not value:
+        return 0
+    if is_memory:
+        multipliers = {"Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4, "k": 1000, "M": 1000**2, "G": 1000**3}
+        for suffix, mul in multipliers.items():
+            if value.endswith(suffix):
+                try:
+                    return int(float(value[:-len(suffix)]) * mul)
+                except ValueError:
+                    return 0
+        if value.endswith("m"):
+            return 0
+        try:
+            return int(float(value))
+        except ValueError:
+            return 0
+    else:
+        if value.endswith("m"):
+            try:
+                return int(value[:-1])
+            except ValueError:
+                return 0
+        multipliers = {"": 1000, "k": 1000**2}
+        for suffix, mul in multipliers.items():
+            if value.endswith(suffix) if suffix else not any(s in value for s in ("m", "k")):
+                try:
+                    return int(float(value) * mul)
+                except ValueError:
+                    pass
+        try:
+            return int(float(value) * 1000)
+        except ValueError:
+            return 0

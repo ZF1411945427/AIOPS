@@ -18,7 +18,7 @@ def api_topology_list(db: Session = Depends(get_db)):
         nodes = [{
             "id": a.id,
             "name": a.name,
-            "type": a.type,
+            "type": a.ci_type,
             "ci_type": getattr(a, "ci_type", None),
             "status": a.status,
             "parent_id": getattr(a, "parent_id", None),

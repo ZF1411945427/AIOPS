@@ -18,7 +18,7 @@ def auto_link(db: Session = Depends(get_db)):
         Alert.created_at >= recent,
         Alert.asset_id != None).all()
     events = db.query(K8sEvent).filter(
-        K8sEvent.last_seen >= recent).all()
+        K8sEvent.last_seen_at >= recent).all()
 
     count = 0
     for a in alerts:

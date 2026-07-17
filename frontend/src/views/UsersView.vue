@@ -8,6 +8,7 @@
     <div class="toolbar">
       <button class="btn btn-primary" @click="showDialog = true">+ 新增用户</button>
       <button class="btn" @click="loadUsers">刷新</button>
+      <span v-if="tenantMode" class="tenant-mode-badge">多租户模式已开启</span>
     </div>
 
     <div class="panel">
@@ -15,13 +16,32 @@
         <div v-if="loading" class="loading-state">加载中...</div>
         <table v-else-if="users.length" class="table">
           <thead>
-            <tr><th>ID</th><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr>
+            <tr>
+              <th>ID</th>
+              <th>用户名</th>
+              <th>角色</th>
+              <th v-if="tenantMode">租户</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="u in users" :key="u.id">
               <td>{{ u.id }}</td>
               <td>{{ u.username }}</td>
-              <td><span class="badge" :class="u.role">{{ roleLabel(u.role) }}</span></td>
+              <td>
+                <select v-if="u.id !== currentUserId" v-model="u.role_id" class="role-select" @change="setUserRole(u)">
+                  <option :value="null">- 无角色 -</option>
+                  <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                </select>
+                <span v-else class="text-sm">{{ roleName(u.role_id) }}</span>
+              </td>
+              <td v-if="tenantMode">
+                <select v-if="u.id !== currentUserId" v-model="u.tenant_id" class="role-select" @change="setUserTenant(u)">
+                  <option v-for="t in tenants" :key="t.id" :value="t.id">{{ t.name }}</option>
+                </select>
+                <span v-else class="text-sm">{{ tenantName(u.tenant_id) }}</span>
+              </td>
               <td class="text-sm">{{ u.created_at || '-' }}</td>
               <td>
                 <button class="btn btn-sm btn-warning" @click="openPwdDialog(u)">修改密码</button>
@@ -41,10 +61,14 @@
         <div class="form-row"><label>用户名</label><input v-model="form.username" class="input"></div>
         <div class="form-row"><label>密码</label><input v-model="form.password" type="password" class="input"></div>
         <div class="form-row"><label>角色</label>
-          <select v-model="form.role" class="input">
-            <option value="admin">管理员</option>
-            <option value="operator">操作员</option>
-            <option value="viewer">观察者</option>
+          <select v-model="form.role_id" class="input">
+            <option :value="null">- 无角色 -</option>
+            <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
+        </div>
+        <div v-if="tenantMode" class="form-row"><label>租户</label>
+          <select v-model="form.tenant_id" class="input">
+            <option v-for="t in tenants" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </div>
         <div class="modal-actions">
@@ -76,15 +100,42 @@ import request from '@/api/request'
 
 const loading = ref(false)
 const users = ref([])
+const roles = ref([])
+const tenants = ref([])
+const tenantMode = ref(false)
 const currentUserId = ref(0)
 const showDialog = ref(false)
-const form = ref({ username: '', password: '', role: 'operator' })
+const form = ref({ username: '', password: '', role_id: null, tenant_id: 1 })
 const showPwdDialog = ref(false)
 const pwdTarget = ref({ id: 0, username: '' })
 const pwdForm = ref({ old_password: '', new_password: '', confirm_password: '' })
 
-function roleLabel(r) {
-  return { admin: '管理员', operator: '操作员', viewer: '观察者' }[r] || r
+function roleName(roleId) {
+  const r = roles.value.find(x => x.id === roleId)
+  return r ? r.name : '-'
+}
+
+function tenantName(tenantId) {
+  const t = tenants.value.find(x => x.id === tenantId)
+  return t ? t.name : '-'
+}
+
+async function setUserRole(u) {
+  try {
+    await request.post('/users/api/' + u.id + '/set-role', { role_id: u.role_id })
+    ElMessage.success('角色已更新')
+  } catch (e) {
+    ElMessage.error('更新角色失败: ' + e.message)
+  }
+}
+
+async function setUserTenant(u) {
+  try {
+    await request.post('/users/api/' + u.id + '/set-tenant', { tenant_id: u.tenant_id })
+    ElMessage.success('租户已更新')
+  } catch (e) {
+    ElMessage.error('更新租户失败: ' + e.message)
+  }
 }
 
 async function loadUsers() {
@@ -92,7 +143,10 @@ async function loadUsers() {
   try {
     const data = await request.get('/users/api/list')
     users.value = data.users || []
+    roles.value = data.roles || []
+    tenants.value = data.tenants || []
     currentUserId.value = data.current_user_id || 0
+    tenantMode.value = data.tenant_mode || false
   } catch (e) {
     ElMessage.error('加载用户失败: ' + e.message)
   } finally {
@@ -110,7 +164,7 @@ async function createUser() {
     if (data.status === 'ok') {
       ElMessage.success('创建成功')
       showDialog.value = false
-      form.value = { username: '', password: '', role: 'operator' }
+      form.value = { username: '', password: '', role_id: null, tenant_id: 1 }
       loadUsers()
     } else {
       ElMessage.error(data.message || '创建失败')
@@ -203,10 +257,6 @@ onMounted(loadUsers)
 .table tr:hover td { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .text-sm { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .current-tag { margin-left: 6px; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
-.badge.admin { background: rgba(99,102,241,0.1); color: #6366f1; }
-.badge.operator { background: rgba(34,197,94,0.1); color: #22c55e; }
-.badge.viewer { background: rgba(100,116,139,0.1); color: #64748b; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
@@ -214,5 +264,6 @@ onMounted(loadUsers)
 .form-row { margin-bottom: 12px; }
 .form-row label { display: block; font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 4px; }
 .input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
+.role-select { padding: 3px 6px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 4px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; max-width: 140px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>

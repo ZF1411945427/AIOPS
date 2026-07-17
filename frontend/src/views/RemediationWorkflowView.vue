@@ -72,15 +72,44 @@
     </div>
 
     <div v-if="createVisible" class="modal-overlay" @click.self="createVisible = false">
-      <div class="modal-box">
+      <div class="modal-box" style="max-width:700px">
         <div class="modal-header"><h3>新建自愈工作流</h3><button class="modal-close" @click="createVisible = false">×</button></div>
         <div class="modal-body">
           <div class="form-group"><label>名称</label><input v-model="form.name" placeholder="如：CPU 高自愈流程" /></div>
           <div class="form-group"><label>关联告警规则 ID（可选）</label><input v-model.number="form.rule_id" type="number" placeholder="留空匹配所有" /></div>
           <div class="form-group">
-            <label>步骤定义（JSON 数组）</label>
-            <textarea v-model="form.steps" rows="8" placeholder='["healthcheck","restart","notify"]'></textarea>
-            <p class="form-tip">可用操作：restart / clean / scale / notify / healthcheck</p>
+            <label>步骤编排（可视化）</label>
+            <div class="step-builder">
+              <div v-for="(step, idx) in form.steps" :key="idx" class="step-card">
+                <div class="step-num">{{ idx + 1 }}</div>
+                <div class="step-fields">
+                  <select v-model="step.action" class="step-action-select">
+                    <option value="">选择动作...</option>
+                    <option value="healthcheck">healthcheck 健康检查</option>
+                    <option value="restart">restart 重启服务</option>
+                    <option value="clean">clean 清理文件</option>
+                    <option value="scale">scale 扩缩容</option>
+                    <option value="notify">notify 通知</option>
+                    <option value="run_command">run_command 执行命令</option>
+                  </select>
+                  <input v-if="step.action === 'scale'" v-model="step.deployment" placeholder="Deployment 名称" class="step-param-input" />
+                  <input v-if="step.action === 'run_command'" v-model="step.command" placeholder="完整命令" class="step-param-input" />
+                  <input v-if="step.action === 'notify'" v-model="step.message" placeholder="通知内容" class="step-param-input" />
+                </div>
+                <div class="step-controls">
+                  <button class="btn-icon" @click="moveStep(idx, -1)" :disabled="idx === 0" title="上移">↑</button>
+                  <button class="btn-icon" @click="moveStep(idx, 1)" :disabled="idx === form.steps.length - 1" title="下移">↓</button>
+                  <button class="btn-icon danger" @click="removeStep(idx)" title="删除">×</button>
+                </div>
+              </div>
+              <div class="step-add-row">
+                <button class="btn btn-sm" @click="addStep('healthcheck')">+ 健康检查</button>
+                <button class="btn btn-sm" @click="addStep('restart')">+ 重启</button>
+                <button class="btn btn-sm" @click="addStep('clean')">+ 清理</button>
+                <button class="btn btn-sm" @click="addStep('notify')">+ 通知</button>
+              </div>
+            </div>
+            <p class="form-tip">可用动作：restart / clean / scale / notify / healthcheck / run_command</p>
           </div>
           <div class="form-actions"><button class="btn" @click="createVisible = false">取消</button><button class="btn btn-primary" @click="createWorkflow" :disabled="creating">{{ creating ? '创建中...' : '创建' }}</button></div>
         </div>
@@ -133,7 +162,52 @@ const total = ref(0)
 const createVisible = ref(false)
 const creating = ref(false)
 const running = ref(null)
-const form = reactive({ name: '', rule_id: 0, steps: '["healthcheck","restart","notify"]' })
+const form = reactive({ name: '', rule_id: 0, steps: [] })
+
+function makeStep(action = 'healthcheck') {
+  return { action, deployment: '', command: '', message: '' }
+}
+
+function openCreate() {
+  Object.assign(form, { name: '', rule_id: 0, steps: [makeStep('healthcheck'), makeStep('restart'), makeStep('notify')] })
+  createVisible.value = true
+}
+
+function addStep(action) {
+  form.steps.push(makeStep(action))
+}
+
+function removeStep(idx) {
+  form.steps.splice(idx, 1)
+}
+
+function moveStep(idx, dir) {
+  const arr = form.steps
+  const newIdx = idx + dir
+  if (newIdx < 0 || newIdx >= arr.length) return
+  const tmp = arr[idx]; arr[idx] = arr[newIdx]; arr[newIdx] = tmp
+}
+
+async function createWorkflow() {
+  if (!form.name) { ElMessage.warning('请填写名称'); return }
+  creating.value = true
+  try {
+    const fd = new FormData()
+    fd.append('name', form.name)
+    fd.append('rule_id', form.rule_id)
+    const stepsJson = JSON.stringify(form.steps.map(s => {
+      if (s.action === 'scale') return { action: s.action, deployment: s.deployment }
+      if (s.action === 'run_command') return { action: s.action, command: s.command }
+      if (s.action === 'notify') return { action: s.action, message: s.message }
+      return { action: s.action }
+    }))
+    fd.append('steps', stepsJson)
+    await request.post('/remediation-workflows/api/create', fd)
+    ElMessage.success('创建成功')
+    createVisible.value = false
+    loadData()
+  } catch (e) { ElMessage.error('创建失败: ' + e.message) } finally { creating.value = false }
+}
 
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -182,26 +256,6 @@ async function loadLogs() {
   } catch (e) {
     ElMessage.error('加载日志失败: ' + e.message)
   }
-}
-
-function openCreate() {
-  Object.assign(form, { name: '', rule_id: 0, steps: '["healthcheck","restart","notify"]' })
-  createVisible.value = true
-}
-
-async function createWorkflow() {
-  if (!form.name) { ElMessage.warning('请填写名称'); return }
-  creating.value = true
-  try {
-    const fd = new FormData()
-    fd.append('name', form.name)
-    fd.append('rule_id', form.rule_id)
-    fd.append('steps', form.steps)
-    await request.post('/remediation-workflows/api/create', fd)
-    ElMessage.success('创建成功')
-    createVisible.value = false
-    loadData()
-  } catch (e) { ElMessage.error('创建失败: ' + e.message) } finally { creating.value = false }
 }
 
 async function toggleWorkflow(w) {
@@ -295,4 +349,16 @@ onMounted(loadData)
 .form-group textarea { font-family: monospace; resize: vertical; }
 .form-tip { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); margin: 4px 0 0; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.step-builder { display: flex; flex-direction: column; gap: 8px; }
+.step-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-hover, rgba(0,0,0,0.03)); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; }
+.step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--accent, #6366f1); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
+.step-fields { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.step-action-select { padding: 5px 8px; border: 1px solid var(--border, rgba(0,0,0,0.12)); border-radius: 6px; font-size: 0.82rem; background: var(--bg-card-solid, #fff); }
+.step-param-input { padding: 5px 8px; border: 1px solid var(--border, rgba(0,0,0,0.12)); border-radius: 6px; font-size: 0.8rem; background: var(--bg-card-solid, #fff); }
+.step-controls { display: flex; flex-direction: column; gap: 4px; }
+.btn-icon { background: none; border: 1px solid var(--border, rgba(0,0,0,0.12)); border-radius: 4px; cursor: pointer; font-size: 12px; padding: 2px 6px; line-height: 1; }
+.btn-icon:hover { background: var(--bg-hover, rgba(0,0,0,0.05)); }
+.btn-icon.danger { color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.btn-icon.danger:hover { background: rgba(239,68,68,0.08); }
+.step-add-row { display: flex; gap: 6px; flex-wrap: wrap; }
 </style>

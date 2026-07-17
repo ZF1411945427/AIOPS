@@ -18,7 +18,7 @@ def api_cmdb_list(db: Session = Depends(get_db)):
             {
                 "id": c.id, "name": c.name, "cmdb_type": c.cmdb_type,
                 "api_url": c.api_url, "sync_interval": c.sync_interval,
-                "last_sync": c.last_sync.isoformat() if c.last_sync else None,
+                "last_synced_at": c.last_synced_at.isoformat() if c.last_synced_at else None,
                 "enabled": c.enabled,
             }
             for c in configs
@@ -85,7 +85,7 @@ def api_cmdb_sync(cfg_id: int, db: Session = Depends(get_db)):
                     db.add(Asset(name=name, ip=ip, ci_type=ci_type, type=ci_type, tags=tags))
                     count += 1
         db.commit()
-        cfg.last_sync = datetime.now()
+        cfg.last_synced_at = datetime.now()
         db.commit()
         return {"status": "ok", "synced": count}
     except Exception as e:

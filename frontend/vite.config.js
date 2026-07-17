@@ -36,6 +36,8 @@ export default defineConfig({
             '/agent': {
                 target: 'http://127.0.0.1:8000',
                 changeOrigin: true,
+                proxyTimeout: 300000,
+                timeout: 300000,
             },
             '/ai': {
                 target: 'http://127.0.0.1:8000',
@@ -45,11 +47,19 @@ export default defineConfig({
                 target: 'http://127.0.0.1:8000',
                 changeOrigin: true,
             },
+            '/metrics': {
+                target: 'http://127.0.0.1:8000',
+                changeOrigin: true,
+            },
             '/vue-assets': {
                 target: 'http://127.0.0.1:8000',
                 changeOrigin: true,
             },
             '/k8s': {
+                target: 'http://127.0.0.1:8000',
+                changeOrigin: true,
+            },
+            '/tenant': {
                 target: 'http://127.0.0.1:8000',
                 changeOrigin: true,
             },

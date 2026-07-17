@@ -183,8 +183,8 @@
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column label="状态" width="90">
             <template #default="{row}">
-              <el-tag :type="row.steady_state_passed ? 'success' : 'danger'" effect="dark" size="small">
-                {{ row.steady_state_passed ? '通过' : '未通过' }}
+              <el-tag :type="row.is_steady_state_passed ? 'success' : 'danger'" effect="dark" size="small">
+                {{ row.is_steady_state_passed ? '通过' : '未通过' }}
               </el-tag>
             </template>
           </el-table-column>

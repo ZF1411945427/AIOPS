@@ -2,6 +2,8 @@ import hashlib
 
 from pathlib import Path
 
+import json
+
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
@@ -69,6 +71,10 @@ def product_intro(request: Request):
 def product_overview(request: Request):
     return templates.TemplateResponse("product_overview.html", {"request": request})
 
+@router.get("/product/intro", response_class=HTMLResponse)
+def product_intro_vue(request: Request):
+    return _serve_vue()
+
 
 @router.post("/login")
 @_limiter.limit("10/minute")
@@ -76,7 +82,10 @@ async def login(request: Request, db: Session = Depends(get_db)):
     content_type = request.headers.get("content-type", "")
 
     if "application/json" in content_type:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse({"ok": False, "message": "请求格式错误，请使用合法的 JSON"}, status_code=400)
         uname = body.get("username", "")
         pwd = body.get("password", "")
         is_json = True
@@ -94,11 +103,14 @@ async def login(request: Request, db: Session = Depends(get_db)):
 
     request.session["user_id"] = user.id
     request.session["username"] = user.username
+    request.session["tenant_id"] = user.tenant_id or 1
 
     if is_json:
         from app.services.mobile_push_service import issue_login_token
         token = issue_login_token(user.id, user.username)
-        return {"ok": True, "message": "登录成功", "token": token, "user": {"id": user.id, "username": user.username, "role": user.role}}
+        from app.services.tenant_service import get_tenant
+        tenant = get_tenant(db, user.tenant_id or 1)
+        return {"ok": True, "message": "登录成功", "token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "role_id": user.role_id, "tenant_id": user.tenant_id or 1, "tenant_name": tenant.get("name", "默认租户") if tenant else "默认租户"}}
     return RedirectResponse("/", status_code=303)
 
 
@@ -139,6 +151,8 @@ def me(request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return JSONResponse({"ok": False, "error": "用户不存在"}, status_code=401)
-    return {"ok": True, "user": {"id": user.id, "username": user.username, "role": user.role}}
+    from app.services.tenant_service import get_tenant
+    tenant = get_tenant(db, user.tenant_id or 1)
+    return {"ok": True, "user": {"id": user.id, "username": user.username, "role": user.role, "role_id": user.role_id, "tenant_id": user.tenant_id or 1, "tenant_name": tenant.get("name", "默认租户") if tenant else "默认租户"}}
 
 

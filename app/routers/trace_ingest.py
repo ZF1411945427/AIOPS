@@ -25,9 +25,9 @@ async def receive_otlp(request: Request, db: Session = Depends(get_db)):
         result = ingest_otlp_json(db, otlp_data)
         return JSONResponse(result)
     except json.JSONDecodeError:
-        return JSONResponse({"success": False, "message": "Invalid JSON format"}, status_code=400)
+        return JSONResponse({"is_success": False, "message": "Invalid JSON format"}, status_code=400)
     except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return JSONResponse({"is_success": False, "message": str(e)}, status_code=500)
 
 
 @router.post("/jaeger")
@@ -45,7 +45,7 @@ def pull_from_jaeger(
         if jaeger_ds:
             jaeger_url = jaeger_ds.endpoint
         else:
-            return JSONResponse({"success": False, "message": "No jaeger_url provided and no jaeger datasource found"})
+            return JSONResponse({"is_success": False, "message": "No jaeger_url provided and no jaeger datasource found"})
     result = fetch_from_jaeger(db, jaeger_url, service, limit)
     return JSONResponse(result)
 

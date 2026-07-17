@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -90,7 +91,7 @@ def _score_rule(alert, entry, db):
 
     if alert.asset_id and entry.asset_type:
         asset = db.query(Asset).filter(Asset.id == alert.asset_id).first()
-        if asset and asset.type and asset.type.lower() == entry.asset_type.lower():
+        if asset and asset.ci_type and asset.ci_type.lower() == entry.asset_type.lower():
             score += 3
             reasons.append("asset_type_match")
 
@@ -153,7 +154,7 @@ def _score_runbook(alert, rb, db):
 
     if alert.asset_id and rb.asset_type:
         asset = db.query(Asset).filter(Asset.id == alert.asset_id).first()
-        if asset and asset.type and asset.type.lower() == rb.asset_type.lower():
+        if asset and asset.ci_type and asset.ci_type.lower() == rb.asset_type.lower():
             score += 3
             reasons.append("asset_type_match")
             has_content_match = True
@@ -322,3 +323,89 @@ def api_recommend(alert_id: int = 0, limit: int = 5, db: Session = Depends(get_d
         import traceback
         traceback.print_exc()
         return JSONResponse({"error": str(e), "alert_id": alert_id, "recommendations": [], "runbooks": []}, status_code=500)
+
+
+@router.get("/ai-analyze-alert/{alert_id}")
+def ai_analyze_alert_endpoint(alert_id: int, db: Session = Depends(get_db)):
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        return JSONResponse({"error": "告警不存在", "analysis": None}, status_code=404)
+    result = ai_analyze_alert(alert, db)
+    return {"alert_id": alert_id, **result}
+
+
+# ── 智能指标推荐 ──────────────────────────────────────────────
+from app.models import Asset as AssetModel
+from app.services.smart_recommend_service import get_metric_gaps, ai_recommend, ai_analyze_alert, apply_recommendation, dismiss_recommendation
+
+
+@router.get("/gaps/{asset_id}")
+def gaps_endpoint(asset_id: int, db: Session = Depends(get_db)):
+    asset = db.query(AssetModel).filter(AssetModel.id == asset_id).first()
+    if not asset:
+        return JSONResponse({"error": "资产不存在"}, status_code=404)
+    return {"asset_id": asset_id, "asset_name": asset.name, "gaps": get_metric_gaps(asset, db)}
+
+
+@router.get("/ai-recommend/{asset_id}")
+def ai_recommend_endpoint(asset_id: int, db: Session = Depends(get_db)):
+    asset = db.query(AssetModel).filter(AssetModel.id == asset_id).first()
+    if not asset:
+        return JSONResponse({"error": "资产不存在"}, status_code=404)
+    result = ai_recommend(asset, db)
+    return {"asset_id": asset_id, "asset_name": asset.name, **result}
+
+
+@router.get("/recommendations/{asset_id}")
+def list_recommendations(asset_id: int, db: Session = Depends(get_db)):
+    from app.models import AssetMetricRecommendation
+    rows = (
+        db.query(AssetMetricRecommendation)
+        .filter(AssetMetricRecommendation.asset_id == asset_id)
+        .order_by(AssetMetricRecommendation.created_at.desc())
+        .all()
+    )
+    return {
+        "asset_id": asset_id,
+        "recommendations": [
+            {
+                "id": r.id,
+                "metric_key": r.metric_key,
+                "metric_name": r.metric_name,
+                "category": r.category,
+                "unit": r.unit,
+                "source": r.source,
+                "status": r.status,
+                "reason": r.reason,
+                "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+class ApplyReq(BaseModel):
+    asset_id: int
+    metric_key: str
+    metric_name: str
+    category: str = ""
+    unit: str = ""
+    source: str = "template"
+    reason: str = ""
+
+
+class DismissReq(BaseModel):
+    asset_id: int
+    metric_key: str
+
+
+@router.post("/apply")
+def apply_endpoint(req: ApplyReq, db: Session = Depends(get_db)):
+    result = apply_recommendation(req.asset_id, req.metric_key, req.metric_name, req.category, req.unit, req.source, req.reason, db)
+    return result
+
+
+@router.post("/dismiss")
+def dismiss_endpoint(req: DismissReq, db: Session = Depends(get_db)):
+    result = dismiss_recommendation(req.asset_id, req.metric_key, db)
+    return result

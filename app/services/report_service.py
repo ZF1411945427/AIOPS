@@ -160,8 +160,8 @@ def generate_report(db: Session, report_type: str) -> Report:
 
     report = Report(
         title=title, type=report_type,
-        period_start=period_start, period_end=now,
-        summary=summary, data=data,
+        period_started_at=period_start, period_ended_at=now,
+        summary=summary, report_data=data,
     )
     db.add(report)
     db.commit()

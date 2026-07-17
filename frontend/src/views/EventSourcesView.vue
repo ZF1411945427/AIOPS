@@ -23,7 +23,7 @@
             <div class="source-meta">
               <div class="meta-item"><span class="meta-label">API URL</span><span class="meta-value">{{ s.api_url || '-' }}</span></div>
               <div class="meta-item"><span class="meta-label">同步间隔</span><span class="meta-value">{{ s.sync_interval }}s</span></div>
-              <div class="meta-item"><span class="meta-label">上次同步</span><span class="meta-value">{{ s.last_sync || '未同步' }}</span></div>
+              <div class="meta-item"><span class="meta-label">上次同步</span><span class="meta-value">{{ s.last_synced_at || '未同步' }}</span></div>
             </div>
             <div class="source-actions">
               <button class="btn btn-sm" @click="toggleSource(s)">{{ s.enabled ? '禁用' : '启用' }}</button>

@@ -123,3 +123,15 @@ projects/
 
 # ===== 模型权重文件（体积过大，不入库）=====
 models/
+
+# ===== opencode 工具配置（AI 工具技能，非项目代码）=====
+.opencode/skills/
+
+# ===== 运行时数据（VictoriaMetrics 等）=====
+data/victoriametrics/
+
+# ===== 大型二进制工具（可单独下载，不入库）=====
+bin/helm
+bin/helm.exe
+bin/victoria-metrics-prod
+bin/victoria-metrics-windows-amd64-prod.exe

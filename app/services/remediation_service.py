@@ -79,7 +79,7 @@ def _check_dangerous_command(command: str) -> Optional[str]:
     return None
 
 
-def _ssh_connect(asset: Asset, timeout: int = 10) -> paramiko.SSHClient:
+def _ssh_connect(asset: "Asset", timeout: int = 10) -> "paramiko.SSHClient":
     """通过资产记录的 connection_config 建立 SSH 连接.
 
     复用 metric_collector._ssh_connect 的连接逻辑，集中在此处避免循环依赖。
@@ -234,7 +234,7 @@ def check_and_remediate(db: Session):
             if recent:
                 continue
 
-            params = json.loads(rem.params) if rem.params else {}
+            params = json.loads(rem.remediation_params) if rem.remediation_params else {}
             target = params.get("target", f"asset_{alert.asset_id}")
             # execute_action 现在要求 asset 对象；自动响应场景按 alert.asset_id 查资产
             asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
@@ -248,7 +248,7 @@ def check_and_remediate(db: Session):
                 alert_id=alert.id,
                 action_type=rem.action_type,
                 target=target,
-                success=success,
+                is_success=success,
                 output=output,
             )
             db.add(log)
@@ -260,6 +260,12 @@ def check_and_remediate(db: Session):
         db.commit()
         for log in logs:
             db.refresh(log)
+        try:
+            from app.services import remediation_effect_service
+            for log in logs:
+                remediation_effect_service.track_effect(log.id, db, delay_minutes=30)
+        except Exception:
+            pass
     return logs
 
 

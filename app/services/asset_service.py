@@ -9,7 +9,7 @@ def list_assets(db: Session, search: str = "", type: str = "", ci_type: str = ""
     if search:
         q = q.filter(Asset.name.ilike(f"%{search}%"))
     if type:
-        q = q.filter(Asset.type == type)
+        q = q.filter(Asset.ci_type == type)
     if ci_type:
         types = [t.strip() for t in ci_type.split(",") if t.strip()]
         if len(types) == 1:
@@ -24,7 +24,7 @@ def list_assets_paged(db: Session, search: str = "", type: str = "", ci_type: st
     if search:
         q = q.filter(Asset.name.ilike(f"%{search}%"))
     if type:
-        q = q.filter(Asset.type == type)
+        q = q.filter(Asset.ci_type == type)
     if ci_type:
         types = [t.strip() for t in ci_type.split(",") if t.strip()]
         if len(types) == 1:
@@ -45,10 +45,12 @@ def get_asset(db: Session, asset_id: int):
 
 
 def create_asset(db: Session, data: dict):
+    from sqlalchemy import text
+    max_id = db.execute(text("SELECT COALESCE(MAX(id), 0) FROM assets")).scalar() or 0
+    data["id"] = max_id + 1
     asset = Asset(**data)
     db.add(asset)
     db.commit()
-    db.refresh(asset)
     return asset
 
 
@@ -84,7 +86,7 @@ def delete_asset(db: Session, asset_id: int):
 
 
 def probe_assets(db: Session):
-    """批量探测所有资产的连接状态，更新 status / last_checked / latency_ms"""
+    """批量探测所有资产的连接状态，更新 status / last_checked_at / latency_ms"""
     from app.services.connection_service import ConnectionTester
     from app.logger import logger
     from datetime import datetime
@@ -125,7 +127,7 @@ def probe_assets(db: Session):
             old_status = a.status
             new_status = "online" if result.get("ok") else "offline"
             a.status = new_status
-            a.last_checked = datetime.now()
+            a.last_checked_at = datetime.now()
             a.latency_ms = int(result.get("latency_ms", 0)) if result.get("ok") else None
             sess.commit()
 

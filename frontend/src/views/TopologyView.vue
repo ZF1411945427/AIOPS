@@ -32,6 +32,10 @@
       </button>
       <button class="btn btn-primary" @click="openCreate">+ 新增关系</button>
       <button class="btn" @click="loadAll">刷新</button>
+      <label class="auto-refresh-label" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;cursor:pointer;color:var(--text-secondary);margin-left:8px">
+        <input type="checkbox" v-model="autoRefresh" style="accent-color:var(--accent)" />
+        自动刷新
+      </label>
     </div>
 
     <div class="content-grid">
@@ -389,12 +393,24 @@ function handleResize() {
   if (chart) chart.resize()
 }
 
+const autoRefresh = ref(false)
+let refreshTimer = null
+
+import { watch } from 'vue'
+watch(autoRefresh, (val) => {
+  if (refreshTimer) clearInterval(refreshTimer)
+  if (val) {
+    refreshTimer = setInterval(loadAll, 30000)
+  }
+})
+
 onMounted(() => {
   loadAll()
   window.addEventListener('resize', handleResize)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  if (refreshTimer) clearInterval(refreshTimer)
   if (chart) { chart.dispose(); chart = null }
 })
 </script>

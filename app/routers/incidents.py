@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from app.template_utils import get_templates
 
 from app.database import get_db
-from app.services import incident_service, rca_service
+from app.services import incident_service, rca_service, knowledge_graph_service
 from app.services.agent_service import call_llm
 from app.models import AIProvider, AgentConfig
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/incidents", tags=["incidents"])
 templates = get_templates()
 
 
-def _incident_to_dict(inc, asset_name: str = "") -> dict:
+def _incident_to_dict(inc, asset_name: str = "", approver_name: str = "") -> dict:
     return {
         "id": inc.id,
         "title": inc.title or "",
@@ -21,6 +21,10 @@ def _incident_to_dict(inc, asset_name: str = "") -> dict:
         "asset_id": inc.asset_id,
         "asset_name": asset_name,
         "alert_count": inc.alert_count or 0,
+        "impact": getattr(inc, "impact", "") or "",
+        "description": getattr(inc, "description", "") or "",
+        "approver_name": approver_name,
+        "review_comment": inc.review_comment or "",
         "created_at": inc.created_at.strftime("%Y-%m-%d %H:%M:%S") if inc.created_at else None,
         "resolved_at": inc.resolved_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(inc, "resolved_at", None) else None,
     }
@@ -43,17 +47,30 @@ def _alert_to_dict(a) -> dict:
 def api_incident_list(status: str = "", page: int = 1, per_page: int = 20, db: Session = Depends(get_db)):
     """故障单列表 JSON API."""
     incidents, total = incident_service.list_incidents(db, status, page, per_page)
-    from app.models import Asset
+    from app.models import Asset, User
     asset_ids = {inc.asset_id for inc in incidents if inc.asset_id}
     asset_map = {a.id: a.name for a in db.query(Asset).filter(Asset.id.in_(asset_ids)).all()} if asset_ids else {}
+    user_ids = {inc.approver_id for inc in incidents if inc.approver_id}
+    user_map = {u.id: u.username for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
     total_pages = (total + per_page - 1) // per_page if total > 0 else 1
     return JSONResponse({
-        "incidents": [_incident_to_dict(inc, asset_map.get(inc.asset_id, "")) for inc in incidents],
+        "incidents": [_incident_to_dict(inc, asset_map.get(inc.asset_id, ""), user_map.get(inc.approver_id, "")) for inc in incidents],
         "total": total,
         "page": page,
         "per_page": per_page,
         "total_pages": total_pages,
     })
+
+
+@router.post("/api/create")
+def api_create_incident(title: str = "", severity: str = "warning", impact: str = "",
+                        description: str = "", asset_id: int = None, db: Session = Depends(get_db)):
+    """创建故障单 JSON API."""
+    inc = incident_service.create_incident(db, title=title, severity=severity,
+                                          impact=impact, description=description, asset_id=asset_id)
+    if not inc:
+        return JSONResponse({"error": "创建失败"}, status_code=500)
+    return JSONResponse({"incident": _incident_to_dict(inc), "ok": True})
 
 
 @router.get("/api/{incident_id}")
@@ -80,6 +97,43 @@ def api_resolve_incident(incident_id: int, db: Session = Depends(get_db)):
     return JSONResponse({"ok": True})
 
 
+@router.post("/api/{incident_id}/submit-approval")
+def api_submit_approval(incident_id: int, request: Request, comment: str = "", db: Session = Depends(get_db)):
+    """提交故障单审批：open → pending_approval"""
+    user_id = request.session.get("user_id")
+    result = incident_service.submit_for_approval(db, incident_id, submitter_id=user_id, comment=comment)
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@router.post("/api/{incident_id}/approve")
+def api_approve_incident(incident_id: int, request: Request, comment: str = "", db: Session = Depends(get_db)):
+    """审批通过：pending_approval → resolved"""
+    user_id = request.session.get("user_id")
+    result = incident_service.approve_incident(db, incident_id, approver_id=user_id, comment=comment)
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@router.post("/api/{incident_id}/reject")
+def api_reject_incident(incident_id: int, request: Request, comment: str = "", db: Session = Depends(get_db)):
+    """审批驳回：pending_approval → open"""
+    user_id = request.session.get("user_id")
+    result = incident_service.reject_incident(db, incident_id, approver_id=user_id, comment=comment)
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@router.get("/api/{incident_id}/approvals")
+def api_approval_history(incident_id: int, db: Session = Depends(get_db)):
+    """查询故障单审批历史"""
+    history = incident_service.get_approval_history(db, incident_id)
+    return JSONResponse({"approvals": history})
+
+
 @router.get("/api/{incident_id}/rca")
 def api_incident_rca(incident_id: int, db: Session = Depends(get_db)):
     """故障单根因分析 JSON API."""
@@ -87,6 +141,14 @@ def api_incident_rca(incident_id: int, db: Session = Depends(get_db)):
     if not detail:
         return JSONResponse({"error": "not found"}, status_code=404)
     analysis = rca_service.analyze_incident(db, incident_id)
+
+    # RCA 结果自动沉淀到知识库
+    try:
+        inc_obj = detail.get("incident")
+        inc_severity = (inc_obj.severity or "warning") if inc_obj else "warning"
+        knowledge_graph_service.record_rca_result(db, incident_id, analysis, severity=inc_severity)
+    except Exception:
+        pass
 
     def _safe(obj):
         if isinstance(obj, dict):

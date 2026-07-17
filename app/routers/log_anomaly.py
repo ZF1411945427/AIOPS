@@ -14,6 +14,7 @@ class RuleBody(BaseModel):
     source: str = ""
     keyword: Optional[str] = None
     regex_pattern: Optional[str] = None
+    log_level: Optional[str] = None
     threshold: int = 5
     window_minutes: int = 10
     severity: str = "warning"
@@ -28,6 +29,7 @@ def list_rules(db: Session = Depends(get_db)):
         {
             "id": r.id, "name": r.name, "source": r.source,
             "keyword": r.keyword, "regex_pattern": r.regex_pattern,
+            "log_level": r.log_level,
             "threshold": r.threshold, "window_minutes": r.window_minutes,
             "severity": r.severity, "enabled": r.enabled,
         }
@@ -41,7 +43,8 @@ def create_rule(body: RuleBody, db: Session = Depends(get_db)):
     try:
         rule = LogAnomalyRule(
             name=body.name, source=body.source, keyword=body.keyword,
-            regex_pattern=body.regex_pattern, threshold=body.threshold,
+            regex_pattern=body.regex_pattern, log_level=body.log_level or "",
+            threshold=body.threshold,
             window_minutes=body.window_minutes, severity=body.severity,
             enabled=body.enabled,
         )
@@ -65,6 +68,7 @@ def update_rule(rule_id: int, body: RuleBody, db: Session = Depends(get_db)):
         rule.source = body.source
         rule.keyword = body.keyword
         rule.regex_pattern = body.regex_pattern
+        rule.log_level = body.log_level or ""
         rule.threshold = body.threshold
         rule.window_minutes = body.window_minutes
         rule.severity = body.severity

@@ -132,7 +132,7 @@ def recommend_kb_for_alert(db: Session, alert, limit: int = 5):
             score += 2
         if alert.asset_id and getattr(entry, "asset_type", None):
             asset = db.query(Asset).filter(Asset.id == alert.asset_id).first()
-            if asset and asset.type == entry.asset_type:
+            if asset and asset.ci_type == entry.asset_type:
                 score += 2
         if entry.symptom and alert.message:
             common = len(set(entry.symptom) & set(alert.message))
@@ -141,3 +141,62 @@ def recommend_kb_for_alert(db: Session, alert, limit: int = 5):
             scored.append((score, entry))
     scored.sort(key=lambda x: -x[0])
     return [entry for _, entry in scored[:limit]]
+
+
+def record_rca_result(db: Session, incident_id: int, rca_result: dict, severity: str = "warning") -> int:
+    """将 RCA 分析结果自动沉淀为知识库条目，下次同类告警优先推荐."""
+    root = rca_result.get("root_cause") or {}
+    involved = rca_result.get("involved_assets") or []
+    if not root or not root.get("name"):
+        return 0
+
+    title = f"【自动沉淀】故障 #{incident_id} 根因: {root['name']}"
+    symptom_parts = []
+    for a in involved[:3]:
+        symptom_parts.append(f"资产 {a['name']} 告警评分 {a['rca_score']}")
+    symptom = f"关联 {len(involved)} 个资产；" + "；".join(symptom_parts)
+    root_cause = f"根因资产: {root['name']}（类型: {root.get('type', '未知')}，RCA评分: {root.get('score', 0)}）"
+    tags = root.get("type", "") or ""
+
+    existing = db.query(KnowledgeBase).filter(
+        KnowledgeBase.title == title
+    ).first()
+    if existing:
+        existing.root_cause = root_cause
+        existing.updated_at = func.now()
+        db.commit()
+        return existing.id
+
+    kb = KnowledgeBase(
+        title=title,
+        symptom=symptom,
+        root_cause=root_cause,
+        solution="",
+        tags=tags,
+        severity=severity,
+        asset_type=root.get("type", "") or "",
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    return kb.id
+
+
+def get_similar_rca(db: Session, metric_name: str = "", asset_type: str = "", severity: str = "", limit: int = 5) -> list:
+    """查找同类历史 RCA 结果，辅助新告警根因推荐."""
+    q = db.query(KnowledgeBase).filter(KnowledgeBase.root_cause != "")
+    if metric_name:
+        q = q.filter(KnowledgeBase.symptom.ilike(f"%{metric_name}%"))
+    if asset_type:
+        q = q.filter(KnowledgeBase.asset_type == asset_type)
+    if severity:
+        q = q.filter(KnowledgeBase.severity == severity)
+    items = q.order_by(KnowledgeBase.updated_at.desc()).limit(limit).all()
+    return [{
+        "id": kb.id,
+        "title": kb.title,
+        "root_cause": kb.root_cause,
+        "symptom": kb.symptom,
+        "asset_type": kb.asset_type,
+        "updated_at": kb.updated_at.strftime("%Y-%m-%d %H:%M:%S") if kb.updated_at else None,
+    } for kb in items]

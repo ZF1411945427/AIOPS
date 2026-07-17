@@ -21,8 +21,8 @@ def _event_to_dict(e: K8sEvent) -> dict:
         "reason": e.reason or "",
         "message": e.message or "",
         "source": e.source or "",
-        "first_seen": e.first_seen.strftime("%Y-%m-%d %H:%M:%S") if e.first_seen else None,
-        "last_seen": e.last_seen.strftime("%Y-%m-%d %H:%M:%S") if e.last_seen else None,
+        "first_seen_at": e.first_seen_at.strftime("%Y-%m-%d %H:%M:%S") if e.first_seen_at else None,
+        "last_seen_at": e.last_seen_at.strftime("%Y-%m-%d %H:%M:%S") if e.last_seen_at else None,
         "count": e.count or 1,
         "severity": e.severity or "info",
         "created_at": e.created_at.strftime("%Y-%m-%d %H:%M:%S") if e.created_at else None,
@@ -53,7 +53,7 @@ def api_event_list(
             | K8sEvent.reason.ilike(f"%{search}%")
         )
     total = q.count()
-    events = q.order_by(desc(K8sEvent.last_seen)).offset((page - 1) * per_page).limit(per_page).all()
+    events = q.order_by(desc(K8sEvent.last_seen_at)).offset((page - 1) * per_page).limit(per_page).all()
     clusters = sorted(set(c[0] for c in db.query(K8sEvent.cluster).distinct().all() if c[0]))
     kinds = sorted(set(k[0] for k in db.query(K8sEvent.kind).distinct().all() if k[0]))
     total_pages = max(1, (total + per_page - 1) // per_page) if total > 0 else 1

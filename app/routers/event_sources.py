@@ -77,7 +77,7 @@ def sync_source(src_id: int, db: Session = Depends(get_db)):
                             status="firing"))
                         count += 1
         db.commit()
-        src.last_sync = datetime.now()
+        src.last_synced_at = datetime.now()
         db.commit()
         return PlainTextResponse(f"Synced {count} new alerts", 200)
     except Exception as e:
@@ -94,7 +94,7 @@ def _source_to_dict(s: ExtEventSource) -> dict:
         "api_url": s.api_url or "",
         "auth_config": parse_json_config(s.auth_config),
         "sync_interval": s.sync_interval or 60,
-        "last_sync": s.last_sync.strftime("%Y-%m-%d %H:%M:%S") if getattr(s, "last_sync", None) else None,
+        "last_synced_at": s.last_synced_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(s, "last_synced_at", None) else None,
         "enabled": bool(s.enabled),
         "created_at": s.created_at.strftime("%Y-%m-%d %H:%M:%S") if s.created_at else None,
     }
@@ -201,7 +201,7 @@ def api_source_sync(src_id: int, db: Session = Depends(get_db)):
                             status="firing"))
                         count += 1
         db.commit()
-        src.last_sync = datetime.now()
+        src.last_synced_at = datetime.now()
         db.commit()
         return JSONResponse({"ok": True, "synced": count})
     except Exception as e:

@@ -33,7 +33,7 @@ def _load_known_hosts():
     return _known_hosts_keys
 
 
-def get_ssh_client() -> paramiko.SSHClient:
+def get_ssh_client() -> "paramiko.SSHClient":
     """创建安全配置的 SSHClient 实例.
 
     - 严格模式（默认）：RejectPolicy，未知主机密钥直接拒绝连接
@@ -58,7 +58,7 @@ def get_ssh_client() -> paramiko.SSHClient:
 
 
 def connect_ssh(host: str, port: int = 22, username: str = "root",
-                password: str = "", pkey=None, timeout: int = 10) -> paramiko.SSHClient:
+                password: str = "", pkey=None, timeout: int = 10) -> "paramiko.SSHClient":
     """创建并连接 SSH 客户端的便捷方法.
 
     自动使用安全策略，调用方只需提供连接参数。
@@ -77,7 +77,7 @@ def connect_ssh(host: str, port: int = 22, username: str = "root",
     return client
 
 
-def register_host(host: str, port: int = 22) -> paramiko.SSHClient:
+def register_host(host: str, port: int = 22) -> "paramiko.SSHClient":
     """首次连接新服务器：使用 AutoAddPolicy 自动信任并记录指纹.
 
     专用于添加新资产/测试连接场景。

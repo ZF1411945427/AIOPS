@@ -143,7 +143,7 @@ def test_source(db: Session, source_id: int) -> tuple:
 
     source.last_status = "online" if success else "error"
     source.last_error = "" if success else msg
-    source.last_scrape = datetime.now()
+    source.last_scraped_at = datetime.now()
     db.commit()
     return (success, msg)
 
@@ -317,7 +317,7 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
         source.last_error = str(e)
         msg = f"ES 采集失败: {e}"
 
-    source.last_scrape = datetime.now()
+    source.last_scraped_at = datetime.now()
     db.commit()
     return (True, msg)
 
@@ -401,13 +401,13 @@ def _scrape_prometheus(db: Session, source: DataSource) -> tuple:
                 pass
         source.last_status = "online"
         source.last_error = ""
-        source.last_scrape = datetime.now()
+        source.last_scraped_at = datetime.now()
         db.commit()
         return (True, f"Prometheus 采集成功, {collected} metrics")
     except Exception as e:
         source.last_status = "error"
         source.last_error = str(e)
-        source.last_scrape = datetime.now()
+        source.last_scraped_at = datetime.now()
         db.commit()
         return (False, f"Prometheus 采集失败: {e}")
 
@@ -424,12 +424,12 @@ def scrape_source(db: Session, source: DataSource) -> tuple:
             return _scrape_prometheus(db, source)
         elif source.type == "custom_api":
             source.last_status = "online"
-            source.last_scrape = datetime.now()
+            source.last_scraped_at = datetime.now()
             db.commit()
             return (True, "API ok")
         elif source.type == "log_file":
             source.last_status = "online"
-            source.last_scrape = datetime.now()
+            source.last_scraped_at = datetime.now()
             db.commit()
             return (True, "日志文件 tail 成功, 解析 12 条新记录")
         elif source.type == "elasticsearch":
@@ -438,7 +438,7 @@ def scrape_source(db: Session, source: DataSource) -> tuple:
             return _scrape_jaeger(db, source)
         elif source.type == "otel":
             source.last_status = "online"
-            source.last_scrape = datetime.now()
+            source.last_scraped_at = datetime.now()
             db.commit()
             return (True, "OTLP endpoint passive receiver")
         else:
@@ -636,7 +636,7 @@ def _scrape_ssh(db: Session, source: DataSource) -> tuple:
 
     source.last_status = "online"
     source.last_error = ""
-    source.last_scrape = datetime.now()
+    source.last_scraped_at = datetime.now()
     db.commit()
     msg = f"SSH 采集成功, {collected} metrics"
     if docker_count:
@@ -771,7 +771,7 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
             K8sEvent.name == obj_name,
             K8sEvent.kind == kind,
             K8sEvent.reason == ev.reason,
-            K8sEvent.last_seen == ev.last_timestamp,
+            K8sEvent.last_seen_at == ev.last_timestamp,
         ).first()
         if exists:
             continue
@@ -788,8 +788,8 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
             reason=ev.reason or "",
             message=ev.message or "",
             source=ev.source.component if ev.source else "",
-            first_seen=ev.first_timestamp,
-            last_seen=ev.last_timestamp,
+            first_seen_at=ev.first_timestamp,
+            last_seen_at=ev.last_timestamp,
             count=ev.count or 1,
             severity=severity,
         ))
@@ -809,9 +809,58 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
         _sync_k8s_asset(db, "service", f"{svc.metadata.namespace}/{svc.metadata.name}", parent, cluster_name, attrs)
         created += 1
 
+    # 8. Metrics Server 运行时指标（CPU/内存使用率）
+    try:
+        custom_api = client.CustomObjectsApi(api_client=api_client)
+        node_metrics = custom_api.list_cluster_custom_object(
+            group="metrics.k8s.io", version="v1beta1", plural="nodes",
+        )
+        node_cpu_cap = {}
+        node_mem_cap = {}
+        for node in nodes:
+            cpu_raw = node.status.capacity.get("cpu", "0")
+            cpu_cores = float(str(cpu_raw).rstrip("n") or 0)
+            mem_raw = node.status.capacity.get("memory", "0Ki")
+            node_cpu_cap[node.metadata.name] = cpu_cores
+            node_mem_cap[node.metadata.name] = _parse_k8s_memory(str(mem_raw))
+        for item in node_metrics.get("items", []):
+            node_name = item["metadata"]["name"]
+            cpu_usage_str = item.get("usage", {}).get("cpu", "0")
+            mem_usage_str = item.get("usage", {}).get("memory", "0")
+            cpu_usage_cores = _parse_k8s_cpu(str(cpu_usage_str))
+            mem_usage_bytes = _parse_k8s_memory(str(mem_usage_str))
+            cpu_cap = node_cpu_cap.get(node_name, 1)
+            mem_cap = node_mem_cap.get(node_name, 1)
+            cpu_pct = round(cpu_usage_cores / cpu_cap * 100, 2) if cpu_cap > 0 else 0
+            mem_pct = round(mem_usage_bytes / mem_cap * 100, 2) if mem_cap > 0 else 0
+            _save_metric(db, node_name, "node_cpu_utilization", cpu_pct, "percent", now)
+            _save_metric(db, node_name, "node_memory_utilization", mem_pct, "percent", now)
+            _save_metric(db, node_name, "node_cpu_usage", cpu_usage_cores, "cores", now)
+            _save_metric(db, node_name, "node_memory_usage", mem_usage_bytes, "bytes", now)
+            collected += 4
+        pod_metrics = custom_api.list_cluster_custom_object(
+            group="metrics.k8s.io", version="v1beta1", plural="pods",
+        )
+        for item in pod_metrics.get("items", []):
+            pod_name = item["metadata"]["name"]
+            pod_ns = item["metadata"].get("namespace", "")
+            full_pod_name = f"{pod_ns}/{pod_name}"
+            total_cpu = 0.0
+            total_mem = 0.0
+            for cont in item.get("containers", []):
+                cpu_str = cont.get("usage", {}).get("cpu", "0")
+                mem_str = cont.get("usage", {}).get("memory", "0")
+                total_cpu += _parse_k8s_cpu(str(cpu_str))
+                total_mem += _parse_k8s_memory(str(mem_str))
+            _save_metric(db, full_pod_name, "pod_cpu_usage", total_cpu, "cores", now)
+            _save_metric(db, full_pod_name, "pod_memory_usage", total_mem, "bytes", now)
+            collected += 2
+    except Exception:
+        pass
+
     source.last_status = "online"
     source.last_error = ""
-    source.last_scrape = datetime.now()
+    source.last_scraped_at = datetime.now()
     db.commit()
     msg = f"K8s 采集成功: {len(nodes)} 节点, {len(namespaces)} 命名空间, {len(deps)} Deployment, {len(pods)} Pod"
     return (True, msg)
@@ -827,6 +876,20 @@ def _parse_k8s_memory(val: str) -> float:
         return float(val[:-2]) * 1024 * 1024 * 1024
     elif val.endswith("Ti"):
         return float(val[:-2]) * 1024 * 1024 * 1024 * 1024
+    elif val.endswith("m"):
+        return float(val[:-1]) / 1000
+    try:
+        return float(val)
+    except ValueError:
+        return 0
+
+
+def _parse_k8s_cpu(val: str) -> float:
+    val = val.strip()
+    if val.endswith("n"):
+        return float(val[:-1]) / 1e9
+    elif val.endswith("u"):
+        return float(val[:-1]) / 1e6
     elif val.endswith("m"):
         return float(val[:-1]) / 1000
     try:
@@ -886,7 +949,7 @@ def _scrape_docker(db: Session, source: DataSource) -> tuple:
     finally:
         client.close()
 
-    source.last_scrape = datetime.now()
+    source.last_scraped_at = datetime.now()
     db.commit()
     return (True, msg)
 
@@ -896,12 +959,12 @@ def scrape_all_sources(db: Session):
     now = datetime.now()
     sources = db.query(DataSource).filter(DataSource.enabled == True).all()
     for source in sources:
-        if source.last_scrape:
-            elapsed = (now - source.last_scrape).total_seconds()
+        if source.last_scraped_at:
+            elapsed = (now - source.last_scraped_at).total_seconds()
             if elapsed < source.scrape_interval:
                 continue
         success, msg = scrape_source(db, source)
-        results.append({"source_id": source.id, "name": source.name, "success": success, "message": msg})
+        results.append({"source_id": source.id, "name": source.name, "is_success": success, "message": msg})
     return results
 
 
@@ -929,18 +992,18 @@ def _scrape_jaeger(db: Session, source: DataSource) -> tuple:
         if result.get("success"):
             source.last_status = "online"
             source.last_error = ""
-            source.last_scrape = datetime.now()
+            source.last_scraped_at = datetime.now()
             db.commit()
             return (True, result.get("message", "Jaeger 拉取成功"))
         else:
             source.last_status = "error"
             source.last_error = result.get("message", "")
-            source.last_scrape = datetime.now()
+            source.last_scraped_at = datetime.now()
             db.commit()
             return (False, result.get("message", "Jaeger 拉取失败"))
     except Exception as e:
         source.last_status = "error"
         source.last_error = str(e)
-        source.last_scrape = datetime.now()
+        source.last_scraped_at = datetime.now()
         db.commit()
         return (False, f"Jaeger 拉取异常: {e}")

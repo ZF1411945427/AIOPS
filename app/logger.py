@@ -7,6 +7,7 @@
 """
 import sys
 import os
+from pathlib import Path
 from loguru import logger as _logger
 from app.config import LOG_LEVEL, APP_ENV
 
@@ -32,7 +33,7 @@ _logger.add(
 )
 
 # 文件输出（按天轮转，保留 30 天）
-_LOG_DIR = os.environ.get("AIOPS_LOG_DIR", "logs")
+_LOG_DIR = os.environ.get("AIOPS_LOG_DIR", str(Path(__file__).resolve().parent.parent / "logs"))
 if not os.path.exists(_LOG_DIR):
     try:
         os.makedirs(_LOG_DIR, exist_ok=True)
