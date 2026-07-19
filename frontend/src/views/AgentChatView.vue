@@ -140,33 +140,6 @@
 
         <!-- 底部输入栏 -->
         <div class="agent-input-area">
-          <!-- 设备标签栏 -->
-          <div class="device-bar" v-if="activeSessionId && currentMode === 'agent'">
-            <div class="device-tags">
-              <span v-for="d in linkedDevices" :key="d.id" class="device-tag">
-                {{ d.ip || d.name }}
-                <span class="device-tag-sep">·</span>
-                {{ d.name }}
-                <button class="device-tag-close" @click="unlinkDevice(d.id)">×</button>
-              </span>
-              <el-popover trigger="click" width="340" placement="top-start">
-                <template #reference>
-                  <button class="device-add-btn">+ 添加设备</button>
-                </template>
-                <div class="device-add-popover">
-                  <input v-model="assetSearch" placeholder="搜索资产名称或 IP..." class="link-input" />
-                  <div class="link-list">
-                    <div v-for="a in filteredAssets" :key="a.id" class="link-item" @click="linkDevice(a.id)">
-                      <span class="badge server">🖥️</span>
-                      <span class="link-text">{{ a.name }} ({{ a.ip || 'N/A' }})</span>
-                    </div>
-                    <div v-if="!filteredAssets.length" class="link-empty">未找到资产</div>
-                  </div>
-                </div>
-              </el-popover>
-            </div>
-          </div>
-
           <!-- 关联上下文快捷按钮 -->
           <div class="context-toolbar" v-if="currentMode === 'agent'">
             <el-popover trigger="click" width="360" placement="top-start">
@@ -268,7 +241,8 @@ function parseHistorySteps(toolCallsStr) {
     return arr.map((item, i) => item.step || {
       step_id: `hist_${i}_${item.tool_name}`,
       tool_name: item.tool_name,
-      title: item.tool_name,
+      display_name: item.display_name || item.tool_name,
+      title: item.display_name || item.tool_name,
       status: 'success',
       summary: (typeof item.result === 'string' ? item.result : JSON.stringify(item.result)).slice(0, 200),
       raw_output: JSON.stringify(item.result, null, 2),
@@ -598,6 +572,7 @@ async function linkAsset(assetId) {
 }
 
 async function runCorrelationAnalysis() {
+  if (correlationRunning.value || loading.value) return
   correlationRunning.value = true
   try {
     const res = await request.post('/agent/correlation-analyze', { hours: correlationHours.value, service: correlationService.value })
@@ -607,7 +582,7 @@ async function runCorrelationAnalysis() {
     window._pendingAgentSessionId = sid
     activeSessionId.value = sid; pendingAutoSend.value = true
     await loadMessages(sid)
-  } catch (e) { ElMessage.error('关联分析失败: ' + (e.message || '未知错误')) }
+  } catch (e) { ElMessage.error('关联分析失败: ' + (e.message || '未知错误')); pendingAutoSend.value = false }
   finally { correlationRunning.value = false }
 }
 
@@ -665,6 +640,8 @@ async function sendMessage() {
   const sessionId = await ensureSession()
   if (!sessionId) return
   stopTypewriter()
+  streamingDone.value = false
+  streamingError.value = null
   if (!skipNextUserPush.value) {
     messages.value.push({ role: 'user', content: message, created_at: new Date().toISOString() })
     await nextTick(); scrollToBottom(true)
@@ -693,7 +670,7 @@ async function sendMessage() {
     messages.value.push({ role: 'assistant', content: '请求失败: ' + e.message, message_type: 'error', created_at: new Date().toISOString() })
     await nextTick(); scrollToBottom(true)
   } finally {
-    stopSSE(); loading.value = false
+    stopSSE(); loading.value = false; streamingDone.value = false; pendingAutoSend.value = false
   }
 }
 

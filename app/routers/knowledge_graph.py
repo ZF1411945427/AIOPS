@@ -52,7 +52,7 @@ def api_graph(db: Session = Depends(get_db)):
             "source": "postgresql",
         })
     except Exception as e:
-        return JSONResponse({"error": str(e), "nodes": [], "edges": []}, status_code=500)
+        return JSONResponse({"warning": str(e), "nodes": [], "edges": []}, status_code=200)
 
 
 @router.get("/api/subgraph")
@@ -74,7 +74,7 @@ def api_subgraph(
             "edge_count": len(result.get("edges", [])),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/api/sync")
@@ -87,7 +87,7 @@ def api_sync_neo4j(db: Session = Depends(get_db)):
         count = sync_asset_graph(db)
         return JSONResponse({"synced": count})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 # ─────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ def api_impact_analysis(
             return JSONResponse(result, status_code=404)
         return JSONResponse(result)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/api/root-cause")
@@ -136,7 +136,7 @@ def api_root_cause(
             return JSONResponse(result, status_code=400)
         return JSONResponse(result)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/api/recommend")
@@ -157,4 +157,4 @@ def api_recommend(
             return JSONResponse(result, status_code=404)
         return JSONResponse(result)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)

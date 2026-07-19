@@ -110,10 +110,6 @@
                         <text class="quick-icon">指标</text>
                         <text class="quick-label">查看指标</text>
                     </view>
-                    <view class="quick-item" @tap="goRestart">
-                        <text class="quick-icon">重启</text>
-                        <text class="quick-label">重启服务</text>
-                    </view>
                     <view class="quick-item" @tap="goDiagnose">
                         <text class="quick-icon">AI</text>
                         <text class="quick-label">AI诊断</text>
@@ -281,16 +277,6 @@ function barHeight(val) {
     const maxV = Math.max(...vals, 0.001)
     const h = Math.abs(val) / maxV * 200
     return Math.max(4, Math.min(200, h))
-}
-
-function goRestart() {
-    uni.showModal({
-        title: '重启服务',
-        content: '确认重启该资产上的服务？',
-        success: (r) => {
-            if (r.confirm) uni.showToast({ title: '已提交', icon: 'success' })
-        },
-    })
 }
 
 function goDiagnose() {

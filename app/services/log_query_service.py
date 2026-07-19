@@ -110,8 +110,29 @@ class ElasticsearchAdapter(LogQueryAdapter):
             "size": limit,
         }
 
-        resp = es.search(index=index_pattern, body=body)
-        es.close()
+        # 捕获 ES 连接/查询异常，转成 (logs=[], total=0, error_msg) 三元组，
+        # 让上层 mcp_tools.query_logs 看到 error 字符串后 raise ValueError，
+        # 由 call_mcp_tool 包装成 {"status": "error", ...}（而非误判为 success）。
+        # 这样 LLM 能看到清晰的失败原因，不会把"ES 不可达"当成"日志查询成功但无结果"
+        try:
+            resp = es.search(index=index_pattern, body=body)
+        except Exception as e:
+            err_type = type(e).__name__
+            err_msg = str(e)
+            # 友好提示：连接超时/拒绝时建议改用其他可观测性工具
+            if any(kw in err_msg.lower() for kw in ("timed out", "timeout", "connection", "refused", "unreachable")):
+                hint = (
+                    f"Elasticsearch 不可达（{err_type}: {err_msg}）。"
+                    f"请稍后重试，或改用 query_k8s_events / query_traces / query_metrics 等其他可观测性工具。"
+                )
+            else:
+                hint = f"Elasticsearch 查询失败（{err_type}: {err_msg}）"
+            return [], 0, hint
+        finally:
+            try:
+                es.close()
+            except Exception:
+                pass
 
         total = resp.get("hits", {}).get("total", {})
         if isinstance(total, dict):

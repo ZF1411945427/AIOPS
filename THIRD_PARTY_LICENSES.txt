@@ -1,0 +1,582 @@
+第三方组件 License 清单（THIRD_PARTY_LICENSES）
+生成时间: 2026-07-19
+说明: 本文件由安全自查模块自动生成，用于交付时主动提供 SBOM。
+
+== aiohappyeyeballs 2.6.1 ==
+  License: 
+
+== aiohttp 3.14.1 ==
+  License: 
+
+== aiosignal 1.4.0 ==
+  License: 
+
+== annotated-doc 0.0.4 ==
+  License: 
+
+== annotated-types 0.7.0 ==
+  License: 
+
+== anyio 4.11.0 ==
+  License: 
+
+== anyio 4.12.1 ==
+  License: 
+
+== asgiref 3.9.2 ==
+  License: 
+
+== attrs 25.4.0 ==
+  License: 
+
+== bandit 1.9.4 ==
+  License: 
+
+== bcrypt 5.0.0 ==
+  License: 
+
+== boolean.py 5.0 ==
+  License: 
+
+== CacheControl 0.14.4 ==
+  License: 
+
+== cachetools 7.1.4 ==
+  License: 
+
+== cairocffi 1.7.1 ==
+  License: 
+
+== CairoSVG 2.9.0 ==
+  License: 
+
+== certifi 2025.10.5 ==
+  License: 
+
+== certifi 2026.2.25 ==
+  License: 
+
+== cffi 2.0.0 ==
+  License: 
+
+== charset-normalizer 3.4.4 ==
+  License: 
+
+== click 8.4.2 ==
+  License: 
+
+== colorama 0.4.6 ==
+  License: 
+
+== contourpy 1.3.3 ==
+  License: 
+
+== cryptography 44.0.0 ==
+  License: 
+
+== cssselect2 0.9.0 ==
+  License: 
+
+== cycler 0.12.1 ==
+  License: 
+
+== cyclonedx-python-lib 11.11.0 ==
+  License: 
+
+== defusedxml 0.7.1 ==
+  License: 
+
+== Deprecated 1.3.1 ==
+  License: 
+
+== distlib 0.4.0 ==
+  License: 
+
+== distro 1.9.0 ==
+  License: 
+
+== Django 5.2.6 ==
+  License: 
+
+== durationpy 0.10 ==
+  License: 
+
+== edge-tts 7.2.7 ==
+  License: 
+
+== elastic-transport 8.17.1 ==
+  License: 
+
+== elasticsearch 8.6.2 ==
+  License: 
+
+== et_xmlfile 2.0.0 ==
+  License: 
+
+== faiss-cpu 1.14.3 ==
+  License: 
+
+== fastapi 0.115.6 ==
+  License: 
+
+== filelock 3.19.1 ==
+  License: 
+
+== filelock 3.25.2 ==
+  License: 
+
+== fonttools 4.62.0 ==
+  License: 
+
+== fpdf2 2.8.7 ==
+  License: 
+
+== freetype-py 2.5.1 ==
+  License: 
+
+== frozenlist 1.8.0 ==
+  License: 
+
+== fsspec 2026.2.0 ==
+  License: 
+
+== greenlet 3.5.3 ==
+  License: 
+
+== grpcio 1.82.1 ==
+  License: 
+
+== h11 0.16.0 ==
+  License: 
+
+== hf-xet 1.4.2 ==
+  License: 
+
+== httpcore 1.0.9 ==
+  License: 
+
+== httpx 0.28.1 ==
+  License: 
+
+== httpx-sse 0.4.3 ==
+  License: 
+
+== huggingface_hub 1.7.1 ==
+  License: 
+
+== idna 3.18 ==
+  License: 
+
+== iniconfig 2.3.0 ==
+  License: 
+
+== invoke 3.0.3 ==
+  License: 
+
+== itsdangerous 2.2.0 ==
+  License: 
+
+== Jinja2 3.1.6 ==
+  License: 
+
+== jiter 0.11.1 ==
+  License: 
+
+== joblib 1.5.3 ==
+  License: 
+
+== jsonpatch 1.33 ==
+  License: 
+
+== jsonpointer 3.0.0 ==
+  License: 
+
+== jsonschema 4.26.0 ==
+  License: 
+
+== jsonschema-specifications 2025.9.1 ==
+  License: 
+
+== kiwisolver 1.5.0 ==
+  License: 
+
+== kubernetes 36.0.2 ==
+  License: 
+
+== langchain 1.2.12 ==
+  License: 
+
+== langchain-core 1.2.19 ==
+  License: 
+
+== langgraph 1.1.2 ==
+  License: 
+
+== langgraph-checkpoint 3.0.0 ==
+  License: 
+
+== langgraph-prebuilt 1.0.8 ==
+  License: 
+
+== langgraph-sdk 0.3.11 ==
+  License: 
+
+== langsmith 0.4.38 ==
+  License: 
+
+== license-expression 30.4.4 ==
+  License: 
+
+== limits 5.8.0 ==
+  License: 
+
+== loguru 0.7.3 ==
+  License: 
+
+== lxml 6.1.1 ==
+  License: 
+
+== markdown-it-py 4.0.0 ==
+  License: 
+
+== MarkupSafe 3.0.3 ==
+  License: 
+
+== matplotlib 3.10.8 ==
+  License: 
+
+== mcp 1.26.0 ==
+  License: 
+
+== mdurl 0.1.2 ==
+  License: 
+
+== milvus-lite 3.0 ==
+  License: 
+
+== mpmath 1.3.0 ==
+  License: 
+
+== msgpack 1.2.1 ==
+  License: 
+
+== multidict 6.7.1 ==
+  License: 
+
+== narwhals 2.23.0 ==
+  License: 
+
+== networkx 3.6.1 ==
+  License: 
+
+== numpy 2.4.6 ==
+  License: 
+
+== oauthlib 3.3.1 ==
+  License: 
+
+== openai 2.6.0 ==
+  License: 
+
+== openpyxl 3.1.5 ==
+  License: 
+
+== orjson 3.11.7 ==
+  License: 
+
+== ormsgpack 1.11.0 ==
+  License: 
+
+== packageurl-python 0.17.6 ==
+  License: 
+
+== packaging 25.0 ==
+  License: 
+
+== packaging 26.0 ==
+  License: 
+
+== pandas 3.0.1 ==
+  License: 
+
+== paramiko 5.0.0 ==
+  License: 
+
+== patsy 1.0.2 ==
+  License: 
+
+== pillow 12.3.0 ==
+  License: 
+
+== pip 26.0.1 ==
+  License: 
+
+== pip-api 0.0.34 ==
+  License: 
+
+== pip-licenses 5.5.5 ==
+  License: 
+
+== pip-requirements-parser 32.0.1 ==
+  License: 
+
+== pip_audit 2.10.1 ==
+  License: 
+
+== platformdirs 4.4.0 ==
+  License: 
+
+== playwright 1.60.0 ==
+  License: 
+
+== pluggy 1.6.0 ==
+  License: 
+
+== prettytable 3.18.0 ==
+  License: 
+
+== propcache 0.4.1 ==
+  License: 
+
+== protobuf 7.35.1 ==
+  License: 
+
+== py-serializable 2.1.0 ==
+  License: 
+
+== pyarrow 25.0.0 ==
+  License: 
+
+== pycairo 1.29.0 ==
+  License: 
+
+== pycparser 3.0 ==
+  License: 
+
+== pydantic 2.12.3 ==
+  License: 
+
+== pydantic-settings 2.14.2 ==
+  License: 
+
+== pydantic_core 2.41.4 ==
+  License: 
+
+== pyee 13.0.1 ==
+  License: 
+
+== Pygments 2.20.0 ==
+  License: 
+
+== PyJWT 2.13.0 ==
+  License: 
+
+== pymilvus 3.0.0 ==
+  License: 
+
+== PyMySQL 1.1.2 ==
+  License: 
+
+== PyNaCl 1.6.2 ==
+  License: 
+
+== pyparsing 3.3.2 ==
+  License: 
+
+== pytest 9.1.1 ==
+  License: 
+
+== pytest-timeout 2.4.0 ==
+  License: 
+
+== python-dateutil 2.9.0.post0 ==
+  License: 
+
+== python-dotenv 1.2.2 ==
+  License: 
+
+== python-multipart 0.0.32 ==
+  License: 
+
+== python-pptx 1.0.2 ==
+  License: 
+
+== pywin32 311 ==
+  License: 
+
+== PyYAML 6.0.3 ==
+  License: 
+
+== rank-bm25 0.2.2 ==
+  License: 
+
+== referencing 0.37.0 ==
+  License: 
+
+== regex 2026.6.28 ==
+  License: 
+
+== reportlab 5.0.0 ==
+  License: 
+
+== requests 2.34.2 ==
+  License: 
+
+== requests-oauthlib 2.0.0 ==
+  License: 
+
+== requests-toolbelt 1.0.0 ==
+  License: 
+
+== rich 14.3.3 ==
+  License: 
+
+== rlPyCairo 0.4.0 ==
+  License: 
+
+== rpds-py 0.30.0 ==
+  License: 
+
+== safetensors 0.8.0 ==
+  License: 
+
+== scikit-learn 1.9.0 ==
+  License: 
+
+== scipy 1.18.0 ==
+  License: 
+
+== sentence-transformers 5.6.0 ==
+  License: 
+
+== sentencepiece 0.2.1 ==
+  License: 
+
+== setuptools 82.0.1 ==
+  License: 
+
+== shellingham 1.5.4 ==
+  License: 
+
+== six 1.17.0 ==
+  License: 
+
+== slowapi 0.1.10 ==
+  License: 
+
+== sniffio 1.3.1 ==
+  License: 
+
+== sortedcontainers 2.4.0 ==
+  License: 
+
+== SQLAlchemy 2.0.36 ==
+  License: 
+
+== sqlparse 0.5.5 ==
+  License: 
+
+== sse-starlette 3.3.2 ==
+  License: 
+
+== starlette 0.41.3 ==
+  License: 
+
+== statsmodels 0.14.6 ==
+  License: 
+
+== stevedore 5.9.0 ==
+  License: 
+
+== svglib 2.0.2 ==
+  License: 
+
+== sympy 1.14.0 ==
+  License: 
+
+== tabulate 0.10.0 ==
+  License: 
+
+== tenacity 9.1.2 ==
+  License: 
+
+== threadpoolctl 3.6.0 ==
+  License: 
+
+== tinycss2 1.5.1 ==
+  License: 
+
+== tokenizers 0.22.2 ==
+  License: 
+
+== tomli 2.4.1 ==
+  License: 
+
+== tomli_w 1.2.0 ==
+  License: 
+
+== torch 2.9.0+cu129 ==
+  License: 
+
+== tqdm 4.67.1 ==
+  License: 
+
+== tqdm 4.67.3 ==
+  License: 
+
+== transformers 5.13.0 ==
+  License: 
+
+== typer 0.24.1 ==
+  License: 
+
+== typing-inspection 0.4.2 ==
+  License: 
+
+== typing_extensions 4.15.0 ==
+  License: 
+
+== tzdata 2025.2 ==
+  License: 
+
+== urllib3 2.7.0 ==
+  License: 
+
+== uuid_utils 0.14.1 ==
+  License: 
+
+== uvicorn 0.34.0 ==
+  License: 
+
+== virtualenv 20.34.0 ==
+  License: 
+
+== wcwidth 0.8.2 ==
+  License: 
+
+== webencodings 0.5.1 ==
+  License: 
+
+== websocket-client 1.9.0 ==
+  License: 
+
+== websockets 16.0 ==
+  License: 
+
+== win32_setctime 1.2.0 ==
+  License: 
+
+== wrapt 2.2.2 ==
+  License: 
+
+== xlsxwriter 3.2.9 ==
+  License: 
+
+== xxhash 3.6.0 ==
+  License: 
+
+== yarl 1.23.0 ==
+  License: 
+
+== zstandard 0.25.0 ==
+  License: 

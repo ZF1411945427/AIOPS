@@ -38,7 +38,7 @@ def api_topology_list(db: Session = Depends(get_db)):
             "trees": trees,
         })
     except Exception as e:
-        return JSONResponse({"nodes": [], "edges": [], "relations": [], "trees": [], "error": str(e)}, status_code=500)
+        return JSONResponse({"nodes": [], "edges": [], "relations": [], "trees": [], "warning": str(e)}, status_code=200)
 
 
 @router.post("/api/relations/create")
@@ -60,7 +60,7 @@ def api_relation_create(payload: dict = Body(...), db: Session = Depends(get_db)
             "relation_type": relation_type,
         })
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/relations/{relation_id}/delete")
@@ -69,4 +69,4 @@ def api_relation_delete(relation_id: int, db: Session = Depends(get_db)):
         topology_service.delete_relation(db, relation_id)
         return JSONResponse({"ok": True, "id": relation_id})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)

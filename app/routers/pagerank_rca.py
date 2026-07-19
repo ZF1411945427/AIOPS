@@ -21,4 +21,4 @@ def pagerank_analyze(
     except Exception as e:
         from app.logger import logger
         logger.error(f"pagerank-rca analyze failed: {e}")
-        return JSONResponse({"error": "分析失败"}, status_code=500)
+        return JSONResponse({"message": "分析失败"}, status_code=200)

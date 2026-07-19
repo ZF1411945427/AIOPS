@@ -3,6 +3,15 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, Integer, Float
 from app.models import AgentEvaluation, ChatSession, ChatMessage, ToolInvocation
+from app.services.mcp_registry import get_mcp_tool
+
+
+def _tool_display_name(tool_name: str) -> str:
+    """从 SSOT 读取工具中文简写名,fallback 到 tool_name."""
+    tool = get_mcp_tool(tool_name)
+    if tool and tool.display_name:
+        return tool.display_name
+    return tool_name
 
 
 def record_evaluation(
@@ -113,6 +122,7 @@ def get_eval_stats(db: Session, days: int = 30) -> dict:
         "tools": [
             {
                 "tool_name": t.tool_name,
+                "display_name": _tool_display_name(t.tool_name),
                 "count": t.count,
                 "is_success": int(t.is_success or 0),
                 "success_rate": round(int(t.is_success or 0) / max(t.count, 1) * 100, 1),

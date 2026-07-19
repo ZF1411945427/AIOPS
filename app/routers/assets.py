@@ -22,6 +22,21 @@ CI_TYPES = [
     "business_app", "api_service", "ssl_certificate", "dns_record", "monitoring_endpoint",
 ]
 
+# 中间件子类型枚举（ci_type="middleware" 时的 mw_subtype 取值，见 CONTRACT.md 第八章 8.1）
+MW_SUBTYPES = [
+    "nginx", "apache", "tomcat", "jetty", "weblogic", "websphere", "wildfly",
+    "kafka", "rabbitmq", "rocketmq", "activemq", "pulsar",
+    "nacos", "zookeeper", "apollo", "consul", "eureka", "etcd",
+    "sentinel", "apisix", "kong", "spring_cloud_gateway", "haproxy",
+    "seata", "minio",
+]
+
+# 数据库子类型枚举（ci_type="database" 时的 db_type 取值，见 CONTRACT.md 第八章 8.2）
+DB_TYPES = [
+    "mysql", "postgresql", "oracle", "sqlserver", "mongodb", "redis", "elasticsearch",
+    "tidb", "clickhouse", "dameng", "oceanbase", "mariadb", "sqlite",
+]
+
 # K8s 子资源不在 CMDB 台账中展示，由 K8sResourceListView 管理
 ASSET_EXCLUDE_CI_TYPES = {"deployment", "statefulset", "daemonset", "pod", "job",
                           "service", "ingress", "pvc", "configmap", "secret",
@@ -184,6 +199,13 @@ def _build_connection_config(payload: dict) -> dict:
             cfg["http_auth"] = payload["http_auth"]
         if payload.get("http_credential"):
             cfg["http_credential"] = payload["http_credential"]
+        # 中间件子类型字段透传到 connection_config，供 _test_middleware 使用
+        if payload.get("mw_subtype"):
+            cfg["mw_subtype"] = payload["mw_subtype"]
+        if payload.get("mw_port") is not None:
+            cfg["mw_port"] = int(payload["mw_port"])
+        if payload.get("mw_admin_url"):
+            cfg["mw_admin_url"] = payload["mw_admin_url"]
         return cfg
     elif ct == "database":
         return {
@@ -266,7 +288,7 @@ def api_asset_update(asset_id: int, payload: dict, db: Session = Depends(get_db)
     if "connection_config" in payload:
         cfg = payload["connection_config"]
         data["connection_config"] = json.dumps(cfg, ensure_ascii=False) if isinstance(cfg, dict) else cfg
-    elif any(k in payload for k in ("ssh_user", "ssh_password", "ssh_port", "k8s_api_server", "k8s_token", "http_url", "http_auth", "http_credential", "db_type", "db_port", "db_user", "db_password", "db_name", "snmp_community", "snmp_port", "snmp_version", "winrm_user", "winrm_password", "winrm_port", "winrm_transport", "winrm_ssl")):
+    elif any(k in payload for k in ("ssh_user", "ssh_password", "ssh_port", "k8s_api_server", "k8s_token", "http_url", "http_auth", "http_credential", "db_type", "db_port", "db_user", "db_password", "db_name", "snmp_community", "snmp_port", "snmp_version", "winrm_user", "winrm_password", "winrm_port", "winrm_transport", "winrm_ssl", "mw_subtype", "mw_port", "mw_admin_url")):
         config = _build_connection_config(payload)
         data["connection_config"] = json.dumps(config, ensure_ascii=False)
     if data.get("connection_config") and data.get("connection_type"):
@@ -714,9 +736,9 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
         db.commit()
         return JSONResponse({"ok": False, "message": f"K8s API 错误: {e}"}, status_code=502)
     except ImportError:
-        return JSONResponse({"ok": False, "message": "未安装 kubernetes 库"}, status_code=500)
+        return JSONResponse({"ok": False, "message": "未安装 kubernetes 库"}, status_code=200)
     except Exception as e:
-        return JSONResponse({"ok": False, "message": f"同步异常: {e}"}, status_code=500)
+        return JSONResponse({"ok": False, "message": f"同步异常: {e}"}, status_code=200)
 
 
 # ─── 从资产跳转 AI 助手（创建/复用会话并注入资产上下文） ───

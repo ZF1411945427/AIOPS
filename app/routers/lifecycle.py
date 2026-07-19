@@ -45,7 +45,7 @@ def api_lifecycle_list(db: Session = Depends(get_db)):
             })
         return JSONResponse({"items": items, "error": None})
     except Exception as e:
-        return JSONResponse({"items": [], "error": str(e)}, status_code=500)
+        return JSONResponse({"items": [], "warning": str(e)}, status_code=200)
 
 
 @router.get("/api/history/{asset_id}")
@@ -75,7 +75,7 @@ def api_lifecycle_history(asset_id: int, db: Session = Depends(get_db)):
             "error": None,
         })
     except Exception as e:
-        return JSONResponse({"items": [], "asset": None, "error": str(e)}, status_code=500)
+        return JSONResponse({"items": [], "asset": None, "warning": str(e)}, status_code=200)
 
 
 @router.post("/api/transition/{asset_id}")
@@ -123,4 +123,4 @@ def api_lifecycle_transition(
             "new_status": to_status,
         })
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)

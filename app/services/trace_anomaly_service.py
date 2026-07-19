@@ -9,7 +9,8 @@ def check_trace_anomalies(db: Session):
     now = datetime.now()
     new_alerts = []
     for cfg in configs:
-        window = 5
+        # 检测窗口从配置读取（默认 30min），之前硬编码 5min 导致 spans 数据非实时时永远查不到
+        window = max(1, int(cfg.check_window_minutes or 30))
         since = now - timedelta(minutes=window)
         q = db.query(Span).filter(Span.started_at >= since)
         if cfg.service_name:
@@ -49,7 +50,7 @@ def check_trace_anomalies(db: Session):
                     threshold=round(cfg.error_rate_threshold, 4),
                     severity="warning",
                     status="triggered",
-                    message=f"Trace异常 [{cfg.name}]: {cfg.service_name or '全部服务'} 错误率 {error_rate:.1%} (阈值={cfg.error_rate_threshold:.1%}, {total} spans)",
+                    message=f"Trace异常 [{cfg.name}]: {cfg.service_name or '全部服务'} 错误率 {error_rate:.1%} (阈值={cfg.error_rate_threshold:.1%}, {total} spans, 窗口={window}min)",
                 )
                 db.add(alert)
                 alerts_fired.append(alert)
@@ -72,7 +73,7 @@ def check_trace_anomalies(db: Session):
                     threshold=round(cfg.latency_threshold_ms, 1),
                     severity="warning",
                     status="triggered",
-                    message=f"Trace异常 [{cfg.name}]: {cfg.service_name or '全部服务'} 平均延迟 {avg_latency:.0f}ms (阈值={cfg.latency_threshold_ms:.0f}ms, P99={p99:.0f}ms)",
+                    message=f"Trace异常 [{cfg.name}]: {cfg.service_name or '全部服务'} 平均延迟 {avg_latency:.0f}ms (阈值={cfg.latency_threshold_ms:.0f}ms, P99={p99:.0f}ms, 窗口={window}min)",
                 )
                 db.add(alert)
                 alerts_fired.append(alert)

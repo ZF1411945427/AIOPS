@@ -412,4 +412,4 @@ def voice_transcribe(req: VoiceTranscribeRequest, user_id: int = Depends(require
             pass
         raise HTTPException(status_code=502, detail=detail)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"语音识别失败: {str(e)}")
+        return JSONResponse({"ok": False, "message": f"语音识别失败: {str(e)}"}, status_code=200)

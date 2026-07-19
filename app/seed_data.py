@@ -118,25 +118,83 @@ def seed_all():
         ("container-app-03", "container", "10.0.10.3", "online", ["k8s", "app"]),
         ("es-cluster-01", "middleware", "10.0.11.10", "online", ["elasticsearch", "data"]),
         ("es-cluster-02", "middleware", "10.0.11.11", "online", ["elasticsearch", "data"]),
+        ("nacos-prod-01", "middleware", "10.0.12.10", "online", ["production", "nacos"]),
+        ("zk-prod-01", "middleware", "10.0.12.20", "online", ["production", "zookeeper"]),
+        ("apollo-prod-01", "middleware", "10.0.12.30", "online", ["production", "apollo"]),
+        ("sentinel-prod-01", "middleware", "10.0.12.40", "online", ["production", "sentinel"]),
+        ("seata-prod-01", "middleware", "10.0.12.50", "online", ["production", "seata"]),
+        ("apisix-prod-01", "middleware", "10.0.13.10", "online", ["production", "apisix"]),
+        ("consul-prod-01", "middleware", "10.0.13.20", "online", ["production", "consul"]),
+        ("etcd-prod-01", "middleware", "10.0.13.30", "online", ["production", "etcd"]),
+        ("rocketmq-prod-01", "middleware", "10.0.14.10", "online", ["production", "rocketmq"]),
+        ("minio-prod-01", "middleware", "10.0.15.10", "online", ["production", "minio"]),
+        ("oracle-prod-01", "database", "10.0.16.10", "online", ["production", "oracle"]),
+        ("sqlserver-prod-01", "database", "10.0.16.20", "online", ["production", "sqlserver"]),
+        ("mongodb-prod-01", "database", "10.0.16.30", "online", ["production", "mongodb"]),
+        ("clickhouse-prod-01", "database", "10.0.16.40", "online", ["production", "clickhouse"]),
+        ("dameng-prod-01", "database", "10.0.16.50", "online", ["production", "dameng"]),
+        ("tidb-prod-01", "database", "10.0.16.60", "online", ["production", "tidb"]),
         ("gateway-01", "network", "10.0.0.1", "online", ["gateway"]),
         ("fw-01", "network", "10.0.0.2", "online", ["firewall"]),
         ("sw-core-01", "network", "10.0.0.3", "online", ["switch", "core"]),
     ]
     asset_objs = {}
+    # mw_subtype 推断表：按资产名前缀或 tags 推断
+    mw_subtype_map = {
+        "redis": "redis", "kafka": "kafka", "elasticsearch": "elasticsearch",
+        "nacos": "nacos", "zookeeper": "zookeeper", "apollo": "apollo",
+        "sentinel": "sentinel", "seata": "seata", "apisix": "apisix",
+        "consul": "consul", "etcd": "etcd", "rocketmq": "rocketmq",
+        "minio": "minio", "rabbitmq": "rabbitmq", "activemq": "activemq",
+        "nginx": "nginx", "tomcat": "tomcat",
+    }
+    db_type_map = {
+        "mysql": "mysql", "postgres": "postgresql", "postgresql": "postgresql",
+        "oracle": "oracle", "sqlserver": "sqlserver", "mongodb": "mongodb",
+        "clickhouse": "clickhouse", "dameng": "dameng", "tidb": "tidb",
+        "oceanbase": "oceanbase", "mariadb": "mariadb",
+    }
     for name, ci_type, ip, status, tags in asset_data:
         existing = db.query(Asset).filter(Asset.name == name).first()
         if existing:
             asset_objs[name] = existing
             continue
+        attrs = {
+            "cpu_cores": random.choice([4, 8, 16, 32]),
+            "memory_gb": random.choice([8, 16, 32, 64, 128]),
+            "disk_gb": random.choice([100, 200, 500, 1000, 2000]),
+            "os": random.choice(["Ubuntu 22.04", "CentOS 7", "Debian 11"]),
+        }
+        # 中间件：按 tags 或名字推断 mw_subtype
+        if ci_type == "middleware":
+            for t in tags:
+                if t in mw_subtype_map:
+                    attrs["mw_subtype"] = mw_subtype_map[t]
+                    attrs["mw_port"] = {
+                        "redis": 6379, "kafka": 9092, "elasticsearch": 9200,
+                        "nacos": 8848, "zookeeper": 2181, "apollo": 8080,
+                        "sentinel": 8080, "seata": 8091, "apisix": 9180,
+                        "consul": 8500, "etcd": 2379, "rocketmq": 9876,
+                        "minio": 9000, "rabbitmq": 15672, "activemq": 8161,
+                        "nginx": 80, "tomcat": 8080,
+                    }.get(t, 80)
+                    break
+        # 数据库：按 tags 推断 db_type
+        elif ci_type == "database":
+            for t in tags:
+                if t in db_type_map:
+                    attrs["db_type"] = db_type_map[t]
+                    break
+            if "db_type" not in attrs:
+                # 按名字兜底
+                for k, v in db_type_map.items():
+                    if k in name.lower():
+                        attrs["db_type"] = v
+                        break
         a = Asset(
-            name=name, type=ci_type, ci_type=ci_type,
+            name=name, ci_type=ci_type,
             ip=ip, status=status, tags=json.dumps(tags),
-            ci_attributes=json.dumps({
-                "cpu_cores": random.choice([4, 8, 16, 32]),
-                "memory_gb": random.choice([8, 16, 32, 64, 128]),
-                "disk_gb": random.choice([100, 200, 500, 1000, 2000]),
-                "os": random.choice(["Ubuntu 22.04", "CentOS 7", "Debian 11"]),
-            }),
+            ci_attributes=json.dumps(attrs),
             created_at=days_ago(random.randint(30, 180)),
         )
         db.add(a); db.flush()
@@ -290,7 +348,7 @@ def seed_all():
             db.add(DataSource(
                 name=name, type=ds_type, endpoint=endpoint,
                 auth_type="none", scrape_interval=30, enabled=enabled,
-                mapping_channel_config=json.dumps({"default_asset_type": "server"}),
+                mapping_config=json.dumps({"default_asset_type": "server"}),
                 last_status="healthy" if enabled else "unknown",
                 last_scraped_at=hours_ago(random.randint(0, 2)),
             ))
@@ -313,7 +371,7 @@ def seed_all():
             channel_type=random.choice(["email", "webhook", "slack"]),
             recipient=random.choice(["admin@example.com", "ops@example.com", "dev@example.com"]),
             title=f"告警通知: {alert.metric_name}",
-            content=f"{alert.message} — 来自 {alert.created_at}",
+            notification_content=f"{alert.message} — 来自 {alert.created_at}",
             is_success=random.random() > 0.15,
             error_message=None if random.random() > 0.15 else "Connection timeout",
             created_at=alert.created_at,
@@ -348,7 +406,7 @@ def seed_all():
             db.add(session); db.flush()
             for role, content, *extra in msgs:
                 tool_calls = extra[0] if extra else None
-                msg = ChatMessage(session_id=session.id, role=role, content=content, tool_calls=tool_calls, created_at=hours_ago(random.randint(1, 72)))
+                msg = ChatMessage(session_id=session.id, role=role, message_content=content, tool_calls=tool_calls, created_at=hours_ago(random.randint(1, 72)))
                 db.add(msg); db.flush()
                 if role == "assistant" and tool_calls:
                     db.add(ToolInvocation(
@@ -514,7 +572,7 @@ def seed_all():
         for name, ci_t, ip, status, tags in k8s_assets:
             existing = db.query(Asset).filter(Asset.name == name).first()
             if not existing:
-                a = Asset(name=name, type=ci_t, ci_type=ci_t, ip=ip, status=status, tags=json.dumps(tags),
+                a = Asset(name=name, ci_type=ci_t, ip=ip, status=status, tags=json.dumps(tags),
                     ci_attributes=json.dumps({"k8s_cluster": "prod-cluster","namespace":"prod" if name.startswith("prod/") else "default"}))
                 db.add(a); db.flush()
 
@@ -533,7 +591,7 @@ def seed_all():
     # ── K8s DataSource ──
     if not db.query(DataSource).filter(DataSource.type == "kubernetes").first():
         db.add(DataSource(name="生产 K8s 集群", type="kubernetes", endpoint="https://k8s-api.prod.local:6443",
-            auth_channel_config=json.dumps({"k8s_api_server": "https://k8s-api.prod.local:6443", "k8s_token": "seed-k8s-token", "verify_ssl": False}),
+            auth_config=json.dumps({"k8s_api_server": "https://k8s-api.prod.local:6443", "k8s_token": "seed-k8s-token", "verify_ssl": False}),
             last_status="unknown", enabled=False))
 
     # ── AutoRemediation (5) ──
@@ -547,7 +605,7 @@ def seed_all():
         rule_ids = [r.id for r in db.query(AlertRule).limit(5).all()]
         for i, (name, act, params) in enumerate(actions):
             db.add(AutoRemediation(name=name, rule_id=rule_ids[i] if i < len(rule_ids) else rule_ids[0],
-                action_type=act, params=json.dumps(params), enabled=True))
+                action_type=act, remediation_params=json.dumps(params), enabled=True))
 
     # ── RemediationWorkflow (3) ──
     if db.query(RemediationWorkflow).count() < 2:
@@ -571,7 +629,7 @@ def seed_all():
     if db.query(DiscoveryJob).count() < 2:
         for name, jtype, target in [("内网资产扫描", "ssh", "192.168.1.0/24"),
             ("K8s 节点发现", "kubernetes", "prod-cluster"), ("云资产同步", "subnet", "10.0.0.0/8")]:
-            db.add(DiscoveryJob(name=name, job_type=jtype, target=target, channel_config=json.dumps({"timeout": 30}),
+            db.add(DiscoveryJob(name=name, job_type=jtype, target=target,         job_config=json.dumps({"timeout": 30}),
                 status=random.choice(["completed", "completed", "failed"]),
                 result_summary=json.dumps({"found": random.randint(5, 20), "new": random.randint(0, 5)}),
                 finished_at=hours_ago(random.randint(1, 48))))
@@ -633,15 +691,15 @@ def seed_all():
             db.add(PredictionModel(name=f"{mn} 预测模型", metric_name=mn,
                 asset_id=assets_list[i % len(assets_list)].id if assets_list else None,
                 model_type=random.choice(["linear", "prophet", "arima"]),
-                params=json.dumps({"window": 24, "period": 7}), enabled=True))
+                model_params=json.dumps({"window": 24, "period": 7}), enabled=True))
 
     # ── DashboardCardConfig (6) ──
     if db.query(DashboardCardConfig).filter(DashboardCardConfig.user_id == 1).count() < 3:
         cards = [("stats", "统计概览"), ("alert_chart", "告警趋势"), ("asset_pie", "资产分布"),
             ("incident_list", "最近故障"), ("health_gauge", "系统健康度"), ("ai_chat", "AI 助手")]
         for i, (ct, title) in enumerate(cards):
-            db.add(DashboardCardConfig(user_id=1, card_type=ct, title=title, position=i, visible=True,
-                channel_config=json.dumps({"span": 2 if ct == "alert_chart" else 1})))
+            db.add(DashboardCardConfig(user_id=1, card_type=ct, title=title, position=i,         is_visible=True,
+                card_config=json.dumps({"span": 2 if ct == "alert_chart" else 1})))
 
     # ── ReportSchedule (3) ──
     if db.query(ReportSchedule).count() < 2:
@@ -649,7 +707,7 @@ def seed_all():
             ("每周汇总", "weekly", "0 9 * * 1", "wecom"),
             ("月度SLA报告", "monthly", "0 10 1 * *", "email")]:
             db.add(ReportSchedule(name=name, report_type=rtype, cron_expr=cron, channel=ch,
-                channel_channel_config=json.dumps({"recipients": ["admin@aiops.local"]}), enabled=True))
+                channel_config=json.dumps({"recipients": ["admin@aiops.local"]}), enabled=True))
 
     # ── ApiToken (3) ──
     if db.query(ApiToken).count() < 2:

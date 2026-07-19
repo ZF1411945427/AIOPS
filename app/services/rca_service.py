@@ -82,7 +82,7 @@ def analyze_incident(db: Session, incident_id: int) -> dict:
                     paths.append({"from": root_asset.name, "to": ia["name"], "path": path})
 
     pkg = _build_investigation_package(
-        db, incident, root_asset, involved, ranked, alerts, parent_map
+        db, incident, root_asset, involved, ranked, alerts, parent_map, paths
     )
     report_md = _build_markdown_report(incident, root_asset, involved, ranked, alerts, paths, pkg)
 
@@ -97,7 +97,7 @@ def analyze_incident(db: Session, incident_id: int) -> dict:
     }
 
 
-def _build_investigation_package(db, incident, root_asset, involved, ranked, alerts, parent_map) -> dict:
+def _build_investigation_package(db, incident, root_asset, involved, ranked, alerts, parent_map, paths=None) -> dict:
     """构建 6 部分 Investigation Package."""
     all_asset_ids = [ia["id"] for ia in involved]
 

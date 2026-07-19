@@ -12,6 +12,7 @@
       </select>
       <button class="btn btn-primary" @click="showRecord = true">+ 录入基准</button>
       <button class="btn" @click="loadStats">刷新</button>
+      <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
     </div>
 
     <div v-if="stats" class="stats-grid">
@@ -113,6 +114,68 @@
         </div>
       </div>
     </div>
+    <GuideDrawer v-model="showGuide" title="📖 异常检测基准评估 · 操作说明">
+      <section class="guide-section">
+        <h4>1. 这个页面是干嘛的？</h4>
+        <p>简单说：<strong>给"异常检测算法"打分</strong>，帮你选出最准的算法。</p>
+        <p>系统里有多种异常检测算法（Isolation Forest、Luminol、MAD、EWMA、Prophet 等），但哪个算法对你自己的数据最准？光看理论说不清，得用<strong>真实数据测一遍</strong>。</p>
+        <p>这个页面就是让你<strong>录入测试结果</strong>（某个算法在某指标上的表现），系统帮你统计对比，推荐最优算法。</p>
+      </section>
+      <section class="guide-section">
+        <h4>2. 核心概念：三个评分指标</h4>
+        <p>每个算法测试后会得到三个分数（都在 0~1 之间，越接近 1 越好）：</p>
+        <div class="key-value-list">
+          <div class="kv-row">
+            <span class="kv-key">Precision<br>(精确率)</span>
+            <span class="kv-val">算法报的异常里，<strong>真异常</strong>占多少。<br>例：算法报了 10 个异常，其中 8 个是真的 → Precision = 0.8<br>⚠️ Precision 低 = 误报多（狼来了）</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">Recall<br>(召回率)</span>
+            <span class="kv-val">真实的异常里，<strong>算法抓到了多少</strong>。<br>例：实际有 10 个异常，算法抓到 7 个 → Recall = 0.7<br>⚠️ Recall 低 = 漏报多（漏检）</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-key">F1 Score<br>(综合分)</span>
+            <span class="kv-val">Precision 和 Recall 的<strong>平衡分</strong>，是综合评价。<br>F1 = 2 × P × R / (P + R)<br>💡 选算法时主要看 F1，越高越好</span>
+          </div>
+        </div>
+        <div class="tip-box">💡 没有完美算法：Precision 高的往往 Recall 低，反之亦然。F1 是平衡点。比如告警场景怕漏报，可侧重 Recall；怕误报烦人，可侧重 Precision。</div>
+      </section>
+      <section class="guide-section">
+        <h4>3. 页面三个区域</h4>
+        <ul>
+          <li><strong>统计卡片</strong> — 显示总记录数、最优算法（F1 最高的）</li>
+          <li><strong>各算法效果对比表</strong> — 每个算法的平均 P/R/F1，绿色高亮最优算法</li>
+          <li><strong>算法推荐</strong> — 系统基于历史数据自动推荐最优算法 + 置信度 + 理由</li>
+          <li><strong>基准记录表</strong> — 你录入的所有测试记录明细</li>
+        </ul>
+        <p>F1 颜色含义：<span class="tag-demo" style="background:rgba(34,197,94,0.12);color:#22c55e;">≥0.8 绿</span>（优秀）/ <span class="tag-demo" style="background:rgba(245,158,11,0.12);color:#d97706;">≥0.6 橙</span>（及格）/ <span class="tag-demo" style="background:rgba(239,68,68,0.12);color:#ef4444;">&lt;0.6 红</span>（较差）</p>
+      </section>
+      <section class="guide-section">
+        <h4>4. 怎么操作？</h4>
+        <h5>步骤 1：跑算法测试（页面外）</h5>
+        <p>先在你的数据上跑一遍某个异常检测算法，拿到测试结果。比如对 CPU 使用率指标跑 Isolation Forest 算法，得到 Precision=0.85、Recall=0.75、F1=0.80。</p>
+        <h5>步骤 2：录入基准</h5>
+        <ul>
+          <li>点击右上角 <code>+ 录入基准</code> 按钮</li>
+          <li>选择算法（如 Isolation Forest）</li>
+          <li>填入 Precision / Recall / F1（0~1 之间的小数）</li>
+          <li>点"提交"</li>
+        </ul>
+        <h5>步骤 3：查看对比和推荐</h5>
+        <p>录入后页面自动刷新，对比表会显示该算法的平均分，推荐区会基于历史数据推荐最优算法。多次录入不同算法后，对比效果更明显。</p>
+      </section>
+      <section class="guide-section">
+        <h4>5. 实战例子</h4>
+        <p>假设你管理 10 台服务器的 CPU 监控，想找出最准的异常检测算法：</p>
+        <ul>
+          <li>第 1 周：跑 Isolation Forest，录入 P=0.85, R=0.75, F1=0.80</li>
+          <li>第 2 周：跑 MAD，录入 P=0.70, R=0.90, F1=0.79</li>
+          <li>第 3 周：跑 EWMA，录入 P=0.60, R=0.95, F1=0.74</li>
+        </ul>
+        <p>系统对比后推荐 Isolation Forest（F1 最高 0.80），你就可以在「异常检测配置」页选它做主算法。</p>
+        <div class="tip-box">💡 这就像买手机：看评测（录入基准）→ 对比参数（对比表）→ 选最高性价比（推荐算法）。区别是这里评测的是算法，不是手机。</div>
+      </section>
+    </GuideDrawer>
   </div>
 </template>
 
@@ -120,6 +183,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const days = ref(90)
 const stats = ref(null)
@@ -127,6 +191,7 @@ const records = ref([])
 const recommend = ref(null)
 const loading = ref(false)
 const showRecord = ref(false)
+const showGuide = ref(false)
 const recForm = ref({ algorithm: 'isolation_forest', precision: 0.8, recall: 0.75, f1_score: 0.77, asset_id: null, metric_name: '' })
 
 async function loadStats() {

@@ -24,6 +24,8 @@ DEFAULT_CONFIGS = {
     "metric_collect_enabled": {"value": "true", "description": "是否启用指标采集"},
     "metric_collect_interval": {"value": "60", "description": "指标采集间隔 (秒)"},
     "tenant_mode": {"value": "false", "description": "是否启用多租户模式（true/false）"},
+    "incident_approval_enabled": {"value": "false", "description": "是否启用故障单审批角色校验（true/false）。关闭=任何人可审批；开启=仅审批人列表中的用户可审批"},
+    "incident_approvers": {"value": "", "description": "故障单审批人 user_id 列表（逗号分隔，如 1,2,3）。仅当 incident_approval_enabled=true 时生效"},
 }
 
 

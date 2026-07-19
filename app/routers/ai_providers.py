@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import AIProvider, AgentConfig
 from app.services.agent_service import call_llm
+from app.services.ai_provider_health import (
+    get_breaker, reset_breaker, reset_all_breakers, health_snapshot, get_all_breakers,
+)
+from app.logger import logger
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -141,3 +145,74 @@ def api_config_edit(config_id: int, payload: dict = Body(...), db: Session = Dep
     config.updated_at = datetime.now()
     db.commit()
     return {"status": "ok"}
+
+
+# ── AI Provider 健康度看板（P1 任务#5） ─────────────────────────────
+
+@router.get("/api/providers/health")
+def api_providers_health(db: Session = Depends(get_db)):
+    """返回所有 provider 的健康度 + 熔断器状态"""
+    try:
+        providers = db.query(AIProvider).all()
+        breakers = get_all_breakers()
+        # 合并 provider 基础信息 + 熔断器状态
+        items = []
+        for p in providers:
+            breaker = breakers.get(p.id)
+            health = breaker.to_dict() if breaker else {
+                "provider_id": p.id, "state": "closed", "failure_count": 0,
+                "success_count": 0, "total_calls": 0, "success_rate": 1.0,
+                "p95_latency_ms": 0.0, "avg_latency_ms": 0.0,
+                "last_success_at": None, "last_failure_at": None,
+                "last_error": None, "open_remaining_sec": 0,
+                "failure_threshold": 5, "open_duration_sec": 60,
+            }
+            items.append({
+                "id": p.id,
+                "name": p.name,
+                "provider_type": p.provider_type,
+                "base_url": p.base_url,
+                "default_model": p.default_model,
+                "is_enabled": p.is_enabled,
+                "has_api_key": bool(p.api_key_encrypted),
+                "health": health,
+            })
+        return {
+            "providers": items,
+            "total": len(items),
+            "opened_count": sum(1 for i in items if i["health"]["state"] == "open"),
+            "half_open_count": sum(1 for i in items if i["health"]["state"] == "half_open"),
+            "closed_count": sum(1 for i in items if i["health"]["state"] == "closed"),
+        }
+    except Exception as e:
+        logger.warning(f"api_providers_health 异常: {e}")
+        return {"warning": str(e), "providers": [], "total": 0}
+
+
+@router.post("/api/providers/{provider_id}/reset-breaker")
+def api_provider_reset_breaker(provider_id: int, db: Session = Depends(get_db)):
+    """手动重置 provider 熔断器"""
+    try:
+        provider = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
+        if not provider:
+            return {"status": "error", "message": "Provider not found"}
+        ok = reset_breaker(provider_id)
+        if ok:
+            logger.info(f"AI Provider {provider_id} 熔断器已手动重置")
+            return {"status": "ok", "message": "熔断器已重置"}
+        return {"status": "error", "message": "熔断器不存在"}
+    except Exception as e:
+        logger.warning(f"api_provider_reset_breaker 异常: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/api/providers/reset-all-breakers")
+def api_providers_reset_all(db: Session = Depends(get_db)):
+    """重置所有 provider 熔断器"""
+    try:
+        reset_all_breakers()
+        logger.info("所有 AI Provider 熔断器已重置")
+        return {"status": "ok", "message": "所有熔断器已重置"}
+    except Exception as e:
+        logger.warning(f"api_providers_reset_all 异常: {e}")
+        return {"status": "error", "message": str(e)}

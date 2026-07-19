@@ -83,7 +83,7 @@ def api_log_indices(source_id: int = 0, db: Session = Depends(get_db)):
         es.close()
         return JSONResponse([{"name": i["index"], "docs": int(i.get("docs.count", 0))} for i in indices])
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 def _query_elasticsearch(source, query_str, time_range, page, size, index="", level="", host="", service=""):

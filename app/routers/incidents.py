@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Body
 from fastapi.responses import JSONResponse
 from app.template_utils import get_templates
 
 from app.database import get_db
-from app.services import incident_service, rca_service, knowledge_graph_service
+from app.services import incident_service, rca_service, knowledge_graph_service, config_service
 from app.services.agent_service import call_llm
 from app.models import AIProvider, AgentConfig
 from sqlalchemy.orm import Session
@@ -69,8 +69,70 @@ def api_create_incident(title: str = "", severity: str = "warning", impact: str 
     inc = incident_service.create_incident(db, title=title, severity=severity,
                                           impact=impact, description=description, asset_id=asset_id)
     if not inc:
-        return JSONResponse({"error": "创建失败"}, status_code=500)
+        return JSONResponse({"message": "创建失败"}, status_code=200)
     return JSONResponse({"incident": _incident_to_dict(inc), "ok": True})
+
+
+# ── 审批设置（必须在 /api/{incident_id} 之前声明，避免路径参数拦截）──
+@router.get("/api/approval-settings")
+def api_get_approval_settings(db: Session = Depends(get_db)):
+    """获取故障单审批设置：是否启用角色校验 + 审批人 user_id 列表 + 审批人详情"""
+    enabled = config_service.get_config(db, "incident_approval_enabled", "false").lower() == "true"
+    approver_ids_str = config_service.get_config(db, "incident_approvers", "")
+    approver_ids = [int(x) for x in approver_ids_str.split(",") if x.strip().isdigit()]
+
+    approvers = []
+    if approver_ids:
+        from app.models import User
+        users = db.query(User).filter(User.id.in_(approver_ids)).all()
+        approvers = [{"id": u.id, "username": u.username, "role": u.role or ""} for u in users]
+
+    return JSONResponse({
+        "enabled": enabled,
+        "approver_ids": approver_ids,
+        "approvers": approvers,
+    })
+
+
+@router.put("/api/approval-settings")
+def api_update_approval_settings(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """更新故障单审批设置
+
+    payload:
+        enabled: bool - 是否启用角色校验
+        approver_ids: list[int] - 审批人 user_id 列表
+    """
+    enabled = bool(payload.get("enabled", False))
+    approver_ids = payload.get("approver_ids", [])
+    if not isinstance(approver_ids, list):
+        return JSONResponse({"ok": False, "error": "approver_ids 必须是数组"}, status_code=400)
+
+    # 校验 user_id 都存在
+    if approver_ids:
+        from app.models import User
+        valid_ids = {u.id for u in db.query(User).filter(User.id.in_(approver_ids)).all()}
+        approver_ids = [i for i in approver_ids if i in valid_ids]
+
+    config_service.update_config(db, "incident_approval_enabled", "true" if enabled else "false")
+    config_service.update_config(db, "incident_approvers", ",".join(str(i) for i in approver_ids))
+    return JSONResponse({"ok": True, "enabled": enabled, "approver_ids": approver_ids})
+
+
+def _check_approval_permission(db: Session, user_id: int) -> tuple[bool, str]:
+    """校验当前用户是否有审批权限。
+
+    返回 (has_permission, error_message)。
+    - 若 incident_approval_enabled=false：任何人都有权限（向后兼容）
+    - 若 incident_approval_enabled=true：仅当 user_id 在 incident_approvers 列表中才有权限
+    """
+    enabled = config_service.get_config(db, "incident_approval_enabled", "false").lower() == "true"
+    if not enabled:
+        return True, ""
+    approver_ids_str = config_service.get_config(db, "incident_approvers", "")
+    approver_ids = {int(x) for x in approver_ids_str.split(",") if x.strip().isdigit()}
+    if user_id in approver_ids:
+        return True, ""
+    return False, "权限不足：当前用户不在审批人列表中（审批角色校验已启用）"
 
 
 @router.get("/api/{incident_id}")
@@ -109,8 +171,14 @@ def api_submit_approval(incident_id: int, request: Request, comment: str = "", d
 
 @router.post("/api/{incident_id}/approve")
 def api_approve_incident(incident_id: int, request: Request, comment: str = "", db: Session = Depends(get_db)):
-    """审批通过：pending_approval → resolved"""
+    """审批通过：pending_approval → resolved
+
+    权限：若 incident_approval_enabled=true，仅审批人列表中的用户可审批
+    """
     user_id = request.session.get("user_id")
+    has_perm, err_msg = _check_approval_permission(db, user_id)
+    if not has_perm:
+        return JSONResponse({"ok": False, "error": err_msg}, status_code=403)
     result = incident_service.approve_incident(db, incident_id, approver_id=user_id, comment=comment)
     if not result.get("ok"):
         return JSONResponse(result, status_code=400)
@@ -119,8 +187,14 @@ def api_approve_incident(incident_id: int, request: Request, comment: str = "", 
 
 @router.post("/api/{incident_id}/reject")
 def api_reject_incident(incident_id: int, request: Request, comment: str = "", db: Session = Depends(get_db)):
-    """审批驳回：pending_approval → open"""
+    """审批驳回：pending_approval → open
+
+    权限：若 incident_approval_enabled=true，仅审批人列表中的用户可驳回
+    """
     user_id = request.session.get("user_id")
+    has_perm, err_msg = _check_approval_permission(db, user_id)
+    if not has_perm:
+        return JSONResponse({"ok": False, "error": err_msg}, status_code=403)
     result = incident_service.reject_incident(db, incident_id, approver_id=user_id, comment=comment)
     if not result.get("ok"):
         return JSONResponse(result, status_code=400)

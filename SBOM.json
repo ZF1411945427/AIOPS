@@ -1,0 +1,1357 @@
+{
+  "sbom_version": "1.0",
+  "generated_at": "2026-07-19",
+  "components": [
+    {
+      "name": "PyMySQL",
+      "version": "1.1.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "aiohappyeyeballs",
+      "version": "2.6.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "aiohttp",
+      "version": "3.14.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "aiosignal",
+      "version": "1.4.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "annotated-doc",
+      "version": "0.0.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.7.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "anyio",
+      "version": "4.11.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "anyio",
+      "version": "4.12.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "asgiref",
+      "version": "3.9.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "attrs",
+      "version": "25.4.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "bandit",
+      "version": "1.9.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "bcrypt",
+      "version": "5.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "boolean.py",
+      "version": "5.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "CacheControl",
+      "version": "0.14.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "cachetools",
+      "version": "7.1.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "cairocffi",
+      "version": "1.7.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "CairoSVG",
+      "version": "2.9.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "certifi",
+      "version": "2025.10.5",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "certifi",
+      "version": "2026.2.25",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "cffi",
+      "version": "2.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.4.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "click",
+      "version": "8.4.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "contourpy",
+      "version": "1.3.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "cryptography",
+      "version": "44.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "cssselect2",
+      "version": "0.9.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "cycler",
+      "version": "0.12.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "cyclonedx-python-lib",
+      "version": "11.11.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "defusedxml",
+      "version": "0.7.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "Deprecated",
+      "version": "1.3.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "distlib",
+      "version": "0.4.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "distro",
+      "version": "1.9.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "Django",
+      "version": "5.2.6",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "durationpy",
+      "version": "0.10",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "edge-tts",
+      "version": "7.2.7",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "elasticsearch",
+      "version": "8.6.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "elastic-transport",
+      "version": "8.17.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "et_xmlfile",
+      "version": "2.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "faiss-cpu",
+      "version": "1.14.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "fastapi",
+      "version": "0.115.6",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "filelock",
+      "version": "3.19.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "filelock",
+      "version": "3.25.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "fonttools",
+      "version": "4.62.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "fpdf2",
+      "version": "2.8.7",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "freetype-py",
+      "version": "2.5.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "frozenlist",
+      "version": "1.8.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "fsspec",
+      "version": "2026.2.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "greenlet",
+      "version": "3.5.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "grpcio",
+      "version": "1.82.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "hf-xet",
+      "version": "1.4.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "httpx-sse",
+      "version": "0.4.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "huggingface_hub",
+      "version": "1.7.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "idna",
+      "version": "3.18",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "invoke",
+      "version": "3.0.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "itsdangerous",
+      "version": "2.2.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "Jinja2",
+      "version": "3.1.6",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "jiter",
+      "version": "0.11.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "joblib",
+      "version": "1.5.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "jsonpatch",
+      "version": "1.33",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "jsonpointer",
+      "version": "3.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "jsonschema",
+      "version": "4.26.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "jsonschema-specifications",
+      "version": "2025.9.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "kiwisolver",
+      "version": "1.5.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "kubernetes",
+      "version": "36.0.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "langchain",
+      "version": "1.2.12",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "langchain-core",
+      "version": "1.2.19",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "langgraph",
+      "version": "1.1.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "langgraph-checkpoint",
+      "version": "3.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "langgraph-prebuilt",
+      "version": "1.0.8",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "langgraph-sdk",
+      "version": "0.3.11",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "langsmith",
+      "version": "0.4.38",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "license-expression",
+      "version": "30.4.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "limits",
+      "version": "5.8.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "loguru",
+      "version": "0.7.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "lxml",
+      "version": "6.1.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "markdown-it-py",
+      "version": "4.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "MarkupSafe",
+      "version": "3.0.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "matplotlib",
+      "version": "3.10.8",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "mcp",
+      "version": "1.26.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "mdurl",
+      "version": "0.1.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "milvus-lite",
+      "version": "3.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "mpmath",
+      "version": "1.3.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "msgpack",
+      "version": "1.2.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "multidict",
+      "version": "6.7.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "narwhals",
+      "version": "2.23.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "networkx",
+      "version": "3.6.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "numpy",
+      "version": "2.4.6",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "oauthlib",
+      "version": "3.3.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "openai",
+      "version": "2.6.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "openpyxl",
+      "version": "3.1.5",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "orjson",
+      "version": "3.11.7",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "ormsgpack",
+      "version": "1.11.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "packageurl-python",
+      "version": "0.17.6",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "packaging",
+      "version": "25.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "packaging",
+      "version": "26.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pandas",
+      "version": "3.0.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "paramiko",
+      "version": "5.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "patsy",
+      "version": "1.0.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pip",
+      "version": "26.0.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pip-api",
+      "version": "0.0.34",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pip_audit",
+      "version": "2.10.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pip-licenses",
+      "version": "5.5.5",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pip-requirements-parser",
+      "version": "32.0.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "platformdirs",
+      "version": "4.4.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "playwright",
+      "version": "1.60.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pluggy",
+      "version": "1.6.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "prettytable",
+      "version": "3.18.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "propcache",
+      "version": "0.4.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "protobuf",
+      "version": "7.35.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pyarrow",
+      "version": "25.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pycairo",
+      "version": "1.29.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pycparser",
+      "version": "3.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pydantic",
+      "version": "2.12.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pydantic_core",
+      "version": "2.41.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pydantic-settings",
+      "version": "2.14.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pyee",
+      "version": "13.0.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "Pygments",
+      "version": "2.20.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "PyJWT",
+      "version": "2.13.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pymilvus",
+      "version": "3.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "PyNaCl",
+      "version": "1.6.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pyparsing",
+      "version": "3.3.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pytest",
+      "version": "9.1.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pytest-timeout",
+      "version": "2.4.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "python-dotenv",
+      "version": "1.2.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "python-multipart",
+      "version": "0.0.32",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "python-pptx",
+      "version": "1.0.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "pywin32",
+      "version": "311",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "py-serializable",
+      "version": "2.1.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "rank-bm25",
+      "version": "0.2.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "referencing",
+      "version": "0.37.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "regex",
+      "version": "2026.6.28",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "reportlab",
+      "version": "5.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "requests-oauthlib",
+      "version": "2.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "requests-toolbelt",
+      "version": "1.0.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "rich",
+      "version": "14.3.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "rlPyCairo",
+      "version": "0.4.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "rpds-py",
+      "version": "0.30.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "safetensors",
+      "version": "0.8.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "scikit-learn",
+      "version": "1.9.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "scipy",
+      "version": "1.18.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "sentencepiece",
+      "version": "0.2.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "sentence-transformers",
+      "version": "5.6.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "setuptools",
+      "version": "82.0.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "shellingham",
+      "version": "1.5.4",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "slowapi",
+      "version": "0.1.10",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "sniffio",
+      "version": "1.3.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "sortedcontainers",
+      "version": "2.4.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "SQLAlchemy",
+      "version": "2.0.36",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "sqlparse",
+      "version": "0.5.5",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "sse-starlette",
+      "version": "3.3.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "starlette",
+      "version": "0.41.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "statsmodels",
+      "version": "0.14.6",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "stevedore",
+      "version": "5.9.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "svglib",
+      "version": "2.0.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "sympy",
+      "version": "1.14.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tabulate",
+      "version": "0.10.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tenacity",
+      "version": "9.1.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "threadpoolctl",
+      "version": "3.6.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tinycss2",
+      "version": "1.5.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tokenizers",
+      "version": "0.22.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tomli",
+      "version": "2.4.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tomli_w",
+      "version": "1.2.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "torch",
+      "version": "2.9.0+cu129",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tqdm",
+      "version": "4.67.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tqdm",
+      "version": "4.67.3",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "transformers",
+      "version": "5.13.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "typer",
+      "version": "0.24.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.15.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "tzdata",
+      "version": "2025.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "urllib3",
+      "version": "2.7.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "uuid_utils",
+      "version": "0.14.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.34.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "virtualenv",
+      "version": "20.34.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "wcwidth",
+      "version": "0.8.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "webencodings",
+      "version": "0.5.1",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "websockets",
+      "version": "16.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "websocket-client",
+      "version": "1.9.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "win32_setctime",
+      "version": "1.2.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "wrapt",
+      "version": "2.2.2",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "xlsxwriter",
+      "version": "3.2.9",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "xxhash",
+      "version": "3.6.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "yarl",
+      "version": "1.23.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    },
+    {
+      "name": "zstandard",
+      "version": "0.25.0",
+      "license": "",
+      "url": "",
+      "author": ""
+    }
+  ]
+}

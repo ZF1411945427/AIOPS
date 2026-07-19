@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Request, Form, Body
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Optional
 from app.template_utils import get_templates
 
 from app.database import get_db
@@ -11,6 +13,18 @@ from sqlalchemy import distinct
 
 router = APIRouter(prefix="/anomaly", tags=["anomaly"])
 templates = get_templates()
+
+
+class BenchmarkCreate(BaseModel):
+    """异常检测基准录入请求体（与前端 AnomalyBenchmarkView recForm 字段对齐）"""
+    algorithm: str
+    precision: float = 0.0
+    recall: float = 0.0
+    f1_score: float = 0.0
+    metric_name: str = ""
+    asset_id: Optional[int] = None
+    window_minutes: int = 60
+    threshold: float = 0.0
 
 
 def _config_to_dict(c) -> dict:
@@ -119,27 +133,22 @@ def api_benchmark_list(
 
 
 @router.post("/api/benchmark")
-def api_benchmark_create(
-    algorithm: str = Form(...),
-    precision: float = Form(0.0),
-    recall: float = Form(0.0),
-    f1_score: float = Form(0.0),
-    metric_name: str = Form(""),
-    asset_id: int = Form(0),
-    window_minutes: int = Form(60),
-    threshold: float = Form(0.0),
-    db: Session = Depends(get_db)
-):
+def api_benchmark_create(payload: BenchmarkCreate = Body(...), db: Session = Depends(get_db)):
+    """录入异常检测基准数据（JSON Body）。
+
+    前端 AnomalyBenchmarkView 发送 JSON：{algorithm, precision, recall, f1_score, asset_id, metric_name, window_minutes, threshold}
+    之前用 Form(...) 接收导致 422 Unprocessable Content（前端发 JSON 时 Form 端点拒绝）。
+    """
     bench_id = anomaly_eval_service.record_benchmark(
         db=db,
-        asset_id=asset_id or None,
-        metric_name=metric_name,
-        algorithm=algorithm,
-        window_minutes=window_minutes,
-        precision=precision,
-        recall=recall,
-        f1_score=f1_score,
-        threshold=threshold,
+        asset_id=payload.asset_id or None,
+        metric_name=payload.metric_name,
+        algorithm=payload.algorithm,
+        window_minutes=payload.window_minutes,
+        precision=payload.precision,
+        recall=payload.recall,
+        f1_score=payload.f1_score,
+        threshold=payload.threshold,
     )
     return JSONResponse({"ok": True, "id": bench_id})
 

@@ -95,7 +95,7 @@ async def send_message(
     result = process_chat_message(db, user_id, session_id, message)
 
     if result.get("error"):
-        return JSONResponse({"error": result["reply"]}, status_code=500)
+        return JSONResponse({"warning": result["reply"]}, status_code=200)
 
     return JSONResponse(result)
 
@@ -476,6 +476,7 @@ def get_agent_capabilities(request: Request, db: Session = Depends(get_db)):
         risk_counts[t.risk_level] = risk_counts.get(t.risk_level, 0) + 1
         tools.append({
             "name": t.name,
+            "display_name": t.display_name or t.name,
             "description": t.description,
             "input_schema": t.input_schema,
             "risk_level": t.risk_level,

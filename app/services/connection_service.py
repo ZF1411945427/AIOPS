@@ -217,7 +217,11 @@ class ConnectionTester:
         """测试 HTTP/HTTPS API 连接
 
         认证字段: http_auth (basic/bearer) + http_credential (见 CONTRACT.md)
+        当 config 含 mw_subtype 时，路由到 _test_middleware（按中间件子类型选择健康检查路径）。
         """
+        if config.get("mw_subtype"):
+            return ConnectionTester._test_middleware(host, config)
+
         url = config.get("http_url", "")
         if not url:
             if host:
@@ -263,20 +267,34 @@ class ConnectionTester:
 
     @staticmethod
     def _test_database(host: str, config: dict) -> dict:
-        """测试数据库连接"""
-        if not host:
-            return {"ok": False, "message": "主机不能为空"}
+        """测试数据库连接
 
+        支持的 db_type（见 CONTRACT.md 第八章 8.2）：
+        mysql / postgresql / redis / oracle / sqlserver / mongodb /
+        elasticsearch / tidb / clickhouse / dameng / oceanbase / mariadb / sqlite
+        """
         db_type = config.get("db_type", "mysql")
-        port = config.get("db_port", 3306 if db_type == "mysql" else 5432)
+        port = config.get("db_port", 3306)
         username = config.get("db_user", "")
         password = config.get("db_password", "")
         database = config.get("db_name", "")
         timeout = 10
 
+        if db_type == "sqlite":
+            if not database:
+                return {"ok": False, "message": "SQLite 需要指定数据库文件路径 (db_name 字段)"}
+            import os
+            if os.path.isfile(database):
+                return {"ok": True, "message": f"SQLite 文件存在: {database}", "latency_ms": 0}
+            return {"ok": False, "message": f"SQLite 文件不存在: {database}"}
+
+        if not host:
+            return {"ok": False, "message": "主机不能为空"}
+
         start = datetime.now()
         try:
-            if db_type == "mysql":
+            # MySQL 协议兼容（mysql / mariadb / tidb / oceanbase）
+            if db_type in ("mysql", "mariadb", "tidb", "oceanbase"):
                 import pymysql
                 conn = pymysql.connect(
                     host=host, port=int(port), user=username, password=password,
@@ -291,6 +309,7 @@ class ConnectionTester:
                     result["permission_check"] = {"error": str(e)}
                 conn.close()
                 return result
+
             elif db_type == "postgresql":
                 import psycopg2
                 conn = psycopg2.connect(
@@ -300,18 +319,199 @@ class ConnectionTester:
                 latency = (datetime.now() - start).total_seconds() * 1000
                 conn.close()
                 return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+
             elif db_type == "redis":
                 import redis
                 r = redis.Redis(host=host, port=int(port), password=password or None, socket_connect_timeout=timeout)
                 r.ping()
                 latency = (datetime.now() - start).total_seconds() * 1000
                 return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+
+            elif db_type == "oracle":
+                try:
+                    import oracledb
+                except ImportError:
+                    try:
+                        import cx_Oracle as oracledb
+                    except ImportError:
+                        return {"ok": False, "message": "缺少驱动: oracledb，请执行 pip install oracledb"}
+                dsn = oracledb.makedsn(host, int(port), service_name=database or None)
+                conn = oracledb.connect(user=username, password=password, dsn=dsn)
+                latency = (datetime.now() - start).total_seconds() * 1000
+                conn.close()
+                return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+
+            elif db_type == "sqlserver":
+                try:
+                    import pymssql
+                except ImportError:
+                    return {"ok": False, "message": "缺少驱动: pymssql，请执行 pip install pymssql"}
+                conn = pymssql.connect(
+                    server=host, port=int(port), user=username, password=password,
+                    database=database if database else None, login_timeout=timeout
+                )
+                latency = (datetime.now() - start).total_seconds() * 1000
+                conn.close()
+                return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+
+            elif db_type == "mongodb":
+                try:
+                    import pymongo
+                except ImportError:
+                    return {"ok": False, "message": "缺少驱动: pymongo，请执行 pip install pymongo"}
+                if username and password:
+                    uri = f"mongodb://{username}:{password}@{host}:{port}/{database or ''}"
+                else:
+                    uri = f"mongodb://{host}:{port}/{database or ''}"
+                client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=timeout * 1000)
+                client.admin.command("ping")
+                latency = (datetime.now() - start).total_seconds() * 1000
+                client.close()
+                return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+
+            elif db_type == "elasticsearch":
+                import requests as _req
+                url = f"http://{host}:{int(port)}/_cluster/health"
+                auth = (username, password) if username and password else None
+                resp = _req.get(url, timeout=timeout, auth=auth)
+                latency = (datetime.now() - start).total_seconds() * 1000
+                if resp.status_code < 500:
+                    return {"ok": True, "message": f"{db_type} 连接成功 (HTTP {resp.status_code}, 延迟 {latency:.0f}ms)", "latency_ms": latency}
+                return {"ok": False, "message": f"{db_type} HTTP {resp.status_code}: {resp.reason}"}
+
+            elif db_type == "clickhouse":
+                import requests as _req
+                url = f"http://{host}:{int(port)}/?query=SELECT%201"
+                auth = (username, password) if username and password else None
+                resp = _req.get(url, timeout=timeout, auth=auth)
+                latency = (datetime.now() - start).total_seconds() * 1000
+                if resp.status_code == 200:
+                    return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+                return {"ok": False, "message": f"{db_type} HTTP {resp.status_code}: {resp.reason}"}
+
+            elif db_type == "dameng":
+                try:
+                    import dmPython
+                except ImportError:
+                    # 驱动未安装时回退到 TCP 端口连通性测试
+                    return ConnectionTester._tcp_only(host, port, db_type)
+                conn = dmPython.connect(user=username, password=password, server=host, port=int(port))
+                latency = (datetime.now() - start).total_seconds() * 1000
+                conn.close()
+                return {"ok": True, "message": f"{db_type} 连接成功 (延迟 {latency:.0f}ms)", "latency_ms": latency}
+
             else:
                 return {"ok": False, "message": f"不支持的数据库类型: {db_type}"}
         except ImportError as e:
             return {"ok": False, "message": f"缺少驱动: {e}"}
         except Exception as e:
             return {"ok": False, "message": f"连接失败: {e}"}
+
+    @staticmethod
+    def _tcp_only(host: str, port, db_type: str) -> dict:
+        """无驱动时回退到 TCP 端口连通性测试"""
+        start = datetime.now()
+        try:
+            sock = socket.create_connection((host, int(port)), timeout=10)
+            sock.close()
+            latency = (datetime.now() - start).total_seconds() * 1000
+            return {"ok": True, "message": f"{db_type} 端口连通 (延迟 {latency:.0f}ms, 未做认证)", "latency_ms": latency}
+        except Exception as e:
+            return {"ok": False, "message": f"{db_type} 端口不通: {e}"}
+
+    @staticmethod
+    def _test_middleware(host: str, config: dict) -> dict:
+        """测试中间件连接（按 mw_subtype 选择健康检查路径，见 CONTRACT.md 第八章 8.1）
+
+        connection_type='http' 且 config 含 mw_subtype 时由 _test_http 路由到此。
+        """
+        mw_subtype = (config.get("mw_subtype") or "").lower()
+        mw_port = config.get("mw_port", 80)
+        mw_admin_url = config.get("mw_admin_url", "")
+        timeout = 10
+
+        # TCP 端口连通类（无标准 HTTP 健康检查接口）
+        tcp_only_types = {"kafka", "rocketmq", "zookeeper"}
+        if mw_subtype in tcp_only_types:
+            return ConnectionTester._tcp_only(host, mw_port, mw_subtype)
+
+        # 各中间件的健康检查路径（mw_subtype -> health path）
+        health_paths = {
+            "nginx": "/",
+            "apache": "/",
+            "tomcat": "/",
+            "jetty": "/",
+            "weblogic": "/console",
+            "websphere": "/ibm/console",
+            "wildfly": "/",
+            "rabbitmq": "/api/overview",
+            "activemq": "/api/jolokia/",
+            "pulsar": "/admin/v2/brokers/healthcheck",
+            "nacos": "/nacos/v1/ns/operator/metrics",
+            "apollo": "/health",
+            "consul": "/v1/status/leader",
+            "eureka": "/eureka/apps",
+            "etcd": "/health",
+            "sentinel": "/health",
+            "apisix": "/apisix/status",
+            "kong": "/status",
+            "spring_cloud_gateway": "/actuator/health",
+            "haproxy": "/stats",
+            "seata": "/health",
+            "minio": "/minio/health/live",
+        }
+
+        path = health_paths.get(mw_subtype, "/")
+
+        # 拼接 URL：优先使用 mw_admin_url，否则用 host:port + path
+        if mw_admin_url:
+            url = mw_admin_url
+            if not url.endswith(path) and mw_subtype != "":
+                # admin_url 已含路径时不再追加
+                if not url.rstrip("/").endswith(path.rstrip("/")):
+                    url = url.rstrip("/") + path
+        else:
+            if not host:
+                return {"ok": False, "message": "中间件主机不能为空"}
+            url = f"http://{host}:{int(mw_port)}{path}"
+
+        if not url.startswith("http"):
+            url = f"http://{url}"
+
+        http_auth_mode = config.get("http_auth", "")
+        http_credential = config.get("http_credential", "")
+
+        start = datetime.now()
+        try:
+            import requests
+            auth = None
+            headers = {}
+            if http_auth_mode == "basic" and http_credential:
+                if ":" in http_credential:
+                    user, pwd = http_credential.split(":", 1)
+                    auth = (user, pwd)
+                else:
+                    auth = (http_credential, "")
+            elif http_auth_mode == "bearer" and http_credential:
+                headers["Authorization"] = f"Bearer {http_credential}"
+
+            resp = requests.get(url, timeout=timeout, headers=headers, auth=auth)
+            latency = (datetime.now() - start).total_seconds() * 1000
+
+            # 2xx/3xx/401/403 都算"服务存活"（401/403 说明需认证但服务在）
+            if resp.status_code < 500:
+                return {
+                    "ok": True,
+                    "message": f"{mw_subtype or 'middleware'} 连接成功 (HTTP {resp.status_code}, 延迟 {latency:.0f}ms)",
+                    "latency_ms": latency,
+                }
+            return {"ok": False, "message": f"{mw_subtype or 'middleware'} HTTP {resp.status_code}: {resp.reason}"}
+        except requests.exceptions.ConnectionError:
+            return {"ok": False, "message": f"{mw_subtype or 'middleware'} 连接失败，服务不可达"}
+        except requests.exceptions.Timeout:
+            return {"ok": False, "message": f"{mw_subtype or 'middleware'} 连接超时"}
+        except Exception as e:
+            return {"ok": False, "message": f"{mw_subtype or 'middleware'} 连接异常: {e}"}
 
     @staticmethod
     def _check_mysql_permissions_conn(conn, user: str) -> dict:
@@ -329,8 +529,14 @@ class ConnectionTester:
                             privs.append(col)
 
             try:
-                cur.execute(f"SHOW GRANTS FOR '{user}'@'%'")
-                grants = [r[0] for r in cur.fetchall()]
+                # SHOW GRANTS 不支持参数化绑定，先对用户名做白名单校验防注入
+                import re as _re
+                if not _re.match(r"^[A-Za-z0-9_\-.@ ]{1,64}$", user or ""):
+                    grants = []
+                else:
+                    _safe_user = (user or "").replace("'", "''")
+                    cur.execute(f"SHOW GRANTS FOR '{_safe_user}'@'%'")
+                    grants = [r[0] for r in cur.fetchall()]
             except Exception:
                 grants = []
 

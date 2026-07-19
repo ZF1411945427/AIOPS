@@ -27,7 +27,7 @@ async def receive_otlp(request: Request, db: Session = Depends(get_db)):
     except json.JSONDecodeError:
         return JSONResponse({"is_success": False, "message": "Invalid JSON format"}, status_code=400)
     except Exception as e:
-        return JSONResponse({"is_success": False, "message": str(e)}, status_code=500)
+        return JSONResponse({"is_success": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/jaeger")

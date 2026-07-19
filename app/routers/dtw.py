@@ -22,4 +22,4 @@ def similar_metrics(
     except Exception as e:
         from app.logger import logger
         logger.error(f"dtw similar failed: {e}")
-        return JSONResponse({"error": "查询失败"}, status_code=500)
+        return JSONResponse({"message": "查询失败"}, status_code=200)

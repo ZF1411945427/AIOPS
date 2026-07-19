@@ -48,12 +48,13 @@
       <div class="panel-body">
         <div v-if="stats.tools.length" class="tool-table-wrap">
           <table class="gap-table">
-            <thead><tr><th>工具名</th><th>调用次数</th><th>成功</th><th>成功率</th><th>平均延迟</th></tr></thead>
+            <thead><tr><th>中文名</th><th>工具名</th><th>调用次数</th><th>成功</th><th>成功率</th><th>平均延迟</th></tr></thead>
             <tbody>
               <tr v-for="t in stats.tools" :key="t.tool_name">
+                <td><span class="tool-display-name">{{ t.display_name || t.tool_name }}</span></td>
                 <td><span class="tool-name">{{ t.tool_name }}</span></td>
                 <td>{{ t.count }}</td>
-                <td>{{ t.success }}</td>
+                <td>{{ t.is_success }}</td>
                 <td><span class="rate-badge" :class="rateClass(t.success_rate)">{{ t.success_rate }}%</span></td>
                 <td>{{ t.avg_latency_ms }}ms</td>
               </tr>
@@ -92,7 +93,7 @@
                 <td>{{ e.latency_ms }}ms</td>
                 <td>{{ e.round_count }}</td>
                 <td>{{ e.tool_call_count }}</td>
-                <td><span class="rate-badge" :class="e.success ? 'rate-high' : 'rate-low'">{{ e.success ? '成功' : '失败' }}</span></td>
+                <td><span class="rate-badge" :class="e.is_success ? 'rate-high' : 'rate-low'">{{ e.is_success ? '成功' : '失败' }}</span></td>
                 <td><span v-if="e.has_hallucination" class="rate-badge rate-low">幻觉</span><span v-else class="text-muted">-</span></td>
               </tr>
             </tbody>
@@ -164,7 +165,8 @@ onMounted(() => { loadStats(); loadHistory() })
 .gap-table th { text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--border,rgba(0,0,0,0.07)); font-weight: 600; color: var(--text-secondary,#64748b); font-size: 0.75rem; text-transform: uppercase; }
 .gap-table td { padding: 10px 10px; border-bottom: 1px solid var(--border,rgba(0,0,0,0.05)); vertical-align: middle; }
 .gap-table tbody tr:hover { background: var(--bg-hover,rgba(0,0,0,0.02)); }
-.tool-name { font-weight: 600; font-family: monospace; background: rgba(99,102,241,0.08); padding: 1px 6px; border-radius: 4px; font-size: 0.78rem; }
+.tool-name { font-weight: 600; font-family: monospace; background: rgba(99,102,241,0.08); padding: 1px 6px; border-radius: 4px; font-size: 0.78rem; color: #6366f1; }
+.tool-display-name { font-weight: 600; color: #1e293b; font-size: 0.85rem; }
 .rate-badge { font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 8px; }
 .rate-high { background: rgba(34,197,94,0.12); color: #22c55e; }
 .rate-mid { background: rgba(245,158,11,0.12); color: #d97706; }

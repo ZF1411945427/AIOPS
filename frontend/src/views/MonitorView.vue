@@ -64,11 +64,11 @@
           </div>
           <div ref="memChartRef" class="chart-container" style="height:220px"></div>
         </div>
-        <div class="chart-card">
+        <div class="chart-card chart-card-wide">
           <div class="chart-card-header"><span>磁盘使用率</span></div>
           <div ref="diskChartRef" class="chart-container" style="height:220px"></div>
         </div>
-        <div class="chart-card">
+        <div class="chart-card chart-card-wide">
           <div class="chart-card-header"><span>系统负载</span></div>
           <div ref="loadChartRef" class="chart-container" style="height:220px"></div>
         </div>

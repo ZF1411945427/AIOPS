@@ -106,7 +106,7 @@ def api_doc_list(
             "source_type": source_type,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e), "items": []}, status_code=500)
+        return JSONResponse({"warning": str(e), "items": []}, status_code=200)
 
 
 @router.get("/api/{doc_id}")
@@ -122,7 +122,7 @@ def api_doc_detail(doc_id: int, db: Session = Depends(get_db)):
             "chunk_total": len(chunks),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/api/create")
@@ -142,7 +142,7 @@ def api_doc_create(payload: dict = Body(...), db: Session = Depends(get_db)):
         rag_service.index_document(db, doc.id)
         return JSONResponse({"ok": True, "id": doc.id, "item": _doc_to_dict(doc)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/upload")
@@ -191,7 +191,7 @@ async def api_doc_upload(
             db.commit()
         return JSONResponse({"ok": True, "id": doc.id, "item": _doc_to_dict(doc)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/{doc_id}/reindex")
@@ -206,7 +206,7 @@ def api_doc_reindex(doc_id: int, db: Session = Depends(get_db)):
         success, msg = rag_service.index_document(db, doc_id)
         return JSONResponse({"ok": success, "id": doc_id, "message": msg, "item": _doc_to_dict(doc)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/{doc_id}/delete")
@@ -229,4 +229,4 @@ def api_doc_delete(doc_id: int, db: Session = Depends(get_db)):
         rag_service.delete_document(db, doc_id)
         return JSONResponse({"ok": True, "id": doc_id})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)

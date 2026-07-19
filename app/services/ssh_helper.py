@@ -45,7 +45,8 @@ def get_ssh_client() -> "paramiko.SSHClient":
     if _SSH_STRICT:
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
     else:
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # 资产探测需要自动信任新主机指纹（首次连接录入 known_hosts），已通过 _SSH_STRICT 开关支持严格模式
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
 
     # 加载 known_hosts
     hosts = _load_known_hosts()
@@ -91,7 +92,8 @@ def register_host(host: str, port: int = 22) -> "paramiko.SSHClient":
         # 后续操作用 get_ssh_client()，此时指纹已录入
     """
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # register_host 是资产录入入口，需要自动信任新主机指纹（首次连接录入 known_hosts）
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
 
     # 加载已有 known_hosts
     hosts = _load_known_hosts()

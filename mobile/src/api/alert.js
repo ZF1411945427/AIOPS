@@ -31,6 +31,10 @@ export function getList(params) {
   return request({ url: `/alerts/api/list${suffix}` })
 }
 
+export function getDetail(id) {
+  return request({ url: `/alerts/api/${id}` })
+}
+
 export function acknowledge(id) {
   return request({ url: `/alerts/api/${id}/acknowledge`, method: 'POST' })
 }
@@ -57,6 +61,7 @@ export function batchResolve(ids) {
 
 export default {
   getList,
+  getDetail,
   acknowledge,
   resolve,
   triggerHeal,

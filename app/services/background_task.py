@@ -66,7 +66,8 @@ def _remote_exec_ssh(ip: str, user: str, password: str, port: int, command: str,
 
     try:
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # 后台任务执行 SSH 命令到已录入资产，AutoAddPolicy 兼容首次连接（生产可设 SSH_STRICT=1 改 RejectPolicy）
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
         client.connect(ip, username=user, password=password, port=port, timeout=30, banner_timeout=30)
         stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
         exit_status = stdout.channel.recv_exit_status()

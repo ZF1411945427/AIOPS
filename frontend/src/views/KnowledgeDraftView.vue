@@ -2,7 +2,7 @@
   <div class="draft-page">
     <div class="page-header">
       <h1>AI 知识草稿</h1>
-      <p>告警解决后自动生成 · 人工审批后入库 · 共 {{ total }} 条待审草稿</p>
+      <p>告警/故障解决后自动生成 · 人工审批后入库 · 共 {{ stats?.total || 0 }} 条草稿（待审 {{ stats?.pending || 0 }}）</p>
     </div>
 
     <div class="toolbar">
@@ -27,7 +27,7 @@
         <div v-if="loading" class="loading-state">加载中...</div>
         <div v-else-if="!items.length" class="empty-state">
           <div style="font-size:32px;margin-bottom:8px;">📝</div>
-          <div>暂无草稿 · 解决告警后会自动生成 AI 知识草稿</div>
+          <div>暂无草稿 · 解决告警或故障单后会自动生成 AI 知识草稿</div>
         </div>
         <div v-else class="draft-list">
           <div v-for="d in items" :key="d.id" class="draft-item">
@@ -70,39 +70,46 @@
               <span class="src-tag" :class="'src-' + (d.source_type || 'auto')">{{ sourceTypeLabel(d.source_type) }}</span>
               <button class="btn btn-sm btn-primary" @click="approveDraft(d)">通过入库</button>
               <button class="btn btn-sm btn-ghost" @click="openReject(d)">拒绝</button>
+              <button class="btn btn-sm btn-danger" @click="deleteDraft(d)">删除</button>
+            </div>
+            <div v-else-if="d.status === 'rejected'" class="draft-actions">
+              <span class="src-tag" :class="'src-' + (d.source_type || 'auto')">{{ sourceTypeLabel(d.source_type) }}</span>
+              <button class="btn btn-sm btn-danger" @click="deleteDraft(d)">删除</button>
             </div>
             <div v-if="d.status === 'rejected' && d.reject_reason" class="reject-reason">
               拒绝原因: {{ d.reject_reason }}
+            </div>
+            <div v-if="d.status === 'rejected' && !d.reject_reason" class="reject-reason muted">
+              拒绝原因: （未填写）
             </div>
           </div>
         </div>
       </div>
     </div>
 
-          <div class="modal-overlay" v-if="showConfirm" @click.self="showConfirm = false">
-            <div class="modal-box">
-              <h3>确认操作</h3>
-              <p style="margin:12px 0;font-size:0.9rem;">{{ confirmMsg }}</p>
-              <div v-if="pendingAction?.type === 'reject'" style="margin-top:12px;">
-                <input v-model="rejectReason" class="reason-input" placeholder="拒绝原因（可选）" />
-              </div>
-              <div class="modal-actions">
-                <button class="btn" @click="showConfirm = false">取消</button>
-                <button class="btn btn-primary" @click="doConfirm">确定</button>
-              </div>
-            </div>
-          </div>
+    <div class="modal-overlay" v-if="showConfirm" @click.self="showConfirm = false">
+      <div class="modal-box">
+        <h3>确认操作</h3>
+        <p style="margin:12px 0;font-size:0.9rem;">{{ confirmMsg }}</p>
+        <div v-if="pendingAction?.type === 'reject'" style="margin-top:12px;">
+          <textarea v-model="rejectReason" class="reason-input" rows="3" placeholder="拒绝原因（建议填写，便于 AI 改进）"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="showConfirm = false">取消</button>
+          <button class="btn btn-primary" @click="doConfirm">确定</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
 const loading = ref(false)
 const items = ref([])
-const total = ref(0)
 const stats = ref(null)
 const filterStatus = ref('pending')
 const showConfirm = ref(false)
@@ -150,17 +157,12 @@ async function loadDrafts() {
   loading.value = true
   try {
     const params = { status: filterStatus.value, page: 1, per_page: 100 }
-    const data = await request.get('/knowledge/api/auto-gen/drafts', { params })
+    const [data, statsData] = await Promise.all([
+      request.get('/knowledge/api/auto-gen/drafts', { params }),
+      request.get('/knowledge/api/auto-gen/drafts/stats'),
+    ])
     items.value = data.items || []
-    total.value = data.total
-
-    const allData = await request.get('/knowledge/api/auto-gen/drafts', { params: { status: '', page: 1, per_page: 100 } })
-    const all = allData.items || []
-    stats.value = {
-      pending: all.filter(x => x.status === 'pending').length,
-      approved: all.filter(x => x.status === 'approved').length,
-      rejected: all.filter(x => x.status === 'rejected').length,
-    }
+    stats.value = statsData
   } catch (e) {
     ElMessage.error('加载失败: ' + (e.message || e))
   } finally {
@@ -174,8 +176,9 @@ async function doConfirm() {
   showConfirm.value = false
   try {
     if (type === 'approve') {
-      await request.post('/knowledge/api/auto-gen/drafts/' + draft.id + '/approve')
-      ElMessage.success('已通过: ' + draft.title)
+      const res = await request.post('/knowledge/api/auto-gen/drafts/' + draft.id + '/approve')
+      const linked = res.linked_alerts?.length ? `（已关联 ${res.linked_alerts.length} 条告警）` : ''
+      ElMessage.success('已通过: ' + draft.title + linked)
     } else {
       await request.post('/knowledge/api/auto-gen/drafts/' + draft.id + '/reject', { reason: rejectReason.value })
       ElMessage.success('已拒绝: ' + draft.title)
@@ -183,6 +186,23 @@ async function doConfirm() {
     await loadDrafts()
   } catch (e) {
     ElMessage.error('操作失败: ' + (e.message || e))
+  }
+}
+
+async function deleteDraft(d) {
+  try {
+    await ElMessageBox.confirm(`确认删除草稿"${d.title}"？此操作不可恢复。`, '确认删除', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch (e) { return }
+  try {
+    await request.delete('/knowledge/api/auto-gen/drafts/' + d.id)
+    ElMessage.success('已删除')
+    loadDrafts()
+  } catch (e) {
+    ElMessage.error('删除失败: ' + (e.message || e))
   }
 }
 
@@ -198,13 +218,13 @@ onMounted(() => {
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 
 .toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
-.search-input { min-width: 240px; }
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
 .btn-sm { padding: 3px 10px; font-size: 0.75rem; }
 .btn-ghost { background: transparent; border-color: var(--border-strong, rgba(0,0,0,0.12)); color: var(--text-secondary, #64748b); }
+.btn-danger { background: #ef4444; color: #fff; border-color: #ef4444; }
 
 .stats-bar { display: flex; gap: 12px; margin-bottom: 12px; }
 .stat-item { font-size: 0.82rem; font-weight: 600; padding: 4px 12px; border-radius: 8px; }
@@ -232,6 +252,8 @@ onMounted(() => {
 .draft-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
 .src-tag { font-size: 0.7rem; padding: 2px 8px; border-radius: 8px; background: rgba(99,102,241,0.1); color: #6366f1; font-weight: 600; }
 .src-sop { background: rgba(34,197,94,0.1); color: #22c55e; }
+.reject-reason { margin-top: 8px; padding: 8px 10px; background: rgba(239,68,68,0.06); border-left: 3px solid #ef4444; border-radius: 4px; font-size: 0.78rem; color: #b91c1c; }
+.reject-reason.muted { color: var(--text-tertiary, #94a3b8); background: rgba(148,163,184,0.08); border-left-color: #94a3b8; }
 
 .sop-block { margin-top: 10px; }
 .sop-step { display: flex; gap: 10px; margin-top: 6px; }
@@ -257,4 +279,5 @@ onMounted(() => {
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 12px; padding: 24px 28px; min-width: 400px; max-width: 500px; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
 .modal-box h3 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 600; color: var(--text, #1e293b); }
 .modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
+.reason-input { width: 100%; padding: 6px 10px; border: 1px solid var(--border, rgba(0,0,0,0.1)); border-radius: 6px; font-size: 0.82rem; font-family: inherit; resize: vertical; box-sizing: border-box; }
 </style>

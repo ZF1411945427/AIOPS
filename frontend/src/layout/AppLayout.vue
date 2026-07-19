@@ -33,7 +33,10 @@
                   v-for="leaf in (item.items || [])"
                   :key="leaf.key"
                   :index="leaf.key"
-                >{{ leaf.label }}</el-menu-item>
+                >
+                  <el-icon><component :is="getIcon(leaf.icon || item.icon || g.icon)" /></el-icon>
+                  <span>{{ leaf.label }}</span>
+                </el-menu-item>
               </el-sub-menu>
               <el-menu-item v-else :index="item.key">{{ item.label }}</el-menu-item>
             </template>
@@ -243,6 +246,12 @@
           <K8sHpaRecommendView v-else-if="activeView === 'k8s-hpa-recommend'" />
           <K8sResourceOptimizeView v-else-if="activeView === 'k8s-resource-optimize'" />
           <NetworkTestView v-else-if="activeView === 'network-test'" />
+          <BackgroundTasksView v-else-if="activeView === 'background-tasks'" />
+          <ContractCheckView v-else-if="activeView === 'contract-check'" />
+          <AlertCorrelationView v-else-if="activeView === 'alert-correlation'" />
+          <RagEvalView v-else-if="activeView === 'rag-eval'" />
+          <AuditMatrixView v-else-if="activeView === 'audit-matrix'" />
+          <SecurityAuditView v-else-if="activeView === 'security-audit'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -257,11 +266,22 @@ import { ref, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
 import {
-  ChatDotRound, Fold, Expand, Bell, Brush,
+  ChatDotRound, Fold, Expand, Bell, Brush, ChatLineRound,
   Odometer, ChatDotSquare, DataLine, Tickets, Operation, Monitor,
   Box, Setting, TrendCharts, Coin, Connection, WarningFilled, Search,
   Lightning, User, Tools, Link, MoonNight, Sunny, DataBoard, Loading,
-  Cpu, DataAnalysis, Cloudy, Warning
+  Cpu, DataAnalysis, Cloudy, Warning, AlarmClock, Histogram, Folder,
+  Calendar, Notebook, Star, Trophy, ScaleToOriginal,
+  FirstAidKit, Finished, CircleCheck, DocumentChecked, Guide, Compass,
+  Document, Timer, Key, MagicStick, Wallet, Stamp, Memo, Flag,
+  Briefcase, Promotion, PriceTag,
+  Van, Grid, ArrowRight, ArrowLeft, ArrowUp, ArrowDown, Check, CirclePlus,
+  Remove, Close, Plus, Minus, Delete, Edit, View, Hide, Download,
+  Upload, Printer, CopyDocument, Refresh, Tools as ToolsIcon,
+  Management, Service, Goods, GoodsFilled, DocumentAdd, DocumentCopy,
+  DocumentDelete, FolderAdd, FolderChecked, FolderOpened, FolderRemove,
+  Collection, CollectionTag, Postcard, Ticket, Briefcase as BriefcaseIcon,
+  Suitcase, SuitcaseLine, Operation as OpIcon, Lock
 } from '@element-plus/icons-vue'
 import AIOpsChatWidget from '@/components/AIOpsChatWidget.vue'
 import DashboardView from '@/views/DashboardView.vue'
@@ -354,6 +374,12 @@ const AgentGroundTruthView = defineAsyncComponent(() => import('@/views/AgentGro
 const K8sHpaRecommendView = defineAsyncComponent(() => import('@/views/K8sHpaRecommendView.vue'))
 const K8sResourceOptimizeView = defineAsyncComponent(() => import('@/views/K8sResourceOptimizeView.vue'))
 const NetworkTestView = defineAsyncComponent(() => import('@/views/NetworkTestView.vue'))
+const BackgroundTasksView = defineAsyncComponent(() => import('@/views/BackgroundTasksView.vue'))
+const ContractCheckView = defineAsyncComponent(() => import('@/views/ContractCheckView.vue'))
+const AlertCorrelationView = defineAsyncComponent(() => import('@/views/AlertCorrelationView.vue'))
+const RagEvalView = defineAsyncComponent(() => import('@/views/RagEvalView.vue'))
+const AuditMatrixView = defineAsyncComponent(() => import('@/views/AuditMatrixView.vue'))
+const SecurityAuditView = defineAsyncComponent(() => import('@/views/SecurityAuditView.vue'))
 const MonitorView = defineAsyncComponent(() => import('@/views/MonitorView.vue'))
 import request from '@/api/request'
 
@@ -398,14 +424,25 @@ const menuGroups = ref([])
 const ICON_MAP = {
   Odometer, ChatDotSquare, DataLine, Tickets, Operation, Monitor,
   Box, Setting, TrendCharts, Coin, Connection, WarningFilled, Search,
-  Lightning, User, Tools, Link, Cpu, DataAnalysis, Cloudy, Warning
+  Lightning, User, ToolsIcon, Link, Cpu, DataAnalysis, Cloudy, Warning,
+  AlarmClock, Histogram, Folder, Calendar, Notebook, Star, Trophy,
+  ScaleToOriginal, FirstAidKit, Finished, CircleCheck, DocumentChecked,
+  Guide, Compass, Document, Timer, Key, MagicStick, Wallet, Stamp, Memo,
+  Flag, Briefcase, Promotion, PriceTag, Van, Grid, ArrowRight, ArrowLeft,
+  ArrowUp, ArrowDown, Check, CirclePlus, Remove, Close, Plus, Minus,
+  Delete, Edit, View, Hide, Download, Upload, Printer, CopyDocument,
+  Refresh, ChatDotRound, Bell, Brush, Fold, Expand, MoonNight, Sunny,
+  DataBoard, Loading, OpIcon, Management, Service, Goods, GoodsFilled,
+  DocumentAdd, DocumentCopy, DocumentDelete, FolderAdd, FolderChecked,
+  FolderOpened, FolderRemove, Collection, CollectionTag, Postcard, Ticket,
+  BriefcaseIcon, Suitcase, SuitcaseLine, Lock
 }
 
 function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['dashboard', 'roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'graph-inference', 'smart-recommend', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'ab-test', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'agent-ground-truth', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'network-test'])
+const VUE_PAGES = new Set(['dashboard', 'roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'alert-correlation', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'ab-test', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'agent-ground-truth', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
 
 function _flattenItems(items) {
   const result = []

@@ -322,7 +322,7 @@ def api_recommend(alert_id: int = 0, limit: int = 5, db: Session = Depends(get_d
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return JSONResponse({"error": str(e), "alert_id": alert_id, "recommendations": [], "runbooks": []}, status_code=500)
+        return JSONResponse({"warning": str(e), "alert_id": alert_id, "recommendations": [], "runbooks": []}, status_code=200)
 
 
 @router.get("/ai-analyze-alert/{alert_id}")

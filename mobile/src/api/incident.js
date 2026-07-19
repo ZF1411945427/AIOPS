@@ -16,9 +16,16 @@ function request({ url, method, data }) {
   })
 }
 
-export function getIncidentList(status) {
-  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-  return request({ url: `/incidents/api/list${qs}` })
+export function getIncidentList(status, params) {
+  const qs = []
+  if (status) qs.push('status=' + encodeURIComponent(status))
+  if (params) {
+    if (params.page) qs.push('page=' + encodeURIComponent(params.page))
+    if (params.per_page) qs.push('per_page=' + encodeURIComponent(params.per_page))
+    else if (params.page_size) qs.push('per_page=' + encodeURIComponent(params.page_size))
+  }
+  const suffix = qs.length ? '?' + qs.join('&') : ''
+  return request({ url: `/incidents/api/list${suffix}` })
 }
 
 export function getIncidentDetail(id) {

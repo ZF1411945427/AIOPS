@@ -3,6 +3,7 @@ import re
 import time
 import hashlib
 import threading
+import logging
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -281,6 +282,15 @@ def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Di
     if tools:
         payload["tools"] = tools
 
+    # P1 任务#5: 通过熔断器保护 LLM 调用，连续失败自动熔断，避免雪崩等待
+    from app.services.ai_provider_health import get_breaker
+    breaker = get_breaker(provider.id)
+    allowed, reason = breaker.allow_call()
+    if not allowed:
+        return {"error": f"Provider 已熔断: {reason}"}
+
+    import time as _t
+    _t0 = _t.time()
     try:
         session = _get_llm_session()
         resp = session.post(
@@ -291,8 +301,16 @@ def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Di
             proxies=proxies if proxies is not None else {"http": None, "https": None},
         )
         resp.raise_for_status()
+        _lat_ms = (_t.time() - _t0) * 1000
+        breaker.record_success(_lat_ms)
         return resp.json()
     except requests.RequestException as e:
+        _lat_ms = (_t.time() - _t0) * 1000
+        breaker.record_failure(str(e))
+        return {"error": str(e)}
+    except Exception as e:
+        _lat_ms = (_t.time() - _t0) * 1000
+        breaker.record_failure(str(e))
         return {"error": str(e)}
 
 
@@ -470,9 +488,17 @@ def process_chat_message(
                 AIProvider.is_enabled == True,
             ).first()
         if not provider:
-            provider = db.query(AIProvider).filter(
-                AIProvider.is_enabled == True
-            ).first()
+            # P1 任务#5: 按 health 度排序选最佳 provider，跳过熔断中的
+            from app.services.ai_provider_health import select_healthy_provider
+            _all_enabled = db.query(AIProvider).filter(AIProvider.is_enabled == True).all()
+            _selected, _candidates, _skipped = select_healthy_provider(_all_enabled)
+            if _selected:
+                provider = _selected
+                # 记录被熔断跳过的 provider，便于排查
+                if _skipped:
+                    logger.info(f"AI 调用跳过熔断中的 provider: {_skipped}")
+            else:
+                provider = _all_enabled[0] if _all_enabled else None
 
     # Save user message
     user_msg = add_message(db, session.id, "user", user_message)
@@ -958,18 +984,75 @@ def process_chat_message(
     if active_ab_test and ab_test_group:
         try:
             token_usage = response.get("usage", {}) if isinstance(response, dict) else {}
+            # 真实 success 判定：response 无 error 且 content 非空才算成功
+            _resp_error = response.get("error") if isinstance(response, dict) else None
+            _ab_success = bool(content) and not _resp_error
             ab_test_service.record_result(
                 db, test_id=active_ab_test.id,
                 session_id=session.id, group=ab_test_group,
                 provider_id=provider.id if provider else None,
-                model_name=provider.model if provider else "",
+                model_name=provider.default_model if provider else "",
                 latency_ms=latency,
                 token_count=token_usage.get("total_tokens", 0),
-                success=True,
+                success=_ab_success,
             )
             db.commit()
         except Exception:
-            pass
+            logging.exception("record ab_test result failed")
+
+    # 记录 Agent 评估数据（遥测管道接入）
+    try:
+        from app.services.agent_eval_service import record_evaluation
+        token_usage = response.get("usage", {}) if isinstance(response, dict) else {}
+        total_latency = int((time.time() - start) * 1000)
+        _has_hallucination = bool(content and any(kw in content for kw in _hallucination_keywords))
+        _is_success = bool(content) and not _has_hallucination
+        _task_type = "general"
+        if tool_results:
+            _tool_names = {tr.get("tool_name", "") for tr in tool_results}
+            if "propose_action" in _tool_names:
+                _task_type = "action_proposal"
+            elif "query_alerts" in _tool_names or "get_alert_detail" in _tool_names:
+                _task_type = "alert_analysis"
+            elif "analyze_incident_rca" in _tool_names or "query_correlation_analysis" in _tool_names:
+                _task_type = "incident_analysis"
+            elif "query_assets" in _tool_names:
+                _task_type = "asset_query"
+            elif "query_logs" in _tool_names:
+                _task_type = "log_analysis"
+            elif "query_metrics" in _tool_names:
+                _task_type = "metric_query"
+        # 写入 task_type：record_evaluation 没有 task_type 参数，需要直接 set 到 ev 对象
+        # 这里先调用 record_evaluation 拿到 ev_id，再回写 task_type
+        ev_id = record_evaluation(
+            db,
+            session_id=session.id,
+            provider_id=provider.id if provider else None,
+            model_name=provider.default_model if provider else "",
+            prompt_tokens=token_usage.get("prompt_tokens", 0),
+            completion_tokens=token_usage.get("completion_tokens", 0),
+            total_tokens=token_usage.get("total_tokens", 0),
+            latency_ms=total_latency,
+            round_count=(round_idx + 1) if "round_idx" in locals() else 0,
+            tool_call_count=len(tool_results),
+            success=_is_success,
+            has_hallucination=_has_hallucination,
+            completion_rate=1.0 if _is_success else 0.0,
+            feedback="",
+        )
+        # 回写 task_type（record_evaluation 接口未暴露此参数，单独 update）
+        if ev_id and _task_type != "general":
+            from app.models import AgentEvaluation as _AE
+            ev_row = db.query(_AE).filter(_AE.id == ev_id).first()
+            if ev_row:
+                ev_row.task_type = _task_type
+        db.commit()
+    except Exception as _eval_err:
+        # 记录异常到日志，不再静默吞掉，便于排查 record_evaluation 接入问题
+        import logging
+        logging.getLogger("agent_eval").exception(
+            "record_evaluation failed: %s", _eval_err
+        )
 
     result = {
         "session_id": session.id,

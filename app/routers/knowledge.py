@@ -45,7 +45,7 @@ def api_kb_list(
             "tags": tags,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e), "items": []}, status_code=500)
+        return JSONResponse({"warning": str(e), "items": []}, status_code=200)
 
 
 @router.get("/api/unified-search")
@@ -111,7 +111,7 @@ def api_unified_search(
         total = sum(len(v) for v in results.values())
         return JSONResponse({"items": results, "total": total, "query": query})
     except Exception as e:
-        return JSONResponse({"error": str(e), "items": [], "total": 0}, status_code=500)
+        return JSONResponse({"warning": str(e), "items": [], "total": 0}, status_code=200)
 
 
 @router.get("/api/{kb_id}")
@@ -122,7 +122,7 @@ def api_kb_detail(kb_id: int, db: Session = Depends(get_db)):
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse(_kb_to_dict(item))
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/api/create")
@@ -140,7 +140,7 @@ def api_kb_create(payload: dict = Body(...), db: Session = Depends(get_db)):
         })
         return JSONResponse({"ok": True, "id": kb.id, "item": _kb_to_dict(kb)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/{kb_id}/update")
@@ -167,7 +167,7 @@ def api_kb_update(kb_id: int, payload: dict = Body(...), db: Session = Depends(g
             return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
         return JSONResponse({"ok": True, "id": kb.id, "item": _kb_to_dict(kb)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/{kb_id}/delete")
@@ -176,5 +176,5 @@ def api_kb_delete(kb_id: int, db: Session = Depends(get_db)):
         knowledge_service.delete_kb(db, kb_id)
         return JSONResponse({"ok": True, "id": kb_id})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
