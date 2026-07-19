@@ -177,15 +177,26 @@
           <template v-else-if="form.ci_type === 'database'">
             <div class="form-grid">
               <div class="form-row"><label>数据库类型</label>
-                <select v-model="form.db_type" class="input">
-                  <option value="mysql">MySQL</option><option value="postgresql">PostgreSQL</option>
-                  <option value="redis">Redis</option><option value="mongodb">MongoDB</option>
-                  <option value="elasticsearch">Elasticsearch</option>
+                <select v-model="form.db_type" class="input" @change="onDbTypeChange">
+                  <optgroup label="关系型数据库">
+                    <option value="mysql">MySQL</option><option value="postgresql">PostgreSQL</option>
+                    <option value="oracle">Oracle</option><option value="sqlserver">SQL Server</option>
+                    <option value="mariadb">MariaDB</option><option value="tidb">TiDB</option>
+                    <option value="oceanbase">OceanBase</option><option value="dameng">达梦 DM</option>
+                    <option value="clickhouse">ClickHouse</option>
+                  </optgroup>
+                  <optgroup label="NoSQL / 缓存">
+                    <option value="mongodb">MongoDB</option><option value="redis">Redis</option>
+                    <option value="elasticsearch">Elasticsearch</option>
+                  </optgroup>
+                  <optgroup label="嵌入式">
+                    <option value="sqlite">SQLite</option>
+                  </optgroup>
                 </select>
               </div>
               <div class="form-row"><label>端口</label><input v-model.number="form.db_port" class="input" type="number" :placeholder="dbPortPlaceholder"></div>
-              <div class="form-row"><label>账户</label><input v-model="form.db_user" class="input" placeholder="root" autocomplete="off"></div>
-              <div class="form-row"><label>密码</label><input v-model="form.db_password" class="input" type="password" autocomplete="new-password"></div>
+              <div class="form-row" v-if="form.db_type !== 'sqlite'"><label>账户</label><input v-model="form.db_user" class="input" placeholder="root" autocomplete="off"></div>
+              <div class="form-row" v-if="form.db_type !== 'sqlite'"><label>密码</label><input v-model="form.db_password" class="input" type="password" autocomplete="new-password"></div>
               <div class="form-row"><label>数据库名</label><input v-model="form.db_name" class="input" placeholder="可选"></div>
             </div>
           </template>
@@ -193,12 +204,37 @@
           <template v-else-if="form.ci_type === 'middleware'">
             <div class="form-grid">
               <div class="form-row"><label>中间件类型</label>
-                <select v-model="form.mw_subtype" class="input">
-                  <option value="nginx">Nginx</option><option value="tomcat">Tomcat</option>
-                  <option value="rabbitmq">RabbitMQ</option><option value="kafka">Kafka</option>
+                <select v-model="form.mw_subtype" class="input" @change="onMwSubtypeChange">
+                  <optgroup label="Web 服务器 / 应用服务器">
+                    <option value="nginx">Nginx</option><option value="apache">Apache HTTP</option>
+                    <option value="tomcat">Tomcat</option><option value="jetty">Jetty</option>
+                    <option value="weblogic">WebLogic</option><option value="websphere">WebSphere</option>
+                    <option value="wildfly">WildFly / JBoss</option>
+                  </optgroup>
+                  <optgroup label="消息队列">
+                    <option value="kafka">Kafka</option><option value="rabbitmq">RabbitMQ</option>
+                    <option value="rocketmq">RocketMQ</option><option value="activemq">ActiveMQ</option>
+                    <option value="pulsar">Apache Pulsar</option>
+                  </optgroup>
+                  <optgroup label="注册中心 / 配置中心">
+                    <option value="nacos">Nacos</option><option value="zookeeper">ZooKeeper</option>
+                    <option value="apollo">Apollo</option><option value="consul">Consul</option>
+                    <option value="eureka">Eureka</option><option value="etcd">Etcd</option>
+                  </optgroup>
+                  <optgroup label="流量控制 / API 网关">
+                    <option value="sentinel">Sentinel</option><option value="apisix">APISIX</option>
+                    <option value="kong">Kong</option><option value="spring_cloud_gateway">Spring Cloud Gateway</option>
+                    <option value="haproxy">HAProxy</option>
+                  </optgroup>
+                  <optgroup label="分布式事务">
+                    <option value="seata">Seata</option>
+                  </optgroup>
+                  <optgroup label="对象存储 / 其他">
+                    <option value="minio">MinIO</option>
+                  </optgroup>
                 </select>
               </div>
-              <div class="form-row"><label>管理端口</label><input v-model.number="form.mw_port" class="input" type="number" placeholder="80/8080/9092"></div>
+              <div class="form-row"><label>管理端口</label><input v-model.number="form.mw_port" class="input" type="number" :placeholder="mwPortPlaceholder"></div>
               <div class="form-row"><label>管理地址</label><input v-model="form.mw_admin_url" class="input" placeholder="http://..."></div>
             </div>
           </template>
@@ -359,8 +395,46 @@ const namePlaceholder = computed(() => ({
 })[form.value.ci_type] || '请输入资产名称')
 
 const dbPortPlaceholder = computed(() => ({
-  mysql: '3306', postgresql: '5432', redis: '6379', mongodb: '27017', elasticsearch: '9200',
+  mysql: '3306', mariadb: '3306', postgresql: '5432', oracle: '1521', sqlserver: '1433',
+  mongodb: '27017', redis: '6379', elasticsearch: '9200', tidb: '4000', oceanbase: '2883',
+  dameng: '5236', clickhouse: '8123', sqlite: '本地文件无需端口',
 })[form.value.db_type] || '3306')
+
+const mwPortPlaceholder = computed(() => ({
+  nginx: '80', apache: '80', tomcat: '8080', jetty: '8080',
+  weblogic: '7001', websphere: '9043', wildfly: '8080',
+  kafka: '9092', rabbitmq: '15672', rocketmq: '9876', activemq: '8161', pulsar: '8080',
+  nacos: '8848', zookeeper: '2181', apollo: '8080', consul: '8500', eureka: '8761', etcd: '2379',
+  sentinel: '8080', apisix: '9180', kong: '8001', spring_cloud_gateway: '8080', haproxy: '80',
+  seata: '8091', minio: '9000',
+})[form.value.mw_subtype] || '80')
+
+function onDbTypeChange() {
+  const portMap = {
+    mysql: 3306, mariadb: 3306, postgresql: 5432, oracle: 1521, sqlserver: 1433,
+    mongodb: 27017, redis: 6379, elasticsearch: 9200, tidb: 4000, oceanbase: 2883,
+    dameng: 5236, clickhouse: 8123,
+  }
+  if (form.value.db_type === 'sqlite') {
+    form.value.db_port = 0
+  } else if (portMap[form.value.db_type]) {
+    form.value.db_port = portMap[form.value.db_type]
+  }
+}
+
+function onMwSubtypeChange() {
+  const portMap = {
+    nginx: 80, apache: 80, tomcat: 8080, jetty: 8080,
+    weblogic: 7001, websphere: 9043, wildfly: 8080,
+    kafka: 9092, rabbitmq: 15672, rocketmq: 9876, activemq: 8161, pulsar: 8080,
+    nacos: 8848, zookeeper: 2181, apollo: 8080, consul: 8500, eureka: 8761, etcd: 2379,
+    sentinel: 8080, apisix: 9180, kong: 8001, spring_cloud_gateway: 8080, haproxy: 80,
+    seata: 8091, minio: 9000,
+  }
+  if (portMap[form.value.mw_subtype]) {
+    form.value.mw_port = portMap[form.value.mw_subtype]
+  }
+}
 
 const form = ref({})
 const specValues = ref({})
@@ -517,7 +591,12 @@ function closeForm() { showForm.value = false; connTestResult.value = null }
 function getTestHost() {
   const ct = form.value.ci_type
   if (ct === 'kubernetes_cluster') return form.value.k8s_api_server || ''
-  if (['business_app', 'api_service', 'middleware', 'monitoring_endpoint'].includes(ct)) return form.value.http_url || ''
+  if (ct === 'middleware') {
+    if (form.value.mw_admin_url) return form.value.mw_admin_url
+    if (form.value.ip) return form.value.ip
+    return ''
+  }
+  if (['business_app', 'api_service', 'monitoring_endpoint'].includes(ct)) return form.value.http_url || ''
   return form.value.ip || ''
 }
 
@@ -540,7 +619,15 @@ async function testConnection() {
     } else if (ct === 'winrm') {
       cfg = { winrm_user: form.value.winrm_user, winrm_password: form.value.winrm_password, winrm_port: form.value.winrm_port, winrm_transport: form.value.winrm_transport, winrm_ssl: form.value.winrm_ssl }
     } else if (ct === 'http') {
-      cfg = { http_url: form.value.http_url, http_auth: form.value.http_auth, http_credential: form.value.http_credential }
+      if (form.value.ci_type === 'middleware') {
+        cfg = {
+          mw_subtype: form.value.mw_subtype, mw_port: form.value.mw_port, mw_admin_url: form.value.mw_admin_url,
+          http_url: form.value.mw_admin_url || (form.value.ip ? `${form.value.ip}:${form.value.mw_port || ''}`.trim(':') : ''),
+          http_auth: form.value.http_auth, http_credential: form.value.http_credential,
+        }
+      } else {
+        cfg = { http_url: form.value.http_url, http_auth: form.value.http_auth, http_credential: form.value.http_credential }
+      }
     }
     const p = new URLSearchParams()
     p.append('connection_type', ct)
@@ -610,7 +697,12 @@ function buildPayload() {
     p.ip = form.value.k8s_api_server || ''
   } else if (ci === 'database') {
     p.db_type = form.value.db_type; p.db_port = form.value.db_port; p.db_user = form.value.db_user; p.db_password = form.value.db_password; p.db_name = form.value.db_name
-  } else if (['business_app', 'api_service', 'middleware', 'monitoring_endpoint'].includes(ci)) {
+  } else if (ci === 'middleware') {
+    p.mw_subtype = form.value.mw_subtype; p.mw_port = form.value.mw_port; p.mw_admin_url = form.value.mw_admin_url
+    p.http_url = form.value.mw_admin_url || (form.value.ip ? `${form.value.ip}${form.value.mw_port ? ':' + form.value.mw_port : ''}` : '')
+    p.http_auth = form.value.http_auth; p.http_credential = form.value.http_credential
+    if (!p.ip && form.value.mw_admin_url) p.ip = form.value.mw_admin_url
+  } else if (['business_app', 'api_service', 'monitoring_endpoint'].includes(ci)) {
     p.http_url = form.value.http_url; p.http_auth = form.value.http_auth; p.http_credential = form.value.http_credential; p.ip = form.value.http_url || ''
   }
   if (isSshType.value) {

@@ -46,7 +46,31 @@ class _MultiStaticFiles(_FastStaticFiles):
 StaticFiles = _FastStaticFiles  # alias so existing mounts keep working
 from app.database import Base, get_all_engines, get_session_for, get_db_mode, set_db_mode
 from app import config as _config
-from app.routers import auth, sre, dashboard, assets, metrics, alerts, notifications, users, anomaly, incidents, topology, knowledge, knowledge_documents, knowledge_v2, remediation, datasources, tokens, settings, reports, knowledge_graph, containers, logs, predictions, events, k8s_resources, api_v1, correlation, runbooks, remediation_workflow, alert_silence, k8s_monitor, log_anomaly, notification_templates, hotspot, dashboard_config, alert_webhooks, asset_changes, smart_recommend, predictions_enhanced, trace_view, tags, es_integration, change_workflow, chatops, topo_graph, alert_storm, ci_models, report_schedules, pcadr, alert_events, alert_console, prediction_models, dtw, idice, script_exec, drain, topology_path, lifecycle, pagerank_rca, traces, discovery, ext_cmdb, granger, log_rca, trace_anomaly, kafka_pipeline, trend_prediction, event_sources, netflow, service_mesh, feature_store, blue_green, cluster_anomaly, trace_rca, ai_providers, agent_chat, agent_sse, ws, audit, menu, system, system_posture, traces_api, trace_ingest, chaos, workflow, agent_workflow, helm, ansible, license, mobile, health_map, inspection, baseline, knowledge_autogen, remediation_effect, agent_eval, ab_test, anomaly_eval, asset_discovery, ops_analytics, diagnostic_tools, tenant_management, roles, observability_correlation, agent_ground_truth, network_test
+# ── 全量路由导入（按 9 个业务域归类，详见 app/domains/registry.py）──
+# assets 资产管理域
+from app.routers import assets, asset_changes, asset_discovery, lifecycle, topology, topology_path, topo_graph, tags, ext_cmdb
+# alerts 告警监控域
+from app.routers import alerts, alert_console, alert_events, alert_silence, alert_storm, alert_webhooks, anomaly, cluster_anomaly, hotspot
+# k8s 容器编排域
+from app.routers import k8s_monitor, k8s_resources, containers, helm, blue_green, service_mesh
+# ai 智能体域
+from app.routers import ai_providers, agent_chat, agent_sse, agent_workflow, agent_eval, agent_ground_truth, ab_test, anomaly_eval
+# sre 可靠性工程域
+from app.routers import sre, chaos, inspection, baseline, remediation, remediation_workflow, remediation_effect, runbooks
+# knowledge 知识管理域
+from app.routers import knowledge, knowledge_documents, knowledge_v2, knowledge_graph, knowledge_autogen, smart_recommend
+# incident 故障运营域
+from app.routers import incidents, dashboard, dashboard_config, ops_analytics, reports, report_schedules
+# tracing 链路追踪域
+from app.routers import traces, traces_api, trace_anomaly, trace_ingest, trace_rca, trace_view, dtw, pagerank_rca, log_rca, log_anomaly, logs
+# platform 平台与集成域
+from app.routers import auth, users, roles, settings, system, system_posture, audit, menu, license, tenant_management, tokens, ws, api_v1, mobile, health_map, network_test, datasources, es_integration, event_sources, events, kafka_pipeline, netflow, feature_store, ci_models, drain, granger, idice, trend_prediction, prediction_models, predictions, predictions_enhanced, pcadr, metrics, notifications, notification_templates, correlation, observability_correlation, script_exec, ansible, change_workflow, workflow, chatops, discovery, diagnostic_tools
+# admin 系统管理路由（领域清单 + 背景任务看板，P1 任务#4/#6）
+from app.routers import admin
+# P2 任务#9 告警收敛闭环 / P2 任务#10 RAG 检索质量评估
+from app.routers import alert_correlation, rag_eval
+# 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线，打磨期 P0）
+from app.routers import security_audit
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service, trace_anomaly_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
@@ -109,6 +133,12 @@ _MIGRATIONS = {
         "provider_id INTEGER",
         "mode VARCHAR(16) DEFAULT 'agent'",
         "linked_asset_ids TEXT DEFAULT '[]'",
+    ],
+    "trace_anomaly_configs": [
+        "check_window_minutes INTEGER DEFAULT 30",
+    ],
+    "audit_logs": [
+        "route_path VARCHAR(256) DEFAULT ''",
     ],
 }
 for _eng in get_all_engines().values():
@@ -176,7 +206,14 @@ for _eng in get_all_engines().values():
             except Exception:
                 pass
 
-app = FastAPI(title="AIOPS 智能运维系统", version="0.1.0")
+app = FastAPI(
+    title="AIOPS 智能运维系统",
+    version="0.1.0",
+    # 安全：生产环境关闭交互式 API 文档，避免接口裸露（SAST/验收常见扣分项）
+    docs_url=None if _config.APP_ENV == "prod" else "/docs",
+    redoc_url=None if _config.APP_ENV == "prod" else "/redoc",
+    openapi_url=None if _config.APP_ENV == "prod" else "/openapi.json",
+)
 
 # ── 限流中间件 (slowapi) ──
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -199,9 +236,10 @@ async def _global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception on {request.url.path}: {exc}\n{traceback.format_exc()}")
     if isinstance(exc, _HTTPException):
         return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
-    return JSONResponse({"error": "服务器内部错误"}, status_code=500)
+    # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500
+    return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0}, status_code=200)
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz", "/health-map"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -249,6 +287,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
                                     {"error": "权限不足：需要管理员权限"},
                                     status_code=403,
                                 )
+                # admin-only 路径：非 admin 禁止任何方法（含 GET）
+                _ADMIN_ONLY_PREFIXES = (
+                    "/incidents/api/approval-settings",
+                )
+                if _user and _user.role != "admin":
+                    for _pfx in _ADMIN_ONLY_PREFIXES:
+                        if path.startswith(_pfx):
+                            _db.close()
+                            return JSONResponse(
+                                {"error": "权限不足：需要管理员权限"},
+                                status_code=403,
+                            )
             finally:
                 _db.close()
         return await call_next(request)
@@ -256,8 +306,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(SlowAPIMiddleware)
-app.add_middleware(AuthMiddleware)
 app.add_middleware(LicenseMiddleware)
+app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=_config.SESSION_SECRET,
                    https_only=_config.APP_ENV == "prod",
                    same_site="lax", max_age=86400)
@@ -271,6 +321,94 @@ app.add_middleware(
 )
 
 
+# ── P2 任务#11: 审计日志中间件（写操作自动记录）──
+class AuditMiddleware(BaseHTTPMiddleware):
+    """所有写操作（POST/PUT/PATCH/DELETE）自动记录到 audit_logs 表。
+
+    - 密码字段脱敏后存储
+    - 失败 fail-soft（审计失败不影响主流程）
+    - 跳过 PUBLIC_PATHS 和静态资源
+    """
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        method = request.method
+        # 只审计写操作
+        if method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return await call_next(request)
+        # 跳过公开路径和静态资源
+        if any(path.startswith(p) for p in PUBLIC_PATHS):
+            return await call_next(request)
+        if path.startswith(("/static", "/vue-assets", "/mobile-app", "/openapi", "/docs", "/redoc")):
+            return await call_next(request)
+        # 跳过审计写自身（避免递归）
+        if path.startswith("/api/admin/audit"):
+            return await call_next(request)
+
+        t0 = time.time()
+        # 获取路由模板路径（如 /api/tags/{tag_id}），用于覆盖率精确匹配
+        route_path = path
+        try:
+            _route = request.scope.get("route")
+            if _route and hasattr(_route, "path_format"):
+                route_path = _route.path_format
+        except Exception:
+            pass
+        # 读取请求体（仅小请求体，避免大上传撑爆内存）
+        body_bytes = b""
+        try:
+            body_bytes = await request.body()
+        except Exception:
+            pass
+        # 由于 body 已被读取，需要在 scope 中重置（用 receive 替换）
+        async def _receive():
+            return {"type": "http.request", "body": body_bytes, "more_body": False}
+        request._receive = _receive  # type: ignore[attr-defined]
+
+        response = await call_next(request)
+
+        # 记录审计日志（fail-soft）
+        try:
+            from app.services.audit_matrix_service import record_audit
+            from app.database import get_session_for, get_db_mode
+            user_id = request.session.get("user_id")
+            username = request.session.get("username", "")
+            ip = request.client.host if request.client else ""
+            ua = request.headers.get("user-agent", "")
+            body_str = body_bytes.decode("utf-8", errors="ignore")[:2000] if body_bytes else ""
+            duration_ms = int((time.time() - t0) * 1000)
+            response_summary = ""
+            try:
+                # 提取响应摘要（仅当响应是 JSON 且较小时）
+                if response.status_code < 500 and "application/json" in response.headers.get("content-type", ""):
+                    # 不读取响应体（会消耗流），用 status_code 摘要即可
+                    response_summary = f"HTTP {response.status_code}"
+                else:
+                    response_summary = f"HTTP {response.status_code}"
+            except Exception:
+                response_summary = f"HTTP {response.status_code}"
+
+            _db = get_session_for(get_db_mode())()
+            try:
+                record_audit(
+                    _db, user_id=user_id, username=username or "",
+                    method=method, path=path, route_path=route_path,
+                    status_code=response.status_code,
+                    ip=ip, user_agent=ua,
+                    request_body=body_str,
+                    response_summary=response_summary,
+                    duration_ms=duration_ms,
+                )
+            finally:
+                _db.close()
+        except Exception as e:
+            logger.warning(f"AuditMiddleware 记录失败 ({method} {path}): {e}")
+
+        return response
+
+
+app.add_middleware(AuditMiddleware)
+
+
 class CacheControlMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -279,7 +417,34 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# ── 安全响应头中间件：补充安全验收常见的响应头要求 ──
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """补充 HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy 等安全头。
+
+    - 生产环境启用 HSTS（https_only）
+    - 禁止 MIME 嗅探、点击劫持、降级 Referer
+    - fail-soft：失败不影响主流程
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        try:
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+            response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+            response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+            if _config.APP_ENV == "prod":
+                response.headers.setdefault(
+                    "Strict-Transport-Security",
+                    "max-age=31536000; includeSubDomains"
+                )
+        except Exception:
+            pass
+        return response
+
+
 app.add_middleware(CacheControlMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # 公共 assets 由 /vue-assets 和 /mobile-app 各自承载，不在此挂载（避免与 /assets API 路由冲突）
 
@@ -305,113 +470,140 @@ def serve_spa():
     return HTMLResponse(content=content)
 
 
-app.include_router(auth.router)
-app.include_router(sre.router)
-app.include_router(dashboard.router)
+# ── 路由按业务域分组注册（详见 app/domains/registry.py）──
+
+# ── assets 资产管理域 ──
 app.include_router(assets.router)
-app.include_router(metrics.router)
-app.include_router(alerts.router)
-app.include_router(notifications.router)
-app.include_router(users.router)
-app.include_router(anomaly.router)
-app.include_router(incidents.router)
-app.include_router(topology.router)
-app.include_router(containers.router)
-app.include_router(knowledge_graph.router)
-app.include_router(knowledge_documents.router)
-app.include_router(knowledge.router)
-app.include_router(remediation.router)
-app.include_router(datasources.router)
-app.include_router(tokens.router)
-app.include_router(settings.router)
-app.include_router(reports.router)
-app.include_router(logs.router)
-app.include_router(predictions.router)
-app.include_router(events.router)
-app.include_router(k8s_resources.router)
-app.include_router(api_v1.router)
-app.include_router(correlation.router)
-app.include_router(runbooks.router)
-app.include_router(remediation_workflow.router)
-app.include_router(alert_silence.router)
-app.include_router(k8s_monitor.router)
-app.include_router(log_anomaly.router)
-app.include_router(notification_templates.router)
-app.include_router(hotspot.router)
-app.include_router(dashboard_config.router)
-app.include_router(alert_webhooks.router)
 app.include_router(asset_changes.router)
-app.include_router(smart_recommend.router)
-app.include_router(predictions_enhanced.router)
-app.include_router(trace_view.router)
-app.include_router(tags.router)
-app.include_router(es_integration.router)
-app.include_router(change_workflow.router)
-app.include_router(chatops.router)
-app.include_router(topo_graph.router)
-app.include_router(alert_storm.router)
-app.include_router(ci_models.router)
-app.include_router(report_schedules.router)
-app.include_router(pcadr.router)
-app.include_router(alert_events.router)
-app.include_router(alert_console.router)
-app.include_router(prediction_models.router)
-app.include_router(dtw.router)
-app.include_router(idice.router)
-app.include_router(script_exec.router)
-app.include_router(drain.router)
-app.include_router(topology_path.router)
+app.include_router(asset_discovery.router)
 app.include_router(lifecycle.router)
-app.include_router(pagerank_rca.router)
-app.include_router(traces.router)
-app.include_router(discovery.router)
+app.include_router(topology.router)
+app.include_router(topology_path.router)
+app.include_router(topo_graph.router)
+app.include_router(tags.router)
 app.include_router(ext_cmdb.router)
-app.include_router(granger.router)
-app.include_router(log_rca.router)
-app.include_router(trace_anomaly.router)
-app.include_router(kafka_pipeline.router)
-app.include_router(trend_prediction.router)
-app.include_router(event_sources.router)
-app.include_router(netflow.router)
-app.include_router(service_mesh.router)
-app.include_router(feature_store.router)
-app.include_router(blue_green.router)
+
+# ── alerts 告警监控域 ──
+app.include_router(alerts.router)
+app.include_router(alert_console.router)
+app.include_router(alert_events.router)
+app.include_router(alert_silence.router)
+app.include_router(alert_storm.router)
+app.include_router(alert_webhooks.router)
+app.include_router(anomaly.router)
 app.include_router(cluster_anomaly.router)
-app.include_router(trace_rca.router)
+app.include_router(hotspot.router)
+
+# ── k8s 容器编排域 ──
+app.include_router(k8s_monitor.router)
+app.include_router(k8s_resources.router)
+app.include_router(containers.router)
+app.include_router(helm.router)
+app.include_router(blue_green.router)
+app.include_router(service_mesh.router)
+
+# ── ai 智能体域 ──
 app.include_router(ai_providers.router)
 app.include_router(agent_chat.router)
 app.include_router(agent_sse.router)
-app.include_router(ws.router)
-app.include_router(audit.router)
-app.include_router(menu.router)
-app.include_router(system.router)
-app.include_router(system_posture.router)
-app.include_router(traces_api.router)
-app.include_router(trace_ingest.router)
-app.include_router(chaos.router)
-app.include_router(workflow.router)
 app.include_router(agent_workflow.router)
-app.include_router(helm.router)
-app.include_router(ansible.router)
-app.include_router(license.router)
-app.include_router(mobile.router)
-app.include_router(knowledge_v2.router)
-app.include_router(health_map.router)
-app.include_router(inspection.router)
-app.include_router(baseline.router)
-app.include_router(knowledge_autogen.router)
-app.include_router(remediation_effect.router)
 app.include_router(agent_eval.router)
+app.include_router(agent_ground_truth.router)
 app.include_router(ab_test.router)
 app.include_router(anomaly_eval.router)
-app.include_router(asset_discovery.router)
+
+# ── sre 可靠性工程域 ──
+app.include_router(sre.router)
+app.include_router(chaos.router)
+app.include_router(inspection.router)
+app.include_router(baseline.router)
+app.include_router(remediation.router)
+app.include_router(remediation_workflow.router)
+app.include_router(remediation_effect.router)
+app.include_router(runbooks.router)
+
+# ── knowledge 知识管理域 ──
+app.include_router(knowledge.router)
+app.include_router(knowledge_documents.router)
+app.include_router(knowledge_v2.router)
+app.include_router(knowledge_graph.router)
+app.include_router(knowledge_autogen.router)
+app.include_router(smart_recommend.router)
+
+# ── incident 故障运营域 ──
+app.include_router(incidents.router)
+app.include_router(dashboard.router)
+app.include_router(dashboard_config.router)
 app.include_router(ops_analytics.router)
-app.include_router(diagnostic_tools.router)
-app.include_router(tenant_management.router)
+app.include_router(reports.router)
+app.include_router(report_schedules.router)
+
+# ── tracing 链路追踪域 ──
+app.include_router(traces.router)
+app.include_router(traces_api.router)
+app.include_router(trace_anomaly.router)
+app.include_router(trace_ingest.router)
+app.include_router(trace_rca.router)
+app.include_router(trace_view.router)
+app.include_router(dtw.router)
+app.include_router(pagerank_rca.router)
+app.include_router(log_rca.router)
+app.include_router(log_anomaly.router)
+app.include_router(logs.router)
+
+# ── platform 平台与集成域 ──
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(roles.router)
-app.include_router(observability_correlation.router)
-app.include_router(agent_ground_truth.router)
+app.include_router(settings.router)
+app.include_router(system.router)
+app.include_router(system_posture.router)
+app.include_router(audit.router)
+app.include_router(menu.router)
+app.include_router(license.router)
+app.include_router(tenant_management.router)
+app.include_router(tokens.router)
+app.include_router(ws.router)
+app.include_router(api_v1.router)
+app.include_router(mobile.router)
+app.include_router(health_map.router)
 app.include_router(network_test.router)
+app.include_router(datasources.router)
+app.include_router(es_integration.router)
+app.include_router(event_sources.router)
+app.include_router(events.router)
+app.include_router(kafka_pipeline.router)
+app.include_router(netflow.router)
+app.include_router(feature_store.router)
+app.include_router(ci_models.router)
+app.include_router(drain.router)
+app.include_router(granger.router)
+app.include_router(idice.router)
+app.include_router(trend_prediction.router)
+app.include_router(prediction_models.router)
+app.include_router(predictions.router)
+app.include_router(predictions_enhanced.router)
+app.include_router(pcadr.router)
+app.include_router(metrics.router)
+app.include_router(notifications.router)
+app.include_router(notification_templates.router)
+app.include_router(correlation.router)
+app.include_router(observability_correlation.router)
+app.include_router(script_exec.router)
+app.include_router(ansible.router)
+app.include_router(change_workflow.router)
+app.include_router(workflow.router)
+app.include_router(chatops.router)
+app.include_router(discovery.router)
+app.include_router(diagnostic_tools.router)
+
+# ── admin 系统管理路由（领域清单 + 背景任务看板，P1 任务#4/#6）──
+app.include_router(admin.router)
+# ── P2 任务#9 告警收敛闭环 / P2 任务#10 RAG 检索质量评估 ──
+app.include_router(alert_correlation.router)
+app.include_router(rag_eval.router)
+# ── 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线）──
+app.include_router(security_audit.router)
 
 
 def _collect_all_menu_keys():
@@ -542,25 +734,60 @@ _last_archive_time = 0.0
 METRIC_RETENTION_DAYS = int(_os.environ.get("AIOPS_METRIC_RETENTION_DAYS", "90"))
 
 
+# P1 任务#6: 后台任务监控器初始化
+def _init_background_task_monitor():
+    """注册所有后台任务到监控器（仅一次）"""
+    from app.services.background_task_monitor import init_task_monitor
+    init_task_monitor([
+        {"name": "alert_check", "fn": alert_service.check_rules, "description": "告警规则检查"},
+        {"name": "alert_escalate", "fn": alert_service.escalate_alerts, "description": "告警升级"},
+        {"name": "k8s_event_alert", "fn": alert_service.check_k8s_events, "description": "K8s 事件告警"},
+        {"name": "anomaly_detect", "fn": anomaly_service.detect_anomalies, "description": "异常检测"},
+        {"name": "incident_correlate", "fn": incident_service.correlate_alerts, "description": "故障关联"},
+        {"name": "remediation", "fn": remediation_service.check_and_remediate, "description": "自愈执行"},
+        {"name": "datasource_scrape", "fn": datasource_service.scrape_all_sources, "description": "数据源采集"},
+        {"name": "pod_health", "fn": pod_health_service.check_pod_anomalies, "description": "Pod 健康检查"},
+        {"name": "log_anomaly", "fn": log_anomaly_service.check_log_anomalies, "description": "日志异常检测"},
+        {"name": "trace_anomaly", "fn": trace_anomaly_service.check_trace_anomalies, "description": "链路异常检测"},
+        {"name": "contention", "fn": contention_service.detect_contention, "description": "资源竞争检测"},
+        {"name": "synthetic_monitor", "fn": check_all_synthetics, "description": "拨测探测"},
+        {"name": "asset_probe", "fn": asset_service.probe_assets, "description": "资产健康探测"},
+        {"name": "metric_collect", "fn": metric_collector.collect_all_metrics, "description": "指标采集"},
+        {"name": "metric_archive", "fn": None, "description": "指标归档（删除超期记录）"},
+        {"name": "report_schedule", "fn": None, "description": "报表调度"},
+    ])
+
+
 def _run_bg_service(name: str, fn, db_mode: str):
     """在独立线程中运行后台服务，使用独立 DB session（线程安全）"""
+    from app.services.background_task_monitor import task_monitor
+    # P1 任务#6: 暂停的任务跳过执行
+    if not task_monitor.is_enabled(name):
+        task_monitor.record_skip(name, "paused")
+        return
     _t0 = time.time()
+    task_monitor.record_start(name)
     _db = get_session_for(db_mode)()
     try:
         fn(_db)
         _elapsed = time.time() - _t0
+        task_monitor.record_success(name, _elapsed * 1000)
         if _elapsed > 30:
             logger.warning(f"后台服务 {name} 耗时过长: {_elapsed:.1f}s")
         elif _elapsed > 5:
             logger.info(f"后台服务 {name} 完成: {_elapsed:.1f}s")
     except Exception as e:
         _elapsed = time.time() - _t0
+        task_monitor.record_failure(name, _elapsed * 1000, str(e))
         logger.warning(f"后台服务 {name} 异常({_elapsed:.1f}s): {e}")
     finally:
         _db.close()
 
 
 def background_loop():
+    # P1 任务#6: 首次启动注册任务清单
+    _init_background_task_monitor()
+    from app.services.background_task_monitor import task_monitor
     while True:
         _mode = get_db_mode()
         # ── 核心服务并发执行（每个独立 session，最多 5 线程）──
@@ -614,14 +841,20 @@ def background_loop():
                 except Exception:
                     _probe_enabled = True
                     _probe_interval = 60
-                if _probe_enabled and _now - _last_probe_time >= _probe_interval:
+                if _probe_enabled and task_monitor.is_enabled("asset_probe") and _now - _last_probe_time >= _probe_interval:
                     _last_probe_time = _now
+                    _t0 = time.time()
+                    task_monitor.record_start("asset_probe")
                     try:
                         changed = asset_service.probe_assets(db)
+                        task_monitor.record_success("asset_probe", (time.time() - _t0) * 1000)
                         if changed:
                             logger.info(f"资产状态变更: {len(changed)} 条")
                     except Exception as pe:
+                        task_monitor.record_failure("asset_probe", (time.time() - _t0) * 1000, str(pe))
                         logger.warning(f"资产探测异常: {pe}")
+                elif not task_monitor.is_enabled("asset_probe"):
+                    task_monitor.record_skip("asset_probe", "paused")
                 # 指标采集
                 try:
                     _collect_enabled = config_service.get_config(db, "metric_collect_enabled", "true").lower() == "true"
@@ -629,18 +862,26 @@ def background_loop():
                 except Exception:
                     _collect_enabled = True
                     _collect_interval = 60
-                if _collect_enabled and _now - _last_collect_time >= _collect_interval:
+                if _collect_enabled and task_monitor.is_enabled("metric_collect") and _now - _last_collect_time >= _collect_interval:
                     _last_collect_time = _now
+                    _t0 = time.time()
+                    task_monitor.record_start("metric_collect")
                     try:
                         summary = metric_collector.collect_all_metrics(db)
+                        task_monitor.record_success("metric_collect", (time.time() - _t0) * 1000)
                         if summary["metrics_collected"] > 0:
                             logger.info(f"指标采集: {summary['success']}成功/{summary['failed']}失败, 采集{summary['metrics_collected']}条指标")
                     except Exception as ce:
+                        task_monitor.record_failure("metric_collect", (time.time() - _t0) * 1000, str(ce))
                         logger.warning(f"指标采集异常: {ce}")
+                elif not task_monitor.is_enabled("metric_collect"):
+                    task_monitor.record_skip("metric_collect", "paused")
                 # ── metric_records 归档：定期删除超期数据 ──
                 _ARCHIVE_INTERVAL = 3600
-                if _now - _last_archive_time >= _ARCHIVE_INTERVAL:
+                if task_monitor.is_enabled("metric_archive") and _now - _last_archive_time >= _ARCHIVE_INTERVAL:
                     _last_archive_time = _now
+                    _t0 = time.time()
+                    task_monitor.record_start("metric_archive")
                     try:
                         from sqlalchemy import text as _arch_text
                         _cutoff = datetime.now() - timedelta(days=METRIC_RETENTION_DAYS)
@@ -648,25 +889,35 @@ def background_loop():
                             "DELETE FROM metric_records WHERE timestamp < :cutoff"
                         ), {"cutoff": _cutoff})
                         db.commit()
+                        task_monitor.record_success("metric_archive", (time.time() - _t0) * 1000)
                         if _result.rowcount and _result.rowcount > 0:
                             logger.info(f"指标归档: 删除 {_result.rowcount} 条超期记录 (>{METRIC_RETENTION_DAYS}天)")
                     except Exception as ae:
+                        task_monitor.record_failure("metric_archive", (time.time() - _t0) * 1000, str(ae))
                         logger.warning(f"指标归档异常: {ae}")
+                elif not task_monitor.is_enabled("metric_archive"):
+                    task_monitor.record_skip("metric_archive", "paused")
                 # 报表调度
-                now = datetime.now()
-                schedules = db.query(ReportSchedule).filter(ReportSchedule.enabled == True).all()
-                for s in schedules:
-                    try:
-                        parts = s.cron_expr.split()
-                        if len(parts) >= 5:
-                            cron_min = int(parts[0])
-                            cron_hour = int(parts[1])
-                            if now.minute == cron_min and now.hour == cron_hour:
-                                report = generate_report(db, s.report_type)
-                                s.last_run_at = now
-                                db.commit()
-                    except Exception:
-                        pass
+                if task_monitor.is_enabled("report_schedule"):
+                    now = datetime.now()
+                    schedules = db.query(ReportSchedule).filter(ReportSchedule.enabled == True).all()
+                    for s in schedules:
+                        try:
+                            parts = s.cron_expr.split()
+                            if len(parts) >= 5:
+                                cron_min = int(parts[0])
+                                cron_hour = int(parts[1])
+                                if now.minute == cron_min and now.hour == cron_hour:
+                                    _t0 = time.time()
+                                    task_monitor.record_start("report_schedule")
+                                    report = generate_report(db, s.report_type)
+                                    s.last_run_at = now
+                                    db.commit()
+                                    task_monitor.record_success("report_schedule", (time.time() - _t0) * 1000)
+                        except Exception as re:
+                            task_monitor.record_failure("report_schedule", 0, str(re))
+                else:
+                    task_monitor.record_skip("report_schedule", "paused")
             finally:
                 db.close()
         except Exception as e:

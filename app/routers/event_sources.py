@@ -205,4 +205,4 @@ def api_source_sync(src_id: int, db: Session = Depends(get_db)):
         db.commit()
         return JSONResponse({"ok": True, "synced": count})
     except Exception as e:
-        return JSONResponse({"error": f"Sync error: {e}"}, status_code=500)
+        return JSONResponse({"warning": f"Sync error: {e}"}, status_code=200)

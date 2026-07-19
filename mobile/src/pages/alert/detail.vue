@@ -65,7 +65,7 @@
 <script setup>
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { getList, acknowledge, resolve, triggerHeal, silence } from '@/api/alert.js'
+import { getList, getDetail, acknowledge, resolve, triggerHeal, silence } from '@/api/alert.js'
 import { setPendingPreset, openAlertAssistant, setPendingSessionId } from '@/api/agent.js'
 
 const alert = ref(null)
@@ -83,11 +83,17 @@ function statusText(s) {
 async function fetchDetail(id) {
     loading.value = true
     try {
-        const data = await getList({ per_page: 100 })
-        const items = data.alerts || data.items || []
-        const arr = Array.isArray(items) ? items : []
-        alert.value = arr.find((a) => String(a.id) === String(id)) || null
-        if (!alert.value && data.id) alert.value = data
+        const data = await getDetail(id)
+        if (data && data.alert) {
+            alert.value = data.alert
+        } else if (data && data.id) {
+            alert.value = data
+        } else {
+            alert.value = null
+            if (data && data.warning) {
+                uni.showToast({ title: data.warning, icon: 'none' })
+            }
+        }
     } catch (e) {
         uni.showToast({ title: '加载失败', icon: 'none' })
     } finally {

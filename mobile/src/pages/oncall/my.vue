@@ -279,7 +279,6 @@ fetchData()
 
 <style lang="scss" scoped>
 .page-wrap {
-    background: #ff00ff !important;
     min-height: 100vh;
 }
 

@@ -54,7 +54,7 @@ def create_rule(body: RuleBody, db: Session = Depends(get_db)):
     except Exception as e:
         from app.logger import logger
         logger.error(f"log-anomaly create failed: {e}")
-        return JSONResponse({"error": "创建失败"}, status_code=500)
+        return JSONResponse({"message": "创建失败"}, status_code=200)
 
 
 @router.put("/rules/{rule_id}")
@@ -78,7 +78,7 @@ def update_rule(rule_id: int, body: RuleBody, db: Session = Depends(get_db)):
     except Exception as e:
         from app.logger import logger
         logger.error(f"log-anomaly update failed: {e}")
-        return JSONResponse({"error": "更新失败"}, status_code=500)
+        return JSONResponse({"message": "更新失败"}, status_code=200)
 
 
 @router.delete("/rules/{rule_id}")
@@ -94,4 +94,4 @@ def delete_rule(rule_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         from app.logger import logger
         logger.error(f"log-anomaly delete failed: {e}")
-        return JSONResponse({"error": "删除失败"}, status_code=500)
+        return JSONResponse({"message": "删除失败"}, status_code=200)

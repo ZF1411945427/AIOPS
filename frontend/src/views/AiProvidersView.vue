@@ -8,12 +8,16 @@
     <div class="panel">
       <div class="panel-head">
         <span>模型提供商</span>
-        <button class="btn btn-primary btn-sm" @click="openProviderDialog()">+ 新增提供商</button>
+        <div class="panel-actions">
+          <button class="btn btn-sm" @click="loadHealth" :disabled="healthLoading">刷新健康度</button>
+          <button class="btn btn-sm" @click="resetAllBreakers" v-if="health.opened_count > 0">全部重置熔断 ({{ health.opened_count }})</button>
+          <button class="btn btn-primary btn-sm" @click="openProviderDialog()">+ 新增提供商</button>
+        </div>
       </div>
       <div class="panel-body">
         <div v-if="loading" class="loading-state">加载中...</div>
         <table v-else-if="providers.length" class="table">
-          <thead><tr><th>ID</th><th>名称</th><th>Base URL</th><th>默认模型</th><th>温度</th><th>API Key</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>名称</th><th>Base URL</th><th>默认模型</th><th>温度</th><th>API Key</th><th>状态</th><th>健康度</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="p in providers" :key="p.id">
               <td>{{ p.id }}</td>
@@ -24,9 +28,16 @@
               <td><span class="badge" :class="p.has_api_key ? 'on' : 'off'">{{ p.has_api_key ? '已配置' : '未配置' }}</span></td>
               <td><span class="badge" :class="p.is_enabled ? 'on' : 'off'">{{ p.is_enabled ? '启用' : '禁用' }}</span></td>
               <td>
+                <span class="badge" :class="healthBadgeClass(p.id)" :title="healthTooltip(p.id)">
+                  {{ healthBadgeText(p.id) }}
+                </span>
+                <span class="text-sm" style="margin-left:6px;">{{ healthStats(p.id) }}</span>
+              </td>
+              <td>
                 <button class="btn btn-sm" @click="openProviderDialog(p)">编辑</button>
                 <button class="btn btn-sm" @click="testProvider(p)" :disabled="testing === p.id">{{ testing === p.id ? '测试中...' : '测试' }}</button>
                 <button class="btn btn-sm" @click="toggleProvider(p)">{{ p.is_enabled ? '禁用' : '启用' }}</button>
+                <button class="btn btn-sm" @click="resetBreaker(p)" v-if="getHealth(p.id) && getHealth(p.id).state !== 'closed'">重置熔断</button>
                 <button class="btn btn-sm btn-danger" @click="deleteProvider(p)">删除</button>
               </td>
             </tr>
@@ -122,11 +133,92 @@ const editingConfig = ref(null)
 const pForm = ref({ name: '', base_url: '', default_model: '', api_key: '', temperature: 0.2, max_tokens: 10000, timeout_seconds: 30 })
 const cForm = ref({ name: 'default', default_provider_id: 0, system_prompt: '', welcome_message: '', suggested_questions: '[]', allow_action_execution: false, require_confirmation: true, max_history_messages: 12 })
 
+// P1 任务#5: AI Provider 健康度 + 熔断器
+const health = ref({ providers: [], total: 0, opened_count: 0, half_open_count: 0, closed_count: 0 })
+const healthLoading = ref(false)
+
 const enabledProviders = computed(() => providers.value.filter(p => p.is_enabled))
 
 function providerName(id) {
   const p = providers.value.find(x => x.id === id)
   return p ? p.name : '无'
+}
+
+function getHealth(providerId) {
+  const item = health.value.providers.find(x => x.id === providerId)
+  return item ? item.health : null
+}
+
+function healthBadgeClass(providerId) {
+  const h = getHealth(providerId)
+  if (!h) return 'off'
+  if (h.state === 'open') return 'danger'
+  if (h.state === 'half_open') return 'warn'
+  return 'on'
+}
+
+function healthBadgeText(providerId) {
+  const h = getHealth(providerId)
+  if (!h) return '未监控'
+  if (h.state === 'open') return `熔断 ${h.open_remaining_sec}s`
+  if (h.state === 'half_open') return '半开试探'
+  return '正常'
+}
+
+function healthStats(providerId) {
+  const h = getHealth(providerId)
+  if (!h || h.total_calls === 0) return '无调用'
+  return `成功率 ${(h.success_rate * 100).toFixed(0)}% · P95 ${h.p95_latency_ms}ms · ${h.total_calls}次`
+}
+
+function healthTooltip(providerId) {
+  const h = getHealth(providerId)
+  if (!h) return '尚未调用'
+  return `状态: ${h.state}\n成功率: ${(h.success_rate * 100).toFixed(1)}%\nP95: ${h.p95_latency_ms}ms\n总调用: ${h.total_calls}\n最近错误: ${h.last_error || '无'}`
+}
+
+async function loadHealth() {
+  healthLoading.value = true
+  try {
+    const data = await request.get('/ai/api/providers/health')
+    if (data.providers) {
+      health.value = {
+        providers: data.providers,
+        total: data.total || 0,
+        opened_count: data.opened_count || 0,
+        half_open_count: data.half_open_count || 0,
+        closed_count: data.closed_count || 0,
+      }
+    } else if (data.warning) {
+      // 静默处理：未登录或异常
+    }
+  } catch (e) {
+    // 静默失败，不打扰用户
+    console.error('load health:', e)
+  } finally {
+    healthLoading.value = false
+  }
+}
+
+async function resetBreaker(p) {
+  try {
+    await request.post(`/ai/api/providers/${p.id}/reset-breaker`)
+    ElMessage.success(`已重置「${p.name}」熔断器`)
+    loadHealth()
+  } catch (e) {
+    ElMessage.error('重置失败: ' + (e.message || e))
+  }
+}
+
+async function resetAllBreakers() {
+  try {
+    await ElMessageBox.confirm(`确认重置所有已熔断的 provider（${health.value.opened_count} 个）？`, '重置确认', { type: 'warning' })
+    await request.post('/ai/api/providers/reset-all-breakers')
+    ElMessage.success('所有熔断器已重置')
+    loadHealth()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('重置失败: ' + (e.message || e))
+  }
 }
 
 async function load() {
@@ -135,6 +227,8 @@ async function load() {
     const data = await request.get('/ai/api/providers')
     providers.value = data.providers || []
     configs.value = data.configs || []
+    // 同步加载健康度（非阻塞，失败不影响主流程）
+    loadHealth()
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
   } finally {
@@ -245,6 +339,9 @@ onMounted(load)
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
 .badge.on { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.off { background: rgba(100,116,139,0.1); color: #64748b; }
+.badge.warn { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.badge.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
+.panel-actions { display: flex; gap: 8px; align-items: center; }
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }

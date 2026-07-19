@@ -61,22 +61,32 @@ const list = ref([])
 const loading = ref(false)
 const loadingMore = ref(false)
 const noMore = ref(false)
+const page = ref(1)
+const PAGE_SIZE = 20
 
 async function fetchList(reset) {
     if (reset) {
+        page.value = 1
         noMore.value = false
+        list.value = []
     }
-    loading.value = true
+    loading.value = reset
+    loadingMore.value = !reset
     try {
-        const data = await getIncidentList(activeTab.value)
+        const data = await getIncidentList(activeTab.value, { page: page.value, per_page: PAGE_SIZE })
         const items = data.incidents || data.items || data || []
         const arr = Array.isArray(items) ? items : []
-        list.value = arr
-        if (arr.length < 50) noMore.value = true
+        if (reset) {
+            list.value = arr
+        } else {
+            list.value = list.value.concat(arr)
+        }
+        if (arr.length < PAGE_SIZE) noMore.value = true
     } catch (e) {
         uni.showToast({ title: '加载失败', icon: 'none' })
     } finally {
         loading.value = false
+        loadingMore.value = false
     }
 }
 
@@ -87,9 +97,9 @@ function switchTab(val) {
 }
 
 function loadMore() {
-    if (loadingMore.value || noMore.value) return
-    loadingMore.value = true
-    setTimeout(() => { loadingMore.value = false }, 500)
+    if (loadingMore.value || noMore.value || loading.value) return
+    page.value++
+    fetchList(false)
 }
 
 function goCreate() {

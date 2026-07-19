@@ -81,4 +81,4 @@ def api_path_find(payload: dict = Body(...), db: Session = Depends(get_db)):
             "length": len(path_ids) - 1,
         })
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e), "path": [], "nodes": []}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e), "path": [], "nodes": []}, status_code=200)

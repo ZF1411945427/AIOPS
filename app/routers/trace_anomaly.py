@@ -15,6 +15,7 @@ def _cfg_to_dict(c):
         "service_name": c.service_name or "",
         "latency_threshold_ms": c.latency_threshold_ms or 1000,
         "error_rate_threshold": c.error_rate_threshold or 0.05,
+        "check_window_minutes": c.check_window_minutes or 30,
         "enabled": bool(c.enabled),
         "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else None,
     }
@@ -47,6 +48,7 @@ def create_config(payload: dict = Body(...), db: Session = Depends(get_db)):
             service_name=payload.get("service_name", ""),
             latency_threshold_ms=payload.get("latency_threshold_ms", 1000),
             error_rate_threshold=payload.get("error_rate_threshold", 0.05),
+            check_window_minutes=payload.get("check_window_minutes", 30),
             enabled=payload.get("enabled", True),
         )
         db.add(cfg)
@@ -54,7 +56,7 @@ def create_config(payload: dict = Body(...), db: Session = Depends(get_db)):
         db.refresh(cfg)
         return JSONResponse({"ok": True, "id": cfg.id, "item": _cfg_to_dict(cfg)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.put("/api/configs/{config_id}")
@@ -71,13 +73,15 @@ def update_config(config_id: int, payload: dict = Body(...), db: Session = Depen
             cfg.latency_threshold_ms = payload["latency_threshold_ms"]
         if "error_rate_threshold" in payload:
             cfg.error_rate_threshold = payload["error_rate_threshold"]
+        if "check_window_minutes" in payload:
+            cfg.check_window_minutes = payload["check_window_minutes"]
         if "enabled" in payload:
             cfg.enabled = payload["enabled"]
         db.commit()
         db.refresh(cfg)
         return JSONResponse({"ok": True, "item": _cfg_to_dict(cfg)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.delete("/api/configs/{config_id}")
@@ -90,7 +94,7 @@ def delete_config(config_id: int, db: Session = Depends(get_db)):
         db.commit()
         return JSONResponse({"ok": True})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/configs/{config_id}/toggle")
@@ -103,4 +107,4 @@ def toggle_config(config_id: int, db: Session = Depends(get_db)):
         db.commit()
         return JSONResponse({"ok": True, "enabled": bool(cfg.enabled)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)

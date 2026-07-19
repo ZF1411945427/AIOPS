@@ -2,7 +2,7 @@
 
 > **所有数据库表、前后端代码的字段命名必须以本文件为准。**
 > 新增/修改任何字段，必须先改本文件，再同步前后端代码。
-> 最后更新: 2026-07-15
+> 最后更新: 2026-07-19
 
 ---
 
@@ -618,3 +618,251 @@
 4. **后缀即语义** — `_at` 时间、`_id` 外键、`_type` 类型、`_config` JSON 配置
 5. **一义一名** — 同一种含义全库用一个字段名（禁止 `name/title/label` 混用）
 6. **本文件唯一权威** — 代码中不得自行发明字段名，新增字段必须先改本契约
+
+---
+
+## 第七章：评估 / A/B 测试 / 知识草稿三模块完整字段定义
+
+> 2026-07-19 新增。这三个模块为本次强力测试与修复的核心，统一在此定义以避免前后端字段漂移。
+
+### `agent_ground_truths` — Agent 评估 GroundTruth 测试集
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | 主键 |
+| name | String(128) | NOT NULL | 用例名 |
+| category | String(32) | "qa" | qa / tool_call / rag / reasoning |
+| question | Text | NOT NULL | 测试问题 |
+| expected_answer | Text | "" | 预期答案 |
+| expected_tools | Text | "[]" | JSON array of expected tool names |
+| tags | String(256) | "" | 标签 |
+| difficulty | String(16) | "medium" | easy / medium / hard |
+| is_active | Boolean | True | 启用标志（软删除用） |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+**API 约定**：
+- 列表 `GET /agent/api/ground-truth/tests` 默认只返回 `is_active=True`，`?include_inactive=true` 显示全部
+- 删除 `DELETE /agent/api/ground-truth/tests/{id}` 默认软删（is_active=False），`?hard=true` 物理删除
+
+### `agent_ground_truth_runs` — GroundTruth 测试执行记录
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| test_id | Integer FK(agent_ground_truths.id) | NOT NULL | - |
+| session_id | Integer | nullable | 保留字段，当前不写入 |
+| provider_id | Integer | nullable | 实际使用的 AI Provider |
+| model_name | String(64) | "" | provider.default_model |
+| actual_answer | Text | "" | LLM 最终回答 |
+| actual_tools | Text | "[]" | JSON array，元素为 `{"name":"x","is_success":true,"latency_ms":120}` |
+| answer_score | Float | 0.0 | 答案相似度 0~1（字符 2-gram Jaccard + SequenceMatcher 综合） |
+| tool_score | Float | 0.0 | 工具匹配度 0~1（成功执行的工具才算命中） |
+| total_score | Float | 0.0 | 综合分 = answer_score * 0.6 + tool_score * 0.4 |
+| latency_ms | Integer | 0 | - |
+| error | String(512) | "" | LLM 调用错误（无错误则空） |
+| created_at | DateTime | now() | - |
+
+### `ab_test_configs` — A/B 测试配置
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| name | String(128) | NOT NULL | 实验名 |
+| provider_a_id | Integer FK(ai_providers.id) | nullable | A 组 provider |
+| provider_b_id | Integer FK(ai_providers.id) | nullable | B 组 provider |
+| model_a | String(64) | "" | A 组模型名（创建/启动时由 provider.default_model 自动填充） |
+| model_b | String(64) | "" | B 组模型名（创建/启动时由 provider.default_model 自动填充） |
+| split_ratio | String(8) | "50/50" | 分流比，格式 "N/M" |
+| metric | String(32) | "latency" | latency / accuracy / success |
+| status | String(16) | "active" | active / stopped（同一时刻全局仅 1 个 active） |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+**API 约定**：
+- 创建时校验 A≠B、provider 存在
+- 启动（status=active）时自动停止其他 active 实验
+- 删除 `DELETE /agent/api/ab-test/configs/{id}` 级联删除 ab_test_records
+
+### `ab_test_records` — A/B 测试结果记录
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| test_id | Integer FK(ab_test_configs.id) | nullable | - |
+| session_id | Integer | nullable | - |
+| group | String(8) | "a" | a / b（由 md5(test_id:session_id) % 100 < ratio_a 决定） |
+| provider_id | Integer | nullable | - |
+| model_name | String(64) | "" | - |
+| latency_ms | Integer | 0 | - |
+| token_count | Integer | 0 | LLM usage.total_tokens，无则记 0 |
+| is_success | Boolean | True | 由 agent_service 真实判定（content 非空且无 error） |
+| user_feedback | String(16) | "" | 保留字段，当前未采集 |
+| created_at | DateTime | now() | - |
+
+### `knowledge_drafts` — AI 知识草稿
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| alert_id | Integer FK(alerts.id) | nullable | 关联告警（告警来源时有值；故障单来源时取首个 alert_id） |
+| title | String(256) | NOT NULL | 标题 |
+| symptom | Text | "" | 故障表现 |
+| root_cause | Text | "" | 根因 |
+| solution | Text | "" | 解决方案 |
+| tags | String(256) | "" | 英文逗号分隔 |
+| severity | String(32) | "warning" | critical / high / warning / info |
+| asset_type | String(32) | "" | - |
+| source_data | Text | "" | JSON，含 alert_id / incident_id / 原始信息 |
+| source_type | String(32) | "auto" | auto / sop / manual |
+| sop_steps | Text | "[]" | JSON array of {step, action, command, expectation} |
+| status | String(16) | "pending" | pending / approved / rejected |
+| reject_reason | Text | "" | 拒绝原因（前端 body 传，后端 Body 接收） |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+**API 约定**：
+- `POST /knowledge/api/auto-gen/drafts/{id}/reject` body: `{"reason":"xxx"}`
+- `GET /knowledge/api/auto-gen/drafts/stats` 返回 `{pending, approved, rejected, total}`（后端 GROUP BY）
+- `DELETE /knowledge/api/auto-gen/drafts/{id}` 仅允许删除非 approved 状态
+- 审批通过后：写入 knowledge_base，并根据 alert_id 或 source_data.incident_id（回查 IncidentAlert）建立 alert_kb_links 关联
+
+### `knowledge_base` — 知识库（审批通过后入库）
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| title | String(256) | NOT NULL | - |
+| symptom | Text | "" | - |
+| root_cause | Text | "" | - |
+| solution | Text | "" | - |
+| tags | String(256) | "" | - |
+| severity | String(32) | "warning" | - |
+| asset_type | String(32) | "" | - |
+| source_type | String(32) | "manual" | manual / auto |
+| sop_steps | Text | "[]" | - |
+| version_number | Integer | 1 | - |
+| change_log | Text | "" | - |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+### `alert_kb_links` — 告警与知识库关联
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| alert_id | Integer FK(alerts.id) | NOT NULL | - |
+| kb_id | Integer FK(knowledge_base.id) | NOT NULL | - |
+
+---
+
+## 第八章：中间件子类型与数据库子类型枚举（2026-07-19 新增）
+
+> **本节为 `mw_subtype` 与 `db_type` 字段的唯一权威枚举清单。**
+> 前后端下拉选项、连接测试、健康检查路径、巡检模板覆盖范围均以本节为准。
+> 新增/修改子类型必须先改本节，再同步前后端代码。
+
+### 8.1 `mw_subtype` — 中间件子类型枚举（ci_type="middleware" 时使用）
+
+> 当 `ci_type="middleware"` 时，`mw_subtype` 用于细分具体中间件产品。
+> `mw_port` 字段对应下方"默认端口"，`mw_admin_url` 为可选管理地址。
+> 连接测试：`connection_type="http"` 时按 `mw_subtype` 路由到对应健康检查路径。
+
+#### 8.1.1 Web 服务器 / 应用服务器
+
+| mw_subtype | 标签 | 默认端口 | 健康检查路径 |
+|-----------|------|---------|------------|
+| nginx | Nginx | 80 | `/` |
+| apache | Apache HTTP | 80 | `/` |
+| tomcat | Tomcat | 8080 | `/` |
+| jetty | Jetty | 8080 | `/` |
+| weblogic | WebLogic | 7001 | `/console` |
+| websphere | WebSphere | 9043 | `/ibm/console` |
+| wildfly | WildFly/JBoss | 8080 | `/` |
+
+#### 8.1.2 消息队列
+
+| mw_subtype | 标签 | 默认端口 | 健康检查方式 |
+|-----------|------|---------|------------|
+| kafka | Kafka | 9092 | TCP 端口连通 |
+| rabbitmq | RabbitMQ | 15672 | `/api/overview` |
+| rocketmq | RocketMQ | 9876 | TCP 端口连通 |
+| activemq | ActiveMQ | 8161 | `/api/jolokia/` |
+| pulsar | Apache Pulsar | 8080 | `/admin/v2/brokers/healthcheck` |
+
+#### 8.1.3 注册中心 / 配置中心
+
+| mw_subtype | 标签 | 默认端口 | 健康检查路径 |
+|-----------|------|---------|------------|
+| nacos | Nacos | 8848 | `/nacos/v1/ns/operator/metrics` |
+| zookeeper | ZooKeeper | 2181 | TCP + ruok 命令 |
+| apollo | Apollo | 8080 | `/health` |
+| consul | Consul | 8500 | `/v1/status/leader` |
+| eureka | Eureka | 8761 | `/eureka/apps` |
+| etcd | Etcd | 2379 | `/health` |
+
+#### 8.1.4 流量控制 / API 网关
+
+| mw_subtype | 标签 | 默认端口 | 健康检查路径 |
+|-----------|------|---------|------------|
+| sentinel | Sentinel | 8080 | `/health` |
+| apisix | APISIX | 9180 | `/apisix/status` |
+| kong | Kong | 8001 | `/status` |
+| spring_cloud_gateway | Spring Cloud Gateway | 8080 | `/actuator/health` |
+| haproxy | HAProxy | 80 | `/stats` |
+
+#### 8.1.5 分布式事务
+
+| mw_subtype | 标签 | 默认端口 | 健康检查路径 |
+|-----------|------|---------|------------|
+| seata | Seata | 8091 | `/health` |
+
+#### 8.1.6 对象存储 / 其他
+
+| mw_subtype | 标签 | 默认端口 | 健康检查路径 |
+|-----------|------|---------|------------|
+| minio | MinIO | 9000 | `/minio/health/live` |
+
+**约定：**
+- `mw_subtype` 取值必须在上表枚举内；未列出的中间件统一用 `middleware`（空 subtype），按 HTTP 通用健康检查。
+- 前端 `AssetsView.vue` 中间件下拉选项必须与本表一致。
+- 后端 `connection_service.py::_test_middleware` 按本表的"健康检查路径/方式"实施。
+
+### 8.2 `db_type` — 数据库子类型枚举（ci_type="database" 时使用）
+
+> 当 `ci_type="database"` 时，`db_type` 用于细分具体数据库产品。
+> 连接测试：`connection_type="database"` 时按 `db_type` 路由到对应驱动。
+
+| db_type | 标签 | 默认端口 | 驱动 / 测试方式 |
+|---------|------|---------|---------------|
+| mysql | MySQL | 3306 | pymysql |
+| postgresql | PostgreSQL | 5432 | psycopg2 |
+| oracle | Oracle | 1521 | cx_Oracle / oracledb（SID or Service Name） |
+| sqlserver | SQL Server | 1433 | pyodbc / pymssql |
+| mongodb | MongoDB | 27017 | pymongo |
+| redis | Redis | 6379 | redis-py |
+| elasticsearch | Elasticsearch | 9200 | HTTP `/_cluster/health` |
+| tidb | TiDB | 4000 | pymysql（MySQL 协议兼容） |
+| clickhouse | ClickHouse | 8123 | HTTP `/?query=SELECT+1` |
+| dameng | 达梦 DM | 5236 | dmPython（可选）/ TCP 端口连通 |
+| oceanbase | OceanBase | 2883 | pymysql（MySQL 协议兼容） |
+| mariadb | MariaDB | 3306 | pymysql |
+| sqlite | SQLite | — | 本地文件，连接测试跳过端口检测 |
+
+**约定：**
+- `db_type` 取值必须在上表枚举内。
+- 前端 `AssetsView.vue` 数据库下拉选项必须与本表一致。
+- 后端 `connection_service.py::_test_database` 必须按本表覆盖所有 `db_type`：
+  - 已支持：mysql / postgresql / redis
+  - 本次新增支持：oracle / sqlserver / mongodb / elasticsearch / tidb / clickhouse / dameng / oceanbase / mariadb / sqlite
+- 未安装驱动的类型：返回明确的"缺少驱动: xxx，请执行 pip install xxx"提示，不得静默失败。
+
+### 8.3 字段命名约束（沿用）
+
+- `mw_subtype` 字段类型 String(32)，默认值 `nginx`（向后兼容）
+- `mw_port` 字段类型 Integer，默认值 80
+- `mw_admin_url` 字段类型 String(512)，可选
+- `db_type` 字段类型 String(32)，默认值 `mysql`
+- `db_port` 字段类型 Integer，默认值 3306
+- `db_user` / `db_password` / `db_name` 字段沿用 CONTRACT.md 第五章敏感字段掩码规则
+

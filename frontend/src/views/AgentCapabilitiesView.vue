@@ -98,6 +98,7 @@
             <thead>
               <tr>
                 <th style="width:30px"></th>
+                <th>中文名</th>
                 <th>工具名称</th>
                 <th>描述</th>
                 <th>风险等级</th>
@@ -109,6 +110,7 @@
               <template v-for="tool in filteredTools" :key="tool.name">
                 <tr class="tool-row" @click="toggleExpand(tool.name)">
                   <td class="expand-icon">{{ expandedSet.has(tool.name) ? '▼' : '▶' }}</td>
+                  <td><span class="tool-display-name">{{ tool.display_name || tool.name }}</span></td>
                   <td><span class="tool-name">{{ tool.name }}</span></td>
                   <td class="tool-desc">{{ tool.description }}</td>
                   <td><span class="risk-badge" :class="'risk-' + tool.risk_level">{{ tool.risk_level }}</span></td>
@@ -120,7 +122,7 @@
                   <td>{{ Object.keys(tool.input_schema?.properties || {}).length }}</td>
                 </tr>
                 <tr v-if="expandedSet.has(tool.name)" class="schema-row">
-                  <td colspan="6">
+                  <td colspan="7">
                     <div class="schema-panel">
                       <div class="schema-title">input_schema</div>
                       <pre class="schema-code">{{ JSON.stringify(tool.input_schema, null, 2) }}</pre>
@@ -189,7 +191,8 @@ const filteredTools = computed(() => {
   return data.value.tools.filter(t => {
     if (search.value) {
       const q = search.value.toLowerCase()
-      if (!t.name.toLowerCase().includes(q) && !t.description.toLowerCase().includes(q)) return false
+      const cn = (t.display_name || '').toLowerCase()
+      if (!t.name.toLowerCase().includes(q) && !t.description.toLowerCase().includes(q) && !cn.includes(q)) return false
     }
     if (riskFilter.value && t.risk_level !== riskFilter.value) return false
     if (scopeFilter.value === 'llm' && !t.expose_to_llm) return false
@@ -286,6 +289,7 @@ onMounted(async () => {
 .tool-row:hover { background: var(--bg-hover, #f8fafc); }
 .expand-icon { color: var(--text-secondary, #94a3b8); font-size: 0.7rem; text-align: center; }
 .tool-name { font-weight: 600; color: #6366f1; font-family: 'Fira Code', monospace; font-size: 0.8rem; }
+.tool-display-name { font-weight: 600; color: #1e293b; font-size: 0.85rem; }
 .tool-desc { color: var(--text-secondary, #64748b); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .risk-badge {

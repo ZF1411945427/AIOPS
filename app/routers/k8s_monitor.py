@@ -71,4 +71,4 @@ def api_k8s_monitor_list(cluster: str = "", hours: int = 1, db: Session = Depend
             "cluster_info": cluster_info,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)

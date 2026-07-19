@@ -32,6 +32,7 @@ def _get_db():
         },
     },
     risk_level="read_only",
+    display_name="查询告警",
 )
 def query_alerts(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -84,6 +85,7 @@ def query_alerts(db: Optional[Session] = None, user_id: Optional[int] = None, **
         "required": ["alert_id"],
     },
     risk_level="read_only",
+    display_name="告警详情",
 )
 def get_alert_detail(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -125,6 +127,7 @@ def get_alert_detail(db: Optional[Session] = None, user_id: Optional[int] = None
         },
     },
     risk_level="read_only",
+    display_name="查询资产",
 )
 def query_assets(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -182,6 +185,7 @@ def query_assets(db: Optional[Session] = None, user_id: Optional[int] = None, **
         },
     },
     risk_level="read_only",
+    display_name="查询指标",
 )
 def query_metrics(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -235,6 +239,7 @@ def query_metrics(db: Optional[Session] = None, user_id: Optional[int] = None, *
         },
     },
     risk_level="read_only",
+    display_name="查询故障单",
 )
 def query_incidents(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -279,6 +284,7 @@ def query_incidents(db: Optional[Session] = None, user_id: Optional[int] = None,
         },
     },
     risk_level="read_only",
+    display_name="查询变更记录",
 )
 def query_change_records(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     from app.models import AssetChangeLog
@@ -329,6 +335,7 @@ def query_change_records(db: Optional[Session] = None, user_id: Optional[int] = 
         "required": ["incident_id"],
     },
     risk_level="medium",
+    display_name="知识沉淀·故障单",
     expose_to_llm=True,
 )
 def generate_knowledge_from_incident(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -366,6 +373,7 @@ def generate_knowledge_from_incident(db: Optional[Session] = None, user_id: Opti
         "required": ["alert_id"],
     },
     risk_level="medium",
+    display_name="知识沉淀·告警",
     expose_to_llm=True,
 )
 def generate_knowledge_from_alert(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -404,6 +412,7 @@ def generate_knowledge_from_alert(db: Optional[Session] = None, user_id: Optiona
         },
     },
     risk_level="read_only",
+    display_name="知识库检索",
 )
 def query_knowledge(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -454,6 +463,7 @@ def query_knowledge(db: Optional[Session] = None, user_id: Optional[int] = None,
         "required": ["query"],
     },
     risk_level="read_only",
+    display_name="RAG 检索",
 )
 def query_knowledge_rag(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -498,6 +508,7 @@ def query_knowledge_rag(db: Optional[Session] = None, user_id: Optional[int] = N
         },
     },
     risk_level="read_only",
+    display_name="Runbook 检索",
 )
 def query_runbook(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -559,6 +570,7 @@ def query_runbook(db: Optional[Session] = None, user_id: Optional[int] = None, *
         },
     },
     risk_level="read_only",
+    display_name="K8s Pod 列表",
 )
 def list_k8s_pods(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -604,6 +616,7 @@ def list_k8s_pods(db: Optional[Session] = None, user_id: Optional[int] = None, *
         },
     },
     risk_level="read_only",
+    display_name="查询 K8s 事件",
 )
 def query_k8s_events(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -623,12 +636,15 @@ def query_k8s_events(db: Optional[Session] = None, user_id: Optional[int] = None
             "events": [
                 {
                     "id": e.id,
-                    "type": e.event_type,
+                    "type": e.kind,
                     "reason": e.reason,
                     "message": e.message,
-                    "involved_object": e.involved_object,
+                    "namespace": e.namespace,
+                    "name": e.name,
                     "severity": e.severity,
                     "cluster": e.cluster,
+                    "count": e.count,
+                    "last_seen_at": str(e.last_seen_at) if e.last_seen_at else None,
                     "created_at": str(e.created_at),
                 }
                 for e in events
@@ -652,6 +668,7 @@ def query_k8s_events(db: Optional[Session] = None, user_id: Optional[int] = None
         "required": ["incident_id"],
     },
     risk_level="read_only",
+    display_name="RCA 根因分析",
 )
 def analyze_incident_rca(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     from app.services.rca_service import analyze_incident
@@ -664,7 +681,7 @@ def analyze_incident_rca(db: Optional[Session] = None, user_id: Optional[int] = 
         incident = db.query(Incident).filter(Incident.id == incident_id).first()
         if not incident:
             return {"error": "故障单未找到"}
-        result = analyze_incident(db, incident)
+        result = analyze_incident(db, incident_id)
         return result
     finally:
         if close_db:
@@ -683,6 +700,7 @@ def analyze_incident_rca(db: Optional[Session] = None, user_id: Optional[int] = 
         },
     },
     risk_level="read_only",
+    display_name="关联分析",
 )
 def query_correlation_analysis(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -735,6 +753,7 @@ def query_correlation_analysis(db: Optional[Session] = None, user_id: Optional[i
         "required": ["service", "asset_id"],
     },
     risk_level="high",
+    display_name="重启服务",
     expose_to_llm=False,
 )
 def execute_restart_service(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -789,6 +808,7 @@ def execute_restart_service(db: Optional[Session] = None, user_id: Optional[int]
         "required": ["path", "asset_id"],
     },
     risk_level="high",
+    display_name="清理磁盘",
     expose_to_llm=False,
 )
 def execute_clean_disk(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -831,6 +851,7 @@ def execute_clean_disk(db: Optional[Session] = None, user_id: Optional[int] = No
         "required": ["script", "asset_id"],
     },
     risk_level="critical",
+    display_name="执行脚本",
     expose_to_llm=False,
 )
 def execute_run_script(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -885,6 +906,7 @@ def execute_run_script(db: Optional[Session] = None, user_id: Optional[int] = No
         "required": ["command", "asset_id"],
     },
     risk_level="critical",
+    display_name="执行命令",
     expose_to_llm=False,
 )
 def execute_run_command(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -926,6 +948,7 @@ def execute_run_command(db: Optional[Session] = None, user_id: Optional[int] = N
         "required": ["alert_id"],
     },
     risk_level="low",
+    display_name="确认告警",
     expose_to_llm=False,
 )
 def execute_acknowledge_alert(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -957,6 +980,7 @@ def execute_acknowledge_alert(db: Optional[Session] = None, user_id: Optional[in
         "required": ["alert_id"],
     },
     risk_level="low",
+    display_name="解决告警",
     expose_to_llm=False,
 )
 def execute_resolve_alert(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -988,6 +1012,7 @@ def execute_resolve_alert(db: Optional[Session] = None, user_id: Optional[int] =
         "required": ["incident_id"],
     },
     risk_level="low",
+    display_name="解决故障单",
     expose_to_llm=False,
 )
 def execute_resolve_incident(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1021,6 +1046,7 @@ def execute_resolve_incident(db: Optional[Session] = None, user_id: Optional[int
         "required": ["rule_id", "minutes"],
     },
     risk_level="medium",
+    display_name="静默告警",
     expose_to_llm=False,
 )
 def execute_silence_alert(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1064,6 +1090,7 @@ def execute_silence_alert(db: Optional[Session] = None, user_id: Optional[int] =
         "required": ["data"],
     },
     risk_level="medium",
+    display_name="创建告警规则",
     expose_to_llm=False,
 )
 def execute_create_alert_rule(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1105,6 +1132,7 @@ def execute_create_alert_rule(db: Optional[Session] = None, user_id: Optional[in
         "required": ["rule_id", "data"],
     },
     risk_level="medium",
+    display_name="更新告警规则",
     expose_to_llm=False,
 )
 def execute_update_alert_rule(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1137,6 +1165,7 @@ def execute_update_alert_rule(db: Optional[Session] = None, user_id: Optional[in
         "required": ["rule_id"],
     },
     risk_level="high",
+    display_name="删除告警规则",
     expose_to_llm=False,
 )
 def execute_delete_alert_rule(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1183,6 +1212,7 @@ def execute_delete_alert_rule(db: Optional[Session] = None, user_id: Optional[in
         "required": ["data"],
     },
     risk_level="medium",
+    display_name="创建资产",
     expose_to_llm=False,
 )
 def execute_create_asset(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1227,6 +1257,7 @@ def execute_create_asset(db: Optional[Session] = None, user_id: Optional[int] = 
         "required": ["asset_id", "data"],
     },
     risk_level="medium",
+    display_name="更新资产",
     expose_to_llm=False,
 )
 def execute_update_asset(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1259,6 +1290,7 @@ def execute_update_asset(db: Optional[Session] = None, user_id: Optional[int] = 
         "required": ["asset_id"],
     },
     risk_level="high",
+    display_name="删除资产",
     expose_to_llm=False,
 )
 def execute_delete_asset(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1287,6 +1319,7 @@ def execute_delete_asset(db: Optional[Session] = None, user_id: Optional[int] = 
         "properties": {},
     },
     risk_level="low",
+    display_name="探测资产",
     expose_to_llm=False,
 )
 def execute_probe_assets(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1371,6 +1404,7 @@ def _is_read_only_diagnostic_command(command: str) -> bool:
         "properties": {},
     },
     risk_level="read_only",
+    display_name="可执行动作清单",
     expose_to_llm=True,
 )
 def list_executable_actions(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1404,6 +1438,7 @@ def list_executable_actions(db: Optional[Session] = None, user_id: Optional[int]
         "required": ["action_type", "title", "payload"],
     },
     risk_level="advisory",
+    display_name="提议运维动作",
     expose_to_llm=True,
 )
 def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1520,6 +1555,7 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
         },
     },
     risk_level="read_only",
+    display_name="工作流模板",
 )
 def list_workflow_templates(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -1530,7 +1566,8 @@ def list_workflow_templates(db: Optional[Session] = None, user_id: Optional[int]
         from app.services import workflow_service
         category = kwargs.get("category") or None
         only_enabled = bool(kwargs.get("only_enabled", True))
-        templates = workflow_service.list_templates(db, category=category, only_enabled=only_enabled)
+        result = workflow_service.list_templates(db, category=category, only_enabled=only_enabled)
+        templates = result.get("items", []) if isinstance(result, dict) else (result or [])
         return {
             "count": len(templates),
             "templates": [
@@ -1567,6 +1604,7 @@ def list_workflow_templates(db: Optional[Session] = None, user_id: Optional[int]
         "required": ["title"],
     },
     risk_level="advisory",
+    display_name="提议工作流",
 )
 def propose_workflow(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -1639,6 +1677,7 @@ def propose_workflow(db: Optional[Session] = None, user_id: Optional[int] = None
         },
     },
     risk_level="read_only",
+    display_name="Agent 工作流列表",
 )
 def list_agent_workflows(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -1682,6 +1721,7 @@ def list_agent_workflows(db: Optional[Session] = None, user_id: Optional[int] = 
         "required": ["workflow_id", "inputs"],
     },
     risk_level="advisory",
+    display_name="运行 Agent 工作流",
 )
 def run_agent_workflow(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -1744,6 +1784,7 @@ def run_agent_workflow(db: Optional[Session] = None, user_id: Optional[int] = No
         "required": ["job_id"],
     },
     risk_level="read_only",
+    display_name="任务状态",
     expose_to_llm=True,
 )
 def get_task_status(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1768,6 +1809,7 @@ def get_task_status(db: Optional[Session] = None, user_id: Optional[int] = None,
         },
     },
     risk_level="read_only",
+    display_name="最近任务",
     expose_to_llm=True,
 )
 def list_recent_tasks(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1802,6 +1844,7 @@ def list_recent_tasks(db: Optional[Session] = None, user_id: Optional[int] = Non
         "required": ["package_name", "asset_id"],
     },
     risk_level="critical",
+    display_name="安装软件包",
     expose_to_llm=False,  # 不直调，必须经 propose_action
 )
 def execute_install_package(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1874,6 +1917,7 @@ def execute_install_package(db: Optional[Session] = None, user_id: Optional[int]
         "required": ["source_id"],
     },
     risk_level="read_only",
+    display_name="查询日志",
     expose_to_llm=True,
 )
 def query_logs(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1886,19 +1930,26 @@ def query_logs(db: Optional[Session] = None, user_id: Optional[int] = None, **kw
     limit = kwargs.get("limit", 20)
 
     if not source_id:
-        raise ValueError("缺少必填参数: source_id")
+        raise ValueError("缺少必填参数: source_id（请先调用 query_log_sources 获取可用数据源）")
 
-    logs, total, error = _query_logs(
-        source_id=int(source_id),
-        query=query_str,
-        time_range=time_range,
-        level=level,
-        host=host,
-        limit=limit,
-    )
+    try:
+        logs, total, error = _query_logs(
+            source_id=int(source_id),
+            query=query_str,
+            time_range=time_range,
+            level=level,
+            host=host,
+            limit=limit,
+        )
+    except Exception as e:
+        raise ValueError(f"日志数据源 {source_id} 查询失败: {str(e)}（请检查数据源配置/网络连通性）")
 
     if error:
-        return {"error": error, "logs": [], "total": 0}
+        # 错误路径必须 raise，让 call_mcp_tool 包装成 {"status":"error","message":...}
+        # 否则返回 dict 会被外层当成 success，LLM 误以为查询成功但无日志
+        # （真实场景：ES 不可达时 LLM 看到"成功但 logs=[]"，会下结论"无错误日志"，
+        #  实际上是查询本身失败，可能误导根因分析）
+        raise ValueError(error)
 
     return {
         "logs": logs,
@@ -1918,6 +1969,7 @@ def query_logs(db: Optional[Session] = None, user_id: Optional[int] = None, **kw
         "properties": {},
     },
     risk_level="read_only",
+    display_name="日志数据源",
     expose_to_llm=True,
 )
 def query_log_sources(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -1964,6 +2016,7 @@ def query_log_sources(db: Optional[Session] = None, user_id: Optional[int] = Non
         },
     },
     risk_level="read_only",
+    display_name="查询链路",
     expose_to_llm=True,
 )
 def query_traces(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -2074,6 +2127,7 @@ def query_traces(db: Optional[Session] = None, user_id: Optional[int] = None, **
         "required": ["asset_id", "sql"],
     },
     risk_level="medium",
+    display_name="查询 MySQL",
     expose_to_llm=True,
 )
 def query_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -2153,6 +2207,7 @@ def query_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, **k
         "required": ["asset_id"],
     },
     risk_level="read_only",
+    display_name="检查 MySQL 权限",
     expose_to_llm=True,
 )
 def check_mysql_permissions(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
@@ -2204,8 +2259,14 @@ def check_mysql_permissions(db: Optional[Session] = None, user_id: Optional[int]
 
             if conn and database:
                 try:
-                    cur.execute(f"SHOW GRANTS FOR '{user}'@'%'")
-                    grants = [r[0] for r in cur.fetchall()]
+                    # SHOW GRANTS 不支持参数化绑定，先对用户名做白名单校验防注入
+                    import re as _re
+                    if not _re.match(r"^[A-Za-z0-9_\-.@ ]{1,64}$", user or ""):
+                        grants = []
+                    else:
+                        _safe_user = (user or "").replace("'", "''")
+                        cur.execute(f"SHOW GRANTS FOR '{_safe_user}'@'%'")
+                        grants = [r[0] for r in cur.fetchall()]
                 except Exception:
                     grants = []
             else:
@@ -2276,6 +2337,7 @@ def check_mysql_permissions(db: Optional[Session] = None, user_id: Optional[int]
         "required": ["asset_id", "sql"],
     },
     risk_level="high",
+    display_name="执行 MySQL",
     expose_to_llm=False,
 )
 def execute_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:

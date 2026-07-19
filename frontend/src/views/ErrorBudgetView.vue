@@ -6,7 +6,7 @@
           <span class="title">错误预算管理</span>
           <div>
             <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
-            <el-button type="primary" @click="showCreateDialog">+ 新建 SLO</el-button>
+            <el-button type="primary" @click="loadData">刷新</el-button>
           </div>
         </div>
       </template>
@@ -27,51 +27,39 @@
         </el-col>
       </el-row>
       
-      <!-- SLO 列表 -->
-      <el-table :data="sloList" stripe>
+      <!-- 错误预算列表（从 SLO 实时派生） -->
+      <el-table :data="budgetList" stripe>
         <el-table-column prop="service_name" label="服务名" />
-        <el-table-column prop="slo_target" label="目标可用性">
+        <el-table-column prop="slo_target" label="SLO 目标" width="110">
+          <template #default="{row}">{{ (row.slo_target * 100).toFixed(2) }}%</template>
+        </el-table-column>
+        <el-table-column prop="window_days" label="窗口(天)" width="90" />
+        <el-table-column prop="budget_total" label="总预算(%)" width="100">
+          <template #default="{row}">{{ row.budget_total.toFixed(1) }}</template>
+        </el-table-column>
+        <el-table-column prop="budget_consumed" label="已消耗(%)" width="100">
+          <template #default="{row}">{{ row.budget_consumed.toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column prop="budget_remaining" label="剩余(%)" width="100">
           <template #default="{row}">
-            {{ (row.slo_target * 100).toFixed(2) }}%
+            <el-tag :type="row.budget_remaining > 50 ? 'success' : row.budget_remaining > 20 ? 'warning' : 'danger'">
+              {{ row.budget_remaining.toFixed(2) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="window_days" label="窗口(天)" />
-        <el-table-column prop="status" label="状态">
+        <el-table-column prop="burn_rate" label="消耗速率" width="100">
+          <template #default="{row}">{{ row.burn_rate.toFixed(2) }}x</template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="90">
           <template #default="{row}">
             <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间">
-          <template #default="{row}">
-            {{ formatTime(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作">
-          <template #default="{row}">
-            <el-button type="danger" size="small" @click="deleteSlo(row.id)">删除</el-button>
-          </template>
+        <el-table-column prop="created_at" label="SLO 创建时间" width="170">
+          <template #default="{row}">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
       </el-table>
     </el-card>
-    
-    <!-- 新建对话框 -->
-    <el-dialog v-model="dialogVisible" title="新建 SLO" width="400px">
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="服务名">
-          <ServicePicker v-model="form.service_id" @update:modelValue="onServicePick" />
-        </el-form-item>
-        <el-form-item label="目标可用性">
-          <el-input-number v-model="form.slo_target" :min="0.9" :max="0.999" :step="0.001" />
-        </el-form-item>
-        <el-form-item label="窗口(天)">
-          <el-input-number v-model="form.window_days" :min="1" :max="90" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="createSlo">确定</el-button>
-      </template>
-    </el-dialog>
 
     <GuideDrawer v-model="showGuide" title="📖 错误预算 · 概念说明">
       <section class="guide-section">
@@ -114,75 +102,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive } from "vue"
-import { ElMessage } from "element-plus"
+import { ref, onMounted } from "vue"
 import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
-import ServicePicker from '@/components/ServicePicker.vue'
 
 const showGuide = ref(false)
-const sloList = ref([])
+const budgetList = ref([])
 const summary = ref({ total: 0, healthy: 0, warning: 0, critical: 0 })
-const dialogVisible = ref(false)
-const form = reactive({
-  service_id: null,
-  service_name: "",
-  slo_target: 0.999,
-  window_days: 30
-})
-let _assetMap = {}
-
-async function onServicePick(id) {
-  form.service_id = id
-  if (id && !_assetMap[id]) {
-    try {
-      const d = await axios.get(`/assets/api/${id}`)
-      _assetMap[id] = d.data.name
-    } catch { _assetMap[id] = "" }
-  }
-  form.service_name = id ? (_assetMap[id] || "") : ""
-}
 
 const loadData = async () => {
   try {
-    const res = await axios.get("/api/sre/slo")
-    sloList.value = res.data
-    // 计算汇总
-    summary.value.total = res.data.length
-    summary.value.healthy = res.data.filter(s => s.status === "healthy").length
-    summary.value.warning = res.data.filter(s => s.status === "warning").length
-    summary.value.critical = res.data.filter(s => s.status === "critical").length
+    // 错误预算从 SLO 实时派生（后端 /error-budget 复用 slo_service._calc_burn）
+    const [budgetRes, summaryRes] = await Promise.all([
+      axios.get("/api/sre/error-budget"),
+      axios.get("/api/sre/error-budget/summary"),
+    ])
+    budgetList.value = budgetRes.data
+    summary.value = summaryRes.data
   } catch (e) {
-    console.error(e)
-  }
-}
-
-const showCreateDialog = () => {
-  form.service_id = null
-  form.service_name = ""
-  form.slo_target = 0.999
-  form.window_days = 30
-  dialogVisible.value = true
-}
-
-const createSlo = async () => {
-  try {
-    await axios.post("/api/sre/slo", form)
-    ElMessage.success("创建成功")
-    dialogVisible.value = false
-    loadData()
-  } catch (e) {
-    ElMessage.error("创建失败")
-  }
-}
-
-const deleteSlo = async (id) => {
-  try {
-    await axios.delete(`/api/sre/slo/${id}`)
-    ElMessage.success("删除成功")
-    loadData()
-  } catch (e) {
-    ElMessage.error("删除失败")
+    console.error("加载错误预算失败:", e)
   }
 }
 

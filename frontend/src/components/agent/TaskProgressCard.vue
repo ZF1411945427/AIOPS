@@ -34,7 +34,7 @@
             <div class="tpc-step-sub" v-if="step.summary">{{ truncate(step.summary, 120) }}</div>
             <div class="tpc-step-sub tpc-step-meta" v-if="step.duration_ms">
               <span>⏱ {{ step.duration_ms }}ms</span>
-              <span v-if="step.tool_name"> · 🔧 {{ step.tool_name }}</span>
+              <span v-if="step.tool_name"> · 🔧 {{ step.display_name || step.title || step.tool_name }}</span>
             </div>
           </div>
           <button v-if="step.raw_output || step.conclusion || step.anomaly" class="tpc-step-fold" @click.stop="toggleStep(step)">
@@ -47,7 +47,7 @@
           <div class="tpc-section tpc-section-cmd" v-if="step.tool_name">
             <div class="tpc-section-title">① 执行命令摘要</div>
             <div class="tpc-section-body">
-              <div class="tpc-cmd-line"><span class="tpc-label">工具：</span>{{ step.tool_name }}</div>
+              <div class="tpc-cmd-line"><span class="tpc-label">工具：</span>{{ step.display_name || step.title || step.tool_name }}<span v-if="step.tool_name && step.display_name" class="tpc-cmd-en"> ({{ step.tool_name }})</span></div>
               <div class="tpc-cmd-line" v-if="step.tool_args_text"><span class="tpc-label">参数：</span><code>{{ step.tool_args_text }}</code></div>
               <div class="tpc-cmd-line" v-if="step.summary"><span class="tpc-label">摘要：</span>{{ step.summary }}</div>
             </div>
@@ -194,6 +194,7 @@ function truncate(text, n) {
 }
 .tpc-section-body { font-size: 0.8rem; color: #334155; line-height: 1.5; }
 .tpc-cmd-line { margin-bottom: 3px; }
+.tpc-cmd-en { color: #94a3b8; font-size: 0.72rem; font-family: 'Fira Code', monospace; }
 .tpc-cmd-line code {
   background: #1e293b; color: #e2e8f0; padding: 1px 6px; border-radius: 3px;
   font-size: 0.74rem; word-break: break-all;

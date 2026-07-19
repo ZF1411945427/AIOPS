@@ -208,6 +208,15 @@ def list_slo(db: Session = Depends(get_db_session)):
     return db.query(SLOConfig).order_by(SLOConfig.id.desc()).all()
 
 
+@router.get("/slo/{slo_id}", response_model=SLOConfigResponse)
+def get_slo(slo_id: int, db: Session = Depends(get_db_session)):
+    """获取单条 SLO 配置"""
+    obj = db.query(SLOConfig).filter(SLOConfig.id == slo_id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="SLO not found")
+    return obj
+
+
 @router.post("/slo", response_model=SLOConfigResponse)
 def create_slo(data: SLOConfigCreate, db: Session = Depends(get_db_session)):
     """创建 SLO 配置"""
@@ -250,45 +259,84 @@ def delete_slo(slo_id: int, db: Session = Depends(get_db_session)):
 
 # ==================== Error Budget 接口 ====================
 
-@router.get("/error-budget", response_model=List[ErrorBudgetResponse])
+class ErrorBudgetViewResponse(BaseModel):
+    """错误预算视图响应：从 SLO 实时派生，与前端 ErrorBudgetView 字段对齐"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    service_name: str
+    slo_target: float
+    window_days: int
+    budget_total: float
+    budget_consumed: float
+    budget_remaining: float
+    burn_rate: float
+    status: str
+    created_at: datetime
+
+
+@router.get("/error-budget", response_model=List[ErrorBudgetViewResponse])
 def list_error_budget(db: Session = Depends(get_db_session)):
-    """获取错误预算列表"""
-    return db.query(ErrorBudget).order_by(ErrorBudget.id.desc()).all()
+    """获取错误预算列表：从 SLO 实时派生（复用 slo_service._calc_burn 计算）。
 
+    设计说明：ErrorBudget 表只在 slo_service.calculate_all_slo 定时任务触发时写入，
+    生产环境通常为空。此接口不依赖 ErrorBudget 表，而是从 SLOConfig 实时计算，
+    保证前端「错误预算」页面始终有真实数据展示，消除概念混淆。
+    """
+    from app.services import slo_service
+    slos = db.query(SLOConfig).order_by(SLOConfig.id.desc()).all()
+    results = []
+    for slo in slos:
+        burn = slo_service._calc_burn(slo, db)
+        budget_total = 100.0
+        budget_consumed = burn.get("budget_consumed", 0.0)
+        budget_remaining = burn.get("budget_remaining", 100.0)
+        burn_rate = burn.get("burn_rate", 0.0)
 
-@router.post("/error-budget", response_model=ErrorBudgetResponse)
-def create_error_budget(data: ErrorBudgetCreate, db: Session = Depends(get_db_session)):
-    """创建错误预算记录"""
-    budget_remaining = data.budget_total - data.budget_consumed
-    obj = ErrorBudget(
-        slo_id=data.slo_id,
-        service_name=data.service_name,
-        period_started_at=data.period_started_at,
-        period_ended_at=data.period_ended_at,
-        budget_total=data.budget_total,
-        budget_consumed=data.budget_consumed,
-        budget_remaining=budget_remaining,
-        burn_rate=round(data.budget_consumed / max(1, (data.period_ended_at - data.period_started_at).days), 2),
-        status='healthy' if budget_remaining > 50 else 'warning' if budget_remaining > 20 else 'critical'
-    )
-    db.add(obj)
-    db.commit()
-    db.refresh(obj)
-    return obj
+        # 与 burn-rate 接口一致的状态判定逻辑
+        if burn_rate > 10 or budget_remaining < 20:
+            status = "critical"
+        elif burn_rate > 5 or budget_remaining < 50:
+            status = "warning"
+        else:
+            status = "healthy"
+
+        results.append(ErrorBudgetViewResponse(
+            id=slo.id,
+            service_name=slo.service_name,
+            slo_target=slo.slo_target,
+            window_days=slo.window_days,
+            budget_total=budget_total,
+            budget_consumed=budget_consumed,
+            budget_remaining=budget_remaining,
+            burn_rate=burn_rate,
+            status=status,
+            created_at=slo.created_at,
+        ))
+    return results
 
 
 @router.get("/error-budget/summary")
 def get_error_budget_summary(db: Session = Depends(get_db_session)):
-    """获取错误预算汇总"""
-    budgets = db.query(ErrorBudget).all()
-    healthy = sum(1 for b in budgets if b.status == 'healthy')
-    warning = sum(1 for b in budgets if b.status == 'warning')
-    critical = sum(1 for b in budgets if b.status == 'critical')
+    """获取错误预算汇总：从 SLO 派生，与 list_error_budget 一致"""
+    from app.services import slo_service
+    slos = db.query(SLOConfig).all()
+    healthy = warning = critical = 0
+    for slo in slos:
+        burn = slo_service._calc_burn(slo, db)
+        burn_rate = burn.get("burn_rate", 0.0)
+        budget_remaining = burn.get("budget_remaining", 100.0)
+        if burn_rate > 10 or budget_remaining < 20:
+            critical += 1
+        elif burn_rate > 5 or budget_remaining < 50:
+            warning += 1
+        else:
+            healthy += 1
     return {
-        "total": len(budgets),
+        "total": len(slos),
         "healthy": healthy,
         "warning": warning,
-        "critical": critical
+        "critical": critical,
     }
 
 

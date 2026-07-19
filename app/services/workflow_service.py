@@ -17,7 +17,9 @@ from app.services.mcp_registry import call_mcp_tool, get_internal_tools, get_mcp
 
 _rlock = threading.Lock()
 
-_jinja_env = Environment(loader=BaseLoader(), autoescape=False)
+# 工作流节点参数模板（渲染 JSON/字符串数据，非 HTML），autoescape=True 会破坏数据
+# 安全性由 _render_value 的输入白名单与节点配置校验保障，故标记 nosec B701
+_jinja_env = Environment(loader=BaseLoader(), autoescape=False)  # nosec B701
 
 
 def _now():

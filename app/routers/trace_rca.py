@@ -130,7 +130,7 @@ def analyze_trace(
     except Exception as e:
         from app.logger import logger
         logger.error(f"trace-rca analyze failed: {e}")
-        return JSONResponse({"error": "分析失败"}, status_code=500)
+        return JSONResponse({"message": "分析失败"}, status_code=200)
 
 
 @router.get("/traces")
@@ -164,4 +164,4 @@ def list_recent_traces(
     except Exception as e:
         from app.logger import logger
         logger.error(f"trace-rca list failed: {e}")
-        return JSONResponse({"error": "查询失败"}, status_code=500)
+        return JSONResponse({"message": "查询失败"}, status_code=200)

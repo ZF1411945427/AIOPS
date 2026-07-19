@@ -1,0 +1,5414 @@
+{
+  "generated_at": "2026-07-19 22:28:53",
+  "generated_at_ts": 1784471385.6964445,
+  "bandit": {
+    "available": true,
+    "issues": [
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B108",
+        "cwe": 377,
+        "filename": "app/data/sop_templates.py",
+        "line": 38,
+        "text": "Probable insecure usage of temp file/directory.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b108_hardcoded_tmp_directory.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "LOW",
+        "test_id": "B608",
+        "cwe": 89,
+        "filename": "app/migrations/add_tenant_tables.py",
+        "line": 70,
+        "text": "Possible SQL injection vector through string-based query construction.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B104",
+        "cwe": 605,
+        "filename": "app/models.py",
+        "line": 833,
+        "text": "Possible binding to all interfaces.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b104_hardcoded_bind_all_interfaces.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/routers/alert_webhooks.py",
+        "line": 39,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/routers/chaos.py",
+        "line": 147,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B108",
+        "cwe": 377,
+        "filename": "app/routers/chaos.py",
+        "line": 213,
+        "text": "Probable insecure usage of temp file/directory.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b108_hardcoded_tmp_directory.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B108",
+        "cwe": 377,
+        "filename": "app/routers/chaos.py",
+        "line": 264,
+        "text": "Probable insecure usage of temp file/directory.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b108_hardcoded_tmp_directory.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/routers/mobile.py",
+        "line": 398,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/routers/network_test.py",
+        "line": 414,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/routers/script_exec.py",
+        "line": 166,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B104",
+        "cwe": 605,
+        "filename": "app/seed_data.py",
+        "line": 737,
+        "text": "Possible binding to all interfaces.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b104_hardcoded_bind_all_interfaces.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B104",
+        "cwe": 605,
+        "filename": "app/seed_data.py",
+        "line": 738,
+        "text": "Possible binding to all interfaces.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b104_hardcoded_bind_all_interfaces.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/background_task.py",
+        "line": 72,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/datasource_service.py",
+        "line": 164,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/services/datasource_service.py",
+        "line": 392,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/datasource_service.py",
+        "line": 456,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/datasource_service.py",
+        "line": 534,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/datasource_service.py",
+        "line": 544,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/datasource_service.py",
+        "line": 560,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/datasource_service.py",
+        "line": 572,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/datasource_service.py",
+        "line": 585,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/services/datasource_service.py",
+        "line": 979,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/metric_collector.py",
+        "line": 103,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/services/notification_service.py",
+        "line": 81,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/services/notification_service.py",
+        "line": 99,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B615",
+        "cwe": 494,
+        "filename": "app/services/rag_engine_v2.py",
+        "line": 384,
+        "text": "Unsafe Hugging Face Hub download without revision pinning in from_pretrained()",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B615",
+        "cwe": 494,
+        "filename": "app/services/rag_engine_v2.py",
+        "line": 385,
+        "text": "Unsafe Hugging Face Hub download without revision pinning in from_pretrained()",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/remediation_service.py",
+        "line": 125,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B108",
+        "cwe": 377,
+        "filename": "app/services/remediation_service.py",
+        "line": 171,
+        "text": "Probable insecure usage of temp file/directory.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b108_hardcoded_tmp_directory.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B108",
+        "cwe": 377,
+        "filename": "app/services/remediation_service.py",
+        "line": 173,
+        "text": "Probable insecure usage of temp file/directory.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b108_hardcoded_tmp_directory.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "MEDIUM",
+        "test_id": "B601",
+        "cwe": 78,
+        "filename": "app/services/ssh_helper.py",
+        "line": 198,
+        "text": "Possible shell injection via Paramiko call, check inputs are properly sanitized.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b601_paramiko_calls.html"
+      },
+      {
+        "severity": "MEDIUM",
+        "confidence": "HIGH",
+        "test_id": "B310",
+        "cwe": 22,
+        "filename": "app/services/trace_ingest_service.py",
+        "line": 219,
+        "text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/logger.py",
+        "line": 40,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 151,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 184,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 206,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 354,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 360,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 441,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 671,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 676,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 681,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 687,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 693,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 700,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/main.py",
+        "line": 708,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/agent_sse.py",
+        "line": 372,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/agent_sse.py",
+        "line": 391,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/alert_webhooks.py",
+        "line": 41,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/routers/ansible.py",
+        "line": 4,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/ansible.py",
+        "line": 273,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/ansible.py",
+        "line": 295,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/ansible.py",
+        "line": 350,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/ansible.py",
+        "line": 355,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/ansible.py",
+        "line": 384,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/ansible.py",
+        "line": 405,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/api_v1.py",
+        "line": 126,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/assets.py",
+        "line": 75,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/assets.py",
+        "line": 302,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/blue_green.py",
+        "line": 152,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/blue_green.py",
+        "line": 331,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/blue_green.py",
+        "line": 336,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/chaos.py",
+        "line": 432,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/routers/chaos.py",
+        "line": 736,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/routers/containers.py",
+        "line": 2,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 148,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 153,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/routers/containers.py",
+        "line": 200,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 226,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 241,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 253,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 258,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B607",
+        "cwe": 78,
+        "filename": "app/routers/containers.py",
+        "line": 464,
+        "text": "Starting a process with a partial executable path",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/containers.py",
+        "line": 464,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B607",
+        "cwe": 78,
+        "filename": "app/routers/containers.py",
+        "line": 485,
+        "text": "Starting a process with a partial executable path",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/containers.py",
+        "line": 485,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 556,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 573,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 587,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 592,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/containers.py",
+        "line": 856,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/routers/discovery.py",
+        "line": 2,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/routers/helm.py",
+        "line": 3,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/helm.py",
+        "line": 29,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/helm.py",
+        "line": 96,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/incidents.py",
+        "line": 224,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/inspection.py",
+        "line": 37,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 302,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1200,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1222,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1256,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1277,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1376,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1392,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1404,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1409,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/k8s_resources.py",
+        "line": 1467,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/knowledge_documents.py",
+        "line": 222,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/knowledge_graph.py",
+        "line": 44,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/knowledge_v2.py",
+        "line": 47,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/knowledge_v2.py",
+        "line": 115,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/knowledge_v2.py",
+        "line": 126,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/knowledge_v2.py",
+        "line": 231,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/logs.py",
+        "line": 198,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/mobile.py",
+        "line": 411,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/routers/network_test.py",
+        "line": 14,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/network_test.py",
+        "line": 120,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/network_test.py",
+        "line": 148,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/network_test.py",
+        "line": 215,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/routers/network_test.py",
+        "line": 285,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/routers/script_exec.py",
+        "line": 1,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B607",
+        "cwe": 78,
+        "filename": "app/routers/script_exec.py",
+        "line": 127,
+        "text": "Starting a process with a partial executable path",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/routers/script_exec.py",
+        "line": 130,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 163,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 164,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 165,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 166,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 198,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 234,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 260,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 261,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 262,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 266,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 268,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 269,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 271,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 271,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 278,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 278,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 280,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 280,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 281,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 282,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 283,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 285,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 286,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 286,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 297,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 298,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 298,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 300,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 301,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 307,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 308,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 309,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 310,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 311,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 322,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 323,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 324,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 325,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 326,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 328,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 353,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 367,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 370,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 371,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 372,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 375,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 376,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 405,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 409,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 414,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 415,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 416,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 418,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 423,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 425,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 426,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 428,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 429,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 430,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 431,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 432,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 433,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 434,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 435,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 435,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 436,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 437,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 440,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 443,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 444,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 445,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 446,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 446,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 467,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 481,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 487,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 488,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 493,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 494,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 495,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 496,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 502,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 503,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 504,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 505,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 506,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 507,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 508,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 509,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 510,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 530,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 531,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 532,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 537,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 538,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 540,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 541,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 548,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 549,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 587,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "test_id": "B105",
+        "cwe": 259,
+        "filename": "app/seed_data.py",
+        "line": 594,
+        "text": "Possible hardcoded password: 'seed-k8s-token'",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 633,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 634,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 634,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 635,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 685,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 693,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 715,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 841,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 858,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 885,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/seed_data.py",
+        "line": 885,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/agent_service.py",
+        "line": 538,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/agent_service.py",
+        "line": 571,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/agent_service.py",
+        "line": 971,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/agent_service.py",
+        "line": 1251,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/agent_service.py",
+        "line": 1306,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/agent_workflow_service.py",
+        "line": 55,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/agent_workflow_service.py",
+        "line": 637,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/alert_service.py",
+        "line": 37,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/alert_service.py",
+        "line": 114,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/alert_service.py",
+        "line": 213,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/alert_service.py",
+        "line": 217,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/alert_service.py",
+        "line": 372,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/alert_service.py",
+        "line": 395,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/alert_service.py",
+        "line": 489,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/services/background_task.py",
+        "line": 11,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/services/baseline_service.py",
+        "line": 296,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/services/baseline_service.py",
+        "line": 303,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/services/connection_service.py",
+        "line": 4,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B607",
+        "cwe": 78,
+        "filename": "app/services/connection_service.py",
+        "line": 188,
+        "text": "Starting a process with a partial executable path",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/services/connection_service.py",
+        "line": 188,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B112",
+        "cwe": 703,
+        "filename": "app/services/contract_check_service.py",
+        "line": 243,
+        "text": "Try, Except, Continue detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b112_try_except_continue.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/datasource_service.py",
+        "line": 292,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/datasource_service.py",
+        "line": 314,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/datasource_service.py",
+        "line": 400,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/datasource_service.py",
+        "line": 858,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/inspection_service.py",
+        "line": 656,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/services/license_service.py",
+        "line": 6,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/license_service.py",
+        "line": 71,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/license_service.py",
+        "line": 79,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B607",
+        "cwe": 78,
+        "filename": "app/services/license_service.py",
+        "line": 90,
+        "text": "Starting a process with a partial executable path",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/services/license_service.py",
+        "line": 90,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/license_service.py",
+        "line": 97,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B607",
+        "cwe": 78,
+        "filename": "app/services/license_service.py",
+        "line": 101,
+        "text": "Starting a process with a partial executable path",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/services/license_service.py",
+        "line": 101,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/license_service.py",
+        "line": 108,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/license_service.py",
+        "line": 159,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/license_service.py",
+        "line": 169,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/license_service.py",
+        "line": 182,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/log_anomaly_service.py",
+        "line": 22,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/log_anomaly_service.py",
+        "line": 93,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/log_query_service.py",
+        "line": 134,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/log_query_service.py",
+        "line": 214,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/log_query_service.py",
+        "line": 221,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/mcp_tools.py",
+        "line": 2085,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/metric_collector.py",
+        "line": 115,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/metric_collector.py",
+        "line": 134,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B311",
+        "cwe": 330,
+        "filename": "app/services/metric_service.py",
+        "line": 28,
+        "text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/metric_v2_service.py",
+        "line": 69,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/metric_v2_service.py",
+        "line": 106,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "test_id": "B105",
+        "cwe": 259,
+        "filename": "app/services/mobile_push_service.py",
+        "line": 137,
+        "text": "Possible hardcoded password: ''",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "test_id": "B105",
+        "cwe": 259,
+        "filename": "app/services/neo4j_graph_service.py",
+        "line": 16,
+        "text": "Possible hardcoded password: 'password'",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/remediation_service.py",
+        "line": 267,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B404",
+        "cwe": 78,
+        "filename": "app/services/security_audit_service.py",
+        "line": 14,
+        "text": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B603",
+        "cwe": 78,
+        "filename": "app/services/security_audit_service.py",
+        "line": 31,
+        "text": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/security_audit_service.py",
+        "line": 57,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/security_audit_service.py",
+        "line": 115,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "test_id": "B105",
+        "cwe": 259,
+        "filename": "app/services/security_audit_service.py",
+        "line": 274,
+        "text": "Possible hardcoded password: 'bcrypt'",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "test_id": "B105",
+        "cwe": 259,
+        "filename": "app/services/security_audit_service.py",
+        "line": 275,
+        "text": "Possible hardcoded password: 'bcrypt'",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/security_audit_service.py",
+        "line": 338,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/security_audit_service.py",
+        "line": 371,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/slo_service.py",
+        "line": 107,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/slo_service.py",
+        "line": 131,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "test_id": "B107",
+        "cwe": 259,
+        "filename": "app/services/ssh_helper.py",
+        "line": 61,
+        "text": "Possible hardcoded password: ''",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b107_hardcoded_password_default.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "test_id": "B107",
+        "cwe": 259,
+        "filename": "app/services/ssh_helper.py",
+        "line": 141,
+        "text": "Possible hardcoded password: ''",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b107_hardcoded_password_default.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/workflow_service.py",
+        "line": 375,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      },
+      {
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "test_id": "B110",
+        "cwe": 703,
+        "filename": "app/services/ws_manager.py",
+        "line": 52,
+        "text": "Try, Except, Pass detected.",
+        "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html"
+      }
+    ],
+    "summary": {
+      "high": 0,
+      "medium": 32,
+      "low": 259,
+      "total": 291
+    }
+  },
+  "dependencies": {
+    "available": true,
+    "vulnerabilities": [
+      {
+        "package": "cryptography",
+        "version": "44.0.0",
+        "vuln_id": "PYSEC-2026-35",
+        "description": "## Summary  In versions of cryptography prior to 46.0.5, DNS name constraints were only validated against SANs within child certificates, and not the \"peer name\" presented during each validation. Consequently, cryptography would allow a peer named `bar.example.com` to validate against a wildcard lea",
+        "fix_versions": [
+          "46.0.6"
+        ]
+      },
+      {
+        "package": "cryptography",
+        "version": "44.0.0",
+        "vuln_id": "PYSEC-2026-35",
+        "description": "cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. Prior to version 46.0.6, DNS name constraints were only validated against SANs within child certificates, and not the \"peer name\" presented during each validation. Consequently, cryptography would",
+        "fix_versions": [
+          "46.0.6"
+        ]
+      },
+      {
+        "package": "cryptography",
+        "version": "44.0.0",
+        "vuln_id": "PYSEC-2026-1284",
+        "description": "pyca/cryptography's wheels include a statically linked copy of OpenSSL. The versions of OpenSSL included in cryptography 42.0.0-44.0.0 are vulnerable to a security issue. More details about the vulnerability itself can be found in https://openssl-library.org/news/secadv/20250211.txt.  If you are bui",
+        "fix_versions": [
+          "44.0.1"
+        ]
+      },
+      {
+        "package": "cryptography",
+        "version": "44.0.0",
+        "vuln_id": "PYSEC-2026-2141",
+        "description": "cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. Prior to 46.0.5, the public_key_from_numbers (or EllipticCurvePublicNumbers.public_key()), EllipticCurvePublicNumbers.public_key(), load_der_public_key() and load_pem_public_key() functions do not",
+        "fix_versions": [
+          "46.0.5"
+        ]
+      },
+      {
+        "package": "cryptography",
+        "version": "44.0.0",
+        "vuln_id": "GHSA-537c-gmf6-5ccf",
+        "description": "pyca/cryptography's wheels include a statically linked copy of OpenSSL. The versions of OpenSSL included in wheels prior to cryptograph 48.01 are vulnerable to a security issue. More details about the vulnerability itself can be found in https://openssl-library.org/news/secadv/20260609.txt.  If you ",
+        "fix_versions": [
+          "48.0.1"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-106",
+        "description": "An issue was discovered in Django 4.2 before 4.2.25, 5.1 before 5.1.13, and 5.2 before 5.2.7. QuerySet.annotate(), QuerySet.alias(), QuerySet.aggregate(), and QuerySet.extra() are subject to SQL injection in column aliases, when using a suitably crafted dictionary, with dictionary expansion, as the ",
+        "fix_versions": [
+          "4.2.25",
+          "5.1.13",
+          "5.2.7"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-107",
+        "description": "An issue was discovered in 5.1 before 5.1.14, 4.2 before 4.2.26, and 5.2 before 5.2.8. NFKC normalization in Python is slow on Windows. As a consequence, `django.http.HttpResponseRedirect`, `django.http.HttpResponsePermanentRedirect`, and the shortcut `django.shortcuts.redirect`  were subject to a p",
+        "fix_versions": [
+          "4.2.26",
+          "5.1.14",
+          "5.2.8"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-108",
+        "description": "An issue was discovered in 5.1 before 5.1.14, 4.2 before 4.2.26, and 5.2 before 5.2.8. The methods `QuerySet.filter()`, `QuerySet.exclude()`, and `QuerySet.get()`, and the class `Q()`, are subject to SQL injection when using a suitably crafted dictionary, with dictionary expansion, as the `_connecto",
+        "fix_versions": [
+          "4.2.26",
+          "5.1.14",
+          "5.2.8"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-104",
+        "description": "An issue was discovered in 5.2 before 5.2.9, 5.1 before 5.1.15, and 4.2 before 4.2.27. `FilteredRelation` is subject to SQL injection in column aliases, using a suitably crafted dictionary, with dictionary expansion, as the `**kwargs` passed to `QuerySet.annotate()` or `QuerySet.alias()` on PostgreS",
+        "fix_versions": [
+          "4.2.27",
+          "5.1.15",
+          "5.2.9"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-109",
+        "description": "An issue was discovered in 5.2 before 5.2.9, 5.1 before 5.1.15, and 4.2 before 4.2.27. Algorithmic complexity in `django.core.serializers.xml_serializer.getInnerText()` allows a remote attacker to cause a potential denial-of-service attack triggering CPU and memory exhaustion via specially crafted X",
+        "fix_versions": [
+          "4.2.27",
+          "5.1.15",
+          "5.2.9"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-42",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28.  The `django.contrib.auth.handlers.modwsgi.check_password()` function for authentication via `mod_wsgi` allows remote attackers to enumerate users via a timing attack. Earlier, unsupported Django series (such as 5",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-44",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28.  Raster lookups on ``RasterField`` (only implemented on PostGIS) allows remote attackers to inject SQL via the band index parameter. Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not ev",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-47",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28.  `.QuerySet.order_by()` is subject to SQL injection in column aliases containing periods when the same alias is, using a suitably crafted dictionary, with dictionary expansion, used in `FilteredRelation`. Earlier,",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-46",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28.  `FilteredRelation` is subject to SQL injection in column aliases via control characters, using a suitably crafted dictionary, with dictionary expansion, as the `**kwargs` passed to `QuerySet` methods `annotate()`",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-45",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28.  `django.utils.text.Truncator.chars()` and `Truncator.words()` methods (with `html=True`) and the `truncatechars_html` and `truncatewords_html` template filters allow a remote attacker to cause a potential denial-",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-43",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28.  `ASGIRequest` allows a remote attacker to cause a potential denial-of-service via a crafted request with multiple duplicate headers. Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not e",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-48",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. `MultiPartParser` allows remote attackers to degrade performance by submitting multipart uploads with `Content-Transfer-Encoding: base64` including excessive whitespace.  Earlier, unsupported Django series (such a",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-49",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. ASGI requests with a missing or understated `Content-Length` header could bypass the `DATA_UPLOAD_MAX_MEMORY_SIZE` limit when reading `HttpRequest.body`, allowing remote attackers to load an unbounded request body",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-53",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. Admin changelist forms using `ModelAdmin.list_editable` incorrectly allowed new instances to be created via forged `POST` data.  Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not evalua",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-52",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. Add permissions on inline model instances were not validated on submission of forged `POST` data in `GenericInlineModelAdmin`.  Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not evaluat",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-51",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. `ASGIRequest` allows a remote attacker to spoof headers by exploiting an ambiguous mapping of two header variants (with hyphens or with underscores) to a single version with underscores.  Earlier, unsupported Djan",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-50",
+        "description": "An issue was discovered in 6.0 before 6.0.5 and 5.2 before 5.2.14. Response headers do not vary on cookies if a session is not modified, but `SESSION_SAVE_EVERY_REQUEST` is `True`. A remote attacker can steal a user's session after that user visits a cached public page. Earlier, unsupported Django s",
+        "fix_versions": [
+          "5.2.14",
+          "6.0.5"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-55",
+        "description": "An issue was discovered in 6.0 before 6.0.5 and 5.2 before 5.2.14. `django.middleware.cache.UpdateCacheMiddleware` erroneously caches requests where the `Vary` header contained an asterisk (`'*'`). This can lead to private data being stored and served. Earlier, unsupported Django series (such as 5.0",
+        "fix_versions": [
+          "5.2.14",
+          "6.0.5"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-54",
+        "description": "An issue was discovered in 6.0 before 6.0.5 and 5.2 before 5.2.14. ASGI requests with a missing or understated `Content-Length` header can bypass the `FILE_UPLOAD_MAX_MEMORY_SIZE` limit, potentially loading large files into memory and causing service degradation.   As a reminder, Django expects a li",
+        "fix_versions": [
+          "5.2.14",
+          "6.0.5"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-50",
+        "description": "An issue was discovered in 6.0 before 6.0.5 and 5.2 before 5.2.14. Response headers do not vary on cookies if a session is not modified, but `SESSION_SAVE_EVERY_REQUEST` is `True`. A remote attacker can steal a user's session after that user visits a cached public page. Earlier, unsupported Django s",
+        "fix_versions": [
+          "5.2.14",
+          "6.0.5"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-43",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28. `ASGIRequest` allows a remote attacker to cause a potential denial-of-service via a crafted request with multiple duplicate headers. Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not ev",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-42",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28. The `django.contrib.auth.handlers.modwsgi.check_password()` function for authentication via `mod_wsgi` allows remote attackers to enumerate users via a timing attack. Earlier, unsupported Django series (such as 5.",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-107",
+        "description": "An issue was discovered in 5.1 before 5.1.14, 4.2 before 4.2.26, and 5.2 before 5.2.8. NFKC normalization in Python is slow on Windows. As a consequence, `django.http.HttpResponseRedirect`, `django.http.HttpResponsePermanentRedirect`, and the shortcut `django.shortcuts.redirect`  were subject to a p",
+        "fix_versions": [
+          "4.2.26",
+          "5.1.14",
+          "5.2.8"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-109",
+        "description": "An issue was discovered in 5.2 before 5.2.9, 5.1 before 5.1.15, and 4.2 before 4.2.27. Algorithmic complexity in `django.core.serializers.xml_serializer.getInnerText()` allows a remote attacker to cause a potential denial-of-service attack triggering CPU and memory exhaustion via specially crafted X",
+        "fix_versions": [
+          "4.2.27",
+          "5.1.15",
+          "5.2.9"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-44",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28. Raster lookups on ``RasterField`` (only implemented on PostGIS) allows remote attackers to inject SQL via the band index parameter. Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not eva",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-108",
+        "description": "An issue was discovered in 5.1 before 5.1.14, 4.2 before 4.2.26, and 5.2 before 5.2.8. The methods `QuerySet.filter()`, `QuerySet.exclude()`, and `QuerySet.get()`, and the class `Q()`, are subject to SQL injection when using a suitably crafted dictionary, with dictionary expansion, as the `_connecto",
+        "fix_versions": [
+          "4.2.26",
+          "5.1.14",
+          "5.2.8"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-46",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28. `FilteredRelation` is subject to SQL injection in column aliases via control characters, using a suitably crafted dictionary, with dictionary expansion, as the `**kwargs` passed to `QuerySet` methods `annotate()`,",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-106",
+        "description": "An issue was discovered in Django 4.2 before 4.2.25, 5.1 before 5.1.13, and 5.2 before 5.2.7. QuerySet.annotate(), QuerySet.alias(), QuerySet.aggregate(), and QuerySet.extra() are subject to SQL injection in column aliases, when using a suitably crafted dictionary, with dictionary expansion, as the ",
+        "fix_versions": [
+          "4.2.25",
+          "5.1.13",
+          "5.2.7"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-45",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28. `django.utils.text.Truncator.chars()` and `Truncator.words()` methods (with `html=True`) and the `truncatechars_html` and `truncatewords_html` template filters allow a remote attacker to cause a potential denial-o",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2025-104",
+        "description": "An issue was discovered in 5.2 before 5.2.9, 5.1 before 5.1.15, and 4.2 before 4.2.27. `FilteredRelation` is subject to SQL injection in column aliases, using a suitably crafted dictionary, with dictionary expansion, as the `**kwargs` passed to `QuerySet.annotate()` or `QuerySet.alias()` on PostgreS",
+        "fix_versions": [
+          "4.2.27",
+          "5.1.15",
+          "5.2.9"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-53",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. Admin changelist forms using `ModelAdmin.list_editable` incorrectly allowed new instances to be created via forged `POST` data. Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not evaluat",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-48",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. `MultiPartParser` allows remote attackers to degrade performance by submitting multipart uploads with `Content-Transfer-Encoding: base64` including excessive whitespace. Earlier, unsupported Django series (such as",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-49",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. ASGI requests with a missing or understated `Content-Length` header could bypass the `DATA_UPLOAD_MAX_MEMORY_SIZE` limit when reading `HttpRequest.body`, allowing remote attackers to load an unbounded request body",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-52",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. Add permissions on inline model instances were not validated on submission of forged `POST` data in `GenericInlineModelAdmin`. Earlier, unsupported Django series (such as 5.0.x, 4.1.x, and 3.2.x) were not evaluate",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-47",
+        "description": "An issue was discovered in 6.0 before 6.0.2, 5.2 before 5.2.11, and 4.2 before 4.2.28. `.QuerySet.order_by()` is subject to SQL injection in column aliases containing periods when the same alias is, using a suitably crafted dictionary, with dictionary expansion, used in `FilteredRelation`. Earlier, ",
+        "fix_versions": [
+          "4.2.28",
+          "5.2.11",
+          "6.0.2"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-51",
+        "description": "An issue was discovered in 6.0 before 6.0.4, 5.2 before 5.2.13, and 4.2 before 4.2.30. `ASGIRequest` allows a remote attacker to spoof headers by exploiting an ambiguous mapping of two header variants (with hyphens or with underscores) to a single version with underscores. Earlier, unsupported Djang",
+        "fix_versions": [
+          "4.2.30",
+          "5.2.13",
+          "6.0.4"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-55",
+        "description": "An issue was discovered in 6.0 before 6.0.5 and 5.2 before 5.2.14. `django.middleware.cache.UpdateCacheMiddleware` erroneously caches requests where the `Vary` header contained an asterisk (`'*'`). This can lead to private data being stored and served. Earlier, unsupported Django series (such as 5.0",
+        "fix_versions": [
+          "5.2.14",
+          "6.0.5"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-54",
+        "description": "An issue was discovered in 6.0 before 6.0.5 and 5.2 before 5.2.14. ASGI requests with a missing or understated `Content-Length` header can bypass the `FILE_UPLOAD_MAX_MEMORY_SIZE` limit, potentially loading large files into memory and causing service degradation.   As a reminder, Django expects a li",
+        "fix_versions": [
+          "5.2.14",
+          "6.0.5"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-199",
+        "description": "An issue was discovered in Django 6.0 before 6.0.6 and 5.2 before 5.2.15. `django.http.HttpRequest.get_signed_cookie` in Django uses a non-injective salt derivation (concatenating the cookie name and salt argument), which allows a remote attacker to use a cookie in a context different from the one w",
+        "fix_versions": [
+          "5.2.15",
+          "6.0.6"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-197",
+        "description": "An issue was discovered in Django 5.2 before 5.2.15 and 6.0 before 6.0.6. `django.middleware.cache.UpdateCacheMiddleware` in Django does not add `Authorization` to the `Vary` response header for requests bearing that header without `Cache-Control: public`, which allows remote attackers to read priva",
+        "fix_versions": [
+          "5.2.15",
+          "6.0.6"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-200",
+        "description": "An issue was discovered in Django 6.0 before 6.0.6 and 5.2 before 5.2.15. `django.core.mail.backends.smtp.EmailBackend` in Django fails to prevent reuse of a partially-initialized connection after a failed `STARTTLS` handshake when `fail_silently=True`, which allows on-path network attackers to read",
+        "fix_versions": [
+          "5.2.15",
+          "6.0.6"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-198",
+        "description": "An issue was discovered in Django 5.2 before 5.2.15 and 6.0 before 6.0.6. `django.utils.cache.has_vary_header()` in Django does not strip leading or trailing whitespace from `Vary` response header values before comparison, which allows remote attackers to read cached responses via requests to URLs w",
+        "fix_versions": [
+          "5.2.15",
+          "6.0.6"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-201",
+        "description": "An issue was discovered in Django 5.2 before 5.2.15 and 6.0 before 6.0.6. `django.middleware.cache.UpdateCacheMiddleware` in Django does not match `Cache-Control` response directives case-insensitively, which allows remote attackers to read responses that were incorrectly cached because their `Cache",
+        "fix_versions": [
+          "5.2.15",
+          "6.0.6"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-1296",
+        "description": "An issue was discovered in Django 4.2 before 4.2.25, 5.1 before 5.1.13, and 5.2 before 5.2.7. The django.utils.archive.extract() function, used by the \"startapp --template\" and \"startproject --template\" commands, allows partial directory traversal via an archive with file paths sharing a common pref",
+        "fix_versions": [
+          "4.2.25",
+          "5.1.13",
+          "5.2.7"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-2090",
+        "description": "An issue was discovered in Django 6.0 before 6.0.7 and 5.2 before 5.2.16. `UpdateCacheMiddleware` and the `cache_page()` decorator cache responses that vary on cookies when the incoming request carries unrelated cookies, which allows remote attackers to read private data from the shared cache. Earli",
+        "fix_versions": [
+          "5.2.16",
+          "6.0.7"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-2092",
+        "description": "An issue was discovered in Django 6.0 before 6.0.7 and 5.2 before 5.2.16. `DomainNameValidator` does not prohibit newlines in domain names (unless used via a form field, since `CharField` strips newlines). If an application uses values with newlines in an HTTP response, header injection can occur. D",
+        "fix_versions": [
+          "5.2.16",
+          "6.0.7"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-2091",
+        "description": "An issue was discovered in Django 6.0 before 6.0.7 and 5.2 before 5.2.16. `django.contrib.gis.gdal.GDALRaster` over-reads its in-memory buffer when constructed from a bytes object, which can disclose adjacent memory or cause service degradation via a potential segmentation fault when the `vsi_buffer",
+        "fix_versions": [
+          "5.2.16",
+          "6.0.7"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-2449",
+        "description": "An issue was discovered in 6.0 before 6.0.3, 5.2 before 5.2.12, and 4.2 before 4.2.29.  Race condition in file-system storage and file-based cache backends in Django allows an attacker to cause file system objects to be created with incorrect permissions via concurrent requests, where one thread's t",
+        "fix_versions": [
+          "4.2.29",
+          "5.2.12",
+          "6.0.3"
+        ]
+      },
+      {
+        "package": "django",
+        "version": "5.2.6",
+        "vuln_id": "PYSEC-2026-2448",
+        "description": "An issue was discovered in 6.0 before 6.0.3, 5.2 before 5.2.12, and 4.2 before 4.2.29.  `URLField.to_python()` in Django calls `urllib.parse.urlsplit()`, which performs NFKC normalization on Windows that is disproportionately slow for certain Unicode characters, allowing a remote attacker to cause d",
+        "fix_versions": [
+          "4.2.29",
+          "5.2.12",
+          "6.0.3"
+        ]
+      },
+      {
+        "package": "filelock",
+        "version": "3.19.1",
+        "vuln_id": "PYSEC-2026-1375",
+        "description": "### Impact  A Time-of-Check-Time-of-Use (TOCTOU) race condition allows local attackers to corrupt or truncate arbitrary user files through symlink attacks. The vulnerability exists in both Unix and Windows lock file creation where filelock checks if a file exists before opening it with O_TRUNC. An a",
+        "fix_versions": [
+          "3.20.1"
+        ]
+      },
+      {
+        "package": "filelock",
+        "version": "3.19.1",
+        "vuln_id": "PYSEC-2026-1374",
+        "description": "## Vulnerability Summary  **Title:** Time-of-Check-Time-of-Use (TOCTOU) Symlink Vulnerability in SoftFileLock  **Affected Component:** `filelock` package - `SoftFileLock` class **File:** `src/filelock/_soft.py` lines 17-27 **CWE:** CWE-362, CWE-367, CWE-59  ---  ## Description  A TOCTOU race conditi",
+        "fix_versions": [
+          "3.20.3"
+        ]
+      },
+      {
+        "package": "langchain",
+        "version": "1.2.12",
+        "vuln_id": "PYSEC-2026-2192",
+        "description": "LangChain is a framework for building agents and LLM-powered applications. Prior to 1.3.9, several LangChain components that resolve filesystem paths or expand search patterns do not consistently confine the resolved path to the intended root directory. Affected behaviors include: a file-search agen",
+        "fix_versions": [
+          "1.3.9"
+        ]
+      },
+      {
+        "package": "langchain-core",
+        "version": "1.2.19",
+        "vuln_id": "PYSEC-2026-2193",
+        "description": "LangChain is a framework for building agents and LLM-powered applications. Prior to version 1.2.22, multiple functions in langchain_core.prompts.loading read files from paths embedded in deserialized config dicts without validating against directory traversal or absolute path injection. When an appl",
+        "fix_versions": [
+          "1.2.22"
+        ]
+      },
+      {
+        "package": "langchain-core",
+        "version": "1.2.19",
+        "vuln_id": "PYSEC-2026-2564",
+        "description": "LangChain contains older runtime code paths that deserialize run inputs, run outputs, or other application-controlled payloads using overly broad object allowlists. These paths may call `load()` with `allowed_objects=\"all\"`. This does not enable arbitrary Python object deserialization, but it does a",
+        "fix_versions": [
+          "0.3.85",
+          "1.3.3"
+        ]
+      },
+      {
+        "package": "langchain-core",
+        "version": "1.2.19",
+        "vuln_id": "PYSEC-2026-2563",
+        "description": "LangChain's f-string prompt-template validation was incomplete in two respects.  First, some prompt template classes accepted f-string templates and formatted them without enforcing the same attribute-access validation as `PromptTemplate`. In particular, `DictPromptTemplate` and `ImagePromptTemplate",
+        "fix_versions": [
+          "0.3.84",
+          "1.2.28"
+        ]
+      },
+      {
+        "package": "langgraph-checkpoint",
+        "version": "3.0.0",
+        "vuln_id": "PYSEC-2026-2573",
+        "description": "## Summary  LangGraph's `JsonPlusSerializer` can reconstruct Python objects from JSON checkpoint payloads. Under conditions where someone could modify checkpoint bytes at rest in the backing store, the deserialization path could reconstruct objects beyond what the application expects, which could in",
+        "fix_versions": [
+          "4.1.1"
+        ]
+      },
+      {
+        "package": "langgraph-checkpoint",
+        "version": "3.0.0",
+        "vuln_id": "PYSEC-2026-2574",
+        "description": "## Context  A Remote Code Execution vulnerability exists in LangGraph's caching layer when applications enable cache backends that inherit from `BaseCache` and opt nodes into caching via `CachePolicy`. Prior to `langgraph-checkpoint` 4.0.0, `BaseCache` defaults to `JsonPlusSerializer(pickle_fallback",
+        "fix_versions": [
+          "4.0.0"
+        ]
+      },
+      {
+        "package": "langgraph-sdk",
+        "version": "0.3.11",
+        "vuln_id": "PYSEC-2026-2575",
+        "description": "## Summary  `langgraph-sdk` constructs HTTP request paths for resource operations by interpolating caller-supplied identifier values into URL templates. Without sanitization of those values, identifiers that contain characters with special meaning in URL paths could cause the resulting request to ad",
+        "fix_versions": [
+          "0.3.15"
+        ]
+      },
+      {
+        "package": "langsmith",
+        "version": "0.4.38",
+        "vuln_id": "PYSEC-2026-2582",
+        "description": "## Description  The LangSmith SDK's prompt pull methods (`pull_prompt` / `pull_prompt_commit` in Python, `pullPrompt` / `pullPromptCommit` in JS/TS) fetch and deserialize prompt manifests from the LangSmith Hub. These manifests may contain serialized LangChain objects and model configuration that af",
+        "fix_versions": [
+          "0.8.0"
+        ]
+      },
+      {
+        "package": "langsmith",
+        "version": "0.4.38",
+        "vuln_id": "PYSEC-2026-2583",
+        "description": "## Summary  The LangSmith SDK's output redaction controls (hideOutputs in JS, hide_outputs in Python) do not apply to streaming token events. When an LLM run produces streaming output, each chunk is recorded as a new_token event containing the raw token value. These events bypass the redaction pipel",
+        "fix_versions": [
+          "0.7.31"
+        ]
+      },
+      {
+        "package": "langsmith",
+        "version": "0.4.38",
+        "vuln_id": "PYSEC-2026-2584",
+        "description": "## Summary  The LangSmith SDK's distributed tracing feature is vulnerable to Server-Side Request Forgery via malicious HTTP headers. An attacker can inject arbitrary `api_url` values through the `baggage` header, causing the SDK to exfiltrate sensitive trace data to attacker-controlled endpoints.  -",
+        "fix_versions": [
+          "0.6.3"
+        ]
+      },
+      {
+        "package": "langsmith",
+        "version": "0.4.38",
+        "vuln_id": "GHSA-f4xh-w4cj-qxq8",
+        "description": "# Summary  An attacker who can send an HTTP request to a server running the LangSmith SDK's `TracingMiddleware` can cause that server to read an arbitrary file from its local filesystem and upload the contents to LangSmith as a trace attachment. Depending on how the distributed trace system is deplo",
+        "fix_versions": [
+          "0.8.18"
+        ]
+      },
+      {
+        "package": "mcp",
+        "version": "1.26.0",
+        "vuln_id": "CVE-2026-52870",
+        "description": "### Summary In affected versions, the default request handlers installed by the experimental tasks feature (`server.experimental.enable_tasks()`) did not check which session created a task before acting on it. On a server with more than one connected client, any client could observe, read results fr",
+        "fix_versions": [
+          "1.27.2"
+        ]
+      },
+      {
+        "package": "mcp",
+        "version": "1.26.0",
+        "vuln_id": "CVE-2026-52869",
+        "description": "### Summary In affected versions, the SSE and Streamable HTTP server transports routed incoming requests to an existing session based only on the session identifier, without verifying that the request was authenticated as the same principal that created the session. Anyone who learned or guessed a s",
+        "fix_versions": [
+          "1.27.2"
+        ]
+      },
+      {
+        "package": "mcp",
+        "version": "1.26.0",
+        "vuln_id": "CVE-2026-59950",
+        "description": "### Summary In affected versions, the deprecated WebSocket server transport (`mcp.server.websocket.websocket_server`) accepted the WebSocket handshake without applying any `Host` or `Origin` header validation. The `TransportSecuritySettings` mechanism that the SSE and Streamable HTTP transports use ",
+        "fix_versions": [
+          "1.28.1"
+        ]
+      },
+      {
+        "package": "pip",
+        "version": "26.0.1",
+        "vuln_id": "PYSEC-2026-196",
+        "description": "pip would treat console_scripts and gui_scripts as paths instead of file names without sanitizing the resolved absolute path to the installation directory, leading to entry points being installed outside the installation directory.",
+        "fix_versions": [
+          "26.1.2"
+        ]
+      },
+      {
+        "package": "pip",
+        "version": "26.0.1",
+        "vuln_id": "PYSEC-2026-196",
+        "description": "pip would treat console_scripts and gui_scripts as paths instead of file names without sanitizing the resolved absolute path to the installation directory, leading to entry points being installed outside the installation directory.",
+        "fix_versions": [
+          "26.1.2"
+        ]
+      },
+      {
+        "package": "pip",
+        "version": "26.0.1",
+        "vuln_id": "PYSEC-2026-2875",
+        "description": "pip handles concatenated tar and ZIP files as ZIP files regardless of filename or whether a file is both a tar and ZIP file. This behavior could result in confusing installation behavior, such as installing \"incorrect\" files according to the filename of the archive. New behavior only proceeds with i",
+        "fix_versions": [
+          "26.1"
+        ]
+      },
+      {
+        "package": "pip",
+        "version": "26.0.1",
+        "vuln_id": "PYSEC-2026-2876",
+        "description": "pip prior to version 26.1 would run self-update check functionality after installing wheel files which required importing well-known Python modules names. These module imports were intentionally deferred to increase startup time of the pip CLI. The patch changes self-update functionality to run befo",
+        "fix_versions": [
+          "26.1"
+        ]
+      },
+      {
+        "package": "setuptools",
+        "version": "82.0.1",
+        "vuln_id": "PYSEC-2026-3447",
+        "description": "setuptools is a package that allows users to download, build, install, upgrade, and uninstall Python packages. Prior to 83.0.0, FileList applied MANIFEST.in exclude, global-exclude, recursive-exclude, and prune directives by matching compiled glob patterns against on-disk file names without Unicode ",
+        "fix_versions": [
+          "83.0.0"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-161",
+        "description": "Starlette reconstructs the requested URL based on the HTTP Host request header and requested path, but does not perform any validation of the Host header value. This allows attackers to inject paths into the host part, prepending the actual path. However, routing in Starlette is based on the actual ",
+        "fix_versions": [
+          "1.0.1"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-161",
+        "description": "### Summary In affected versions, the HTTP `Host` request header was not validated before being used to reconstruct `request.url`. Because the routing algorithm relies on the raw HTTP path while `request.url` is rebuilt from the `Host` header, a malformed header could make `request.url.path` differ ",
+        "fix_versions": [
+          "1.0.1"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-248",
+        "description": "### Summary  In affected versions, the HTTP request path is not validated before being used to reconstruct `request.url`. Because `request.url` is rebuilt by concatenating `{scheme}://{host}{path}` and re-parsing the result, a path that does not begin with `/` (for example `@google.com`) moves the a",
+        "fix_versions": [
+          "1.3.0"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-249",
+        "description": "Starlette is a lightweight ASGI framework/toolkit. From 0.4.1 until 1.3.1, request.form() accepts max_fields and max_part_size to bound resource consumption while parsing form data. These limits are enforced for multipart/form-data, but silently ignored for application/x-www-form-urlencoded. An unau",
+        "fix_versions": [
+          "1.3.1"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-248",
+        "description": "Starlette is a lightweight ASGI framework/toolkit. Prior to 1.3.0, the HTTP request path is not validated before being used to reconstruct request.url. Because request.url is rebuilt by concatenating {scheme}://{host}{path} and re-parsing the result, a path that does not begin with / (for example @g",
+        "fix_versions": [
+          "1.3.0"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-1942",
+        "description": "### Summary An unauthenticated attacker can send a crafted HTTP Range header that triggers quadratic-time processing in Starlette's `FileResponse` Range parsing/merging logic. This enables CPU exhaustion per request, causing denial‑of‑service for endpoints serving files (e.g., `StaticFiles` or any u",
+        "fix_versions": [
+          "0.49.1"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-1941",
+        "description": "### Summary When parsing a multi-part form with large files (greater than the [default max spool size](https://github.com/encode/starlette/blob/fa5355442753f794965ae1af0f87f9fec1b9a3de/starlette/formparsers.py#L126)) `starlette` will block the main thread to roll the file over to disk. This blocks t",
+        "fix_versions": [
+          "0.47.2"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-2281",
+        "description": "Starlette is a lightweight ASGI framework/toolkit. In versions 1.0.1 and earlier, StaticFiles on Windows is vulnerable to SSRF. An UNC path such as \\\\attacker.com\\share can cause os.path.realpath to initiate an outbound SMB connection before the path is rejected, exposing the service account’s NTLMv",
+        "fix_versions": [
+          "1.1.0"
+        ]
+      },
+      {
+        "package": "starlette",
+        "version": "0.41.3",
+        "vuln_id": "PYSEC-2026-2280",
+        "description": "Starlette is a lightweight ASGI framework/toolkit. In versions 1.0.1 and below, when dispatching a request, HTTPEndpoint selects the handler by lowercasing the HTTP method and looking it up as an attribute with getattr, without restricting the lookup to a known set of HTTP verbs. When an HTTPEndpoin",
+        "fix_versions": [
+          "1.1.0"
+        ]
+      },
+      {
+        "package": "virtualenv",
+        "version": "20.34.0",
+        "vuln_id": "PYSEC-2026-2009",
+        "description": "## Impact  TOCTOU (Time-of-Check-Time-of-Use) vulnerabilities in `virtualenv` allow local attackers to perform symlink-based attacks on directory creation operations. An attacker with local access can exploit a race condition between directory existence checks and creation to redirect virtualenv's a",
+        "fix_versions": [
+          "20.36.1"
+        ]
+      }
+    ],
+    "summary": {
+      "vuln_count": 85,
+      "affected_deps": 13,
+      "total_deps": 188
+    }
+  },
+  "licenses": {
+    "available": true,
+    "licenses": [
+      {
+        "name": "aiohappyeyeballs",
+        "version": "2.6.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "aiohttp",
+        "version": "3.14.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "aiosignal",
+        "version": "1.4.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "annotated-doc",
+        "version": "0.0.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "annotated-types",
+        "version": "0.7.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "anyio",
+        "version": "4.11.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "anyio",
+        "version": "4.12.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "asgiref",
+        "version": "3.9.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "attrs",
+        "version": "25.4.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "bandit",
+        "version": "1.9.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "bcrypt",
+        "version": "5.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "boolean.py",
+        "version": "5.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "CacheControl",
+        "version": "0.14.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "cachetools",
+        "version": "7.1.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "cairocffi",
+        "version": "1.7.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "CairoSVG",
+        "version": "2.9.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "certifi",
+        "version": "2025.10.5",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "certifi",
+        "version": "2026.2.25",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "cffi",
+        "version": "2.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.4.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "click",
+        "version": "8.4.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "colorama",
+        "version": "0.4.6",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "contourpy",
+        "version": "1.3.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "cryptography",
+        "version": "44.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "cssselect2",
+        "version": "0.9.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "cycler",
+        "version": "0.12.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "cyclonedx-python-lib",
+        "version": "11.11.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "defusedxml",
+        "version": "0.7.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "Deprecated",
+        "version": "1.3.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "distlib",
+        "version": "0.4.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "distro",
+        "version": "1.9.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "Django",
+        "version": "5.2.6",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "durationpy",
+        "version": "0.10",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "edge-tts",
+        "version": "7.2.7",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "elastic-transport",
+        "version": "8.17.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "elasticsearch",
+        "version": "8.6.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "et_xmlfile",
+        "version": "2.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "faiss-cpu",
+        "version": "1.14.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "fastapi",
+        "version": "0.115.6",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "filelock",
+        "version": "3.19.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "filelock",
+        "version": "3.25.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "fonttools",
+        "version": "4.62.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "fpdf2",
+        "version": "2.8.7",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "freetype-py",
+        "version": "2.5.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "frozenlist",
+        "version": "1.8.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "fsspec",
+        "version": "2026.2.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "greenlet",
+        "version": "3.5.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "grpcio",
+        "version": "1.82.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "hf-xet",
+        "version": "1.4.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "httpcore",
+        "version": "1.0.9",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "httpx",
+        "version": "0.28.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "httpx-sse",
+        "version": "0.4.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "huggingface_hub",
+        "version": "1.7.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "idna",
+        "version": "3.18",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "iniconfig",
+        "version": "2.3.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "invoke",
+        "version": "3.0.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "itsdangerous",
+        "version": "2.2.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "Jinja2",
+        "version": "3.1.6",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "jiter",
+        "version": "0.11.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "joblib",
+        "version": "1.5.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "jsonpatch",
+        "version": "1.33",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "jsonpointer",
+        "version": "3.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "jsonschema",
+        "version": "4.26.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "jsonschema-specifications",
+        "version": "2025.9.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "kiwisolver",
+        "version": "1.5.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "kubernetes",
+        "version": "36.0.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "langchain",
+        "version": "1.2.12",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "langchain-core",
+        "version": "1.2.19",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "langgraph",
+        "version": "1.1.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "langgraph-checkpoint",
+        "version": "3.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "langgraph-prebuilt",
+        "version": "1.0.8",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "langgraph-sdk",
+        "version": "0.3.11",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "langsmith",
+        "version": "0.4.38",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "license-expression",
+        "version": "30.4.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "limits",
+        "version": "5.8.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "loguru",
+        "version": "0.7.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "lxml",
+        "version": "6.1.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "markdown-it-py",
+        "version": "4.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "MarkupSafe",
+        "version": "3.0.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "matplotlib",
+        "version": "3.10.8",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "mcp",
+        "version": "1.26.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "mdurl",
+        "version": "0.1.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "milvus-lite",
+        "version": "3.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "mpmath",
+        "version": "1.3.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "msgpack",
+        "version": "1.2.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "multidict",
+        "version": "6.7.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "narwhals",
+        "version": "2.23.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "networkx",
+        "version": "3.6.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "numpy",
+        "version": "2.4.6",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "oauthlib",
+        "version": "3.3.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "openai",
+        "version": "2.6.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "openpyxl",
+        "version": "3.1.5",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "orjson",
+        "version": "3.11.7",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "ormsgpack",
+        "version": "1.11.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "packageurl-python",
+        "version": "0.17.6",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "packaging",
+        "version": "25.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "packaging",
+        "version": "26.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pandas",
+        "version": "3.0.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "paramiko",
+        "version": "5.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "patsy",
+        "version": "1.0.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pillow",
+        "version": "12.3.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pip",
+        "version": "26.0.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pip-api",
+        "version": "0.0.34",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pip-licenses",
+        "version": "5.5.5",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pip-requirements-parser",
+        "version": "32.0.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pip_audit",
+        "version": "2.10.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "platformdirs",
+        "version": "4.4.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "playwright",
+        "version": "1.60.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pluggy",
+        "version": "1.6.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "prettytable",
+        "version": "3.18.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "propcache",
+        "version": "0.4.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "protobuf",
+        "version": "7.35.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "py-serializable",
+        "version": "2.1.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pyarrow",
+        "version": "25.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pycairo",
+        "version": "1.29.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pycparser",
+        "version": "3.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pydantic",
+        "version": "2.12.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pydantic-settings",
+        "version": "2.14.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pydantic_core",
+        "version": "2.41.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pyee",
+        "version": "13.0.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "Pygments",
+        "version": "2.20.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "PyJWT",
+        "version": "2.13.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pymilvus",
+        "version": "3.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "PyMySQL",
+        "version": "1.1.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "PyNaCl",
+        "version": "1.6.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pyparsing",
+        "version": "3.3.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pytest",
+        "version": "9.1.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pytest-timeout",
+        "version": "2.4.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "python-dateutil",
+        "version": "2.9.0.post0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "python-dotenv",
+        "version": "1.2.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "python-multipart",
+        "version": "0.0.32",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "python-pptx",
+        "version": "1.0.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "pywin32",
+        "version": "311",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "PyYAML",
+        "version": "6.0.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "rank-bm25",
+        "version": "0.2.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "referencing",
+        "version": "0.37.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "regex",
+        "version": "2026.6.28",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "reportlab",
+        "version": "5.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "requests",
+        "version": "2.34.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "requests-oauthlib",
+        "version": "2.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "requests-toolbelt",
+        "version": "1.0.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "rich",
+        "version": "14.3.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "rlPyCairo",
+        "version": "0.4.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "rpds-py",
+        "version": "0.30.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "safetensors",
+        "version": "0.8.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "scikit-learn",
+        "version": "1.9.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "scipy",
+        "version": "1.18.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "sentence-transformers",
+        "version": "5.6.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "sentencepiece",
+        "version": "0.2.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "setuptools",
+        "version": "82.0.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "shellingham",
+        "version": "1.5.4",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "six",
+        "version": "1.17.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "slowapi",
+        "version": "0.1.10",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "sniffio",
+        "version": "1.3.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "sortedcontainers",
+        "version": "2.4.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "SQLAlchemy",
+        "version": "2.0.36",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "sqlparse",
+        "version": "0.5.5",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "sse-starlette",
+        "version": "3.3.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "starlette",
+        "version": "0.41.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "statsmodels",
+        "version": "0.14.6",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "stevedore",
+        "version": "5.9.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "svglib",
+        "version": "2.0.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "sympy",
+        "version": "1.14.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tabulate",
+        "version": "0.10.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tenacity",
+        "version": "9.1.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "threadpoolctl",
+        "version": "3.6.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tinycss2",
+        "version": "1.5.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tokenizers",
+        "version": "0.22.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tomli",
+        "version": "2.4.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tomli_w",
+        "version": "1.2.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "torch",
+        "version": "2.9.0+cu129",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tqdm",
+        "version": "4.67.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tqdm",
+        "version": "4.67.3",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "transformers",
+        "version": "5.13.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "typer",
+        "version": "0.24.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "typing-inspection",
+        "version": "0.4.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "typing_extensions",
+        "version": "4.15.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "tzdata",
+        "version": "2025.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "urllib3",
+        "version": "2.7.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "uuid_utils",
+        "version": "0.14.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "uvicorn",
+        "version": "0.34.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "virtualenv",
+        "version": "20.34.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "wcwidth",
+        "version": "0.8.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "webencodings",
+        "version": "0.5.1",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "websocket-client",
+        "version": "1.9.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "websockets",
+        "version": "16.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "win32_setctime",
+        "version": "1.2.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "wrapt",
+        "version": "2.2.2",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "xlsxwriter",
+        "version": "3.2.9",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "xxhash",
+        "version": "3.6.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "yarl",
+        "version": "1.23.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      },
+      {
+        "name": "zstandard",
+        "version": "0.25.0",
+        "license": "",
+        "url": "",
+        "author": "",
+        "description": ""
+      }
+    ],
+    "risky_licenses": [],
+    "summary": {
+      "total": 193,
+      "risky_count": 0
+    }
+  },
+  "config": {
+    "checks": [
+      {
+        "key": "app_env",
+        "label": "运行环境",
+        "value": "dev",
+        "status": "warn",
+        "advice": "生产环境应设置 APP_ENV=prod"
+      },
+      {
+        "key": "api_docs_disabled",
+        "label": "API 文档关闭 (/docs /redoc /openapi)",
+        "value": "开发环境开启",
+        "status": "warn",
+        "advice": "生产环境关闭交互式 API 文档，避免接口裸露"
+      },
+      {
+        "key": "cors",
+        "label": "CORS 跨域策略",
+        "value": "http://localhost:5173, http://127.0.0.1:5173, http://localhost:3000, http://127.0.0.1:3000",
+        "status": "pass",
+        "advice": ""
+      },
+      {
+        "key": "session_secret",
+        "label": "Session 密钥强度",
+        "value": "弱密钥/默认值",
+        "status": "fail",
+        "advice": "生产环境必须通过 AIOPS_SESSION_SECRET 设置 32+ 字符随机密钥"
+      },
+      {
+        "key": "password_hash",
+        "label": "密码哈希方案",
+        "value": "bcrypt",
+        "status": "pass",
+        "advice": ""
+      },
+      {
+        "key": "admin_password",
+        "label": "管理员默认密码",
+        "value": "使用默认 admin123",
+        "status": "warn",
+        "advice": "生产环境应通过 AIOPS_ADMIN_PASSWORD 设置强密码"
+      },
+      {
+        "key": "upload_limit",
+        "label": "文件上传大小限制",
+        "value": "10 MB",
+        "status": "pass",
+        "advice": ""
+      },
+      {
+        "key": "script_blacklist",
+        "label": "脚本执行危险命令黑名单",
+        "value": "19 条规则",
+        "status": "pass",
+        "advice": ""
+      },
+      {
+        "key": "uvicorn_reload",
+        "label": "uvicorn 热重载",
+        "value": "关闭",
+        "status": "pass",
+        "advice": ""
+      }
+    ],
+    "summary": {
+      "pass": 5,
+      "warn": 3,
+      "fail": 1,
+      "total": 9
+    }
+  },
+  "from_cache": false
+}

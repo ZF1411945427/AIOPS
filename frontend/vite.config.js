@@ -6,13 +6,25 @@ export default defineConfig({
     plugins: [vue()],
     build: {
         outDir: 'dist',
-        chunkSizeWarningLimit: 900,
+        // P1 任务#7: 首屏体积监控 — 警告阈值 500KB，强制细分 chunk
+        chunkSizeWarningLimit: 500,
+        reportCompressedSize: true,
         rollupOptions: {
             output: {
-                manualChunks: {
-                    'vendor-vue': ['vue', 'vue-router', 'pinia'],
-                    'vendor-element': ['element-plus', '@element-plus/icons-vue'],
-                    'vendor-echarts': ['echarts'],
+                // 按业务依赖细分 chunk：echarts/element/element-icons/vue-flow/xterm/markdown 各自独立
+                // 仅首页用到的 vendor 进首屏 chunk，其余懒加载
+                manualChunks(id) {
+                    if (id.includes('node_modules')) {
+                        if (id.includes('echarts')) return 'vendor-echarts'
+                        if (id.includes('@element-plus/icons-vue')) return 'vendor-element-icons'
+                        if (id.includes('element-plus')) return 'vendor-element'
+                        if (id.includes('@vue-flow')) return 'vendor-vue-flow'
+                        if (id.includes('@xterm') || id.includes('/xterm/')) return 'vendor-xterm'
+                        if (id.includes('markdown-it')) return 'vendor-markdown'
+                        if (id.includes('vue-router') || id.includes('pinia') || id.includes('@vue/')) return 'vendor-vue'
+                        if (id.includes('axios')) return 'vendor-axios'
+                        return 'vendor'
+                    }
                 },
             },
         },

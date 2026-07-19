@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 from app.models import NotificationChannel, NotificationLog, Alert
+from app.security import validate_url_scheme
 
 
 def get_channels(db: Session):
@@ -69,28 +70,36 @@ def send_notification(db: Session, alert: Alert, channel: NotificationChannel) -
         success, error = send_email(config, title, content)
     elif channel.type == "webhook":
         recipient = config.get("url", "")
-        try:
-            import urllib.request
-            data = json.dumps({"title": title, "content": content, "alert_id": alert.id}).encode()
-            req = urllib.request.Request(recipient, data, {"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=10)
-            success, error = True, ""
-        except Exception as e:
-            success, error = False, str(e)
+        ok, reason = validate_url_scheme(recipient)
+        if not ok:
+            success, error = False, f"URL 校验失败: {reason}"
+        else:
+            try:
+                import urllib.request
+                data = json.dumps({"title": title, "content": content, "alert_id": alert.id}).encode()
+                req = urllib.request.Request(recipient, data, {"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=10)
+                success, error = True, ""
+            except Exception as e:
+                success, error = False, str(e)
     elif channel.type in ("dingtalk", "wecom", "feishu"):
         recipient = config.get("webhook", "")
-        try:
-            import urllib.request
-            if channel.type == "feishu":
-                payload = {"msg_type": "text", "content": {"text": f"{title}\n{content}"}}
-            else:
-                payload = {"msgtype": "text", "text": {"content": f"{title}\n{content}"}}
-            data = json.dumps(payload).encode()
-            req = urllib.request.Request(recipient, data, {"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=10)
-            success, error = True, ""
-        except Exception as e:
-            success, error = False, str(e)
+        ok, reason = validate_url_scheme(recipient)
+        if not ok:
+            success, error = False, f"URL 校验失败: {reason}"
+        else:
+            try:
+                import urllib.request
+                if channel.type == "feishu":
+                    payload = {"msg_type": "text", "content": {"text": f"{title}\n{content}"}}
+                else:
+                    payload = {"msgtype": "text", "text": {"content": f"{title}\n{content}"}}
+                data = json.dumps(payload).encode()
+                req = urllib.request.Request(recipient, data, {"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=10)
+                success, error = True, ""
+            except Exception as e:
+                success, error = False, str(e)
     elif channel.type == "log":
         recipient = "console"
         success, error = True, ""

@@ -71,7 +71,7 @@ def pod_logs(asset_id: int, tail: int = 100, db: Session = Depends(get_db)):
         logs = v1.read_namespaced_pod_log(name=name, namespace=ns, tail_lines=tail)
         return PlainTextResponse(logs)
     except Exception as e:
-        return PlainTextResponse(f"Error: {e}", status_code=500)
+        return PlainTextResponse(f"Error: {e}", status_code=200)
 
 
 @router.get("/pod/{asset_id}/logs", response_class=HTMLResponse)
@@ -412,7 +412,7 @@ def api_container_overview(db: Session = Depends(get_db)):
             "recent_containers": recent_containers,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/api/docker")
@@ -440,7 +440,7 @@ def api_docker_list(search: str = "", host: str = "", status: str = "", db: Sess
             "count": len(items),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/api/docker/{asset_id}")
@@ -451,7 +451,7 @@ def api_docker_detail(asset_id: int, db: Session = Depends(get_db)):
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({"container": _container_to_dict(container)})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/api/docker/{asset_id}/logs")
@@ -467,7 +467,7 @@ def api_docker_container_logs(asset_id: int, tail: int = 200, db: Session = Depe
         )
         stdout = result.stdout.decode("utf-8", errors="replace")
         if result.returncode != 0:
-            return JSONResponse({"error": result.stderr.decode("utf-8", errors="replace") or "获取日志失败"}, status_code=500)
+            return JSONResponse({"warning": result.stderr.decode("utf-8", errors="replace") or "获取日志失败"}, status_code=200)
         lines = stdout.count("\n")
         return JSONResponse({
             "ok": True, "logs": stdout or "(无日志输出)",
@@ -476,7 +476,7 @@ def api_docker_container_logs(asset_id: int, tail: int = 200, db: Session = Depe
     except subprocess.TimeoutExpired:
         return JSONResponse({"error": "日志获取超时"}, status_code=504)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/api/docker/local/scan")
@@ -517,7 +517,7 @@ def api_docker_local_scan(db: Session = Depends(get_db)):
         db.commit()
         return JSONResponse({"ok": True, "count": len(imported), "containers": imported})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.websocket("/ws/docker/{asset_id}/terminal")
@@ -618,7 +618,7 @@ def api_pod_list(cluster: str = "", namespace: str = "", db: Session = Depends(g
             "count": len(items),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/api/pod/{asset_id}")
@@ -634,7 +634,7 @@ def api_pod_detail(asset_id: int, db: Session = Depends(get_db)):
             "anomalies": [_event_to_dict(a) for a in anomalies],
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/api/deployments")
@@ -662,7 +662,7 @@ def api_deployment_list(cluster: str = "", namespace: str = "", db: Session = De
             "count": len(items),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/api/deploy/{asset_id}/manage")
@@ -673,7 +673,7 @@ def api_deployment_manage(asset_id: int, db: Session = Depends(get_db)):
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({"deployment": _deployment_to_dict(dep)})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/api/deploy/create")
@@ -746,7 +746,7 @@ def api_deploy_create(body: dict = Body(...), db: Session = Depends(get_db)):
             "replicas": replicas,
         })
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/deploy/{asset_id}/rollout")
@@ -787,7 +787,7 @@ def api_deployment_rollout(asset_id: int, body: dict = Body(default={}), db: Ses
         })
         return JSONResponse({"ok": True, "message": "rollout triggered", "image": image or None})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/deploy/{asset_id}/scale")
@@ -819,7 +819,7 @@ def api_deployment_scale_api(asset_id: int, body: dict = Body(...), db: Session 
         apps_v1.patch_namespaced_deployment_scale(name=name, namespace=ns, body={"spec": {"replicas": replicas}})
         return JSONResponse({"ok": True, "message": "scaled", "replicas": replicas})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/deploy/{asset_id}/canary")
@@ -874,7 +874,7 @@ def api_deployment_canary_api(asset_id: int, body: dict = Body(default={}), db: 
             "canary_replicas": canary_replicas,
         })
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/deploy/{asset_id}/promote")
@@ -913,7 +913,7 @@ def api_deployment_promote_api(asset_id: int, db: Session = Depends(get_db)):
         apps_v1.delete_namespaced_deployment(name=canary_name, namespace=ns)
         return JSONResponse({"ok": True, "message": "canary promoted", "new_image": new_image})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/deploy/{asset_id}/rollback")
@@ -952,5 +952,5 @@ def api_deployment_rollback_api(asset_id: int, body: dict = Body(default={}), db
             })
         return JSONResponse({"ok": True, "message": "rollback triggered", "revision": revision or None})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 

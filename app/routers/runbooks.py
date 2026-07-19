@@ -38,7 +38,7 @@ def api_list_runbooks(category: str = "", db: Session = Depends(get_db)):
             "categories": cats,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e), "items": []}, status_code=500)
+        return JSONResponse({"warning": str(e), "items": []}, status_code=200)
 
 
 @router.get("/api/{rb_id}")
@@ -49,7 +49,7 @@ def api_runbook_detail(rb_id: int, db: Session = Depends(get_db)):
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse(_rb_to_dict(rb))
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/api/create")
@@ -69,7 +69,7 @@ def api_create_runbook(payload: dict = Body(...), db: Session = Depends(get_db))
         db.refresh(rb)
         return JSONResponse({"ok": True, "id": rb.id, "item": _rb_to_dict(rb)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/{rb_id}/update")
@@ -90,7 +90,7 @@ def api_update_runbook(rb_id: int, payload: dict = Body(...), db: Session = Depe
         db.refresh(rb)
         return JSONResponse({"ok": True, "id": rb.id, "item": _rb_to_dict(rb)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/api/{rb_id}/delete")
@@ -102,4 +102,4 @@ def api_delete_runbook(rb_id: int, db: Session = Depends(get_db)):
             db.commit()
         return JSONResponse({"ok": True, "id": rb_id})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)

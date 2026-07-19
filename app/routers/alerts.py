@@ -61,6 +61,28 @@ def api_alert_list(
     })
 
 
+@router.get("/api/{alert_id}")
+def api_alert_detail(alert_id: int, db: Session = Depends(get_db)):
+    """单条告警详情 JSON API（移动端告警详情页直接按 id 拉取，避免全量拉取再 find）."""
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        return JSONResponse({"warning": "告警不存在", "alert": None}, status_code=200)
+    asset_name = ""
+    if alert.asset_id:
+        a = db.query(Asset).filter(Asset.id == alert.asset_id).first()
+        if a:
+            asset_name = a.name or ""
+    d = _alert_to_dict(alert)
+    d["asset_name"] = asset_name
+    d["rule_name"] = ""
+    if getattr(alert, "rule_id", None):
+        from app.models import AlertRule
+        rule = db.query(AlertRule).filter(AlertRule.id == alert.rule_id).first()
+        if rule:
+            d["rule_name"] = rule.name or ""
+    return JSONResponse({"alert": d})
+
+
 @router.post("/api/batch-acknowledge")
 def api_batch_acknowledge(db: Session = Depends(get_db)):
     count = alert_service.batch_acknowledge(db)
@@ -92,7 +114,8 @@ def api_resolve_alert(alert_id: int, db: Session = Depends(get_db)):
         from app.services import knowledge_autogen_service
         knowledge_autogen_service.generate_draft(alert_id, db)
     except Exception:
-        pass
+        import logging
+        logging.exception("auto generate knowledge draft failed for alert_id=%s", alert_id)
     return JSONResponse({"ok": True})
 
 

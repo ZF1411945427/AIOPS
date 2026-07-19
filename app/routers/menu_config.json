@@ -13,30 +13,35 @@
             "key": "system-posture",
             "label": "系统态势",
             "type": "vue",
+            "icon": "DataBoard",
             "path": "/system-posture"
           },
           {
             "key": "monitor-view",
             "label": "实时监控看板",
             "type": "vue",
+            "icon": "Monitor",
             "path": "/monitor-view"
           },
           {
             "key": "dashboard",
             "label": "仪表盘",
             "type": "vue",
+            "icon": "TrendCharts",
             "path": "/dashboard"
           },
           {
             "key": "dashboard-designer",
             "label": "自定义仪表盘",
             "type": "vue",
+            "icon": "Edit",
             "path": "/dashboard-designer"
           },
           {
             "key": "ops-analytics",
             "label": "运营分析看板",
             "type": "vue",
+            "icon": "Histogram",
             "path": "/ops-analytics"
           }
         ]
@@ -49,18 +54,28 @@
             "key": "alerts",
             "label": "告警中心",
             "type": "vue",
+            "icon": "Bell",
             "path": "/alerts"
+          },
+          {
+            "key": "alert-correlation",
+            "label": "告警收敛闭环",
+            "type": "vue",
+            "icon": "Connection",
+            "path": "/alert-correlation"
           },
           {
             "key": "anomaly",
             "label": "异常检测",
             "type": "vue",
+            "icon": "WarningFilled",
             "path": "/anomaly"
           },
           {
             "key": "event-stats",
             "label": "事件统计",
             "type": "vue",
+            "icon": "TrendCharts",
             "path": "/events/stats"
           }
         ]
@@ -73,24 +88,28 @@
             "key": "incident",
             "label": "故障单管理",
             "type": "vue",
+            "icon": "Tickets",
             "path": "/incidents"
           },
           {
             "key": "oncall-schedule",
             "label": "值班表",
             "type": "vue",
+            "icon": "Calendar",
             "path": "/oncall-schedule"
           },
           {
             "key": "escalation-policy",
             "label": "升级策略",
             "type": "vue",
+            "icon": "ArrowUp",
             "path": "/escalation-policy"
           },
           {
             "key": "notifications",
             "label": "通知管理",
             "type": "vue",
+            "icon": "MessageBox",
             "path": "/notifications"
           }
         ]
@@ -111,24 +130,28 @@
             "key": "asset-list",
             "label": "资产列表",
             "type": "vue",
+            "icon": "Box",
             "path": "/assets"
           },
           {
             "key": "topology",
             "label": "拓扑视图",
             "type": "vue",
+            "icon": "Connection",
             "path": "/topology"
           },
           {
             "key": "lifecycle",
             "label": "资产生命周期",
             "type": "vue",
+            "icon": "Timer",
             "path": "/lifecycle"
           },
           {
             "key": "asset-discovery",
             "label": "资产自动发现",
             "type": "vue",
+            "icon": "MagicStick",
             "path": "/asset-discovery"
           }
         ]
@@ -141,42 +164,49 @@
             "key": "k8s-overview",
             "label": "集群总览",
             "type": "vue",
+            "icon": "Cloudy",
             "path": "/k8s/overview"
           },
           {
             "key": "k8s-topology",
             "label": "资源拓扑图",
             "type": "vue",
+            "icon": "Link",
             "path": "/containers/topology"
           },
           {
             "key": "k8s-pods",
             "label": "Pod 容器组",
             "type": "vue",
+            "icon": "Box",
             "path": "/containers/pods"
           },
           {
             "key": "k8s-deployments",
             "label": "Deployment 应用",
             "type": "vue",
+            "icon": "Operation",
             "path": "/containers/deployments"
           },
           {
             "key": "k8s-namespaces",
             "label": "Namespace 命名空间",
             "type": "vue",
+            "icon": "Folder",
             "path": "/k8s/namespaces"
           },
           {
             "key": "k8s-hpa-recommend",
             "label": "HPA 配置推荐",
             "type": "vue",
+            "icon": "ScaleToOriginal",
             "path": "/k8s/hpa-recommend"
           },
           {
             "key": "k8s-resource-optimize",
             "label": "资源优化建议",
             "type": "vue",
+            "icon": "TrendCharts",
             "path": "/k8s/resource-optimize"
           }
         ]
@@ -189,18 +219,21 @@
             "key": "remediation",
             "label": "自愈规则",
             "type": "vue",
+            "icon": "Lightning",
             "path": "/remediation"
           },
           {
             "key": "remediation-workflow",
             "label": "自愈工作流",
             "type": "vue",
+            "icon": "Operation",
             "path": "/remediation-workflows"
           },
           {
             "key": "remediation-effect",
             "label": "自愈效果分析",
             "type": "vue",
+            "icon": "Finished",
             "path": "/remediation-effect"
           }
         ]
@@ -213,12 +246,14 @@
             "key": "workflow-runs",
             "label": "工作流执行",
             "type": "vue",
+            "icon": "VideoPlay",
             "path": "/workflow/runs"
           },
           {
             "key": "workflow-templates",
             "label": "工作流模板",
             "type": "vue",
+            "icon": "Document",
             "path": "/workflow/templates"
           }
         ]
@@ -231,24 +266,28 @@
             "key": "diagnostic-tools",
             "label": "诊断工具中心",
             "type": "vue",
+            "icon": "FirstAidKit",
             "path": "/diagnostic-tools"
           },
           {
             "key": "smart-inspection",
             "label": "智能巡检",
             "type": "vue",
+            "icon": "Search",
             "path": "/smart-inspection"
           },
           {
             "key": "script-exec",
             "label": "远程脚本",
             "type": "vue",
+            "icon": "Tools",
             "path": "/script"
           },
           {
             "key": "network-test",
             "label": "网络测试",
             "type": "vue",
+            "icon": "Connection",
             "path": "/network-test"
           }
         ]
@@ -269,12 +308,14 @@
             "key": "metrics",
             "label": "指标监控",
             "type": "vue",
+            "icon": "TrendCharts",
             "path": "/metrics-view"
           },
           {
             "key": "k8s-monitor",
             "label": "K8s 资源监控",
             "type": "vue",
+            "icon": "Monitor",
             "path": "/k8s-monitor"
           }
         ]
@@ -287,12 +328,14 @@
             "key": "logs",
             "label": "日志中心",
             "type": "vue",
+            "icon": "Document",
             "path": "/logs"
           },
           {
             "key": "datasources",
             "label": "数据源管理",
             "type": "vue",
+            "icon": "Connection",
             "path": "/datasources"
           }
         ]
@@ -305,12 +348,14 @@
             "key": "traces",
             "label": "链路追踪",
             "type": "vue",
+            "icon": "Guide",
             "path": "/trace-view"
           },
           {
             "key": "discovery",
             "label": "接入指引",
             "type": "vue",
+            "icon": "Compass",
             "path": "/trace-agent-guide"
           }
         ]
@@ -323,18 +368,21 @@
             "key": "firemap",
             "label": "灭火图",
             "type": "vue",
+            "icon": "WarningFilled",
             "path": "/firemap"
           },
           {
             "key": "anomaly-benchmark",
             "label": "异常检测基准",
             "type": "vue",
+            "icon": "TrophyBase",
             "path": "/anomaly-benchmark"
           },
           {
             "key": "trace-anomaly-config",
             "label": "Trace 异常检测",
             "type": "vue",
+            "icon": "Setting",
             "path": "/trace-anomaly/configs"
           }
         ]
@@ -347,6 +395,7 @@
             "key": "event-sources",
             "label": "事件源配置",
             "type": "vue",
+            "icon": "Connection",
             "path": "/event-sources"
           }
         ]
@@ -359,6 +408,7 @@
             "key": "observability-correlation",
             "label": "日志·指标·链路关联",
             "type": "vue",
+            "icon": "Connection",
             "path": "/observability-correlation"
           }
         ]
@@ -368,7 +418,7 @@
   {
     "key": "reliability",
     "label": "可靠性工程",
-    "icon": "DataLine",
+    "icon": "Trophy",
     "description": "SRE：SLO管理、混沌工程",
     "items": [
       {
@@ -379,24 +429,28 @@
             "key": "slo-config",
             "label": "SLO 配置",
             "type": "vue",
+            "icon": "Setting",
             "path": "/slo-config"
           },
           {
             "key": "error-budget",
             "label": "错误预算",
             "type": "vue",
+            "icon": "Coin",
             "path": "/error-budget"
           },
           {
             "key": "burn-rate",
             "label": "预算消耗",
             "type": "vue",
+            "icon": "TrendCharts",
             "path": "/burn-rate"
           },
           {
             "key": "availability-report",
             "label": "可用性报表",
             "type": "vue",
+            "icon": "DataBoard",
             "path": "/availability-report"
           }
         ]
@@ -409,18 +463,21 @@
             "key": "chaos-experiment",
             "label": "混沌实验",
             "type": "vue",
+            "icon": "Lightning",
             "path": "/chaos-experiment"
           },
           {
             "key": "chaos-report",
             "label": "实验报告",
             "type": "vue",
+            "icon": "Document",
             "path": "/chaos-report"
           },
           {
             "key": "chaos-scenario",
             "label": "场景库",
             "type": "vue",
+            "icon": "Folder",
             "path": "/chaos-scenario"
           }
         ]
@@ -441,43 +498,57 @@
             "key": "kb-list",
             "label": "故障知识库",
             "type": "vue",
+            "icon": "Reading",
             "path": "/knowledge"
           },
           {
             "key": "runbooks",
             "label": "Runbook",
             "type": "vue",
+            "icon": "Document",
             "path": "/runbooks"
           },
           {
             "key": "knowledge-draft",
             "label": "知识草稿审批",
             "type": "vue",
+            "icon": "DocumentChecked",
             "path": "/knowledge-draft"
           },
           {
             "key": "kb-documents",
             "label": "RAG 知识库文档",
             "type": "vue",
+            "icon": "Files",
             "path": "/knowledge/documents"
           },
           {
             "key": "kb-graph",
             "label": "运维知识图谱",
             "type": "vue",
+            "icon": "Connection",
             "path": "/knowledge/graph"
           },
           {
             "key": "graph-inference",
             "label": "知识图谱推理",
             "type": "vue",
+            "icon": "MagicStick",
             "path": "/knowledge/graph-inference"
           },
           {
             "key": "smart-recommend",
             "label": "智能推荐",
             "type": "vue",
+            "icon": "Star",
             "path": "/smart-recommend"
+          },
+          {
+            "key": "rag-eval",
+            "label": "RAG 检索质量评估",
+            "type": "vue",
+            "icon": "Finished",
+            "path": "/rag-eval"
           }
         ]
       }
@@ -497,12 +568,14 @@
             "key": "agent-chat",
             "label": "智能助手",
             "type": "vue",
+            "icon": "ChatDotRound",
             "path": "/agent-chat"
           },
           {
             "key": "pending-actions",
             "label": "待确认动作",
             "type": "vue",
+            "icon": "Clock",
             "path": "/agent/pending"
           }
         ]
@@ -515,36 +588,42 @@
             "key": "agent-workflow-editor",
             "label": "智能体编排",
             "type": "vue",
+            "icon": "Operation",
             "path": "/agent-workflow/editor"
           },
           {
             "key": "ai-providers",
             "label": "智能体配置",
             "type": "vue",
+            "icon": "Setting",
             "path": "/ai/providers"
           },
           {
             "key": "agent-capabilities",
             "label": "Agent 能力中心",
             "type": "vue",
+            "icon": "Cpu",
             "path": "/agent/capabilities"
           },
           {
             "key": "agent-eval",
             "label": "Agent 评估",
             "type": "vue",
+            "icon": "Finished",
             "path": "/agent-eval"
           },
           {
             "key": "ab-test",
             "label": "A/B 测试",
             "type": "vue",
+            "icon": "Operation",
             "path": "/ab-test"
           },
           {
             "key": "agent-ground-truth",
             "label": "GroundTruth 测试",
             "type": "vue",
+            "icon": "Check",
             "path": "/agent/ground-truth"
           }
         ]
@@ -565,12 +644,14 @@
             "key": "users",
             "label": "用户管理",
             "type": "vue",
+            "icon": "User",
             "path": "/users"
           },
           {
             "key": "roles-manage",
             "label": "角色管理",
             "type": "vue",
+            "icon": "Key",
             "path": "/roles-manage"
           }
         ]
@@ -583,18 +664,49 @@
             "key": "settings",
             "label": "系统配置",
             "type": "vue",
+            "icon": "Setting",
             "path": "/settings"
+          },
+          {
+            "key": "background-tasks",
+            "label": "后台任务看板",
+            "type": "vue",
+            "icon": "Timer",
+            "path": "/background-tasks"
+          },
+          {
+            "key": "contract-check",
+            "label": "字段契约检测",
+            "type": "vue",
+            "icon": "DocumentChecked",
+            "path": "/contract-check"
+          },
+          {
+            "key": "audit-matrix",
+            "label": "审计覆盖矩阵",
+            "type": "vue",
+            "icon": "CircleCheck",
+            "path": "/audit-matrix"
+          },
+          {
+            "key": "security-audit",
+            "label": "安全自查",
+            "type": "vue",
+            "icon": "Lock",
+            "path": "/security-audit"
           },
           {
             "key": "tenant-management",
             "label": "租户管理",
             "type": "vue",
+            "icon": "OfficeBuilding",
             "path": "/tenant-management"
           },
           {
             "key": "tags",
             "label": "标签管理",
             "type": "vue",
+            "icon": "PriceTag",
             "path": "/tags"
           }
         ]
@@ -607,12 +719,14 @@
             "key": "integration",
             "label": "集成管理",
             "type": "vue",
+            "icon": "Connection",
             "path": "/es-integration"
           },
           {
             "key": "openapi",
             "label": "开放接口",
             "type": "vue",
+            "icon": "Document",
             "path": "/api/v1/docs"
           }
         ]

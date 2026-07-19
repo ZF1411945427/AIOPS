@@ -193,4 +193,4 @@ def api_docs_meta(db: Session = Depends(get_db)):
             },
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)

@@ -11,6 +11,7 @@ class MCPToolDef:
     handler: Callable
     risk_level: str = "read_only"
     expose_to_llm: bool = True
+    display_name: Optional[str] = None  # 中文简写名，用于前端展示和对话进度卡片
 
 
 _MCP_TOOLS: Dict[str, MCPToolDef] = {}
@@ -22,6 +23,7 @@ def register_mcp_tool(
     input_schema: Optional[Dict[str, Any]] = None,
     risk_level: str = "read_only",
     expose_to_llm: bool = True,
+    display_name: Optional[str] = None,
 ):
     def decorator(func):
         _MCP_TOOLS[name] = MCPToolDef(
@@ -31,6 +33,7 @@ def register_mcp_tool(
             handler=func,
             risk_level=risk_level,
             expose_to_llm=expose_to_llm,
+            display_name=display_name,
         )
         return func
 
@@ -41,6 +44,7 @@ def get_mcp_manifest() -> List[Dict[str, Any]]:
     return [
         {
             "name": t.name,
+            "display_name": t.display_name or t.name,
             "description": t.description,
             "input_schema": t.input_schema,
             "risk_level": t.risk_level,

@@ -54,7 +54,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/store/user.js'
-import { listDevices, deleteDevice as removeDeviceApi } from '@/api/mobile.js'
+import { listDevices, deleteDevice as removeDeviceApi, registerDevice, unregisterDevice } from '@/api/mobile.js'
 import { getBaseURL, setBaseURL } from '@/api/config.js'
 import { useOfflineStore } from '@/store/offline.js'
 
@@ -66,13 +66,97 @@ const avatarText = computed(() => {
     return n.charAt(0).toUpperCase()
 })
 const pushEnabled = ref(uni.getStorageSync('push_enabled') !== 'false')
+const pushRegistering = ref(false)
 const serverUrl = ref(getBaseURL())
 const devices = ref([])
 const cacheSize = ref('0 KB')
 
-function togglePush(e) {
-    pushEnabled.value = e.detail.value
-    uni.setStorageSync('push_enabled', pushEnabled.value ? 'true' : 'false')
+function getDeviceId() {
+    let id = uni.getStorageSync('device_id')
+    if (!id) {
+        id = 'h5-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10)
+        uni.setStorageSync('device_id', id)
+    }
+    return id
+}
+
+function getPlatform() {
+    try {
+        const info = uni.getSystemInfoSync()
+        return info.platform || 'h5'
+    } catch (e) {
+        return 'h5'
+    }
+}
+
+function getAppVersion() {
+    try {
+        const info = uni.getSystemInfoSync()
+        return info.appVersion || info.appWgtVersion || '1.0.0'
+    } catch (e) {
+        return '1.0.0'
+    }
+}
+
+function getPushToken() {
+    return new Promise((resolve) => {
+        if (typeof uni.getPushClientId === 'function') {
+            try {
+                uni.getPushClientId({
+                    success: (res) => resolve((res && res.cid) || ''),
+                    fail: () => resolve(''),
+                })
+            } catch (e) {
+                resolve('')
+            }
+        } else {
+            resolve('')
+        }
+    })
+}
+
+async function togglePush(e) {
+    if (pushRegistering.value) return
+    const target = e.detail.value
+    pushRegistering.value = true
+    pushEnabled.value = target
+    uni.setStorageSync('push_enabled', target ? 'true' : 'false')
+    try {
+        const deviceId = getDeviceId()
+        const platform = getPlatform()
+        const appVersion = getAppVersion()
+        // H5/web 端无原生推送通道，仅存本地设置
+        if (platform === 'h5' || platform === 'web') {
+            uni.showToast({ title: target ? '推送已开启（App 端生效）' : '推送已关闭', icon: 'none' })
+            return
+        }
+        if (target) {
+            const pushToken = await getPushToken()
+            try {
+                await registerDevice({
+                    device_id: deviceId,
+                    platform: platform,
+                    push_token: pushToken || '',
+                    app_version: appVersion,
+                })
+                uni.showToast({ title: '推送已开启', icon: 'success' })
+            } catch (err) {
+                pushEnabled.value = false
+                uni.setStorageSync('push_enabled', 'false')
+                uni.showToast({ title: '推送注册失败: ' + (err && err.errMsg ? err.errMsg : '请检查网络'), icon: 'none' })
+            }
+        } else {
+            try {
+                await unregisterDevice(deviceId)
+                uni.showToast({ title: '推送已关闭', icon: 'none' })
+            } catch (err) {
+                uni.showToast({ title: '推送已关闭（注销请求失败）', icon: 'none' })
+            }
+        }
+        fetchDevices()
+    } finally {
+        pushRegistering.value = false
+    }
 }
 
 function editServer() {

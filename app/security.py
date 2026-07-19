@@ -71,3 +71,27 @@ def require_admin(request: Request):
             raise HTTPException(status_code=403, detail="需要管理员权限")
     finally:
         db.close()
+
+
+# 仅允许 http/https 协议（防 SSRF / file:// 读取 / gopher 协议攻击）
+_SAFE_URL_SCHEMES = ("http", "https")
+_SAFE_URL_RE = re.compile(r"^[A-Za-z0-9_\-.@:/\?&=#%~+]{1,2048}$")
+
+
+def validate_url_scheme(url: str) -> tuple[bool, str]:
+    """校验 URL 协议是否安全（仅允许 http/https），防 SSRF。
+
+    返回 (是否安全, 原因)。用于 urlopen / requests 调用前的校验。
+    """
+    if not url or not isinstance(url, str):
+        return False, "URL 为空"
+    url = url.strip()
+    if not _SAFE_URL_RE.match(url):
+        return False, "URL 含非法字符或过长"
+    lower = url.lower()
+    if lower.startswith("http://") or lower.startswith("https://"):
+        return True, "ok"
+    if "://" in lower:
+        scheme = lower.split("://", 1)[0]
+        return False, f"不允许的协议: {scheme}（仅允许 http/https）"
+    return False, "URL 缺少协议（需 http:// 或 https://）"

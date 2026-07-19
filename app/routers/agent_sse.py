@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models import AIProvider
 from app.services.agent_service import call_llm, get_mcp_manifest, call_mcp_tool
 from app.services.agent_service import add_message, get_message_history, _parse_text_tool_calls, _strip_text_tool_call_tags
+from app.services.mcp_registry import get_mcp_tool
 from app.services.ws_manager import ws_manager
 from app.logger import logger
 
@@ -24,46 +25,22 @@ def _get_user_id(request: Request):
     return request.session.get("user_id")
 
 
-# 工具名 → 中文标题映射（用于任务进度卡片步骤标题）
-_TOOL_TITLE_MAP = {
-    "query_alerts": "查询告警",
-    "get_alert_detail": "告警详情",
-    "query_assets": "查询资产",
-    "query_metrics": "查询指标",
-    "query_logs": "查询日志",
-    "query_log_sources": "日志数据源",
-    "query_traces": "查询链路",
-    "query_incidents": "查询故障单",
-    "query_correlation_analysis": "关联分析",
-    "query_change_records": "查询变更记录",
-    "query_knowledge": "知识库检索",
-    "query_knowledge_rag": "RAG 检索",
-    "query_runbook": "Runbook 检索",
-    "query_mysql": "查询 MySQL",
-    "check_mysql_permissions": "检查 MySQL 权限",
-    "query_k8s_events": "查询 K8s 事件",
-    "list_k8s_pods": "K8s Pod 列表",
-    "analyze_incident_rca": "RCA 根因分析",
-    "list_executable_actions": "可执行动作清单",
-    "propose_action": "提议运维动作",
-    "propose_workflow": "提议工作流",
-    "list_agent_workflows": "Agent 工作流列表",
-    "list_workflow_templates": "工作流模板",
-    "list_recent_tasks": "最近任务",
-    "get_task_status": "任务状态",
-    "run_agent_workflow": "运行 Agent 工作流",
-    "generate_knowledge_from_alert": "知识沉淀·告警",
-    "generate_knowledge_from_incident": "知识沉淀·故障单",
-}
+def _tool_display_name(tool_name: str) -> str:
+    """从 SSOT (MCPToolDef.display_name) 读取中文简写名，fallback 到 tool_name."""
+    tool = get_mcp_tool(tool_name)
+    if tool and tool.display_name:
+        return tool.display_name
+    return tool_name
 
 
 def _tool_title(tool_name: str, tool_args: dict) -> str:
-    """生成步骤标题：优先用工具参数里的语义字段，否则用中文映射，再否则用工具名"""
+    """生成步骤标题：优先用工具参数里的语义字段，否则用中文 display_name，再否则用工具名"""
+    display = _tool_display_name(tool_name)
     for key in ("asset_name", "name", "service", "metric_name", "alert_id", "incident_id", "rule_name"):
         v = tool_args.get(key)
         if v:
-            return f"{_TOOL_TITLE_MAP.get(tool_name, tool_name)} · {v}"
-    return _TOOL_TITLE_MAP.get(tool_name, tool_name)
+            return f"{display} · {v}"
+    return display
 
 
 def _extract_step_fields(t_name: str, t_args: dict, t_result: dict) -> dict:
@@ -229,10 +206,12 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
                 t_args = {}
             step_id = f"r{round_idx}_t{tc_idx}"
             step_title = _tool_title(t_name, t_args)
+            step_display = _tool_display_name(t_name)
             started_at = datetime.now().isoformat()
             yield sse_json("step_start", {
                 "step_id": step_id, "round": round_idx + 1,
-                "tool_name": t_name, "tool_args": t_args,
+                "tool_name": t_name, "display_name": step_display,
+                "tool_args": t_args,
                 "title": step_title, "started_at": started_at,
             })
             t_start = time.time()
@@ -248,6 +227,7 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
             })
             steps.append({
                 "step_id": step_id, "round": round_idx + 1, "tool_name": t_name,
+                "display_name": step_display,
                 "title": step_title, "status": step_status,
                 "duration_ms": duration_ms,
                 "started_at": started_at, "finished_at": finished_at,
@@ -341,6 +321,56 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
                               tool_calls=tool_calls_with_steps if tool_calls_with_steps else None)
     session.last_message_at = datetime.now()
     db.commit()
+
+    # 记录 Agent 评估数据（遥测管道接入）
+    try:
+        from app.services.agent_eval_service import record_evaluation
+        _HALLUCINATION_KEYWORDS = [
+            "已提议", "已提交", "已提交安装", "已提交请求",
+            "请点击确认", "点击确认", "确认按钮",
+            "请确认是否执行", "确认执行",
+            "操作已提交", "执行中，请稍候", "待确认",
+        ]
+        token_usage = response.get("usage", {}) if isinstance(response, dict) else {}
+        total_latency = int((time.time() - start) * 1000)
+        _has_hallucination = bool(cleaned and any(kw in cleaned for kw in _HALLUCINATION_KEYWORDS)
+                                  and not any(s.get("tool_name") == "propose_action" and s.get("status") == "success"
+                                              for s in steps))
+        _is_success = bool(cleaned) and not _has_hallucination
+        _task_type = "general"
+        if steps:
+            _tool_names = {s.get("tool_name", "") for s in steps}
+            if "propose_action" in _tool_names:
+                _task_type = "action_proposal"
+            elif "query_alerts" in _tool_names or "get_alert_detail" in _tool_names:
+                _task_type = "alert_analysis"
+            elif "analyze_incident_rca" in _tool_names or "query_correlation_analysis" in _tool_names:
+                _task_type = "incident_analysis"
+            elif "query_assets" in _tool_names:
+                _task_type = "asset_query"
+            elif "query_logs" in _tool_names:
+                _task_type = "log_analysis"
+            elif "query_metrics" in _tool_names:
+                _task_type = "metric_query"
+        record_evaluation(
+            db,
+            session_id=session.id,
+            provider_id=provider.id if provider else None,
+            model_name=provider.default_model if provider else "",
+            prompt_tokens=token_usage.get("prompt_tokens", 0),
+            completion_tokens=token_usage.get("completion_tokens", 0),
+            total_tokens=token_usage.get("total_tokens", 0),
+            latency_ms=total_latency,
+            round_count=(round_idx + 1) if "round_idx" in locals() else 0,
+            tool_call_count=len(steps),
+            success=_is_success,
+            has_hallucination=_has_hallucination,
+            completion_rate=1.0 if _is_success else 0.0,
+            feedback="",
+        )
+        db.commit()
+    except Exception:
+        pass
 
     yield sse_json("done", {
         "session_id": session.id,

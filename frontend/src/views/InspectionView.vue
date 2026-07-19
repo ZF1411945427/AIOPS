@@ -374,6 +374,12 @@ export default {
       'database', 'redis', 'mysql', 'postgresql', 'kafka', 'rabbitmq', 'rocketmq', 'mongodb', 'elasticsearch', 'middleware',
       'deployment', 'service', 'pod', 'container', 'statefulset', 'daemonset',
       'api_service', 'api_gateway', 'api',
+      // 中间件子类型
+      'nginx', 'apache', 'tomcat', 'jetty', 'weblogic', 'websphere', 'wildfly',
+      'activemq', 'pulsar', 'nacos', 'zookeeper', 'apollo', 'consul', 'eureka', 'etcd',
+      'sentinel', 'apisix', 'kong', 'spring_cloud_gateway', 'haproxy', 'seata', 'minio',
+      // 数据库子类型
+      'oracle', 'sqlserver', 'tidb', 'clickhouse', 'dameng', 'oceanbase', 'mariadb', 'sqlite',
     ]
     const CI_LABELS = {
       server: '服务器', virtual_machine: '虚拟机', cloud_host: '云主机', network_device: '网络设备',
@@ -382,6 +388,16 @@ export default {
       rabbitmq: 'RabbitMQ', rocketmq: 'RocketMQ', mongodb: 'MongoDB', elasticsearch: 'Elasticsearch', middleware: '中间件',
       deployment: 'K8s部署', service: 'Service', pod: 'Pod', container: '容器', statefulset: 'StatefulSet', daemonset: 'DaemonSet',
       api_service: 'API服务', api_gateway: 'API网关', api: 'API',
+      // 中间件子类型（mw_subtype）— 巡检列表显示用
+      nginx: 'Nginx', apache: 'Apache', tomcat: 'Tomcat', jetty: 'Jetty',
+      weblogic: 'WebLogic', websphere: 'WebSphere', wildfly: 'WildFly',
+      activemq: 'ActiveMQ', pulsar: 'Pulsar',
+      nacos: 'Nacos', zookeeper: 'ZooKeeper', apollo: 'Apollo', consul: 'Consul', eureka: 'Eureka', etcd: 'Etcd',
+      sentinel: 'Sentinel', apisix: 'APISIX', kong: 'Kong', spring_cloud_gateway: 'Spring Cloud Gateway', haproxy: 'HAProxy',
+      seata: 'Seata', minio: 'MinIO',
+      // 数据库子类型（db_type）
+      oracle: 'Oracle', sqlserver: 'SQL Server', tidb: 'TiDB', clickhouse: 'ClickHouse',
+      dameng: '达梦', oceanbase: 'OceanBase', mariadb: 'MariaDB', sqlite: 'SQLite',
     }
 
     const selectedTemplate = computed(() => templates.value.find(t => t.id === taskForm.template_id))

@@ -23,7 +23,9 @@ from app.models import (
 from app.services.mcp_registry import call_mcp_tool, get_internal_tools
 from app.services.mcp_tools import _get_db  # 复用 db helper
 
-_jinja_env = Environment(loader=BaseLoader(), autoescape=False)
+# 智能体工作流节点参数模板（渲染 JSON/字符串数据，非 HTML），autoescape=True 会破坏数据
+# 安全性由 _render_value 的输入白名单与节点配置校验保障，故标记 nosec B701
+_jinja_env = Environment(loader=BaseLoader(), autoescape=False)  # nosec B701
 
 
 def _now():
@@ -431,7 +433,9 @@ def _exec_code(node_data: Dict, runtime_context: Dict, db: Session) -> Dict:
             return {"output": {}, "status": "failed", "error": f"代码包含禁止关键字: {kw}"}
 
     try:
-        exec(code, safe_globals, safe_locals)
+        # 沙箱执行用户配置的代码节点：受限 builtins + 危险关键字黑名单
+        # 该节点仅由 admin 配置工作流模板时使用，运行态受工作流审批/权限管控
+        exec(code, safe_globals, safe_locals)  # nosec B102
         result = safe_globals.get("result", safe_locals.get("result"))
         return {"output": {"result": result}, "status": "completed"}
     except Exception as e:

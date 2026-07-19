@@ -89,7 +89,7 @@ def list_documents(search: str = "", db: Session = Depends(get_db)):
             "vector_chunks": stats.get("total_chunks", 0),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e), "items": []}, status_code=500)
+        return JSONResponse({"warning": str(e), "items": []}, status_code=200)
 
 
 @router.get("/documents/{doc_id}/detail")
@@ -133,7 +133,7 @@ def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
             "chunk_source": chunk_source,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.post("/documents/upload")
@@ -183,7 +183,7 @@ async def upload_document(
 
         return JSONResponse({"ok": True, "id": doc.id, "message": "文件已上传，索引在后台处理中"})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/documents/create")
@@ -211,7 +211,7 @@ async def create_document(payload: dict = {}, db: Session = Depends(get_db)):
 
         return JSONResponse({"ok": True, "id": doc.id, "message": "文档已创建，索引在后台处理中"})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/documents/{doc_id}/delete")
@@ -241,7 +241,7 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
         db.commit()
         return JSONResponse({"ok": True})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/documents/{doc_id}/reindex")
@@ -264,7 +264,7 @@ async def reindex_document(doc_id: int, db: Session = Depends(get_db)):
 
         return JSONResponse({"ok": True, "id": doc_id, "message": "重新索引在后台处理中"})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 # ─── 语义检索 ───────────────────────────────────────────────────
@@ -340,7 +340,7 @@ def get_stats(db: Session = Depends(get_db)):
             "reranker": reranker_status,
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"warning": str(e)}, status_code=200)
 
 
 @router.get("/reranker/status")

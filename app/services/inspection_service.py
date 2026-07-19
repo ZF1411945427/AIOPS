@@ -37,7 +37,7 @@ BUILTIN_TEMPLATES = [
     },
     {
         "name": "中间件健康巡检",
-        "description": "检查数据库/Redis/Kafka/ES 的连接、告警、性能指标",
+        "description": "检查数据库/中间件（Redis/Kafka/Nacos/ZK/Apollo/Sentinel/Seata/APISIX 等）的连接、告警、性能指标",
         "target_ci_types": ["database", "redis", "mysql", "postgresql", "kafka", "elasticsearch", "middleware"],
         "check_items": [
             {"name": "活跃告警", "metric": "active_alerts", "threshold": 1, "unit": "个", "severity": "warning"},

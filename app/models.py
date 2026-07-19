@@ -775,6 +775,7 @@ class TraceAnomalyConfig(Base):
     service_name = Column(String(128), default="")
     latency_threshold_ms = Column(Float, default=1000)
     error_rate_threshold = Column(Float, default=0.05)
+    check_window_minutes = Column(Integer, default=30)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
 
@@ -1966,3 +1967,29 @@ class AgentGroundTruthRun(Base):
     latency_ms = Column(Integer, default=0)
     error = Column(String(512), default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+# ─── P2 任务#11: 审计日志（写操作自动记录）──
+class AuditLog(Base):
+    """审计日志表：所有写操作（POST/PUT/PATCH/DELETE）由中间件自动记录。
+
+    覆盖：资产变更 / 审批 / 配置修改 / 脚本执行 / Token 管理 / 用户权限变更 等。
+    """
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    username = Column(String(64), default="")
+    method = Column(String(16), nullable=False)           # GET / POST / PUT / PATCH / DELETE
+    path = Column(String(256), nullable=False, index=True)        # 实际请求路径（含资源 ID，如 /api/tags/5）
+    route_path = Column(String(256), default="", index=True)      # 路由模板路径（如 /api/tags/{tag_id}），用于覆盖率精确匹配
+    action = Column(String(64), default="")               # create / update / delete / approve / login 等
+    target_type = Column(String(64), default="")          # asset / incident / user / config / token 等
+    target_id = Column(String(64), default="")            # 目标资源 ID（字符串以兼容 UUID）
+    status_code = Column(Integer, default=0)              # HTTP 响应状态码
+    ip = Column(String(64), default="")
+    user_agent = Column(String(256), default="")
+    request_body = Column(Text, default="")               # 请求体（脱敏后，密码字段已屏蔽）
+    response_summary = Column(String(256), default="")    # 响应摘要
+    duration_ms = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(), index=True)

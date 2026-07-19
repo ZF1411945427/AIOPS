@@ -47,6 +47,7 @@ export function useAgentSSE() {
         step_id: data.step_id,
         round: data.round,
         tool_name: data.tool_name,
+        display_name: data.display_name,
         tool_args: data.tool_args,
         title: data.title,
         status: 'running',
@@ -120,12 +121,14 @@ export function useAgentSSE() {
       const data = JSON.parse(e.data)
       streamingError.value = data.content
       streamingStatus.value = ''
+      streamingDone.value = true
     })
 
     eventSource.onerror = () => {
       if (eventSource.readyState !== EventSource.CLOSED && !streamingDone.value) {
         streamingError.value = '连接中断'
         streamingStatus.value = ''
+        streamingDone.value = true
       }
     }
   }
