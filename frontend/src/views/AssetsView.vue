@@ -49,6 +49,7 @@
                 <a v-if="a.tags" href="javascript:void(0)" class="btn btn-sm btn-tag" @click="showTags(a)">标签</a>
                 <a href="javascript:void(0)" class="btn btn-sm btn-lifecycle" @click="goLifecycle(a.id)">生命周期</a>
                 <button class="btn btn-sm btn-ai" @click="openAssistant(a.id)">💬 智能助手</button>
+                <button v-if="a.edge_agent_id" class="btn btn-sm btn-terminal" @click="openWebSSH(a)">🖥 终端</button>
                 <a href="javascript:void(0)" class="btn btn-sm" @click="openEdit(a.id)">编辑</a>
                 <button class="btn btn-sm btn-danger" @click="deleteAsset(a.id, a.name)">删除</button>
               </td>
@@ -310,11 +311,23 @@
         </div>
       </div>
     </div>
+
+    <!-- P2: WebSSH 终端模态框 -->
+    <div v-if="websshVisible" class="webssh-overlay" @click.self="closeWebSSH">
+      <div class="webssh-modal">
+        <div class="webssh-head">
+          <span class="webssh-title">🖥 WebSSH 终端 — {{ websshAsset?.name }} ({{ websshAsset?.edge_agent_id }})</span>
+          <span class="webssh-status" :class="{ on: websshStatus === '已连接' }">{{ websshStatus }}</span>
+          <button class="webssh-close" @click="closeWebSSH">✕</button>
+        </div>
+        <div id="webssh-terminal" class="webssh-body"></div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
@@ -787,6 +800,68 @@ async function openAssistant(assetId) {
   }
 }
 
+// ─── P2: WebSSH 终端（通过 edge agent 反向隧道）──
+const websshVisible = ref(false)
+const websshAsset = ref(null)
+const websshStatus = ref('')
+let websshWs = null
+let websshTerm = null
+
+function openWebSSH(asset) {
+  websshAsset.value = asset
+  websshVisible.value = true
+  websshStatus.value = '连接中...'
+  nextTick(() => connectWebSSH(asset.edge_agent_id))
+}
+
+function connectWebSSH(agentId) {
+  // 动态加载 xterm.js
+  if (!window._xtermLoaded) {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css'
+    document.head.appendChild(link)
+    const s = document.createElement('script')
+    s.src = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js'
+    s.onload = () => { window._xtermLoaded = true; connectWebSSH(agentId) }
+    document.head.appendChild(s)
+    return
+  }
+  const token = localStorage.getItem('aiops_token') || ''
+  const cols = 100, rows = 30
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${location.host}/webssh/${agentId}?token=${encodeURIComponent(token)}&cols=${cols}&rows=${rows}`
+  websshWs = new WebSocket(wsUrl)
+  websshTerm = new window.Terminal({ cols, rows, cursorBlink: true, fontSize: 13 })
+  const termEl = document.getElementById('webssh-terminal')
+  if (termEl) {
+    termEl.innerHTML = ''
+    websshTerm.open(termEl)
+  }
+  websshWs.onopen = () => { websshStatus.value = '已连接' }
+  websshWs.onmessage = (e) => {
+    websshTerm.write(e.data)
+  }
+  websshWs.onclose = () => { websshStatus.value = '已断开' }
+  websshWs.onerror = () => { websshStatus.value = '连接错误' }
+  websshTerm.onData((data) => {
+    if (websshWs && websshWs.readyState === WebSocket.OPEN) {
+      websshWs.send(JSON.stringify({ type: 'input', data }))
+    }
+  })
+  websshTerm.onResize(({ cols, rows }) => {
+    if (websshWs && websshWs.readyState === WebSocket.OPEN) {
+      websshWs.send(JSON.stringify({ type: 'resize', cols, rows }))
+    }
+  })
+}
+
+function closeWebSSH() {
+  if (websshWs) { websshWs.close(); websshWs = null }
+  if (websshTerm) { websshTerm.dispose(); websshTerm = null }
+  websshVisible.value = false
+}
+
 async function deleteAsset(id, name) {
   try { await ElMessageBox.confirm(`确认删除「${name}」？`, '删除确认', { type: 'warning' }); await request.post(`/assets/api/${id}/delete`); ElMessage.success('已删除'); loadAssets() }
   catch (e) { if (e !== 'cancel') ElMessage.error('删除失败: ' + (e.message || e)) }
@@ -885,4 +960,15 @@ tr.row-orphan td { background: rgba(239,68,68,0.03); }
 .lc-badge.lc-active { background: rgba(34,197,94,0.15); color: #16a34a; }
 .lc-badge.lc-maintenance { background: rgba(245,158,11,0.15); color: #d97706; }
 .lc-badge.lc-retired { background: rgba(107,114,128,0.15); color: #4b5563; }
+.btn-terminal { background: rgba(16,185,129,0.08); color: #10b981; border-color: rgba(16,185,129,0.25); }
+.btn-terminal:hover { background: rgba(16,185,129,0.15); }
+.webssh-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000; }
+.webssh-modal { background: #1e293b; border-radius: 10px; width: 90%; max-width: 1100px; height: 80%; display: flex; flex-direction: column; }
+.webssh-head { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid #334155; }
+.webssh-title { color: #e2e8f0; font-size: 0.9rem; font-weight: 600; }
+.webssh-status { font-size: 0.75rem; padding: 2px 10px; border-radius: 10px; background: #334155; color: #94a3b8; }
+.webssh-status.on { background: #166534; color: #bbf7d0; }
+.webssh-close { margin-left: auto; background: transparent; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; }
+.webssh-close:hover { color: #ef4444; }
+.webssh-body { flex: 1; padding: 12px; overflow: hidden; }
 </style>

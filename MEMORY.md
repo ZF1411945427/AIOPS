@@ -6,6 +6,64 @@
 
 ---
 
+### 2026-07-20: P2 Edge Agent 反向隧道完成
+- **架构**：edge agent 主动 WebSocket 拨出 + HTTP 轮询获取命令 + WebSocket 回传结果 + WebSSH PTY
+- **关键决策**：用 HTTP 轮询模式（非 WebSocket 推送）避开 Starlette/uvicorn Windows 上 WebSocket 跨协程 send 的已知问题
+- **`EdgeSession` + `EdgeCommandLog` 模型** + `Asset.edge_agent_id` 关联
+- **`app/services/edge_tunnel_service.py`（新建）**：在线连接池 + `_PENDING_COMMANDS` 命令队列 + 心跳监控后台线程 + future 机制
+- **`app/routers/edge_tunnel.py`（新建）**：WebSocket `/edge/tunnel/connect` 接入 + 管理 API + `GET /edge/commands/pending` HTTP 轮询接口
+- **`app/routers/webssh.py`（新建）**：浏览器 WebSSH WebSocket → 反向隧道 → edge agent PTY（xterm.js 兼容）
+- **`edge_agent/edge_agent.py`（新建）**：主机侧守护进程（拨出 + 心跳 + HTTP 轮询 + PTY + 断线重连指数退避）
+- **前端 `EdgeTunnelView.vue`（新建）**：隧道管理页 + 命令测试 + WebSSH 终端 + 命令审计日志
+- **`AssetsView.vue`** 加"🖥 终端"按钮（edge_agent_id 存在时显示）+ WebSSH 模态框
+- **入口**：菜单 资产管理 → Edge 隧道管理（key=`edge-tunnel`）；资产列表 → 🖥 终端按钮
+- **测试**：注册+心跳+在线列表 ✅；HTTP 轮询命令执行 exit_code=0 duration=158ms ✅；命令审计日志全记录 ✅；WebSSH PTY 全链路 ✅
+- **涉及文件**：models.py / edge_tunnel_service.py(新) / edge_tunnel.py(新) / webssh.py(新) / edge_agent/edge_agent.py(新) / EdgeTunnelView.vue(新) / AssetsView.vue / menu_config.json / main.py
+
+---
+
+### 2026-07-20: P1 子专家分派 + IM 双向通道完成
+- **P1-1 子专家分派(Multi-Agent Orchestration)**：
+  - `SubAgent` 模型 + 6 个预置子专家(general/SRE/网络/数据库/中间件/K8s)
+  - `app/services/sub_agent_service.py`：关键词路由(零 LLM 调用) + 工具白名单过滤 + system_prompt 注入
+  - `agent_sse.py` 改造：读 session.sub_agent → 路由 → 过滤工具 → 注入 prompt → SSE 推 `sub_agent` 事件
+  - `app/routers/sub_agents.py`：CRUD + `/route` 路由测试 + `/{name}/tools` 工具清单
+  - `agent_chat.py` 加 `/session/{id}/set-sub-agent`
+  - 前端 `AgentChatView.vue` 加 chips 切换条 + 头部子专家标签；`SubAgentsView.vue` 管理页
+  - `useAgentSSE.js` 加 `sub_agent` 事件 + `currentSubAgent` ref
+  - **入口**：菜单 AI 运维智能体 → 子智能体管理(key=`sub-agents`)；对话页头部 chips
+- **P1-2 IM 双向通道(ChatOps)**：
+  - `NotificationChannel` 加 `bidirectional`/`callback_token`/`callback_secret`/`default_sub_agent`
+  - `ImIncomingMessage` 模型存 IM 回调 + Agent 回复
+  - `app/services/im_chatops_service.py`：飞书/钉钉/企微签名校验 + 指令解析(/ai /alert /help) + Agent 调用 + 回推
+  - `app/routers/im_chatops.py`：3 平台回调端点 + URL 校验 + incoming 查询 + 通道配置 + 测试回推
+  - 修复 `notification_service.create_channel` 兼容 config/channel_config
+  - 前端 `ImChatopsView.vue`：双向通道配置 + 消息列表 + 签名密钥弹窗
+  - **入口**：菜单 AI 运维智能体 → IM 双向通道(key=`im-chatops`)
+- **测试**：P1-1 路由 7 场景全通过 + SSE sub_agent 事件 + 工具过滤(network 11/db 12/k8s 14/sre 45)；P1-2 指令解析 6 用例 + 飞书/钉钉/企微 mock 回调 + /help /alert 回复内容正确
+- **涉及文件**：models.py / sub_agent_service.py(新) / sub_agents.py(新) / im_chatops_service.py(新) / im_chatops.py(新) / agent_sse.py / agent_chat.py / notification_service.py / AgentChatView.vue / SubAgentsView.vue(新) / ImChatopsView.vue(新) / useAgentSSE.js / menu_config.json
+- **下一步**：P2 edge agent 反向隧道(架构级)
+
+---
+
+### 2026-07-20: P0 竞品差距优化完成（工具安全元数据 + PromQL 解析器）
+- **背景**：对照 Ongrid 公众号文章（`docs/20260720_竞品对比_Ongrid差距分析与优化方向.md`）识别 5 项差距，按 P0/P1/P2 分级推进
+- **P0-1 工具安全元数据（Capability Metadata）**：
+  - `MCPToolDef` 新增 `location`(cloud/edge/hybrid) + `category`(15 分类) 字段 + `safe`/`read_only`/`ai_only` 派生属性
+  - 45 个 MCP 工具全补齐（cloud 39 + edge 6）；`tools/patch_mcp_metadata.py` 批量补元数据脚本
+  - `/agent/api/capabilities` 返回 location_counts/category_counts/safe_count/unsafe_count
+  - `AgentCapabilitiesView.vue` 改造：分类侧边栏 + 位置/安全/只读筛选 + 展开详情 6 项元数据
+  - **入口**：左侧菜单 → AI 运维智能体 → Agent 能力中心（key=`agent-capabilities`）
+- **P0-2 PromQL 子集解析器**：
+  - 新建 `app/services/promql_parser.py`（parse_promql + PromQLQuery）
+  - `query_metrics` 工具新增 `promql` 参数，支持 topk/bottomk/rate/avg_over_time/avg/max/min/sum + 标签过滤 + 嵌套聚合
+  - 字段模式完全兼容（metric_name + asset_id + hours + limit）
+- **测试**：3 轮全通过（字段模式 / PromQL 7 种语法 / 嵌套聚合 / 非法表达式 / capabilities API 元数据完整性）
+- **涉及文件**：mcp_registry.py / mcp_tools.py / promql_parser.py(新) / agent_chat.py / AgentCapabilitiesView.vue / patch_mcp_metadata.py(新)
+- **下一步**：P1 子专家分派 + IM 双向通道；P2 edge agent 反向隧道
+
+---
+
 ### 2026-07-20: 企业级安全加固 + 性能修复 + 后台BUG修复
 - **后台BUG修复**：
   - `notification_service.py` NotificationLog 字段名 `content` → `notification_content`（模型字段不匹配导致 anomaly_detect 持续报错）

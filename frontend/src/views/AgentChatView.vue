@@ -61,6 +61,9 @@
             <span v-else class="chat-header-title" @dblclick="startRenameHeader">{{ activeSessionTitle }}</span>
             <span class="chat-header-mode-tag">{{ currentModeLabel }}</span>
             <span v-if="isAgentUrgent" class="chat-header-urgent">紧急</span>
+            <span v-if="currentSubAgent" class="chat-header-subagent" :style="{ background: currentSubAgent.color + '22', color: currentSubAgent.color, borderColor: currentSubAgent.color + '44' }">
+              {{ currentSubAgent.icon }} {{ currentSubAgent.display_name }}
+            </span>
           </div>
           <div class="chat-header-right">
             <label class="model-label">模型：</label>
@@ -70,6 +73,20 @@
               </option>
             </select>
           </div>
+        </div>
+
+        <!-- 子专家切换条 -->
+        <div class="sub-agent-bar" v-if="activeSessionId && subAgentList.length">
+          <span class="sub-agent-label">🤝 子专家：</span>
+          <button class="sub-agent-chip" :class="{ active: currentSubAgentName === 'auto' }" @click="setSubAgent('auto')">
+            🎯 自动路由
+          </button>
+          <button v-for="sa in subAgentList" :key="sa.name"
+                  class="sub-agent-chip" :class="{ active: currentSubAgentName === sa.name }"
+                  :style="currentSubAgentName === sa.name ? { background: sa.color + '22', color: sa.color, borderColor: sa.color + '66' } : {}"
+                  @click="setSubAgent(sa.name)" :title="sa.description">
+            {{ sa.icon }} {{ sa.display_name }}
+          </button>
         </div>
 
         <!-- 消息列表 -->
@@ -275,6 +292,8 @@ const currentMode = ref('agent')
 const typewriterText = ref('')
 const typewriterTimer = ref(null)
 const typewriterBuffer = ref('')
+const subAgentList = ref([])  // P1-1: 子专家清单
+const currentSubAgentName = ref('auto')  // auto/sre_expert/...
 
 const alertSearch = ref('')
 const assetSearch = ref('')
@@ -329,6 +348,7 @@ const {
   streamingSteps,
   streamingTask,
   streamingReport,
+  currentSubAgent,
 } = useAgentSSE()
 
 watch(ssePendingActions, (newActions) => {
@@ -424,6 +444,8 @@ function switchSession(sessionId) {
   loadDevices(sessionId)
   const s = sessions.value.find(x => x.id === sessionId)
   if (s && s._mode) currentMode.value = s._mode
+  if (s && s.sub_agent) currentSubAgentName.value = s.sub_agent
+  else currentSubAgentName.value = 'auto'
 }
 
 function newSession() {
@@ -483,6 +505,22 @@ async function loadProviders() {
     providerList.value = data.providers || []
     if (providerList.value.length && !currentProviderId.value) currentProviderId.value = providerList.value[0].id
   } catch (e) { console.error(e) }
+}
+
+async function loadSubAgents() {
+  try {
+    const data = await request.get('/agent/sub-agents/manifest')
+    subAgentList.value = (data.sub_agents || []).filter(a => a.name !== 'general')
+  } catch (e) { console.error(e) }
+}
+
+async function setSubAgent(name) {
+  currentSubAgentName.value = name
+  if (activeSessionId.value) {
+    try {
+      await request.post(`/agent/session/${activeSessionId.value}/set-sub-agent`, { sub_agent: name })
+    } catch (e) { console.error(e) }
+  }
 }
 
 async function onProviderChange() {
@@ -711,7 +749,7 @@ function scrollToBottom(force = false) {
 }
 
 onMounted(async () => {
-  await loadSessions(); await loadShortcuts(); await loadProviders()
+  await loadSessions(); await loadShortcuts(); await loadProviders(); await loadSubAgents()
   const pendingId = window._pendingAgentSessionId
   if (pendingId) {
     window._pendingAgentSessionId = null; pendingAutoSend.value = true; switchSession(pendingId)
@@ -821,6 +859,22 @@ onUnmounted(() => { stopSSE(); stopTypewriter() })
   background: #fef2f2; color: #ef4444; animation: urgent-pulse 1.5s ease-in-out infinite;
 }
 @keyframes urgent-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+.chat-header-subagent {
+  font-size: 0.72rem; padding: 2px 10px; border-radius: 12px; font-weight: 600;
+  border: 1px solid; display: inline-flex; align-items: center; gap: 4px;
+}
+.sub-agent-bar {
+  display: flex; align-items: center; gap: 6px; padding: 8px 20px;
+  background: #fff; border-bottom: 1px solid #f1f5f9; flex-wrap: wrap; flex-shrink: 0;
+}
+.sub-agent-label { font-size: 0.75rem; color: #94a3b8; font-weight: 600; margin-right: 4px; }
+.sub-agent-chip {
+  font-size: 0.75rem; padding: 4px 12px; border-radius: 14px; cursor: pointer;
+  border: 1px solid #e2e8f0; background: #f8fafc; color: #475569;
+  transition: all 0.15s; font-weight: 500;
+}
+.sub-agent-chip:hover { background: #eef2ff; border-color: #c7d2fe; }
+.sub-agent-chip.active { background: #eef2ff; color: #4338ca; border-color: #6366f1; font-weight: 600; }
 .chat-header-right { display: flex; align-items: center; gap: 8px; }
 .model-label { font-size: 0.78rem; color: #64748b; white-space: nowrap; }
 .model-select {

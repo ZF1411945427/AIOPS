@@ -15,6 +15,9 @@ from app.models import AIProvider
 from app.services.agent_service import call_llm, get_mcp_manifest, call_mcp_tool
 from app.services.agent_service import add_message, get_message_history, _parse_text_tool_calls, _strip_text_tool_call_tags
 from app.services.mcp_registry import get_mcp_tool
+from app.services.sub_agent_service import (
+    route_sub_agent, get_sub_agent, filter_tools_by_sub_agent, get_sub_agent_prompt, sub_agent_to_dict
+)
 from app.services.ws_manager import ws_manager
 from app.logger import logger
 
@@ -137,7 +140,41 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
     system_prompt = config.system_prompt or _svc.DEFAULT_SYSTEM_PROMPT
     messages = _svc.get_message_history(db, session, config) + [{"role": "user", "content": user_message}]
 
+    # ─── P1-1: 子专家分派（Multi-Agent Orchestration）──────────────
+    # session.sub_agent 取值: auto/sre/network/database/middleware/k8s/general
+    # auto = 根据用户消息关键词自动路由; 其他 = 手动指定子专家
+    sub_agent_name = getattr(session, "sub_agent", None) or "auto"
+    sub_agent_obj = None
+    if sub_agent_name == "auto":
+        sub_agent_name = route_sub_agent(user_message, db)
+    if sub_agent_name and sub_agent_name != "general":
+        sub_agent_obj = get_sub_agent(db, sub_agent_name)
+    # 注入子专家 system_prompt（在 config system_prompt 之后，用户消息之前）
+    sub_prompt = get_sub_agent_prompt(sub_agent_obj)
+    if sub_prompt:
+        # 在 messages 最前面（系统消息位置）注入子专家身份提示
+        # 如果第一条是 system，合并；否则插入新的 system
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = messages[0]["content"] + "\n\n## 当前子专家身份\n" + sub_prompt
+        else:
+            messages.insert(0, {"role": "system", "content": sub_prompt})
+    # 推送子专家切换事件（前端显示当前子专家标签）
+    if sub_agent_obj or sub_agent_name == "general":
+        if sub_agent_obj:
+            yield sse_json("sub_agent", {
+                "name": sub_agent_obj.name, "display_name": sub_agent_obj.display_name,
+                "domain": sub_agent_obj.domain, "icon": sub_agent_obj.icon, "color": sub_agent_obj.color,
+            })
+        else:
+            yield sse_json("sub_agent", {
+                "name": "general", "display_name": "通用助手",
+                "domain": "general", "icon": "🤖", "color": "#64748b",
+            })
+
     mcp_tools = get_mcp_manifest() if not is_chat_mode else []
+    # 按子专家工具白名单过滤
+    if mcp_tools and sub_agent_obj:
+        mcp_tools = filter_tools_by_sub_agent(mcp_tools, sub_agent_obj)
     openai_tools = [{
         "type": "function", "function": {
             "name": t["name"], "description": t["description"], "parameters": t["input_schema"]

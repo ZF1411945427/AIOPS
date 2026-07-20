@@ -12,6 +12,24 @@ class MCPToolDef:
     risk_level: str = "read_only"
     expose_to_llm: bool = True
     display_name: Optional[str] = None  # 中文简写名，用于前端展示和对话进度卡片
+    # ─── Capability Metadata（对齐 Ongrid，工具安全/运行位置/分类元数据）───
+    location: str = "cloud"  # cloud=云端 / edge=设备端 / hybrid=混合
+    category: str = "general"  # 工具分类：alert/asset/metric/incident/change/knowledge/k8s/rca/execute_host/workflow/task/propose/log/trace/mysql/general
+
+    @property
+    def read_only(self) -> bool:
+        """是否只读工具（不可变更系统状态）。read_only/low 视为只读。"""
+        return self.risk_level in ("read_only", "low")
+
+    @property
+    def safe(self) -> bool:
+        """是否安全工具（可由 Agent 直接调用，无需特殊审批）。read_only/low/advisory 视为安全。"""
+        return self.risk_level in ("read_only", "low", "advisory")
+
+    @property
+    def ai_only(self) -> bool:
+        """是否仅 AI 调用（expose_to_llm=True 即 LLM 可见，False 即内部工具）。"""
+        return self.expose_to_llm
 
 
 _MCP_TOOLS: Dict[str, MCPToolDef] = {}
@@ -24,6 +42,8 @@ def register_mcp_tool(
     risk_level: str = "read_only",
     expose_to_llm: bool = True,
     display_name: Optional[str] = None,
+    location: str = "cloud",
+    category: str = "general",
 ):
     def decorator(func):
         _MCP_TOOLS[name] = MCPToolDef(
@@ -34,6 +54,8 @@ def register_mcp_tool(
             risk_level=risk_level,
             expose_to_llm=expose_to_llm,
             display_name=display_name,
+            location=location,
+            category=category,
         )
         return func
 
@@ -48,6 +70,11 @@ def get_mcp_manifest() -> List[Dict[str, Any]]:
             "description": t.description,
             "input_schema": t.input_schema,
             "risk_level": t.risk_level,
+            "location": t.location,
+            "category": t.category,
+            "safe": t.safe,
+            "read_only": t.read_only,
+            "ai_only": t.ai_only,
         }
         for t in _MCP_TOOLS.values()
         if t.expose_to_llm

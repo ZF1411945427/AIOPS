@@ -183,6 +183,9 @@
       <PendingActionsView v-else-if="activeView === 'pending-actions'" />
           <AiProvidersView v-else-if="activeView === 'ai-providers'" />
           <AgentCapabilitiesView v-else-if="activeView === 'agent-capabilities'" />
+          <SubAgentsView v-else-if="activeView === 'sub-agents'" />
+          <ImChatopsView v-else-if="activeView === 'im-chatops'" />
+          <EdgeTunnelView v-else-if="activeView === 'edge-tunnel'" />
           <FeatureStoreView v-else-if="activeView === 'feature-store'" />
           <PredictionModelsView v-else-if="activeView === 'prediction-models'" />
           <UsersView v-else-if="activeView === 'users'" />
@@ -367,6 +370,9 @@ const DashboardDesignerView = defineAsyncComponent(() => import('@/views/Dashboa
 const DiagnosticToolsView = defineAsyncComponent(() => import('@/views/DiagnosticToolsView.vue'))
 const TenantManagementView = defineAsyncComponent(() => import('@/views/TenantManagementView.vue'))
 const AgentCapabilitiesView = defineAsyncComponent(() => import('@/views/AgentCapabilitiesView.vue'))
+const SubAgentsView = defineAsyncComponent(() => import('@/views/SubAgentsView.vue'))
+const ImChatopsView = defineAsyncComponent(() => import('@/views/ImChatopsView.vue'))
+const EdgeTunnelView = defineAsyncComponent(() => import('@/views/EdgeTunnelView.vue'))
 const RolesView = defineAsyncComponent(() => import('@/views/RolesView.vue'))
 const ObservabilityCorrelationView = defineAsyncComponent(() => import('@/views/ObservabilityCorrelationView.vue'))
 const TraceAnomalyConfigView = defineAsyncComponent(() => import('@/views/TraceAnomalyConfigView.vue'))
