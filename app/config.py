@@ -55,23 +55,64 @@ PASSWORD_HASH_SCHEME = os.environ.get("AIOPS_PASSWORD_SCHEME", "bcrypt")
 DANGEROUS_PATTERNS = [
     "rm -rf /",
     "rm -rf /*",
+    "rm -rf ~",
+    "rm -rf ~/*",
     "mkfs",
     "dd if=",
+    "dd of=/dev/",
     "shutdown",
     "reboot",
     "halt",
     "init 0",
     "init 6",
+    "poweroff",
     ":(){:|:&};:",
     "fork bomb",
     "> /dev/sda",
+    "> /dev/nvme",
     "chmod -R 777 /",
+    "chmod -R 777 ~",
     "chown -R",
     "iptables -F",
     "iptables -X",
+    "iptables -t nat -F",
     "curl.*|.*sh",
     "wget.*|.*sh",
+    "curl.*|.*bash",
+    "wget.*|.*bash",
     "eval ",
+    "exec ",
+    "kill -9 -1",
+    "killall",
+    "pkill -9",
+    "find / -delete",
+    "find / -exec rm",
+    "crontab -r",
+    "history -c",
+    "shred /",
+    "umount /",
+    "mount /dev/",
+    "fdisk",
+    "parted",
+    "wipefs",
+    "> /etc/passwd",
+    "> /etc/shadow",
+    "> /etc/sudoers",
+    "userdel",
+    "usermod -L",
+    "passwd -l",
+    "--no-preserve-root",
+    "systemctl stop",
+    "systemctl disable",
+    "service.*stop",
+]
+
+# ── 脚本执行安全：命令白名单（可选，默认关闭）──
+# 启用后，只允许白名单内的命令前缀执行（更严格的安全模式）
+# 设置环境变量 AIOPS_COMMAND_WHITELIST=cmd1,cmd2,cmd3 启用
+COMMAND_WHITELIST = [
+    c.strip() for c in os.environ.get("AIOPS_COMMAND_WHITELIST", "").split(",")
+    if c.strip()
 ]
 
 # 文件上传限制

@@ -2,6 +2,7 @@ from app.template_utils import parse_json_config
 import json
 import random
 import re
+import time
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -954,17 +955,43 @@ def _scrape_docker(db: Session, source: DataSource) -> tuple:
     return (True, msg)
 
 
+_scrape_fail_cache = {}  # source_id -> 失败时间戳，5 分钟内不重试
+_SCRAPE_FAIL_COOLDOWN = 300  # 5 分钟
+
+
 def scrape_all_sources(db: Session):
     results = []
     now = datetime.now()
     sources = db.query(DataSource).filter(DataSource.enabled == True).all()
+    due = []
     for source in sources:
         if source.last_scraped_at:
             elapsed = (now - source.last_scraped_at).total_seconds()
             if elapsed < source.scrape_interval:
                 continue
-        success, msg = scrape_source(db, source)
-        results.append({"source_id": source.id, "name": source.name, "is_success": success, "message": msg})
+        # 失败冷却：5 分钟内不重试最近失败的源（避免不可达源拖慢整个采集）
+        if source.id in _scrape_fail_cache:
+            if time.time() - _scrape_fail_cache[source.id] < _SCRAPE_FAIL_COOLDOWN:
+                continue
+            else:
+                del _scrape_fail_cache[source.id]
+        due.append(source)
+    # 串行采集（SQLite session 非线程安全），整体时间预算 80s 防止超时
+    _BUDGET = 80.0
+    _t0 = time.time()
+    for source in due:
+        _elapsed = time.time() - _t0
+        if _elapsed >= _BUDGET:
+            results.append({"source_id": source.id, "name": source.name, "is_success": False, "message": "跳过(整体时间预算耗尽)"})
+            continue
+        try:
+            success, msg = scrape_source(db, source)
+            results.append({"source_id": source.id, "name": source.name, "is_success": success, "message": msg})
+            if not success:
+                _scrape_fail_cache[source.id] = time.time()
+        except Exception as e:
+            results.append({"source_id": source.id, "name": source.name, "is_success": False, "message": str(e)})
+            _scrape_fail_cache[source.id] = time.time()
     return results
 
 

@@ -446,6 +446,47 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 app.add_middleware(CacheControlMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
+
+# ── CSRF 防护：Origin/Referer 校验中间件 ──
+class CSRFMiddleware(BaseHTTPMiddleware):
+    """对写操作（POST/PUT/PATCH/DELETE）校验 Origin/Referer 头，防止跨站请求伪造。
+
+    - 浏览器同源策略下，JSON API 的 CSRF 风险较低，但 Origin 校验是纵深防御
+    - 跳过公开路径（/login 等）和不含 cookie 的请求
+    - fail-soft：缺少 Origin 头时放行（兼容非浏览器客户端如 curl/移动端）
+    """
+    async def dispatch(self, request: Request, call_next):
+        method = request.method
+        if method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return await call_next(request)
+        path = request.url.path
+        # 跳过公开路径（登录本身需要无 Origin 访问）
+        if any(path.startswith(p) for p in PUBLIC_PATHS):
+            return await call_next(request)
+        # 检查是否有 session cookie（无 cookie 的 API 调用不受 CSRF 保护）
+        _has_cookie = "session" in request.headers.get("cookie", "")
+        if not _has_cookie:
+            return await call_next(request)
+        origin = request.headers.get("origin", "")
+        referer = request.headers.get("referer", "")
+        _allowed = set(_config.CORS_ORIGINS)
+        # 允许同源请求（origin 为空或匹配 CORS 白名单）
+        if origin and origin not in _allowed:
+            # 也允许 origin 是 CORS 白名单的子路径
+            _ok = any(origin.startswith(a) for a in _allowed)
+            if not _ok:
+                logger.warning(f"CSRF 拦截: {method} {path} origin={origin}")
+                return JSONResponse({"detail": "跨站请求被拦截（CSRF 保护）"}, status_code=403)
+        if referer:
+            _ref_ok = any(referer.startswith(a) for a in _allowed)
+            if not _ref_ok:
+                logger.warning(f"CSRF 拦截(referer): {method} {path} referer={referer}")
+                return JSONResponse({"detail": "跨站请求被拦截（CSRF 保护）"}, status_code=403)
+        return await call_next(request)
+
+
+app.add_middleware(CSRFMiddleware)
+
 # 公共 assets 由 /vue-assets 和 /mobile-app 各自承载，不在此挂载（避免与 /assets API 路由冲突）
 
 # Mobile tab 图标（需在 /static 之前挂载，Starlette 优先匹配精确路径）
@@ -731,6 +772,7 @@ BACKGROUND_INTERVAL = 10
 _last_probe_time = 0
 _last_collect_time = 0.0
 _last_archive_time = 0.0
+_last_scrape_time = 0.0
 METRIC_RETENTION_DAYS = int(_os.environ.get("AIOPS_METRIC_RETENTION_DAYS", "90"))
 
 
@@ -798,7 +840,6 @@ def background_loop():
             ("anomaly_detect", anomaly_service.detect_anomalies),
             ("incident_correlate", incident_service.correlate_alerts),
             ("remediation", remediation_service.check_and_remediate),
-            ("datasource_scrape", datasource_service.scrape_all_sources),
             ("pod_health", pod_health_service.check_pod_anomalies),
             ("log_anomaly", log_anomaly_service.check_log_anomalies),
             ("trace_anomaly", trace_anomaly_service.check_trace_anomalies),
@@ -831,7 +872,7 @@ def background_loop():
         try:
             db = get_session_for(_mode)()
             try:
-                global _last_probe_time, _last_collect_time, _last_archive_time
+                global _last_probe_time, _last_collect_time, _last_archive_time, _last_scrape_time
                 _now = time.time()
                 # 资产健康探测
                 try:
@@ -897,6 +938,27 @@ def background_loop():
                         logger.warning(f"指标归档异常: {ae}")
                 elif not task_monitor.is_enabled("metric_archive"):
                     task_monitor.record_skip("metric_archive", "paused")
+                # ── 数据源采集（独立执行，不受 120s 超时限制）──
+                _SCRAPE_INTERVAL = 60
+                if task_monitor.is_enabled("datasource_scrape") and _now - _last_scrape_time >= _SCRAPE_INTERVAL:
+                    _last_scrape_time = _now
+                    _t0 = time.time()
+                    task_monitor.record_start("datasource_scrape")
+                    try:
+                        _scrape_results = datasource_service.scrape_all_sources(db)
+                        _scrape_ok = sum(1 for r in _scrape_results if r.get("is_success"))
+                        _scrape_fail = len(_scrape_results) - _scrape_ok
+                        task_monitor.record_success("datasource_scrape", (time.time() - _t0) * 1000)
+                        _elapsed_s = time.time() - _t0
+                        if _elapsed_s > 30:
+                            logger.warning(f"数据源采集耗时过长: {_elapsed_s:.1f}s (成功{_scrape_ok}/失败{_scrape_fail})")
+                        elif _scrape_results:
+                            logger.info(f"数据源采集: {_scrape_ok}成功/{_scrape_fail}失败, 耗时{_elapsed_s:.1f}s")
+                    except Exception as se:
+                        task_monitor.record_failure("datasource_scrape", (time.time() - _t0) * 1000, str(se))
+                        logger.warning(f"数据源采集异常: {se}")
+                elif not task_monitor.is_enabled("datasource_scrape"):
+                    task_monitor.record_skip("datasource_scrape", "paused")
                 # 报表调度
                 if task_monitor.is_enabled("report_schedule"):
                     now = datetime.now()
@@ -934,6 +996,36 @@ init_admin()
 set_db_mode("demo")
 # 只对 demo 库灌入种子数据
 seed_all()
+
+# ── 安全启动检查：默认密钥/弱密码检测 ──
+def _security_startup_check():
+    """启动时检测安全风险：默认密钥、弱密码 admin"""
+    _risks = []
+    # 1. 检测 SECRET_KEY 是否为默认值
+    _DEFAULT_KEY = "aiops-dev-secret-change-in-production-please"
+    if _config.SECRET_KEY == _DEFAULT_KEY:
+        _risks.append("SECRET_KEY 仍为默认值，生产环境必须设置 AIOPS_SECRET_KEY 环境变量")
+    if _config.MOBILE_JWT_SECRET == "aiops-mobile-secret-dev":
+        _risks.append("MOBILE_JWT_SECRET 仍为默认值，建议设置环境变量")
+    # 2. 检测 admin 是否使用弱密码
+    try:
+        _db = get_session_for("demo")()
+        try:
+            _admin = _db.query(User).filter(User.username == "admin").first()
+            if _admin and verify_password("admin123", _admin.password_hash):
+                _risks.append("admin 账户使用默认密码 admin123，请尽快修改")
+        finally:
+            _db.close()
+    except Exception:
+        pass
+    if _risks:
+        for _r in _risks:
+            logger.warning(f"[安全检查] {_r}")
+        logger.warning(f"[安全检查] 共发现 {len(_risks)} 项安全风险，详见上方警告")
+    else:
+        logger.info("[安全检查] 启动安全检查通过，未发现默认密钥/弱密码风险")
+
+_security_startup_check()
 # 两个库都播种 SOP 工作流模板（幂等，按 name 去重）
 from app.services.workflow_service import seed_workflow_templates
 from app.services.agent_workflow_service import seed_agent_workflows, _preset_workflows as _get_agent_presets

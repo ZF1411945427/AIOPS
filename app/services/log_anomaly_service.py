@@ -66,6 +66,8 @@ def _fetch_logs(db: Session, source: str, since: datetime, log_level: str = "", 
         events = (
             db.query(K8sEvent)
             .filter(K8sEvent.last_seen_at >= since)
+            .order_by(K8sEvent.last_seen_at.desc())
+            .limit(500)
             .all()
         )
         return [{"id": e.id, "message": e.message} for e in events]
@@ -74,6 +76,8 @@ def _fetch_logs(db: Session, source: str, since: datetime, log_level: str = "", 
         records = (
             db.query(MetricRecord)
             .filter(MetricRecord.timestamp >= since)
+            .order_by(MetricRecord.timestamp.desc())
+            .limit(500)
             .all()
         )
         return [{"id": r.id, "message": f"{r.name}={r.value}"} for r in records]
@@ -83,15 +87,25 @@ def _fetch_logs(db: Session, source: str, since: datetime, log_level: str = "", 
 
 
 _es_client_cache = {}
+_es_fail_cache = {}  # ds_id -> 失败时间戳，5 分钟内不重试
+_ES_FAIL_COOLDOWN = 300  # 5 分钟
+
 
 def _get_es_client(ds):
+    import time as _time
     key = ds.id
+    # 失败冷却：5 分钟内不重试不可达的 ES
+    if key in _es_fail_cache:
+        if _time.time() - _es_fail_cache[key] < _ES_FAIL_COOLDOWN:
+            return None
+        else:
+            del _es_fail_cache[key]
     if key in _es_client_cache:
         try:
-            _es_client_cache[key].ping()
-            return _es_client_cache[key]
+            if _es_client_cache[key].ping():
+                return _es_client_cache[key]
         except Exception:
-            pass
+            del _es_client_cache[key]
     try:
         from elasticsearch import Elasticsearch
     except ImportError:
@@ -112,14 +126,19 @@ def _get_es_client(ds):
     api_key = cfg.get("api_key", "")
     try:
         if api_key:
-            es = Elasticsearch(ds.endpoint, api_key=api_key, request_timeout=8)
+            es = Elasticsearch(ds.endpoint, api_key=api_key, request_timeout=3)
         elif auth:
-            es = Elasticsearch(ds.endpoint, basic_auth=auth, request_timeout=8)
+            es = Elasticsearch(ds.endpoint, basic_auth=auth, request_timeout=3)
         else:
-            es = Elasticsearch(ds.endpoint, request_timeout=8)
-        _es_client_cache[key] = es
-        return es
+            es = Elasticsearch(ds.endpoint, request_timeout=3)
+        if es.ping():
+            _es_client_cache[key] = es
+            return es
+        else:
+            _es_fail_cache[key] = _time.time()
+            return None
     except Exception:
+        _es_fail_cache[key] = _time.time()
         return None
 
 

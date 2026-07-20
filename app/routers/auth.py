@@ -110,7 +110,14 @@ async def login(request: Request, db: Session = Depends(get_db)):
         token = issue_login_token(user.id, user.username)
         from app.services.tenant_service import get_tenant
         tenant = get_tenant(db, user.tenant_id or 1)
-        return {"ok": True, "message": "登录成功", "token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "role_id": user.role_id, "tenant_id": user.tenant_id or 1, "tenant_name": tenant.get("name", "默认租户") if tenant else "默认租户"}}
+        # 安全：检测弱密码，提示前端要求修改
+        _weak_passwords = {"admin123", "123456", "password", "admin"}
+        _must_change = False
+        for _wp in _weak_passwords:
+            if verify_password(_wp, user.password_hash):
+                _must_change = True
+                break
+        return {"ok": True, "message": "登录成功", "token": token, "must_change_password": _must_change, "user": {"id": user.id, "username": user.username, "role": user.role, "role_id": user.role_id, "tenant_id": user.tenant_id or 1, "tenant_name": tenant.get("name", "默认租户") if tenant else "默认租户"}}
     return RedirectResponse("/", status_code=303)
 
 

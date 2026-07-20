@@ -7,7 +7,7 @@ import re
 import os
 import bcrypt
 from fastapi import Request
-from app.config import DANGEROUS_PATTERNS
+from app.config import DANGEROUS_PATTERNS, COMMAND_WHITELIST
 
 
 def hash_password(password: str) -> str:
@@ -34,10 +34,20 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def is_dangerous_command(command: str) -> tuple[bool, str]:
-    """检测危险命令，返回 (是否危险, 匹配的模式)"""
+    """检测危险命令，返回 (是否危险, 匹配的模式/原因)"""
     if not command:
         return False, ""
     cmd_lower = command.lower().strip()
+    # 白名单模式（可选）：只允许白名单内的命令前缀
+    if COMMAND_WHITELIST:
+        _allowed = False
+        for _w in COMMAND_WHITELIST:
+            if cmd_lower.startswith(_w.lower()):
+                _allowed = True
+                break
+        if not _allowed:
+            return True, f"命令不在白名单中（白名单: {', '.join(COMMAND_WHITELIST[:5])}...）"
+    # 黑名单模式：匹配危险模式
     for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, cmd_lower, re.IGNORECASE):
             return True, pattern

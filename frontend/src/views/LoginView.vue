@@ -271,6 +271,9 @@ async function handleLogin() {
         else localStorage.removeItem(REMEMBER_KEY)
       } catch (e) {}
       ElMessage.success('登录成功')
+      if (res?.must_change_password) {
+        ElMessage.warning('检测到您使用的是弱密码，请尽快前往「系统配置」→「用户管理」修改密码')
+      }
       router.push('/')
     } else {
       errorMsg.value = res?.message || '登录失败，请检查用户名和密码'
