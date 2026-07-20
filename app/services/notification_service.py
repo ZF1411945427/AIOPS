@@ -110,7 +110,7 @@ def send_notification(db: Session, alert: Alert, channel: NotificationChannel) -
         channel_type=channel.type,
         recipient=recipient,
         title=title,
-        content=content,
+        notification_content=content,
         is_success=success,
         error_message=error,
     )

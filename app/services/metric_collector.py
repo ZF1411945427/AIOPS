@@ -141,7 +141,7 @@ def collect_asset_metrics(asset, db):
 def collect_all_metrics(db):
     """采集所有 online 资产的指标"""
     assets = db.query(Asset).filter(Asset.status == "online").all()
-    summary = {"total": len(assets), "is_success": 0, "failed": 0, "metrics_collected": 0, "errors": []}
+    summary = {"total": len(assets), "success": 0, "failed": 0, "metrics_collected": 0, "errors": []}
     for asset in assets:
         r = collect_asset_metrics(asset, db)
         if r["error"]:
