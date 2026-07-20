@@ -35,7 +35,8 @@ def list_sessions_json(request: Request, db: Session = Depends(get_db)):
     )
     return {
         "sessions": [
-            {"id": s.id, "title": s.title or "新会话", "created_at": s.created_at.isoformat()}
+            {"id": s.id, "title": s.title or "新会话", "created_at": s.created_at.isoformat(),
+             "sub_agent": s.sub_agent or "auto", "mode": s.mode or "agent"}
             for s in sessions
         ]
     }
@@ -472,8 +473,12 @@ def get_agent_capabilities(request: Request, db: Session = Depends(get_db)):
 
     tools = []
     risk_counts = {"read_only": 0, "low": 0, "medium": 0, "high": 0, "critical": 0, "advisory": 0}
+    location_counts = {"cloud": 0, "edge": 0, "hybrid": 0}
+    category_counts = {}
     for t in _MCP_TOOLS.values():
         risk_counts[t.risk_level] = risk_counts.get(t.risk_level, 0) + 1
+        location_counts[t.location] = location_counts.get(t.location, 0) + 1
+        category_counts[t.category] = category_counts.get(t.category, 0) + 1
         tools.append({
             "name": t.name,
             "display_name": t.display_name or t.name,
@@ -481,11 +486,18 @@ def get_agent_capabilities(request: Request, db: Session = Depends(get_db)):
             "input_schema": t.input_schema,
             "risk_level": t.risk_level,
             "expose_to_llm": t.expose_to_llm,
+            "location": t.location,
+            "category": t.category,
+            "safe": t.safe,
+            "read_only": t.read_only,
+            "ai_only": t.ai_only,
         })
 
     total = len(tools)
     llm_tools = sum(1 for t in tools if t["expose_to_llm"])
     internal_tools = total - llm_tools
+    safe_count = sum(1 for t in tools if t["safe"])
+    unsafe_count = total - safe_count
 
     return {
         "tools": tools,
@@ -494,6 +506,10 @@ def get_agent_capabilities(request: Request, db: Session = Depends(get_db)):
             "llm_tools": llm_tools,
             "internal_tools": internal_tools,
             "risk_counts": risk_counts,
+            "location_counts": location_counts,
+            "category_counts": category_counts,
+            "safe_count": safe_count,
+            "unsafe_count": unsafe_count,
         },
         "agent_config": {
             "name": config.name if config else "default",
@@ -606,6 +622,23 @@ async def set_session_mode(session_id: int, request: Request, db: Session = Depe
     session.mode = mode
     db.commit()
     return {"status": "ok", "mode": session.mode}
+
+
+@router.post("/session/{session_id}/set-sub-agent")
+async def set_session_sub_agent(session_id: int, request: Request, db: Session = Depends(get_db)):
+    """切换会话使用的子专家（auto/sre_expert/network_expert/database_expert/middleware_expert/k8s_expert/general）"""
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    data = await request.json()
+    sub_agent = (data.get("sub_agent") or "auto").strip()
+    session = db.query(ChatSession).filter(
+        ChatSession.id == session_id, ChatSession.user_id == user_id).first()
+    if not session:
+        return JSONResponse({"error": "会话不存在"}, status_code=404)
+    session.sub_agent = sub_agent
+    db.commit()
+    return {"status": "ok", "sub_agent": session.sub_agent}
 
 
 @router.post("/session/{session_id}/rename")

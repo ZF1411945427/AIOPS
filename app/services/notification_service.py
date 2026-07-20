@@ -13,8 +13,12 @@ def get_channels(db: Session):
 
 
 def create_channel(db: Session, data: dict):
-    if isinstance(data.get("config"), dict):
-        data["config"] = json.dumps(data["config"], ensure_ascii=False)
+    # 兼容 config / channel_config 两种字段名
+    if "config" in data and "channel_config" not in data:
+        cfg = data.pop("config")
+        data["channel_config"] = json.dumps(cfg, ensure_ascii=False) if isinstance(cfg, dict) else cfg
+    elif isinstance(data.get("channel_config"), dict):
+        data["channel_config"] = json.dumps(data["channel_config"], ensure_ascii=False)
     channel = NotificationChannel(**data)
     db.add(channel)
     db.commit()

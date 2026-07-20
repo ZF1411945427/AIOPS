@@ -80,6 +80,7 @@ def asset_api_list(
             "ip": a.ip, "status": a.status,
             "lifecycle_status": lifecycle_status,
             "connection_type": getattr(a, 'connection_type', None),
+            "edge_agent_id": getattr(a, 'edge_agent_id', None) or "",
             "last_checked_at": a.last_checked_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, 'last_checked_at', None) else None,
             "latency_ms": getattr(a, 'latency_ms', None),
             "k8s_cluster": getattr(a, 'k8s_cluster', None) or "",

@@ -54,7 +54,7 @@ from app.routers import alerts, alert_console, alert_events, alert_silence, aler
 # k8s 容器编排域
 from app.routers import k8s_monitor, k8s_resources, containers, helm, blue_green, service_mesh
 # ai 智能体域
-from app.routers import ai_providers, agent_chat, agent_sse, agent_workflow, agent_eval, agent_ground_truth, ab_test, anomaly_eval
+from app.routers import ai_providers, agent_chat, agent_sse, agent_workflow, agent_eval, agent_ground_truth, ab_test, anomaly_eval, sub_agents, im_chatops, edge_tunnel, webssh
 # sre 可靠性工程域
 from app.routers import sre, chaos, inspection, baseline, remediation, remediation_workflow, remediation_effect, runbooks
 # knowledge 知识管理域
@@ -133,6 +133,16 @@ _MIGRATIONS = {
         "provider_id INTEGER",
         "mode VARCHAR(16) DEFAULT 'agent'",
         "linked_asset_ids TEXT DEFAULT '[]'",
+        "sub_agent VARCHAR(64) DEFAULT 'auto'",
+    ],
+    "notification_channels": [
+        "bidirectional BOOLEAN DEFAULT 0",
+        "callback_token VARCHAR(128) DEFAULT ''",
+        "callback_secret VARCHAR(128) DEFAULT ''",
+        "default_sub_agent VARCHAR(64) DEFAULT 'auto'",
+    ],
+    "assets": [
+        "edge_agent_id VARCHAR(64) DEFAULT ''",
     ],
     "trace_anomaly_configs": [
         "check_window_minutes INTEGER DEFAULT 30",
@@ -239,7 +249,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
     # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500
     return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0}, status_code=200)
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -552,6 +562,10 @@ app.include_router(agent_eval.router)
 app.include_router(agent_ground_truth.router)
 app.include_router(ab_test.router)
 app.include_router(anomaly_eval.router)
+app.include_router(sub_agents.router)
+app.include_router(im_chatops.router)
+app.include_router(edge_tunnel.router)
+app.include_router(webssh.router)
 
 # ── sre 可靠性工程域 ──
 app.include_router(sre.router)
@@ -997,6 +1011,11 @@ set_db_mode("demo")
 # 只对 demo 库灌入种子数据
 seed_all()
 
+# P2: 启动 edge agent 心跳监控（后台线程，扫描超时会话）
+from app.services.edge_tunnel_service import start_heartbeat_monitor as _start_edge_hb
+_start_edge_hb()
+logger.info("Edge agent 心跳监控已启动")
+
 # ── 安全启动检查：默认密钥/弱密码检测 ──
 def _security_startup_check():
     """启动时检测安全风险：默认密钥、弱密码 admin"""
@@ -1029,6 +1048,7 @@ _security_startup_check()
 # 两个库都播种 SOP 工作流模板（幂等，按 name 去重）
 from app.services.workflow_service import seed_workflow_templates
 from app.services.agent_workflow_service import seed_agent_workflows, _preset_workflows as _get_agent_presets
+from app.services.sub_agent_service import seed_sub_agents as _seed_sub_agents
 for _mode in ("demo", "real"):
     set_db_mode(_mode)
     _seed_db = get_session_for(_mode)()
@@ -1039,6 +1059,10 @@ for _mode in ("demo", "real"):
         _added2 = seed_agent_workflows(_seed_db)
         if _added2:
             logger.info(f"{_mode} 库播种 {_added2} 个智能体工作流模板")
+        # P1-1: 播种预置子专家（SRE/网络/数据库/中间件/K8s）
+        _added3 = _seed_sub_agents(_seed_db)
+        if _added3:
+            logger.info(f"{_mode} 库播种 {_added3} 个预置子专家")
         # 给已有种子工作流的 tool 节点补 execution_mode: auto（向后兼容）
         from app.models import AgentWorkflow
         from sqlalchemy import text as _sa_text2

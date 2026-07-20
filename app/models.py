@@ -99,6 +99,7 @@ class Asset(Base):
     k8s_cluster = Column(String(128), default="")
     connection_type = Column(String(32), default="ssh")
     connection_config = Column(Text, default="{}")
+    edge_agent_id = Column(String(64), default="", index=True)  # P2: 关联 EdgeSession.agent_id，空=未纳管
     created_at = Column(DateTime, default=lambda: datetime.now())
     last_checked_at = Column(DateTime, nullable=True)
     latency_ms = Column(Integer, nullable=True)
@@ -176,6 +177,36 @@ class NotificationChannel(Base):
     channel_config = Column(Text, default="")
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
+    # P1-2: IM 双向通道字段
+    bidirectional = Column(Boolean, default=False)        # 是否双向（支持指令回传）
+    callback_token = Column(String(128), default="")      # IM 平台回调校验 token / Verify Token / Signing Key
+    callback_secret = Column(String(128), default="")     # 飞书 Encrypt Key / 钉钉 Secret / 企微 Token
+    default_sub_agent = Column(String(64), default="auto")  # 该通道默认使用的子专家
+
+
+class ImIncomingMessage(Base):
+    """IM 双向通道收到的指令消息（ChatOps 闭环）。"""
+    __tablename__ = "im_incoming_messages"
+
+    STATUS_PENDING = "pending"
+    STATUS_PROCESSING = "processing"
+    STATUS_REPLIED = "replied"
+    STATUS_FAILED = "failed"
+
+    id = Column(Integer, primary_key=True, index=True)
+    channel_id = Column(Integer, ForeignKey("notification_channels.id"), nullable=True)
+    platform = Column(String(32), nullable=False)         # feishu / dingtalk / wecom
+    sender_id = Column(String(128), default="")           # 发送者 ID（open_id / userid / userid）
+    sender_name = Column(String(128), default="")         # 发送者名称
+    chat_id = Column(String(128), default="")             # 群/会话 ID
+    raw_payload = Column(Text, default="")                # 原始回调 payload
+    command = Column(String(64), default="")              # 指令名：ai / alert / help
+    message_text = Column(Text, default="")               # 消息文本
+    status = Column(String(32), default=STATUS_PENDING)
+    reply_text = Column(Text, default="")                 # Agent 回复内容
+    session_id = Column(Integer, nullable=True)           # 关联的 ChatSession.id
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    processed_at = Column(DateTime, nullable=True)
 
 
 class NotificationLog(Base):
@@ -978,6 +1009,43 @@ class AgentConfig(Base):
             return []
 
 
+class SubAgent(Base):
+    """子智能体（Sub-agent）定义 — 按域分派的专家 Agent。
+
+    Coordinator Agent 根据用户消息关键词路由到对应子专家，
+    子专家使用专属 system_prompt + 工具白名单，实现 Multi-Agent Orchestration。
+    domain 取值: sre / network / database / middleware / k8s / general
+    """
+    __tablename__ = "sub_agents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(64), unique=True, nullable=False)          # 如 "sre_expert"
+    display_name = Column(String(128), default="")                   # 如 "SRE 可靠性专家"
+    domain = Column(String(32), nullable=False)                      # sre/network/database/middleware/k8s/general
+    description = Column(Text, default="")
+    system_prompt = Column(Text, default="")
+    tool_whitelist = Column(Text, default="[]")                      # JSON 数组，工具名白名单；空数组=继承全部工具
+    keywords = Column(Text, default="[]")                            # JSON 数组，路由关键词
+    icon = Column(String(16), default="🤖")                          # 前端展示图标
+    color = Column(String(16), default="#6366f1")                    # 前端展示颜色
+    is_enabled = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+    def get_tool_whitelist(self):
+        try:
+            return json.loads(self.tool_whitelist) if self.tool_whitelist else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def get_keywords(self):
+        try:
+            return json.loads(self.keywords) if self.keywords else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+
 class ChatSession(Base):
     """AI 会话"""
     __tablename__ = "chat_sessions"
@@ -999,6 +1067,7 @@ class ChatSession(Base):
     provider_id = Column(Integer, nullable=True)
     mode = Column(String(16), default=MODE_AGENT)
     linked_asset_ids = Column(Text, default="[]")
+    sub_agent = Column(String(64), default="auto")  # auto/sre/network/database/middleware/k8s/general
 
 
 class ChatMessage(Base):
@@ -1993,3 +2062,66 @@ class AuditLog(Base):
     response_summary = Column(String(256), default="")    # 响应摘要
     duration_ms = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
+
+
+# ─── P2: Edge Agent 反向隧道 ──────────────────────────────
+class EdgeSession(Base):
+    """Edge Agent 反向隧道会话。
+
+    edge agent 启动时主动 WebSocket 拨出到云端，云端为此连接创建一个 EdgeSession。
+    云端通过 EdgeSession.id 路由 WebSSH / 命令执行到对应 edge agent。
+    主机侧零监听端口，所有命令走已建立的反向隧道。
+    """
+    __tablename__ = "edge_sessions"
+
+    STATUS_ONLINE = "online"
+    STATUS_OFFLINE = "offline"
+    STATUS_RECONNECTING = "reconnecting"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(String(64), unique=True, nullable=False, index=True)  # edge agent 唯一标识（主机名+MAC 哈希）
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True)       # 关联资产（首次连接时绑定）
+    hostname = Column(String(128), default="")
+    os_type = Column(String(32), default="linux")                            # linux / windows / macos
+    ip_addresses = Column(Text, default="[]")                                # JSON 数组
+    agent_version = Column(String(32), default="")
+    status = Column(String(16), default=STATUS_OFFLINE)
+    tunnel_token = Column(String(128), default="")                           # 隧道认证 token（edge agent 拨出时携带）
+    last_heartbeat_at = Column(DateTime, nullable=True)
+    connected_at = Column(DateTime, nullable=True)
+    disconnected_at = Column(DateTime, nullable=True)
+    reconnect_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+    def get_ip_addresses(self):
+        try:
+            return json.loads(self.ip_addresses) if self.ip_addresses else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+
+class EdgeCommandLog(Base):
+    """Edge Agent 命令执行审计日志（全程审计）。"""
+    __tablename__ = "edge_command_logs"
+
+    STATUS_RUNNING = "running"
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_TIMEOUT = "timeout"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("edge_sessions.id"), nullable=False, index=True)
+    user_id = Column(Integer, nullable=True)                                 # 发起用户
+    username = Column(String(64), default="")
+    command = Column(Text, default="")                                       # 执行的命令
+    cwd = Column(String(256), default="")                                    # 工作目录
+    exit_code = Column(Integer, nullable=True)
+    stdout = Column(Text, default="")
+    stderr = Column(Text, default="")
+    duration_ms = Column(Integer, default=0)
+    status = Column(String(16), default=STATUS_RUNNING)
+    client_ip = Column(String(64), default="")                               # 发起端 IP（浏览器侧）
+    created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
+    finished_at = Column(DateTime, nullable=True)
+

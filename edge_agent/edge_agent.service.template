@@ -1,0 +1,17 @@
+[Unit]
+Description=AIOps Edge Agent (Reverse Tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aiops-edge-agent
+ExecStart=/usr/bin/python3 /opt/aiops-edge-agent/edge_agent.py --cloud https://cloud.example.com --token YOUR_TUNNEL_TOKEN
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/aiops-edge-agent.log
+StandardError=append:/var/log/aiops-edge-agent.log
+
+[Install]
+WantedBy=multi-user.target

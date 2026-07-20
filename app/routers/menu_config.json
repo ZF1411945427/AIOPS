@@ -134,6 +134,13 @@
             "path": "/assets"
           },
           {
+            "key": "edge-tunnel",
+            "label": "Edge 隧道管理",
+            "type": "vue",
+            "icon": "Connection",
+            "path": "/edge/tunnel"
+          },
+          {
             "key": "topology",
             "label": "拓扑视图",
             "type": "vue",
@@ -604,6 +611,20 @@
             "type": "vue",
             "icon": "Cpu",
             "path": "/agent/capabilities"
+          },
+          {
+            "key": "sub-agents",
+            "label": "子智能体管理",
+            "type": "vue",
+            "icon": "UserFilled",
+            "path": "/agent/sub-agents"
+          },
+          {
+            "key": "im-chatops",
+            "label": "IM 双向通道",
+            "type": "vue",
+            "icon": "ChatLineRound",
+            "path": "/im/chatops"
           },
           {
             "key": "agent-eval",

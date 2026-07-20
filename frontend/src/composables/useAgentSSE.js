@@ -9,6 +9,7 @@ export function useAgentSSE() {
   const streamingSteps = ref([])
   const streamingTask = ref(null)
   const streamingReport = ref(null)
+  const currentSubAgent = ref(null)  // P1-1: 当前子专家 {name, display_name, domain, icon, color}
   let eventSource = null
 
   function connect(sessionId, message) {
@@ -23,9 +24,15 @@ export function useAgentSSE() {
     streamingSteps.value = []
     streamingTask.value = null
     streamingReport.value = null
+    currentSubAgent.value = null
 
     const url = `/agent/chat/stream?session_id=${sessionId}&message=${encodeURIComponent(message)}`
     eventSource = new EventSource(url)
+
+    eventSource.addEventListener('sub_agent', (e) => {
+      const data = JSON.parse(e.data)
+      currentSubAgent.value = data
+    })
 
     eventSource.addEventListener('status', (e) => {
       const data = JSON.parse(e.data)
@@ -151,5 +158,6 @@ export function useAgentSSE() {
     streamingSteps,
     streamingTask,
     streamingReport,
+    currentSubAgent,
   }
 }

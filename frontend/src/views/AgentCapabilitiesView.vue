@@ -55,6 +55,14 @@
               <div class="stat-desc">内部执行</div>
             </div>
           </div>
+          <div class="meta-row">
+            <div class="meta-chip meta-safe"><span class="meta-dot dot-safe"></span>安全 {{ data.stats.safe_count }}</div>
+            <div class="meta-chip meta-unsafe"><span class="meta-dot dot-unsafe"></span>需审批 {{ data.stats.unsafe_count }}</div>
+          </div>
+          <div class="meta-row">
+            <div class="meta-chip meta-cloud"><span class="meta-dot dot-cloud"></span>云端 {{ data.stats.location_counts?.cloud || 0 }}</div>
+            <div class="meta-chip meta-edge"><span class="meta-dot dot-edge"></span>设备端 {{ data.stats.location_counts?.edge || 0 }}</div>
+          </div>
           <div class="risk-bar">
             <div v-for="(count, level) in data.stats.risk_counts" :key="level"
                  class="risk-segment"
@@ -72,7 +80,21 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="caps-body">
+        <aside class="cat-sidebar">
+          <div class="cat-sidebar-title">分类</div>
+          <div class="cat-item" :class="{ active: categoryFilter === '' }" @click="categoryFilter = ''">
+            <span class="cat-name">全部</span>
+            <span class="cat-count">{{ data.tools.length }}</span>
+          </div>
+          <div v-for="cat in categoryList" :key="cat.name" class="cat-item"
+               :class="{ active: categoryFilter === cat.name }" @click="categoryFilter = cat.name">
+            <span class="cat-name">{{ categoryLabel(cat.name) }}</span>
+            <span class="cat-count">{{ cat.count }}</span>
+          </div>
+        </aside>
+
+        <div class="panel caps-panel">
         <div class="panel-head">
           <span>工具清单 ({{ filteredTools.length }})</span>
           <div class="panel-actions">
@@ -85,6 +107,17 @@
               <option value="high">high</option>
               <option value="critical">critical</option>
               <option value="advisory">advisory</option>
+            </select>
+            <select v-model="locationFilter" class="filter-select">
+              <option value="">全部位置</option>
+              <option value="cloud">云端</option>
+              <option value="edge">设备端</option>
+              <option value="hybrid">混合</option>
+            </select>
+            <select v-model="safeFilter" class="filter-select">
+              <option value="">全部安全级</option>
+              <option value="safe">安全</option>
+              <option value="unsafe">需审批</option>
             </select>
             <select v-model="scopeFilter" class="filter-select">
               <option value="">全部范围</option>
@@ -101,9 +134,12 @@
                 <th>中文名</th>
                 <th>工具名称</th>
                 <th>描述</th>
-                <th>风险等级</th>
-                <th>可见范围</th>
-                <th>参数数量</th>
+                <th>分类</th>
+                <th>位置</th>
+                <th>风险</th>
+                <th>安全</th>
+                <th>可见</th>
+                <th>参数</th>
               </tr>
             </thead>
             <tbody>
@@ -113,7 +149,10 @@
                   <td><span class="tool-display-name">{{ tool.display_name || tool.name }}</span></td>
                   <td><span class="tool-name">{{ tool.name }}</span></td>
                   <td class="tool-desc">{{ tool.description }}</td>
+                  <td><span class="cat-badge" :class="'cat-' + tool.category">{{ categoryLabel(tool.category) }}</span></td>
+                  <td><span class="loc-badge" :class="'loc-' + tool.location">{{ locationLabel(tool.location) }}</span></td>
                   <td><span class="risk-badge" :class="'risk-' + tool.risk_level">{{ tool.risk_level }}</span></td>
+                  <td><span class="safe-badge" :class="tool.safe ? 'safe-yes' : 'safe-no'">{{ tool.safe ? '✓ 安全' : '⚠ 审批' }}</span></td>
                   <td>
                     <span class="scope-badge" :class="tool.expose_to_llm ? 'scope-llm' : 'scope-internal'">
                       {{ tool.expose_to_llm ? 'LLM' : 'Internal' }}
@@ -122,8 +161,16 @@
                   <td>{{ Object.keys(tool.input_schema?.properties || {}).length }}</td>
                 </tr>
                 <tr v-if="expandedSet.has(tool.name)" class="schema-row">
-                  <td colspan="7">
+                  <td colspan="10">
                     <div class="schema-panel">
+                      <div class="schema-meta">
+                        <div class="meta-line"><strong>分类:</strong> {{ categoryLabel(tool.category) }} ({{ tool.category }})</div>
+                        <div class="meta-line"><strong>运行位置:</strong> {{ locationLabel(tool.location) }} ({{ tool.location }})</div>
+                        <div class="meta-line"><strong>风险等级:</strong> {{ tool.risk_level }}</div>
+                        <div class="meta-line"><strong>安全工具:</strong> {{ tool.safe ? '是 — 可由 Agent 直接调用' : '否 — 需经提议-确认闭环' }}</div>
+                        <div class="meta-line"><strong>只读工具:</strong> {{ tool.read_only ? '是 — 不变更系统状态' : '否 — 会变更系统状态' }}</div>
+                        <div class="meta-line"><strong>AI 可见:</strong> {{ tool.ai_only ? '是 — LLM 可 function calling 调用' : '否 — 仅内部确认路径可调用' }}</div>
+                      </div>
                       <div class="schema-title">input_schema</div>
                       <pre class="schema-code">{{ JSON.stringify(tool.input_schema, null, 2) }}</pre>
                     </div>
@@ -133,6 +180,7 @@
             </tbody>
           </table>
           <div v-if="filteredTools.length === 0" class="empty-state">无匹配工具</div>
+        </div>
         </div>
       </div>
 
@@ -184,7 +232,28 @@ const data = ref(null)
 const search = ref('')
 const riskFilter = ref('')
 const scopeFilter = ref('')
+const locationFilter = ref('')
+const safeFilter = ref('')
+const categoryFilter = ref('')
 const expandedSet = ref(new Set())
+
+const CATEGORY_LABELS = {
+  alert: '告警', asset: '资产', metric: '指标', incident: '故障',
+  change: '变更', knowledge: '知识', k8s: 'K8s', rca: 'RCA',
+  execute_host: '主机执行', workflow: '工作流', task: '任务',
+  propose: '提议', log: '日志', trace: '链路', mysql: 'MySQL',
+  general: '通用',
+}
+const LOCATION_LABELS = { cloud: '云端', edge: '设备端', hybrid: '混合' }
+
+function categoryLabel(c) { return CATEGORY_LABELS[c] || c }
+function locationLabel(l) { return LOCATION_LABELS[l] || l }
+
+const categoryList = computed(() => {
+  if (!data.value) return []
+  const counts = data.value.stats.category_counts || {}
+  return Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+})
 
 const filteredTools = computed(() => {
   if (!data.value) return []
@@ -197,6 +266,10 @@ const filteredTools = computed(() => {
     if (riskFilter.value && t.risk_level !== riskFilter.value) return false
     if (scopeFilter.value === 'llm' && !t.expose_to_llm) return false
     if (scopeFilter.value === 'internal' && t.expose_to_llm) return false
+    if (locationFilter.value && t.location !== locationFilter.value) return false
+    if (safeFilter.value === 'safe' && !t.safe) return false
+    if (safeFilter.value === 'unsafe' && t.safe) return false
+    if (categoryFilter.value && t.category !== categoryFilter.value) return false
     return true
   })
 })
@@ -330,5 +403,70 @@ onMounted(async () => {
   .policy-grid { grid-template-columns: 1fr; }
   .panel-actions { flex-wrap: wrap; }
   .search-input { width: 100%; }
+  .caps-body { flex-direction: column; }
+  .cat-sidebar { width: 100%; flex-direction: row; overflow-x: auto; }
 }
+
+/* ─── Capability Metadata 新增样式 ─── */
+.caps-body { display: flex; gap: 16px; margin-bottom: 16px; }
+.cat-sidebar {
+  width: 180px; flex-shrink: 0; background: var(--bg-card, #fff);
+  border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 12px;
+  align-self: flex-start;
+}
+.cat-sidebar-title { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary, #888); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+.cat-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
+  transition: all 0.15s; margin-bottom: 2px;
+}
+.cat-item:hover { background: var(--bg-hover, #f1f5f9); }
+.cat-item.active { background: #eef2ff; color: #4338ca; font-weight: 600; }
+.cat-count { font-size: 0.72rem; background: var(--bg-hover, #f1f5f9); padding: 1px 8px; border-radius: 10px; color: var(--text-secondary, #64748b); }
+.cat-item.active .cat-count { background: #c7d2fe; color: #3730a3; }
+.caps-panel { flex: 1; margin-bottom: 0; min-width: 0; }
+
+.meta-row { display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.meta-chip { display: flex; align-items: center; gap: 5px; font-size: 0.75rem; padding: 3px 10px; border-radius: 12px; font-weight: 500; }
+.meta-safe { background: #dcfce7; color: #166534; }
+.meta-unsafe { background: #fee2e2; color: #991b1b; }
+.meta-cloud { background: #e0f2fe; color: #075985; }
+.meta-edge { background: #fef3c7; color: #92400e; }
+.meta-dot { width: 7px; height: 7px; border-radius: 50%; }
+.dot-safe { background: #22c55e; }
+.dot-unsafe { background: #ef4444; }
+.dot-cloud { background: #0ea5e9; }
+.dot-edge { background: #f59e0b; }
+
+.cat-badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; white-space: nowrap; }
+.cat-alert { background: #fee2e2; color: #991b1b; }
+.cat-asset { background: #e0f2fe; color: #075985; }
+.cat-metric { background: #f0fdf4; color: #166534; }
+.cat-incident { background: #fef3c7; color: #92400e; }
+.cat-change { background: #f3e8ff; color: #6b21a8; }
+.cat-knowledge { background: #dbeafe; color: #1e40af; }
+.cat-k8s { background: #ede9fe; color: #5b21b6; }
+.cat-rca { background: #ffedd5; color: #9a3412; }
+.cat-execute_host { background: #fecaca; color: #991b1b; }
+.cat-workflow { background: #cffafe; color: #155e75; }
+.cat-task { background: #f1f5f9; color: #475569; }
+.cat-propose { background: #e0e7ff; color: #4338ca; }
+.cat-log { background: #ecfeff; color: #155e75; }
+.cat-trace { background: #fae8ff; color: #86198f; }
+.cat-mysql { background: #fff7ed; color: #9a3412; }
+.cat-general { background: #f3f4f6; color: #6b7280; }
+
+.loc-badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; white-space: nowrap; }
+.loc-cloud { background: #e0f2fe; color: #075985; }
+.loc-edge { background: #fef3c7; color: #92400e; }
+.loc-hybrid { background: #f3e8ff; color: #6b21a8; }
+
+.safe-badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; white-space: nowrap; }
+.safe-yes { background: #dcfce7; color: #166534; }
+.safe-no { background: #fee2e2; color: #991b1b; }
+
+.schema-meta { background: var(--bg-hover, #f8fafc); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+.meta-line { font-size: 0.78rem; color: var(--text-secondary, #64748b); padding: 3px 0; }
+.meta-line strong { color: var(--text-primary, #1e293b); }
+
 </style>
