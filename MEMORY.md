@@ -6,6 +6,26 @@
 
 ---
 
+### 2026-07-20: 企业级安全加固 + 性能修复 + 后台BUG修复
+- **后台BUG修复**：
+  - `notification_service.py` NotificationLog 字段名 `content` → `notification_content`（模型字段不匹配导致 anomaly_detect 持续报错）
+  - `metric_collector.py` summary 键名 `is_success` → `success`（KeyError 导致指标采集持续异常）
+- **性能修复**：
+  - `log_anomaly_service.py` ES 连接超时 8s→3s + 失败缓存 5 分钟（避免不可达 ES 拖慢 88s）
+  - `log_anomaly_service.py` k8s/metric 源查询加 limit 500（避免全表扫描 15 万条 MetricRecord）
+  - `datasource_service.py` 从 120s 超时池移到辅助任务区（不再阻塞其他后台服务）
+  - `datasource_service.py` 失败源 5 分钟冷却 + 整体 80s 时间预算
+- **安全加固**（企业级 Phase 6）：
+  - 启动时检测默认 SECRET_KEY/MOBILE_JWT_SECRET 并警告（`main.py:_security_startup_check`）
+  - 登录检测弱密码返回 `must_change_password` 标记 + 前端 LoginView 提示
+  - CSRF 中间件：写操作校验 Origin/Referer（evil origin 403 拦截）
+  - 危险命令黑名单从 18 条扩展到 52 条 + 可选白名单模式（`AIOPS_COMMAND_WHITELIST` 环境变量）
+- 已发现已有中间件：AuditMiddleware（审计写操作）、SecurityHeadersMiddleware（HSTS/X-Frame-Options等）
+- 服务器后端 8000/前端 3000/移动端 5173 三端口正常运行
+- commit: 2e944fa（BUG修复）、70a5e50（安全加固+性能修复）
+
+---
+
 ## 关键信息（始终保留，最新）
 
 | 项 | 值 |
