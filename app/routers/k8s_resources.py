@@ -63,112 +63,72 @@ def _add_cluster_info(ctx: dict, db: Session):
 @router.get("/api/overview")
 def api_overview(db: Session = Depends(get_db)):
     try:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        _RT = (5, 10)
         clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
-        overviews = []
-        errors = []
-        total_nodes = 0
-        total_healthy_nodes = 0
-        total_pods = 0
-        total_running_pods = 0
-        total_deployments = 0
-        total_namespaces = 0
-        total_services = 0
-        healthy_clusters = 0
-
-        def _ov_unknown(ds):
-            return {
-                "name": ds.name, "endpoint": ds.endpoint, "status": "unknown",
-                "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
-                "pods": 0, "running_pods": 0, "pod_running_rate": 0,
-                "deployments": 0, "namespaces": 0, "services": 0,
-                "last_scraped_at": str(ds.last_scraped_at) if ds.last_scraped_at else None,
-            }
-
-        def _ov_error(ds):
-            ov = _ov_unknown(ds)
-            ov["status"] = "error"
-            return ov
-
-        def _probe(ds):
-            if not ds.endpoint:
-                return ds.name, _ov_unknown(ds), None, None
-            try:
-                from kubernetes import client
-                v1, apps_v1, _ = _get_k8s_client(ds)
-                nodes = v1.list_node(_request_timeout=_RT).items
-                pods = v1.list_pod_for_all_namespaces(_request_timeout=_RT).items
-                deployments = apps_v1.list_deployment_for_all_namespaces(_request_timeout=_RT).items
-                try:
-                    ns_count = len(v1.list_namespace(_request_timeout=_RT).items)
-                except Exception:
-                    ns_count = 0
-                try:
-                    svc_count = len(v1.list_service_for_all_namespaces(_request_timeout=_RT).items)
-                except Exception:
-                    svc_count = 0
-                healthy_nodes = sum(1 for n in nodes if all(c.status == "True" for c in n.status.conditions if c.type == "Ready"))
-                running_pods = sum(1 for p in pods if (p.status.phase or "") == "Running")
-                node_rate = round(healthy_nodes / len(nodes) * 100, 1) if nodes else 0
-                pod_rate = round(running_pods / len(pods) * 100, 1) if pods else 0
-                ov = {
-                    "name": ds.name, "endpoint": ds.endpoint, "status": "online",
-                    "nodes": len(nodes), "healthy_nodes": healthy_nodes, "node_health_rate": node_rate,
-                    "pods": len(pods), "running_pods": running_pods, "pod_running_rate": pod_rate,
-                    "deployments": len(deployments), "namespaces": ns_count, "services": svc_count,
-                    "last_scraped_at": str(ds.last_scraped_at) if ds.last_scraped_at else None,
-                }
-                stats = (len(nodes), healthy_nodes, len(pods), running_pods, len(deployments), ns_count, svc_count)
-                return ds.name, ov, stats, None
-            except Exception as e:
-                return ds.name, _ov_error(ds), None, str(e)
-
-        results = {}
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            fut_map = {pool.submit(_probe, ds): ds for ds in clusters}
-            for fut in as_completed(fut_map, timeout=45):
-                ds = fut_map[fut]
-                try:
-                    results[ds.name] = fut.result(timeout=45)
-                except Exception as e:
-                    results[ds.name] = (ds.name, _ov_error(ds), None, f"探测超时/异常: {e}")
-
-        for ds in clusters:
-            name, ov, stats, err = results.get(ds.name, (ds.name, _ov_error(ds), None, "未探测"))
-            overviews.append(ov)
-            if err:
-                errors.append(f"{ds.name}: {err}")
-                ds.last_status = "error"
-                ds.last_error = str(err)
-            elif stats:
-                ds.last_status = "online"
-                ds.last_error = ""
-                healthy_clusters += 1
-                total_nodes += stats[0]
-                total_healthy_nodes += stats[1]
-                total_pods += stats[2]
-                total_running_pods += stats[3]
-                total_deployments += stats[4]
-                total_namespaces += stats[5]
-                total_services += stats[6]
-            else:
-                ds.last_status = "unknown"
-        db.commit()
-        summary = {
-            "cluster_count": len(clusters), "healthy_clusters": healthy_clusters,
-            "total_nodes": total_nodes, "total_healthy_nodes": total_healthy_nodes,
-            "node_health_rate": round(total_healthy_nodes / total_nodes * 100, 1) if total_nodes else 0,
-            "total_pods": total_pods, "total_running_pods": total_running_pods,
-            "pod_running_rate": round(total_running_pods / total_pods * 100, 1) if total_pods else 0,
-            "total_deployments": total_deployments, "total_namespaces": total_namespaces, "total_services": total_services,
-        }
+        clusters_data = []
+        online_count = 0
+        for c in clusters:
+            s = c.last_status or "unknown"
+            if s == "online":
+                online_count += 1
+            clusters_data.append({
+                "name": c.name,
+                "endpoint": c.endpoint or "",
+                "status": s,
+                "last_scraped_at": str(c.last_scraped_at) if c.last_scraped_at else None,
+            })
         return JSONResponse({
-            "overviews": overviews, "errors": errors, "summary": summary,
-            "clusters": [{"name": c.name, "endpoint": c.endpoint, "status": c.last_status} for c in clusters],
+            "clusters": clusters_data,
+            "summary": {"cluster_count": len(clusters), "healthy_clusters": online_count},
         })
     except Exception as e:
         return JSONResponse({"warning": str(e)}, status_code=200)
+
+
+@router.get("/api/cluster/{name}/probe")
+def probe_cluster(name: str, db: Session = Depends(get_db)):
+    ds = db.query(DataSource).filter(DataSource.type == "kubernetes", DataSource.name == name).first()
+    if not ds:
+        return JSONResponse({"error": f"集群 [{name}] 不存在"}, status_code=404)
+    _RT = (5, 10)
+    try:
+        v1, apps_v1, _ = _get_k8s_client(ds)
+        nodes = v1.list_node(_request_timeout=_RT).items
+        pods = v1.list_pod_for_all_namespaces(_request_timeout=_RT).items
+        deployments = apps_v1.list_deployment_for_all_namespaces(_request_timeout=_RT).items
+        try:
+            ns_count = len(v1.list_namespace(_request_timeout=_RT).items)
+        except Exception:
+            ns_count = 0
+        try:
+            svc_count = len(v1.list_service_for_all_namespaces(_request_timeout=_RT).items)
+        except Exception:
+            svc_count = 0
+        healthy_nodes = sum(1 for n in nodes if all(c.status == "True" for c in n.status.conditions if c.type == "Ready"))
+        running_pods = sum(1 for p in pods if (p.status.phase or "") == "Running")
+        node_rate = round(healthy_nodes / len(nodes) * 100, 1) if nodes else 0
+        pod_rate = round(running_pods / len(pods) * 100, 1) if pods else 0
+        ds.last_status = "online"
+        ds.last_error = ""
+        db.commit()
+        return JSONResponse({
+            "name": ds.name, "endpoint": ds.endpoint, "status": "online",
+            "nodes": len(nodes), "healthy_nodes": healthy_nodes, "node_health_rate": node_rate,
+            "pods": len(pods), "running_pods": running_pods, "pod_running_rate": pod_rate,
+            "deployments": len(deployments), "namespaces": ns_count, "services": svc_count,
+            "last_scraped_at": str(ds.last_scraped_at) if ds.last_scraped_at else None,
+        })
+    except Exception as e:
+        ds.last_status = "error"
+        ds.last_error = str(e)
+        db.commit()
+        return JSONResponse({
+            "name": ds.name, "endpoint": ds.endpoint, "status": "error",
+            "nodes": 0, "healthy_nodes": 0, "node_health_rate": 0,
+            "pods": 0, "running_pods": 0, "pod_running_rate": 0,
+            "deployments": 0, "namespaces": 0, "services": 0,
+            "last_scraped_at": str(ds.last_scraped_at) if ds.last_scraped_at else None,
+            "error": str(e),
+        })
 
 
 @router.get("/api/statefulsets")

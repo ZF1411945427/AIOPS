@@ -1,14 +1,17 @@
 <template>
   <div class="topo-page">
-    <div class="topo-hd">
-      <h1>K8s 资源拓扑</h1>
-      <div class="hd-right">
-        <select v-model="clusterFilter" @change="doFilter" class="cs">
-          <option value="">全部集群</option>
-          <option v-for="c in clusterNames" :key="c" :value="c">{{ c }}</option>
-        </select>
-        <button class="btn btn-sm" @click="loadGraph">刷新</button>
-      </div>
+    <div style="display:flex;align-items:center;margin-bottom:10px">
+      <h1 style="font-size:1.1rem;font-weight:600;color:var(--text,#1e293b);margin:0">K8s 资源拓扑</h1>
+      <button class="btn btn-guide" style="margin-left:auto" @click="showGuide = !showGuide">📖 操作说明</button>
+    </div>
+    <div class="toolbar">
+      <select v-model="clusterFilter" class="input" @change="loadGraph">
+        <option value="">全部集群</option>
+        <option v-for="c in clusterNames" :key="c" :value="c">{{ c }}</option>
+      </select>
+      <input v-model="namespaceFilter" class="input" placeholder="命名空间筛选" @keyup.enter="loadGraph" />
+      <button class="btn btn-primary" @click="loadGraph">查询</button>
+      <button class="btn" @click="resetFilter">重置</button>
     </div>
 
     <div class="legend-bar">
@@ -117,21 +120,82 @@
       </div>
     </div>
   </div>
+
+  <GuideDrawer v-model="showGuide" title="📖 K8s 资源拓扑 — 操作说明">
+    <div class="guide-section">
+      <h4>什么是资源拓扑？</h4>
+      <p>本页以<strong>层次化树形结构</strong>展示 Kubernetes 集群内的所有纳管资源，从<strong>集群 → 命名空间 → 工作负载 / Service / ConfigMap / Secret / PVC</strong> 逐层展开，帮助你直观理解资源的归属关系和运行状态。</p>
+    </div>
+
+    <div class="guide-section">
+      <h4>三层纳管模型</h4>
+      <p>根据 CI 纳管深度，资源分为三个层级：</p>
+      <ul>
+        <li><strong>持久纳管（绿色系）</strong> — <code>Deployment</code>、<code>StatefulSet</code>、<code>DaemonSet</code>，支持持续同步与告警</li>
+        <li><strong>弱纳管（蓝 / 紫 / 灰色系）</strong> — <code>ConfigMap</code>、<code>Secret</code>、<code>PVC</code>，仅发现与引用关联，不主动同步</li>
+        <li><strong>实时视图（黄色系）</strong> — 当前页面即时查询，不持久化存储</li>
+      </ul>
+    </div>
+
+    <div class="guide-section">
+      <h4>颜色图例</h4>
+      <p>每种资源类型使用独立色标：</p>
+      <ul>
+        <li><span class="tag-demo" style="background:#6366f1;color:#fff">集群</span> 紫色 — 集群根节点</li>
+        <li><span class="tag-demo" style="background:#3b82f6;color:#fff">命名空间</span> 蓝色 — 资源隔离单元</li>
+        <li><span class="tag-demo" style="background:#10b981;color:#fff">节点</span> 绿色 — 物理/虚拟节点</li>
+        <li><span class="tag-demo" style="background:#f59e0b;color:#fff">工作负载</span> 琥珀色 — Deployment / StatefulSet / DaemonSet</li>
+        <li><span class="tag-demo" style="background:#8b5cf6;color:#fff">Service</span> 紫色系 — 网络服务</li>
+        <li><span class="tag-demo" style="background:#06b6d4;color:#fff">ConfigMap</span> 青色 — 配置数据</li>
+        <li><span class="tag-demo" style="background:#dc2626;color:#fff">Secret</span> 红色 — 敏感数据</li>
+        <li><span class="tag-demo" style="background:#64748b;color:#fff">PVC/PV</span> 灰色 — 存储资源</li>
+      </ul>
+    </div>
+
+    <div class="guide-section">
+      <h4>侧边面板统计</h4>
+      <p>右侧面板展示：</p>
+      <ul>
+        <li><strong>节点统计</strong> — 各类型资源数量汇总</li>
+        <li><strong>孤岛告警</strong> — 未被任何 Pod 引用的 <code>ConfigMap</code> / <code>Secret</code> / <code>PVC</code>，标红并显示 ⚠</li>
+        <li><strong>节点详情</strong> — 点击任意资源节点，显示完整元数据（副本数、Selector、ClusterIP、引用关系等）</li>
+      </ul>
+    </div>
+
+    <div class="guide-section">
+      <h4>孤岛资源检测</h4>
+      <p>当 <code>ConfigMap</code> / <code>Secret</code> / <code>PVC</code> 的 <code>referenced_by</code> 数组为空（即没有被任何 Pod 引用），则该资源被标记为<strong>孤岛资源</strong>。</p>
+      <div class="tip-box">孤岛资源通常表示配置漂移或资源废弃，建议人工确认后清理。</div>
+    </div>
+
+    <div class="guide-section">
+      <h4>快速操作</h4>
+      <ul>
+        <li>点击 <strong>▶</strong> 展开/收起集群或命名空间</li>
+        <li>点击资源节点，右侧面板显示详情</li>
+        <li>使用顶部筛选器按集群 / 命名空间过滤</li>
+      </ul>
+    </div>
+  </GuideDrawer>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import request from '@/api/request'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const loading = ref(false)
 const errorMsg = ref('')
 const rawTrees = ref([])
 const treeData = ref([])
 const clusterFilter = ref('')
+const namespaceFilter = ref('')
 const selectedNode = ref(null)
+const showGuide = ref(false)
 const nodeTypeList = ref([])
 const stats = ref({})
 const refEdgeCount = ref(0)
+const clusterNames = ref([])
 
 const TYPE_COLOR = {
   kubernetes_cluster:'#6366f1', cluster:'#6366f1', namespace:'#3b82f6',
@@ -160,24 +224,13 @@ function formatPodSummary(ps) {
   return `共${ps.total} 运行${ps.running} 等待${ps.pending} 失败${ps.failed} 重启${ps.restarts}`
 }
 
-const clusterNames = computed(() => {
-  const s = new Set()
-  function walk(n) { if(n.cluster) s.add(n.cluster); (n.children||[]).forEach(walk) }
-  rawTrees.value.forEach(walk)
-  rawTrees.value.forEach(r => { if(r.name) s.add(r.name) })
-  return [...s]
-})
-
-function expandAll(list) { list.forEach(n => { n._open = true; if(n.children) expandAll(n.children) }) }
-
-function doFilter() {
-  if(clusterFilter.value) {
-    treeData.value = rawTrees.value.filter(r => r.cluster === clusterFilter.value || r.name === clusterFilter.value)
-  } else {
-    treeData.value = rawTrees.value
-  }
-  expandAll(treeData.value)
+function resetFilter() {
+  clusterFilter.value = ''
+  namespaceFilter.value = ''
+  loadGraph()
 }
+
+function expandClustersOnly(list) { list.forEach(n => { n._open = true }) }
 
 function buildTypeList() {
   const bt = stats.value.by_type || {}
@@ -187,9 +240,13 @@ function buildTypeList() {
 async function loadGraph() {
   loading.value = true; errorMsg.value = ''
   try {
-    const data = await request.get('/containers/topology/graph')
+    const params = {}
+    if (clusterFilter.value) params.cluster_name = clusterFilter.value
+    if (namespaceFilter.value) params.namespace = namespaceFilter.value
+    const data = await request.get('/containers/topology/graph', { params })
     rawTrees.value = data.trees || []
     stats.value = data.stats || {}
+    clusterNames.value = data.clusters || []
     // 统计孤岛数与引用边数
     let orphanCnt = 0
     function countOrphan(n) {
@@ -200,7 +257,7 @@ async function loadGraph() {
     stats.value.orphan_count = orphanCnt
     refEdgeCount.value = (data.links || []).filter(l => l.type === 'references').length
     treeData.value = rawTrees.value
-    expandAll(treeData.value)
+    expandClustersOnly(treeData.value)
     buildTypeList()
   } catch(e) { errorMsg.value = '加载失败: ' + (e.message || e) }
   finally { loading.value = false }
@@ -211,13 +268,13 @@ onMounted(() => loadGraph())
 
 <style scoped>
 .topo-page { padding: 4px; }
-.topo-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.topo-hd h1 { font-size: 1.1rem; font-weight: 600; color: var(--text, #1e293b); margin: 0; }
-.hd-right { display: flex; gap: 6px; align-items: center; }
-.cs { padding: 4px 8px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid,#fff); color: var(--text,#1e293b); font-size: 0.78rem; }
-.btn { padding: 4px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid,#fff); color: var(--text,#1e293b); cursor: pointer; font-size: 0.78rem; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+.input { padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid,#fff); color: var(--text,#1e293b); font-size: 0.82rem; min-width: 160px; }
+.btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid,#fff); color: var(--text,#1e293b); cursor: pointer; font-size: 0.82rem; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
-.btn-sm { padding: 3px 8px; font-size: 0.72rem; }
+.btn-primary { background: var(--accent,#6366f1); color: #fff; border-color: var(--accent,#6366f1); }
+.btn-primary:hover { background: var(--accent-hover,#4f46e5); }
+.btn-guide { border-color: var(--accent,#6366f1); color: var(--accent,#6366f1); font-size: 0.8rem; }
 .loading, .error, .empty { text-align: center; padding: 60px 20px; color: var(--text-secondary,#64748b); font-size: 0.85rem; }
 .error { color: #ef4444; }
 .topo-layout { display: flex; gap: 14px; }

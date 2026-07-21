@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>Docker 容器概览</h1>
       <p>Docker 主机与容器统计 · 运行率 {{ summary.running_rate || 0 }}%</p>
+      <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
     </div>
 
     <div v-if="loading" class="loading-state">加载中...</div>
@@ -70,15 +71,46 @@
         </div>
       </div>
     </template>
+  <GuideDrawer v-model="showGuide" title="📖 Docker 容器操作说明">
+    <div class="guide-section">
+      <h4>页面功能</h4>
+      <p>本页面展示多主机 Docker 容器的全局概览，包括容器总数、运行/停止统计、主机分布、热门镜像排行以及最近创建的容器列表。</p>
+    </div>
+    <div class="guide-section">
+      <h4>容器状态颜色说明</h4>
+      <ul>
+        <li><span class="tag-demo" style="background:rgba(16,185,129,0.12);color:#10b981;">running</span> — 运行中，容器正常运行</li>
+        <li><span class="tag-demo" style="background:rgba(239,68,68,0.12);color:#ef4444;">stopped</span> — 已停止，容器已停止运行</li>
+        <li><span class="tag-demo" style="background:rgba(245,158,11,0.12);color:#f59e0b;">paused</span> — 已暂停，容器进程挂起</li>
+        <li><span class="tag-demo" style="background:rgba(239,68,68,0.2);color:#dc2626;">error</span> — 异常，容器状态异常</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>容器管理操作</h4>
+      <p>在容器详情页面可执行以下操作：</p>
+      <ul>
+        <li><strong>启动</strong> — 启动已停止的容器</li>
+        <li><strong>停止</strong> — 停止运行中的容器</li>
+        <li><strong>重启</strong> — 重启容器（先停止再启动）</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>查看日志与监控</h4>
+      <p>点击容器可查看详细的日志输出和资源指标（CPU、内存、网络 I/O），帮助排查问题与性能分析。</p>
+      <div class="tip-box">提示：日志支持按时间范围和关键字搜索，方便快速定位问题。</div>
+    </div>
+  </GuideDrawer>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import request from '@/api/request'
 
 const loading = ref(false)
+const showGuide = ref(false)
 const errorMsg = ref('')
 const summary = ref({})
 const hostStats = ref([])

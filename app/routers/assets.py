@@ -502,6 +502,8 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
                   "daemonsets": 0, "services": 0, "ingresses": 0, "pvcs": 0, "pvs": 0,
                   "configmaps": 0, "secrets": 0, "pods_scanned": 0, "pods_skipped": 0,
                   "orphans": 0, "stale_cleaned": 0}
+        from sqlalchemy import text as _text
+        _next_id = [db.execute(_text("SELECT COALESCE(MAX(id), 0) FROM assets")).scalar() or 0]
 
         def _upsert(name, ci_type_val, ns="", extra_attrs=None, parent=None):
             existing = db.query(Asset).filter(Asset.name == name, Asset.ci_type == ci_type_val).first()
@@ -517,8 +519,9 @@ def api_asset_sync_k8s(asset_id: int, db: Session = Depends(get_db)):
                 if parent:
                     existing.parent_id = parent
             else:
+                _next_id[0] += 1
                 a = Asset(
-                    name=name, type=ci_type_val, ci_type=ci_type_val,
+                    id=_next_id[0], name=name, ci_type=ci_type_val,
                     ip="", status="online", tags=json.dumps(["k8s", asset.name]),
                     k8s_cluster=asset.name, parent_id=parent,
                     connection_type="kubernetes",

@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect, Body
 from fastapi.responses import PlainTextResponse, JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text as _sa_text
 
 from app.database import get_db
 from app.template_utils import get_templates, parse_json_config
@@ -30,10 +31,14 @@ def _parse_attrs(c):
 
 
 @router.get("/topology/graph")
-def container_topology_graph(db: Session = Depends(get_db)):
+def container_topology_graph(
+    db: Session = Depends(get_db),
+    cluster_name: str = "",
+    namespace: str = "",
+):
     """K8s 资源关系图数据（d3 力导向图用）：nodes + links + clusters + stats"""
     from fastapi.responses import JSONResponse
-    data = topology_service.build_k8s_topo_graph(db)
+    data = topology_service.build_k8s_topo_graph(db, cluster_name=cluster_name, namespace=namespace)
     return JSONResponse(data)
 
 
@@ -507,8 +512,9 @@ def api_docker_local_scan(db: Session = Depends(get_db)):
                 exists.status = "online" if state == "running" else "offline"
                 exists.ci_attributes = json.dumps(attrs, ensure_ascii=False)
             else:
+                _max_id = (db.execute(_sa_text("SELECT COALESCE(MAX(id), 0) FROM assets")).scalar() or 0) + 1
                 asset = Asset(
-                    name=cname, type="docker", ci_type="container",
+                    id=_max_id, name=cname, ci_type="container",
                     status="online" if state == "running" else "offline",
                     ci_attributes=json.dumps(attrs, ensure_ascii=False),
                 )

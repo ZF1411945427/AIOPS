@@ -21,6 +21,11 @@
     </div>
 
     <div class="toolbar">
+      <select v-model="typeFilter" class="input type-select" @change="renderChart">
+        <option value="">全部类型</option>
+        <option v-for="t in typeList" :key="t" :value="t">{{ t }}</option>
+      </select>
+      <input v-model="searchText" class="input" placeholder="搜索节点名称" @input="renderChart" />
       <button
         class="btn"
         :class="{ 'btn-abnormal': showAbnormalOnly }"
@@ -32,6 +37,7 @@
       </button>
       <button class="btn btn-primary" @click="openCreate">+ 新增关系</button>
       <button class="btn" @click="loadAll">刷新</button>
+      <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
       <label class="auto-refresh-label" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;cursor:pointer;color:var(--text-secondary);margin-left:8px">
         <input type="checkbox" v-model="autoRefresh" style="accent-color:var(--accent)" />
         自动刷新
@@ -118,6 +124,7 @@
         </div>
       </div>
     </div>
+    <GuideDrawer v-model:visible="showGuide" title="拓扑视图操作说明" :sections="guideSections" />
   </div>
 </template>
 
@@ -126,6 +133,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const loading = ref(false)
 const nodes = ref([])
@@ -135,6 +143,9 @@ const selectedNodeId = ref(null)
 const showAbnormalOnly = ref(false)
 const showCreate = ref(false)
 const createForm = ref({ source_id: 0, target_id: 0, relation_type: 'depends_on' })
+const showGuide = ref(false)
+const typeFilter = ref('')
+const searchText = ref('')
 
 const chartRef = ref(null)
 let chart = null
@@ -182,6 +193,19 @@ function isAbnormal(n) {
 
 const abnormalCount = computed(() => nodes.value.filter(isAbnormal).length)
 
+const typeList = computed(() => {
+  const types = new Set(nodes.value.map(n => (n.ci_type || n.type || '')).filter(Boolean))
+  return [...types].sort()
+})
+
+const guideSections = [
+  { title: '筛选过滤', content: '通过类型下拉框筛选特定资产类型；搜索框按名称定位节点；"仅异常"按钮只显示异常节点及其关联资产。' },
+  { title: '节点交互', content: '点击任一节点，右侧图例区显示详情和关联资产；选中节点高亮其所有关联关系。' },
+  { title: '拓扑浏览', content: '节点可拖拽移动；鼠标滚轮缩放；选中节点后关联节点和边高亮为橙色。' },
+  { title: '关系管理', content: '点击"+新增关系"创建资产间依赖关系；关系列表支持直接删除。' },
+  { title: '自动刷新', content: '开启"自动刷新"后每30秒拉取最新拓扑数据。' },
+]
+
 const connectedNodes = computed(() => {
   if (!selectedNode.value) return []
   const neighborIds = new Set()
@@ -213,6 +237,18 @@ function isConnectedTo(id, targetId) {
 function getDisplayData() {
   let dn = nodes.value
   let de = relations.value
+  if (typeFilter.value) {
+    const typeVal = typeFilter.value.toLowerCase()
+    dn = dn.filter(n => (n.ci_type || n.type || '').toLowerCase() === typeVal)
+  }
+  if (searchText.value) {
+    const q = searchText.value.toLowerCase()
+    dn = dn.filter(n => (n.name || '').toLowerCase().includes(q))
+  }
+  if (typeFilter.value || searchText.value) {
+    const keepIds = new Set(dn.map(n => n.id))
+    de = de.filter(r => keepIds.has(r.source_id) && keepIds.has(r.target_id))
+  }
   if (showAbnormalOnly.value) {
     const abnormalIds = new Set(dn.filter(isAbnormal).map(n => n.id))
     const connectedIds = new Set()
@@ -313,7 +349,7 @@ function renderChart() {
       data: graphNodes,
       links: graphEdges,
       categories: categories.map(c => ({ name: c })),
-      force: { repulsion: 220, edgeLength: 120, gravity: 0.08 },
+      force: { repulsion: 350, edgeLength: 180, gravity: 0.05, friction: 0.15 },
       edgeSymbol: ['none', 'arrow'],
       edgeSymbolSize: 8,
       lineStyle: { color: '#aaa', curveness: 0.1 },
@@ -435,7 +471,7 @@ onBeforeUnmount(() => {
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-head { padding: 12px 18px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); font-weight: 600; font-size: 0.9rem; color: var(--text, #1e293b); }
 .panel-body { padding: 16px 18px; }
-.chart-box { width: 100%; height: 480px; }
+.chart-box { width: 100%; height: 600px; }
 .legend-section { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary, #64748b); margin: 10px 0 6px; text-transform: uppercase; letter-spacing: 0.3px; }
 .legend-section:first-child { margin-top: 0; }
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text, #1e293b); padding: 3px 0; }
@@ -462,6 +498,7 @@ onBeforeUnmount(() => {
 .input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .btn-abnormal { background: rgba(239,68,68,0.12); color: #ef4444; border-color: rgba(239,68,68,0.35); }
+.type-select { max-width: 160px; }
 .btn-abnormal:hover { background: rgba(239,68,68,0.22); }
 .filter-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; display: inline-block; margin-right: 4px; }
 .filter-badge { background: #ef4444; color: #fff; border-radius: 8px; padding: 0 6px; font-size: 0.7rem; font-weight: 700; line-height: 1.5; margin-left: 4px; }

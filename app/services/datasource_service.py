@@ -8,6 +8,11 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models import DataSource, MetricRecord, Asset, K8sEvent, Alert
+from sqlalchemy import text as _sa_text
+
+
+def _next_asset_id(db: Session) -> int:
+    return (db.execute(_sa_text("SELECT COALESCE(MAX(id), 0) FROM assets")).scalar() or 0) + 1
 
 
 DS_TYPES = {
@@ -336,8 +341,8 @@ def _sync_k8s_asset(db: Session, ci_type: str, name: str, parent_id: int, k8s_cl
         db.commit()
         return existing
     asset = Asset(
+        id=_next_asset_id(db),
         name=name,
-        type="k8s",
         ci_type=ci_type,
         parent_id=parent_id,
         status="online",
@@ -358,8 +363,8 @@ def _sync_docker_asset(db: Session, container_id: str, name: str, attrs: dict) -
         db.commit()
         return existing
     asset = Asset(
+        id=_next_asset_id(db),
         name=name,
-        type="docker",
         ci_type="container",
         status="online" if attrs.get("status") == "running" else "offline",
         ci_attributes=json.dumps(attrs, ensure_ascii=False),
@@ -368,7 +373,6 @@ def _sync_docker_asset(db: Session, container_id: str, name: str, attrs: dict) -
     db.commit()
     db.refresh(asset)
     return asset
-
 
 
 
@@ -474,8 +478,8 @@ def _sync_ssh_asset(db: Session, host: str) -> Asset:
     if existing:
         return existing
     asset = Asset(
+        id=_next_asset_id(db),
         name=host,
-        type="server",
         ci_type="server",
         ip=host,
         status="online",
@@ -500,8 +504,8 @@ def _sync_docker_asset_via_ssh(db: Session, host: str, container_id: str, name: 
         db.commit()
         return existing
     asset = Asset(
+        id=_next_asset_id(db),
         name=f"{host}/{name}",
-        type="docker",
         ci_type="container",
         status="online" if attrs.get("state") == "running" else "offline",
         ci_attributes=json.dumps(attrs, ensure_ascii=False),

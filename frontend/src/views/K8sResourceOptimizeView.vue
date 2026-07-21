@@ -1,8 +1,13 @@
 <template>
   <div class="ro-page">
     <div class="page-header">
-      <h1>资源优化建议</h1>
-      <p>Pod 资源请求/限制分析 · 超配 / 欠配检测</p>
+      <div class="page-header-row">
+        <div>
+          <h1>资源优化建议</h1>
+          <p>Pod 资源请求/限制分析 · 超配 / 欠配检测</p>
+        </div>
+        <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
+      </div>
     </div>
     <div class="toolbar">
       <input v-model="nsFilter" class="input" placeholder="命名空间过滤" @keyup.enter="loadData" />
@@ -47,11 +52,71 @@
       </div>
     </div>
   </div>
+
+  <GuideDrawer v-model="showGuide" title="📖 资源优化操作说明">
+    <div class="guide-section">
+      <h4>页面功能</h4>
+      <p>本页面分析集群中所有 Pod 的 <strong>资源请求（Requests）</strong> 与 <strong>资源限制（Limits）</strong> 配置，检测 <strong>超配（Over-Provisioning）</strong> 和 <strong>欠配（Under-Provisioning）</strong> 问题，并提供优化建议。</p>
+    </div>
+    <div class="guide-section">
+      <h4>超配 vs 欠配</h4>
+      <div class="key-value-list">
+        <div class="kv-row">
+          <span class="kv-key">超配</span>
+          <span class="kv-val">Request/Limit 远高于实际使用，导致集群资源利用率低、浪费成本。</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">欠配</span>
+          <span class="kv-val">Request/Limit 不足，Pod 在负载高峰时可能被 OOM Kill 或限流，影响稳定性。</span>
+        </div>
+      </div>
+    </div>
+    <div class="guide-section">
+      <h4>理解 Request 与 Limit</h4>
+      <p>在 Kubernetes 中：</p>
+      <ul>
+        <li><strong>Request</strong> — 容器保证能获得的最低资源量，调度器据此分配节点</li>
+        <li><strong>Limit</strong> — 容器最多能使用的资源上限，超过会被限流或杀死</li>
+      </ul>
+      <div class="tip-box">
+        <strong>💡 最佳实践：</strong> 建议 Limit ≥ Request，且差距不宜过大。通常 Request = 实际使用 × 1.2~1.5，Limit = Request × 1.5~2。
+      </div>
+    </div>
+    <div class="guide-section">
+      <h4>如何阅读优化建议</h4>
+      <p>每条建议按 <strong>严重级别</strong> 分类：</p>
+      <ul>
+        <li><span class="tag-demo" style="background:rgba(239,68,68,0.12);color:#ef4444;">Critical</span> — 严重欠配，可能导致 Pod 被杀死</li>
+        <li><span class="tag-demo" style="background:rgba(217,119,6,0.12);color:#d97706;">Warning</span> — 资源设置不合理，建议调整</li>
+        <li><span class="tag-demo" style="background:rgba(34,197,94,0.12);color:#22c55e;">OK</span> — 当前配置合理</li>
+      </ul>
+      <p>表格中 <strong>问题列</strong> 会标注具体检测到的问题类型（如 <code>CPU 超配</code>、<code>内存不足</code>）。</p>
+    </div>
+    <div class="guide-section">
+      <h4>应用优化推荐</h4>
+      <ol>
+        <li>筛选 <strong>Critical</strong> / <strong>Warning</strong> 级别的条目优先处理</li>
+        <li>根据问题描述调整对应容器的 <code>resources.requests</code> 和 <code>resources.limits</code></li>
+        <li>修改 Deployment / StatefulSet YAML 后重新部署</li>
+      </ol>
+    </div>
+    <div class="guide-section">
+      <h4>成本节省潜力</h4>
+      <p>通过合理配置资源请求/限制，您可以：</p>
+      <ul>
+        <li>消除超配导致的资源浪费，提高集群装箱密度</li>
+        <li>减少因欠配引发的应用故障和运维介入成本</li>
+        <li>在相同集群规模下承载更多业务，降低单位成本</li>
+      </ul>
+    </div>
+  </GuideDrawer>
 </template>
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
+import GuideDrawer from '@/components/GuideDrawer.vue'
+const showGuide = ref(false)
 const items = ref([])
 const filtered = ref([])
 const summary = ref(null)
@@ -80,6 +145,8 @@ onMounted(loadData)
 <style scoped>
 .ro-page { padding: 4px; }
 .page-header { margin-bottom: 12px; }
+.page-header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.page-header-row > div { flex: 1; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary,#64748b); font-size: 0.85rem; margin: 0; }
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }

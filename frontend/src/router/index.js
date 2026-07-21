@@ -16,6 +16,12 @@ const routes = [
       meta: { title: '产品介绍' },
     },
     {
+      path: '/user-guide',
+      name: 'UserGuide',
+      component: () => import('../views/UserGuideView.vue'),
+      meta: { title: '用户操作指南' },
+    },
+    {
     path: '/login',
     name: 'login',
     component: () => import('../views/LoginView.vue'),
