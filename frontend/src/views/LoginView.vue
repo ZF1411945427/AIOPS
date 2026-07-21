@@ -96,11 +96,11 @@
           </el-form>
 
           <div class="form-links">
-            <a href="/product" class="form-link">了解产品 →</a>
-            <span class="form-link-sep">·</span>
             <a href="/product/overview" class="form-link">产品全景 →</a>
             <span class="form-link-sep">·</span>
             <a href="/product/intro" class="form-link">新版产品介绍 →</a>
+            <span class="form-link-sep">·</span>
+            <a href="/user-guide" class="form-link">用户操作指南 →</a>
           </div>
         </div>
 

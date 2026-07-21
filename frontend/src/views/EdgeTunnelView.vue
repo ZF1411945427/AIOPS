@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>Edge Agent 反向隧道</h1>
       <p>主机主动拨出 + 零入站端口 + 浏览器 WebSSH — 主机侧零监听，所有命令走已建立的反向隧道</p>
+      <button class="btn btn-guide" @click="showGuide = !showGuide" style="margin-left:auto">📖 操作说明</button>
     </div>
 
     <div v-if="loading" class="loading-state">加载中...</div>
@@ -132,6 +133,51 @@
         </div>
       </div>
     </div>
+    <!-- 操作说明 -->
+    <GuideDrawer v-model="showGuide">
+      <div class="guide-section">
+        <h4>什么是 Edge Agent？</h4>
+        <p>Edge Agent 是运行在被管理主机上的轻量级 Python 进程。它通过<strong>设备主动拨出</strong>的方式与云端建立反向隧道 —— 主机侧<strong>无需开放任何入站端口</strong>，所有通信走 Agent 主动建立的出站连接。你可以在浏览器中通过 WebSSH 直接操作远程主机终端，就像在本地一样。</p>
+      </div>
+
+      <div class="guide-section">
+        <h4>使用流程</h4>
+        <ol>
+          <li><strong>生成 Token</strong> — 点击页面顶部「生成新 Token」按钮，获取一次性的 <code>tunnel_token</code></li>
+          <li><strong>配置 Edge Agent</strong> — 在目标主机上运行：<div class="guide-code">python edge_agent.py --cloud {{ cloudUrl }} --token &lt;token&gt;</div></li>
+          <li><strong>等待连接</strong> — Agent 启动后自动拨出建连，会话列表出现在线记录即表示成功</li>
+          <li><strong>WebSSH 终端</strong> — 点击在线会话的「WebSSH 终端」按钮，浏览器内直接打开远程 shell</li>
+        </ol>
+      </div>
+
+      <div class="guide-section">
+        <h4>命令执行测试</h4>
+        <p>你可以对在线 Agent 执行一次性远程命令（如 <code>whoami</code>、<code>df -h</code>、<code>uptime</code>），结果会实时返回。适用于快速巡检和脚本化运维。</p>
+        <div class="tip-box">
+          <strong>💡 提示：</strong> 每条命令默认超时 30 秒，执行结果包含 exit_code、stdout、stderr 和耗时（ms），所有记录均写入审计日志。
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <h4>会话生命周期 &amp; 心跳</h4>
+        <div class="key-value-list">
+          <div class="kv-row"><span class="kv-key">连接方式</span><span class="kv-val">Agent 主动 WebSocket 拨出，云端被动接受</span></div>
+          <div class="kv-row"><span class="kv-key">心跳间隔</span><span class="kv-val">每 30 秒一次，超过 90 秒未收到判定离线</span></div>
+          <div class="kv-row"><span class="kv-key">离线重连</span><span class="kv-val">Agent 自动指数退避重连（1s → 2s → 4s … 上限 60s）</span></div>
+          <div class="kv-row"><span class="kv-key">Token 轮换</span><span class="kv-val">新 Token 生成后旧 Token 即时失效，Agent 需重启</span></div>
+          <div class="kv-row"><span class="kv-key">会话清理</span><span class="kv-val">离线超过 24 小时自动归档，前端可手动删除</span></div>
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <h4>安全说明</h4>
+        <ul>
+          <li>Token 仅用于身份认证，不承载权限；Agent 的操作权限由云端用户角色控制</li>
+          <li>所有 WebSSH 键盘输入和命令执行均走加密 WebSocket（wss://）</li>
+          <li>审计日志记录每条命令的用户、内容、结果和时间，不可篡改</li>
+        </ul>
+      </div>
+    </GuideDrawer>
   </div>
 </template>
 
@@ -139,6 +185,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const loading = ref(true)
 const sessions = ref([])
@@ -146,6 +193,7 @@ const commands = ref([])
 const tunnelToken = ref('')
 const testAgentId = ref('')
 const testCommand = ref('')
+const showGuide = ref(false)
 const cmdRunning = ref(false)
 const cmdResult = ref(null)
 const assetList = ref([])
@@ -196,7 +244,7 @@ async function generateToken() {
     const data = await request.post('/edge/tokens')
     tunnelToken.value = data.tunnel_token
     ElMessage.success('Token 已生成，请复制到 edge agent 配置')
-  } catch (e) { ElMessage.error('生成失败') }
+  } catch (e) { ElMessage.error(e.response?.data?.error || e.message || '生成失败') }
 }
 
 async function runCommand() {

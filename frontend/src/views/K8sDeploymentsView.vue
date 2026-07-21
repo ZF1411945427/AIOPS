@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>K8s Deployment 管理</h1>
       <p>Deployment 列表与运维操作 · 共 {{ deployments.length }} 个</p>
+      <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
     </div>
 
     <div class="toolbar">
@@ -149,6 +150,39 @@
         </div>
       </div>
     </div>
+  <GuideDrawer v-model="showGuide" title="📖 K8s Deployment 操作说明">
+    <div class="guide-section">
+      <h4>页面功能</h4>
+      <p>本页面展示 K8s Deployment 列表，按集群和命名空间分组，支持扩缩容、滚动更新、金丝雀发布、回滚等运维操作。</p>
+    </div>
+    <div class="guide-section">
+      <h4>扩缩容</h4>
+      <p>点击 Deployment 行中的 <strong>管理</strong> 按钮，在弹窗中点击 <strong>扩缩容</strong>，输入目标副本数确认即可。副本数可设为 0（暂停服务）。</p>
+    </div>
+    <div class="guide-section">
+      <h4>滚动更新状态</h4>
+      <p>Deployment 列表中的 <strong>副本/就绪</strong> 列展示当前状态：</p>
+      <ul>
+        <li><code>3/3</code> — 全部就绪，更新完成</li>
+        <li><code>2/3</code> — 滚动更新中，部分副本正在替换</li>
+        <li><code>0/3</code> — 更新异常或副本被暂停</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>查看下属 Pod</h4>
+      <p>通过 Deployment 详情可了解其管理的 Pod 副本状态。如需查看具体 Pod 列表，可前往 <strong>K8s Pod 管理</strong> 页面，按相同命名空间筛选。</p>
+    </div>
+    <div class="guide-section">
+      <h4>HPA 配置</h4>
+      <p>HPA（Horizontal Pod Autoscaler）可实现根据 CPU 利用率自动扩缩容：</p>
+      <ul>
+        <li>在 <strong>K8s 资源列表</strong> 中选择 <code>HPA</code> 资源类型</li>
+        <li>点击 <strong>创建 HPA</strong>，指定目标 Deployment、最小/最大副本数和 CPU 目标利用率</li>
+        <li>系统将自动在负载高时扩容、低时缩容</li>
+      </ul>
+      <div class="tip-box">提示：金丝雀发布可先创建少量副本验证新版本，确认无误后提升为主版本。</div>
+    </div>
+  </GuideDrawer>
   </div>
 </template>
 
@@ -157,9 +191,11 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 import { useAppStore } from '@/stores/app'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const appStore = useAppStore()
 const loading = ref(false)
+const showGuide = ref(false)
 const deployments = ref([])
 const clusters = ref([])
 const clusterFilter = ref(appStore.k8sCluster || '')

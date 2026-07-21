@@ -1,10 +1,45 @@
 # AIOps 项目记忆
 
 > 每次会话开始时读取本文件了解项目背景和之前的决策。按时间倒序排列。
+
+### 2026-07-21: TopologyView 加类型筛选 + 搜索 + 大力布局 + GuideDrawer
+- **类型筛选**: 工具栏新增 `<select>` 下拉框，按 `ci_type`/`type` 过滤节点；选项来自该页面实际数据中出现的所有类型
+- **搜索过滤**: `<input>` 按节点 `name` 模糊匹配；类型+搜索联合过滤时同步裁剪无关的边
+- **力布局优化**: `repulsion` 从 220 → 350, `edgeLength` 120 → 180, `gravity` 0.08 → 0.05, 新增 `friction: 0.15`，节点间距增大减少重叠
+- **图表高度**: `480px` → `600px`，提供更大可视区域
+- **操作说明**: 新增 GuideDrawer（📖 操作说明按钮），5 节说明覆盖筛选、交互、拓扑浏览、关系管理、自动刷新
 > **压缩说明**：2026-07-19 由 2384 行压缩至 ~430 行，原始完整版见 `MEMORY.md.bak.20260719_compress`。
 > 07-19 当天保留较详细，07-10~18 压成单行摘要。专业名词/话术/测试细节见对应 docs 文件。
 
 ---
+
+### 2026-07-21: 拓扑树默认只展开集群级 + GuideDrawer 覆盖 10 个新页 + CSRF 修复
+- **拓扑折叠优化**：`expandAll` → `expandClustersOnly`，页面加载后集群卡展开、命名空间和资源默认收起，解决成千上万节点"一眼看不到东西"的问题
+- **命名空间筛选 bug 修复**：`topology_service.py` 命名空间筛选用反向传播算法（匹配叶子→向上保留父级路径），不再过滤掉 `kubernetes_cluster`/`namespace` 层级节点；`ota-system` 搜索从空结果修复为正确显示
+- **GuideDrawer 操作说明**：同 SLO 配置页风格，添加到 10 个新功能页：
+  - `EdgeTunnelView.vue` — Edge Agent 反向隧道使用流程
+  - `ContainerTopologyView.vue` — 三层纳管模型 & 图例 & 孤岛检测
+  - `K8sOverviewView.vue` — 多集群卡片状态颜色 & 指标含义
+  - `DockerOverviewView.vue` — 容器管理 & 状态颜色
+  - `K8sPodsView.vue` — Pod 状态含义 & 日志/终端
+  - `K8sDeploymentsView.vue` — 扩缩容 & 滚动更新 & HPA
+  - `K8sResourceListView.vue` — 多资源类型切换 & 搜索
+  - `K8sMonitorView.vue` — 集群监控 & 指标图表
+  - `K8sHpaRecommendView.vue` — HPA 推荐 & 目标利用率
+  - `K8sResourceOptimizeView.vue` — 超配/欠配 & Request/Limit
+- **CSRF 403 修复**：`config.py` 的 `CORS_ORIGINS` 加入 `http://localhost:8000` 和 `http://127.0.0.1:8000`，解决从 8000 端口访问时的 CSRF 拦截
+- **筛选栏 UI 统一**：`ContainerTopologyView.vue` 筛选栏样式与 K8sPodsView 保持一致（`.toolbar`/`.input`/`.btn`/`.btn-primary` 组件化），加「查询」和「重置」按钮
+
+### 2026-07-21: K8s 集群概览卡片级视觉状态 + probe 排查
+- 卡片添加 `card-online`/`card-error`/`card-probing`/`card-unknown` 动态 class，**卡片左边框颜色**区分状态（绿/红/蓝/灰）+ 渐变背景微色
+- `loadClusters` 中 `pageLoaded` 提前到 mount → stat-cards 和页面框架秒出
+- probing 状态改为紧凑 spinner + "正在连接集群..."，error 状态改为 ⚠️ "集群不可达"
+- **162 集群**：如 overview 返回 status=online 但仍显示异常，请检查后端 `k8s_resources.py:87` probe 的 `_get_k8s_client(ds)` 连接配置（kubeconfig/token/超时）是否正确
+
+### 2026-07-21: K8s 集群概览卡片即时渲染 + EdgeTunnel 403 错误提示优化
+- **K8sOverviewView.vue**：去掉全页 `v-if="!pageLoaded"` 加载阻塞，`pageLoaded` 提前到 mount 时设为 true，stat-cards 即时渲染；probing 状态从全骨架屏改为紧凑 spinner + "正在连接集群..." 文字；error 状态改为紧凑错误提示；去掉废弃的 skeleton/shimmer/spinner-overlay/loading-state CSS
+- **EdgeTunnelView.vue**：`generateToken` catch 从固定 "生成失败" 改为显示服务端真实错误信息 `e.response?.data?.error || e.message`
+- **403 根因**：`edge_tunnel.py:_require_admin` 要求 `user.role == "admin"`，当前用户角色非 admin 导致 403
 
 ### 2026-07-20: P2 Edge Agent 反向隧道完成
 - **架构**：edge agent 主动 WebSocket 拨出 + HTTP 轮询获取命令 + WebSocket 回传结果 + WebSSH PTY

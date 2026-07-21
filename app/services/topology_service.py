@@ -1,7 +1,7 @@
 import json
 from sqlalchemy.orm import Session
 
-from app.models import Asset, AssetRelation
+from app.models import Asset, AssetRelation, DataSource
 
 
 def get_relations(db: Session):
@@ -20,7 +20,22 @@ def _parse_attrs(a):
         return {}
 
 
-def build_k8s_topo_graph(db: Session):
+def _get_online_cluster_names(db: Session) -> set:
+    """查询 DataSource 表，返回状态为 online 的 k8s 集群名称集合"""
+    online_ds = db.query(DataSource).filter(
+        DataSource.type == "kubernetes",
+        DataSource.last_status == "online"
+    ).all()
+    return set(ds.name for ds in online_ds)
+
+
+def _empty_result():
+    return {"nodes": [], "links": [], "clusters": [], "stats": {
+        "total": 0, "by_type": {}, "abnormal_count": 0, "link_count": 0, "cluster_count": 0
+    }, "trees": []}
+
+
+def build_k8s_topo_graph(db: Session, cluster_name: str = "", namespace: str = ""):
     """构建 K8s 多维关系图：ownership 层级 + 弱引用关系 + 孤岛标记 + Pod 实时视图聚合。
 
     三层纳管模型（参考 ServiceNow Dynamic CI / OpenTelemetry 资源稳定性分层）:
@@ -33,7 +48,16 @@ def build_k8s_topo_graph(db: Session):
       - references:  弱引用（deployment→configmap/secret/pvc，基于 attrs.referenced_by 反查）
       - selects:     Service selector → Deployment（基于 selector 匹配 deployment 标签）
     孤岛标记: configmap/secret/pvc 的 attrs.orphan=true 时节点标记 abnormal
+
+    参数:
+      cluster_name: 可选，按集群名筛选（精确匹配）
+      namespace:    可选，按命名空间筛选（模糊匹配）
     """
+    # 仅显示已在线集群的资源
+    online_clusters = _get_online_cluster_names(db)
+    if not online_clusters:
+        return _empty_result()
+
     # 排除 deprecated（旧 pod/replicaset 记录已降级）
     container_types = ["kubernetes_cluster", "namespace", "node",
                        "deployment", "statefulset", "daemonset",
@@ -41,6 +65,13 @@ def build_k8s_topo_graph(db: Session):
                        "configmap", "secret"]
     all_assets = db.query(Asset).filter(Asset.ci_type.in_(container_types)).all()
     all_assets = [a for a in all_assets if a.status != "deprecated"]
+
+    # 只保留在线集群的资产（k8s_cluster 字段匹配 online_clusters 中的名称）
+    all_assets = [a for a in all_assets if a.k8s_cluster in online_clusters]
+
+    # 按集群名筛选
+    if cluster_name:
+        all_assets = [a for a in all_assets if a.k8s_cluster == cluster_name]
 
     # 只保留：1）kubernetes_cluster/cluster 根节点 2）有 parent_id 且父级在集合中的后代
     all_clusters = [a for a in all_assets if a.ci_type == "kubernetes_cluster"]
@@ -61,6 +92,31 @@ def build_k8s_topo_graph(db: Session):
                 valid_ids.add(a.id)
                 changed = True
     assets = [a for a in all_assets if a.id in valid_ids]
+
+    # 按命名空间筛选（解析 ci_attributes 中 namespace 字段）
+    # 保留集群/命名空间层级节点，只过滤叶子资源
+    if namespace:
+        _hierarchy_types = {"kubernetes_cluster", "namespace"}
+        _matched_ids = set()
+        for a in assets:
+            if a.ci_type in _hierarchy_types:
+                continue
+            attrs = _parse_attrs(a)
+            ns = attrs.get("namespace", "") or ""
+            if namespace.lower() in ns.lower():
+                _matched_ids.add(a.id)
+        if not _matched_ids:
+            return _empty_result()
+        # 反向传播：从匹配的叶子往根走，保留父级路径
+        _keep_ids = set(_matched_ids)
+        _changed = True
+        while _changed:
+            _changed = False
+            for a in assets:
+                if a.id in _keep_ids and a.parent_id and a.parent_id not in _keep_ids:
+                    _keep_ids.add(a.parent_id)
+                    _changed = True
+        assets = [a for a in assets if a.id in _keep_ids]
 
     asset_map = {}
     nodes = []

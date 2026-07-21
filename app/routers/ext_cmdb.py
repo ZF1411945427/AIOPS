@@ -82,7 +82,7 @@ def api_cmdb_sync(cfg_id: int, db: Session = Depends(get_db)):
                     (Asset.name == name) | ((Asset.ip != "") & (Asset.ip == ip))
                 ).first()
                 if not existing:
-                    db.add(Asset(name=name, ip=ip, ci_type=ci_type, type=ci_type, tags=tags))
+                    db.add(Asset(name=name, ip=ip, ci_type=ci_type, tags=tags))
                     count += 1
         db.commit()
         cfg.last_synced_at = datetime.now()

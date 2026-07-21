@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>{{ title }}</h1>
       <p>{{ subtitle }} · 共 {{ items.length }} 项</p>
+      <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
     </div>
 
     <div class="toolbar">
@@ -285,6 +286,37 @@
         </div>
       </div>
     </div>
+  <GuideDrawer v-model="showGuide" title="📖 K8s 资源列表操作说明">
+    <div class="guide-section">
+      <h4>页面功能</h4>
+      <p>本页面提供统一的 K8s 资源列表查看与管理入口，支持多种资源类型：Namespace、StatefulSet、DaemonSet、Service、Ingress、ConfigMap、Secret、HPA、PVC、PV。</p>
+    </div>
+    <div class="guide-section">
+      <h4>切换资源类型</h4>
+      <p>通过左侧菜单或顶部导航选择不同的资源类型，页面自动切换对应的列表视图和操作按钮。</p>
+      <div class="key-value-list">
+        <div class="kv-row"><span class="kv-key">Deployment</span><span class="kv-val">Deployment 管理页面（独立）</span></div>
+        <div class="kv-row"><span class="kv-key">Service</span><span class="kv-val">查看 ClusterIP、端口映射、类型</span></div>
+        <div class="kv-row"><span class="kv-key">ConfigMap</span><span class="kv-val">查看和编辑键值对配置</span></div>
+        <div class="kv-row"><span class="kv-key">Secret</span><span class="kv-val">查看密钥列表（值自动 Base64 编码）</span></div>
+        <div class="kv-row"><span class="kv-key">Ingress</span><span class="kv-val">查看路由规则和 TLS 配置</span></div>
+        <div class="kv-row"><span class="kv-key">PVC/PV</span><span class="kv-val">查看存储卷状态和容量</span></div>
+      </div>
+    </div>
+    <div class="guide-section">
+      <h4>搜索与筛选</h4>
+      <ul>
+        <li><strong>集群筛选</strong> — 下拉选择目标集群</li>
+        <li><strong>命名空间</strong> — 输入命名空间名称后点击查询</li>
+        <li><strong>重置</strong> — 清空筛选条件重新加载</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>查看 YAML 详情</h4>
+      <p>点击列表中任意资源的 <strong>查看</strong> 按钮，弹出 YAML 详情弹窗，支持一键复制。对于 ConfigMap 还可直接编辑键值对。</p>
+      <div class="tip-box">提示：HPA 资源支持直接在列表中创建、编辑和删除。</div>
+    </div>
+  </GuideDrawer>
   </div>
 </template>
 
@@ -293,6 +325,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 import { useAppStore } from '@/stores/app'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const appStore = useAppStore()
 
@@ -388,6 +421,7 @@ const COLUMN_MAP = {
 }
 
 const loading = ref(false)
+const showGuide = ref(false)
 const items = ref([])
 const clusters = ref([])
 const errorMsg = ref('')

@@ -1,8 +1,13 @@
 <template>
   <div class="k8s-monitor-page">
     <div class="page-header">
-      <h1>K8s 监控</h1>
-      <p>Kubernetes 集群资源监控 · {{ cluster || '全部集群' }}</p>
+      <div class="page-header-row">
+        <div>
+          <h1>K8s 监控</h1>
+          <p>Kubernetes 集群资源监控 · {{ cluster || '全部集群' }}</p>
+        </div>
+        <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
+      </div>
     </div>
 
     <div class="toolbar">
@@ -74,6 +79,44 @@
       </div>
     </template>
   </div>
+
+  <GuideDrawer v-model="showGuide" title="📖 K8s 监控操作说明">
+    <div class="guide-section">
+      <h4>页面功能</h4>
+      <p>本页面展示多集群 Kubernetes 资源监控数据，包括 <strong>CPU 使用率</strong>、<strong>内存使用率</strong>、<strong>网络流量</strong> 和 <strong>磁盘 I/O</strong> 等核心指标的时序图表，帮助您实时掌握集群健康状态。</p>
+    </div>
+    <div class="guide-section">
+      <h4>选择集群与时间范围</h4>
+      <p>顶栏工具栏支持以下筛选：</p>
+      <ul>
+        <li><strong>集群选择</strong> — 下拉选择指定集群，默认 "全部集群" 聚合展示</li>
+        <li><strong>时间范围</strong> — 可选最近 1 小时 / 3 小时 / 6 小时 / 12 小时 / 24 小时</li>
+        <li><strong>刷新按钮</strong> — 手动拉取最新监控数据</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>解读指标图表</h4>
+      <p>每个指标卡片包含一条 <strong>趋势折线图</strong>：</p>
+      <ul>
+        <li>X 轴为时间点，Y 轴为指标数值</li>
+        <li>曲线平滑展示，<strong>面积填充</strong> 直观反映变化趋势</li>
+        <li>鼠标悬停可查看具体时刻的精确数值</li>
+        <li>CPU / 内存以 <strong>百分比 (%)</strong> 为单位，Pod 重启次数为累计计数</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>从指标设置告警规则</h4>
+      <p>当观察到某指标持续异常时（如 CPU 持续 > 80%），您可以：</p>
+      <ul>
+        <li>前往 <strong>告警管理</strong> 页面创建新的告警规则</li>
+        <li>选择对应的 <strong>集群 + 指标类型</strong> 作为触发条件</li>
+        <li>设置阈值和持续时间，配置通知渠道（如群消息）</li>
+      </ul>
+      <div class="tip-box">
+        <strong>💡 建议：</strong> 为 CPU 和内存使用率设置告警阈值（如 80%），避免突发负载影响业务。
+      </div>
+    </div>
+  </GuideDrawer>
 </template>
 
 <script setup>
@@ -81,7 +124,9 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'v
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import request from '@/api/request'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
+const showGuide = ref(false)
 const loading = ref(false)
 const clusters = ref([])
 const cluster = ref('')
@@ -191,6 +236,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .k8s-monitor-page { padding: 4px; }
 .page-header { margin-bottom: 16px; }
+.page-header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.page-header-row > div { flex: 1; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }

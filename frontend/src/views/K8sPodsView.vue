@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1>K8s Pod 管理</h1>
       <p>Pod 列表与详情 · 共 {{ pods.length }} 个 Pod</p>
+      <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
     </div>
 
     <div class="toolbar">
@@ -153,6 +154,39 @@
         </div>
       </div>
     </div>
+  <GuideDrawer v-model="showGuide" title="📖 K8s Pod 操作说明">
+    <div class="guide-section">
+      <h4>页面功能</h4>
+      <p>本页面展示 K8s Pod 列表，支持按集群和命名空间筛选，可查看 Pod 详情、日志、异常事件及远程终端。</p>
+    </div>
+    <div class="guide-section">
+      <h4>筛选与查询</h4>
+      <p>顶部工具栏支持：</p>
+      <ul>
+        <li><strong>集群选择</strong> — 下拉选择目标集群，不选则查询全部集群</li>
+        <li><strong>命名空间筛选</strong> — 输入命名空间名称后按回车或点击查询按钮</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>Pod 状态含义</h4>
+      <ul>
+        <li><span class="tag-demo" style="background:rgba(16,185,129,0.12);color:#10b981;">Running</span> Pod 正常运行</li>
+        <li><span class="tag-demo" style="background:rgba(245,158,11,0.12);color:#f59e0b;">Pending</span> 等待调度或拉取镜像</li>
+        <li><span class="tag-demo" style="background:rgba(59,130,246,0.12);color:#3b82f6;">Succeeded</span> 任务型 Pod 执行完成</li>
+        <li><span class="tag-demo" style="background:rgba(239,68,68,0.12);color:#ef4444;">Failed</span> Pod 执行出错</li>
+        <li><span class="tag-demo" style="background:rgba(239,68,68,0.2);color:#dc2626;">CrashLoopBackOff</span> 容器反复崩溃重启</li>
+      </ul>
+    </div>
+    <div class="guide-section">
+      <h4>Pod 操作</h4>
+      <ul>
+        <li><strong>查看</strong> — 查看 Pod YAML 详情</li>
+        <li><strong>日志</strong> — 查看容器日志，支持按行数、时间范围和关键字过滤</li>
+        <li><strong>终端</strong> — 通过 WebSocket 进入容器远程 Shell</li>
+      </ul>
+      <div class="tip-box">提示：点击 Pod 行可查看详情和异常事件，方便快速排查问题。</div>
+    </div>
+  </GuideDrawer>
   </div>
 </template>
 
@@ -161,9 +195,11 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 import { useAppStore } from '@/stores/app'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const appStore = useAppStore()
 const loading = ref(false)
+const showGuide = ref(false)
 const pods = ref([])
 const clusters = ref([])
 const clusterFilter = ref(appStore.k8sCluster || '')
