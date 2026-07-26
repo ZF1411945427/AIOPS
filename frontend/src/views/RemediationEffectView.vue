@@ -79,7 +79,7 @@
             <tbody>
               <tr v-for="r in stats.by_remediation" :key="r.remediation_id">
                 <td><span class="rem-name">{{ r.name }}</span></td>
-                <td><span class="tag-mini">{{ r.action_type }}</span></td>
+                <td><span class="tag-mini">{{ actionLabel(r.action_type) }}</span></td>
                 <td>{{ r.total }}</td>
                 <td>{{ r.resolved }}</td>
                 <td>
@@ -136,6 +136,10 @@ const history = ref([])
 const recommendations = ref([])
 const loading = ref(false)
 
+function actionLabel(type) {
+  const m = { restart: '重启服务', clean: '清理磁盘', scale: '扩缩容', script: '执行脚本', run_command: '执行命令', notify: '发送通知' }
+  return m[type] || type
+}
 function effectLabel(e) {
   const m = { resolved: '完全恢复', improved: '改善', no_change: '无变化', worsened: '恶化' }
   return m[e] || e

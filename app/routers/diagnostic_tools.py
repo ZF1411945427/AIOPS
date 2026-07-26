@@ -7,13 +7,16 @@
 """
 import re
 import json
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.models import Asset
+from app.models import Asset, AIProvider, AgentConfig
+from app.services.agent_service import call_llm
 from app.services.ssh_helper import get_ssh_client
 
 router = APIRouter(prefix="/api/diagnostic-tools", tags=["diagnostic-tools"])
@@ -412,4 +415,103 @@ def validate_command_api(body: ValidateBody):
     return {"valid": valid, "message": msg, "command": body.command}
 
 
-from datetime import datetime
+class AnalyzeBody(BaseModel):
+    tool_id: str
+    asset_id: int
+    command: Optional[str] = None
+    output: str
+    exit_code: Optional[int] = None
+
+
+@router.post("/analyze")
+def analyze_diagnostic_output(body: AnalyzeBody, db: Session = Depends(get_db)):
+    """AI 智能解读诊断工具输出 — 对命令 stdout 做根因推断/异常定位/修复建议.
+
+    复用 Incident AI RCA 的 LLM 调用模式（同步 call_llm + markdown 自然语言输出），
+    前端用 markdown-it 渲染。补齐「对标 GOPS 借力 AI RCA」Layer3 上层 AI 解读层。
+    """
+    tool = next((t for t in DIAGNOSTIC_TOOLS if t["id"] == body.tool_id), None)
+    tool_name = tool["name"] if tool else body.tool_id
+    tool_desc = tool.get("description", "") if tool else ""
+
+    asset = db.query(Asset).filter(Asset.id == body.asset_id).first()
+    asset_info = f"{asset.name} (ip={asset.ip}, ci_type={getattr(asset, 'ci_type', '-')})" if asset else "未关联资产"
+
+    output = (body.output or "").strip()
+    if not output:
+        return JSONResponse({"ok": False, "error": "诊断输出为空，无法分析"}, status_code=400)
+    if len(output) > 8000:
+        output = output[:8000] + f"\n... (已截断，原始长度 {len(body.output)} 字符)"
+
+    config = db.query(AgentConfig).filter(AgentConfig.id == 1).first()
+    provider = None
+    if config and config.default_provider_id:
+        provider = db.query(AIProvider).filter(
+            AIProvider.id == config.default_provider_id,
+            AIProvider.is_enabled == True,
+        ).first()
+    if not provider:
+        provider = db.query(AIProvider).filter(AIProvider.is_enabled == True).first()
+    if not provider:
+        return JSONResponse({"ok": False, "error": "未配置 AI 提供商，请在「智能体配置 > AI 提供商」中添加并启用"}, status_code=400)
+
+    system_prompt = (
+        "你是一名资深 SRE 运维诊断专家。你的任务是对运维诊断工具的命令输出进行智能解读，"
+        "给出根因推断、影响评估和可操作的修复建议。回答用中文，使用 Markdown 格式，"
+        "结构清晰、专业简洁，不要空话套话。"
+    )
+
+    user_prompt = f"""请对以下诊断工具输出进行 AI 智能解读。
+
+## 诊断上下文
+- 工具: {body.tool_id}（{tool_name}）
+- 工具说明: {tool_desc or '无'}
+- 目标资产: {asset_info}
+- 执行命令: `{body.command or '内置命令'}`
+- 退出码: {body.exit_code if body.exit_code is not None else '未知'}
+- 执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## 诊断输出
+```
+{output}
+```
+
+请按以下结构输出 Markdown：
+### 1. 现象概览
+简要概括输出反映的系统现状（1-3 句）。
+
+### 2. 异常定位
+指出输出中值得关注的异常指标/异常行/告警信号。若无异常，明确说明"未发现明显异常"。
+
+### 3. 根因推断
+结合工具类型与输出内容，推断最可能的根因（如内存泄漏/锁等待/磁盘满/连接数打满等）。不确定时给出 1-2 个候选并标注置信度。
+
+### 4. 影响评估
+评估该问题对业务/服务可用性的潜在影响范围与紧急程度。
+
+### 5. 修复建议
+给出 2-4 条具体、可操作的修复步骤（按紧急程度排序）。每条标注风险等级（低/中/高）。
+
+### 6. 下一步诊断建议
+推荐下一步应执行的诊断工具（从 Snapshot/Focused/Flexible 三层中选取，如 mysql.lock_contention、redis.slowlog 等），以便进一步确认。"""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    result = call_llm(provider, messages, timeout_override=120)
+    if "error" in result:
+        return JSONResponse({"ok": False, "error": f"AI 调用失败: {result['error']}"}, status_code=502)
+    try:
+        content = result["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        content = str(result)
+
+    return {
+        "ok": True,
+        "analysis": content,
+        "tool_id": body.tool_id,
+        "tool_name": tool_name,
+        "asset_info": asset_info,
+        "analyzed_at": datetime.now().isoformat(),
+    }

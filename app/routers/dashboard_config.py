@@ -25,6 +25,11 @@ CARD_TYPES = [
     {"type": "stat-rule", "title": "告警规则", "icon": "Setting", "desc": "规则总数", "w": 3, "h": 2},
     {"type": "chart-ai-tool", "title": "AI 工具调用", "icon": "Cpu", "desc": "工具调用趋势", "w": 6, "h": 4},
     {"type": "chart-notification", "title": "通知统计", "icon": "Message", "desc": "通知送达率", "w": 3, "h": 4},
+    {"type": "chart-cpu", "title": "CPU 使用率", "icon": "Cpu", "desc": "VM CPU 时序", "w": 6, "h": 4},
+    {"type": "chart-mem", "title": "内存使用率", "icon": "Odometer", "desc": "VM 内存时序", "w": 6, "h": 4},
+    {"type": "chart-disk", "title": "磁盘使用率", "icon": "Coin", "desc": "VM 磁盘仪表", "w": 3, "h": 4},
+    {"type": "chart-load", "title": "系统负载", "icon": "DataLine", "desc": "VM 1min 负载", "w": 6, "h": 4},
+    {"type": "chart-net", "title": "网络流量", "icon": "Connection", "desc": "VM 收发流量", "w": 6, "h": 4},
 ]
 
 
@@ -138,8 +143,8 @@ def set_default(layout_id: int, db: Session = Depends(get_db)):
 
 PRESET_LAYOUTS = [
     {
-        "name": "运维总览",
-        "description": "综合运维视图：资产、告警、故障、健康一目了然",
+        "name": "实时监控看板",
+        "description": "复刻实时监控看板：资源时序图 + 告警/健康概览",
         "is_default": True,
         "is_shared": True,
         "layout_config": [
@@ -147,11 +152,16 @@ PRESET_LAYOUTS = [
             {"id": "c2", "type": "stat-alert", "title": "告警概览", "x": 3, "y": 0, "w": 3, "h": 2},
             {"id": "c3", "type": "stat-incident", "title": "故障概览", "x": 6, "y": 0, "w": 3, "h": 2},
             {"id": "c4", "type": "stat-health", "title": "健康评分", "x": 9, "y": 0, "w": 3, "h": 2},
-            {"id": "c5", "type": "chart-alert-trend", "title": "告警趋势", "x": 0, "y": 2, "w": 6, "h": 4},
-            {"id": "c6", "type": "chart-asset-type", "title": "资产分布", "x": 6, "y": 2, "w": 3, "h": 4},
-            {"id": "c7", "type": "chart-severity", "title": "告警级别", "x": 9, "y": 2, "w": 3, "h": 4},
-            {"id": "c8", "type": "list-recent-alerts", "title": "最新告警", "x": 0, "y": 6, "w": 6, "h": 4},
-            {"id": "c9", "type": "list-recent-incidents", "title": "最新故障", "x": 6, "y": 6, "w": 6, "h": 4},
+            {"id": "c5", "type": "chart-cpu", "title": "CPU 使用率", "x": 0, "y": 2, "w": 6, "h": 4},
+            {"id": "c6", "type": "chart-mem", "title": "内存使用率", "x": 6, "y": 2, "w": 6, "h": 4},
+            {"id": "c7", "type": "chart-disk", "title": "磁盘使用率", "x": 0, "y": 6, "w": 3, "h": 4},
+            {"id": "c8", "type": "chart-load", "title": "系统负载", "x": 3, "y": 6, "w": 3, "h": 4},
+            {"id": "c9", "type": "chart-net", "title": "网络流量", "x": 6, "y": 6, "w": 6, "h": 4},
+            {"id": "c10", "type": "chart-alert-trend", "title": "告警趋势", "x": 0, "y": 10, "w": 6, "h": 4},
+            {"id": "c11", "type": "chart-asset-type", "title": "资产分布", "x": 6, "y": 10, "w": 3, "h": 4},
+            {"id": "c12", "type": "chart-severity", "title": "告警级别", "x": 9, "y": 10, "w": 3, "h": 4},
+            {"id": "c13", "type": "list-recent-alerts", "title": "最新告警", "x": 0, "y": 14, "w": 6, "h": 4},
+            {"id": "c14", "type": "list-recent-incidents", "title": "最新故障", "x": 6, "y": 14, "w": 6, "h": 4},
         ],
     },
     {
@@ -183,15 +193,49 @@ PRESET_LAYOUTS = [
             {"id": "c6", "type": "chart-ai-tool", "title": "AI 工具调用", "x": 0, "y": 6, "w": 12, "h": 4},
         ],
     },
+    {
+        "name": "资源全景",
+        "description": "专注 VM 资源消耗：CPU/内存/磁盘/负载/网络全时序",
+        "is_default": False,
+        "is_shared": True,
+        "layout_config": [
+            {"id": "c1", "type": "stat-asset", "title": "资产概览", "x": 0, "y": 0, "w": 4, "h": 2},
+            {"id": "c2", "type": "stat-health", "title": "健康评分", "x": 4, "y": 0, "w": 4, "h": 2},
+            {"id": "c3", "type": "stat-datasource", "title": "数据源", "x": 8, "y": 0, "w": 4, "h": 2},
+            {"id": "c4", "type": "chart-cpu", "title": "CPU 使用率", "x": 0, "y": 2, "w": 6, "h": 4},
+            {"id": "c5", "type": "chart-mem", "title": "内存使用率", "x": 6, "y": 2, "w": 6, "h": 4},
+            {"id": "c6", "type": "chart-disk", "title": "磁盘使用率", "x": 0, "y": 6, "w": 4, "h": 4},
+            {"id": "c7", "type": "chart-load", "title": "系统负载", "x": 4, "y": 6, "w": 4, "h": 4},
+            {"id": "c8", "type": "chart-net", "title": "网络流量", "x": 8, "y": 6, "w": 4, "h": 4},
+        ],
+    },
+    {
+        "name": "故障应急",
+        "description": "专注故障处置：故障概览、最新故障、告警趋势、MTTR、自愈",
+        "is_default": False,
+        "is_shared": True,
+        "layout_config": [
+            {"id": "c1", "type": "stat-incident", "title": "故障概览", "x": 0, "y": 0, "w": 4, "h": 2},
+            {"id": "c2", "type": "stat-alert", "title": "告警概览", "x": 4, "y": 0, "w": 4, "h": 2},
+            {"id": "c3", "type": "stat-health", "title": "健康评分", "x": 8, "y": 0, "w": 4, "h": 2},
+            {"id": "c4", "type": "list-recent-incidents", "title": "最新故障", "x": 0, "y": 2, "w": 6, "h": 5},
+            {"id": "c5", "type": "list-recent-alerts", "title": "最新告警", "x": 6, "y": 2, "w": 6, "h": 5},
+            {"id": "c6", "type": "chart-alert-trend", "title": "告警趋势", "x": 0, "y": 7, "w": 6, "h": 4},
+            {"id": "c7", "type": "chart-mttr", "title": "MTTR 趋势", "x": 6, "y": 7, "w": 6, "h": 4},
+            {"id": "c8", "type": "chart-remediation", "title": "自愈统计", "x": 0, "y": 11, "w": 12, "h": 4},
+        ],
+    },
 ]
 
 
 @router.post("/seed-presets")
 def seed_preset_layouts(db: Session = Depends(get_db)):
-    existing = db.query(DashboardLayout).count()
-    if existing > 0:
-        return {"message": "已有布局，跳过播种", "count": existing}
+    # 按 name 增量播种：已存在同名则跳过，不存在则插入（不影响用户已自定义的布局）
+    existing_names = set(l.name for l in db.query(DashboardLayout).all())
+    inserted = 0
     for p in PRESET_LAYOUTS:
+        if p["name"] in existing_names:
+            continue
         layout = DashboardLayout(
             name=p["name"],
             description=p["description"],
@@ -200,5 +244,6 @@ def seed_preset_layouts(db: Session = Depends(get_db)):
             is_shared=p["is_shared"],
         )
         db.add(layout)
+        inserted += 1
     db.commit()
-    return {"message": "预置仪表盘已播种", "count": len(PRESET_LAYOUTS)}
+    return {"message": f"预置仪表盘播种完成，新增 {inserted} 个", "inserted": inserted, "total": len(PRESET_LAYOUTS)}

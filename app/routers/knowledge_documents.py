@@ -91,9 +91,10 @@ def doc_search(
 def api_doc_list(
     search: str = "",
     source_type: str = "",
+    asset_id: int = 0,
     db: Session = Depends(get_db)):
     try:
-        items = rag_service.list_documents(db, search=search, source_type=source_type)
+        items = rag_service.list_documents(db, search=search, source_type=source_type, asset_id=asset_id)
         from app.models import KbChunk
         total_chunks = db.query(KbChunk).count()
         indexed_count = sum(1 for d in items if d.status == "indexed")
@@ -151,6 +152,7 @@ async def api_doc_upload(
     title: str = Form(""),
     tags: str = Form(""),
     asset_type: str = Form(""),
+    asset_id: int = Form(0),
     severity: str = Form("warning"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)):
@@ -180,6 +182,7 @@ async def api_doc_upload(
             "file_ext": ext,
             "tags": tags,
             "asset_type": asset_type,
+            "asset_id": asset_id if asset_id else None,
             "severity": severity,
             "status": "pending",
             "index_engine": "v1",

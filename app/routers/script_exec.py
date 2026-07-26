@@ -87,6 +87,8 @@ def api_script_execute(
     timeout: int = Form(30),
     db: Session = Depends(get_db)):
     """执行远程脚本 JSON API."""
+    # 规范化换行: Windows 浏览器 textarea 产生 CRLF, 发到 Linux bash 会变成 `date\r` -> command not found
+    script_content = script_content.replace("\r\n", "\n").replace("\r", "\n")
     from app.security import is_dangerous_command
     dangerous, pattern = is_dangerous_command(script_content)
     if dangerous:

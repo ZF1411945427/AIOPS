@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.services import alert_service, rca_service
-from app.models import Alert, AlertSilence, RemediationWorkflow, RemediationLog, Asset, K8sEvent, AIProvider, AgentConfig, MetricRecord
+from app.models import Alert, AlertSilence, AlertRule, RemediationWorkflow, RemediationLog, Asset, K8sEvent, AIProvider, AgentConfig, MetricRecord
 from app.models import ChatSession, AlertSessionLink, AssetSessionLink
 from app.services.remediation_service import execute_action
 from app.services.agent_service import call_llm, get_or_create_session, add_message
@@ -461,7 +461,7 @@ def api_alert_ai_rca(alert_id: int, db: Session = Depends(get_db)):
         {"role": "system", "content": "你是资深 SRE 根因分析专家，根据告警数据、K8S事件和拓扑关系给出精准的根因分析和可操作的修复建议。回答简洁专业，用中文。"},
         {"role": "user", "content": prompt},
     ]
-    result = call_llm(provider, messages, timeout_override=60)
+    result = call_llm(provider, messages, timeout_override=120)
     if "error" in result:
         return JSONResponse({"ok": False, "error": f"AI 调用失败: {result['error']}"}, status_code=502)
     try:
@@ -537,4 +537,112 @@ def api_check_k8s_events(db: Session = Depends(get_db)):
     手动触发时扫描最近 24 小时，确保能检测到历史事件。"""
     new_alerts, skipped, scanned = alert_service.check_k8s_events(db, window_minutes=1440)
     return JSONResponse({"new_alerts": len(new_alerts), "skipped": skipped, "scanned": scanned})
+
+
+# ─── 告警规则管理（CRUD）───
+
+@router.get("/api/rules/list")
+def api_rules_list(db: Session = Depends(get_db)):
+    """告警规则列表。返回所有规则（含已禁用），按 id 倒序。"""
+    rules = alert_service.list_rules(db)
+    return {
+        "total": len(rules),
+        "items": [
+            {
+                "id": r.id, "name": r.name, "metric_name": r.metric_name,
+                "condition": r.condition, "threshold": r.threshold,
+                "severity": r.severity, "enabled": bool(r.enabled),
+                "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+            }
+            for r in rules
+        ],
+    }
+
+
+@router.post("/api/rules/create")
+def api_rules_create(body: dict, db: Session = Depends(get_db)):
+    """创建告警规则。body: {name, metric_name, condition, threshold, severity, enabled}"""
+    name = (body.get("name") or "").strip()
+    metric_name = (body.get("metric_name") or "").strip()
+    condition = (body.get("condition") or ">").strip()
+    if not name or not metric_name:
+        return JSONResponse({"ok": False, "message": "规则名称和指标名不能为空"}, status_code=400)
+    if condition not in (">", ">=", "<", "<=", "=", "gt", "lt", "gte", "lte", "eq"):
+        return JSONResponse({"ok": False, "message": f"不支持的条件: {condition}"}, status_code=400)
+    try:
+        threshold = float(body.get("threshold"))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "message": "阈值必须是数字"}, status_code=400)
+    severity = (body.get("severity") or "warning").strip()
+    if severity not in ("critical", "warning", "info"):
+        return JSONResponse({"ok": False, "message": f"不支持级别: {severity}"}, status_code=400)
+    rule = alert_service.create_rule(db, {
+        "name": name, "metric_name": metric_name, "condition": condition,
+        "threshold": threshold, "severity": severity,
+        "enabled": bool(body.get("enabled", True)),
+    })
+    return {"ok": True, "id": rule.id, "message": "规则创建成功"}
+
+
+@router.post("/api/rules/{rule_id}/update")
+def api_rules_update(rule_id: int, body: dict, db: Session = Depends(get_db)):
+    """更新告警规则。支持部分字段更新。"""
+    existing = alert_service.get_rule(db, rule_id)
+    if not existing:
+        return JSONResponse({"ok": False, "message": "规则不存在"}, status_code=404)
+    data = {}
+    for k in ("name", "metric_name", "condition", "threshold", "severity", "enabled"):
+        if k in body:
+            v = body[k]
+            if k == "name":
+                v = (v or "").strip()
+                if not v:
+                    return JSONResponse({"ok": False, "message": "规则名称不能为空"}, status_code=400)
+            elif k == "metric_name":
+                v = (v or "").strip()
+                if not v:
+                    return JSONResponse({"ok": False, "message": "指标名不能为空"}, status_code=400)
+            elif k == "condition" and v not in (">", ">=", "<", "<=", "=", "gt", "lt", "gte", "lte", "eq"):
+                return JSONResponse({"ok": False, "message": f"不支持的条件: {v}"}, status_code=400)
+            elif k == "threshold":
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    return JSONResponse({"ok": False, "message": "阈值必须是数字"}, status_code=400)
+            elif k == "severity" and v not in ("critical", "warning", "info"):
+                return JSONResponse({"ok": False, "message": f"不支持级别: {v}"}, status_code=400)
+            elif k == "enabled":
+                v = bool(v)
+            data[k] = v
+    if not data:
+        return {"ok": True, "message": "无更新字段"}
+    rule = alert_service.update_rule(db, rule_id, data)
+    return {"ok": True, "id": rule.id, "message": "规则更新成功"}
+
+
+@router.post("/api/rules/{rule_id}/toggle")
+def api_rules_toggle(rule_id: int, body: dict, db: Session = Depends(get_db)):
+    """启用/禁用告警规则。body: {enabled: true/false}"""
+    existing = alert_service.get_rule(db, rule_id)
+    if not existing:
+        return JSONResponse({"ok": False, "message": "规则不存在"}, status_code=404)
+    alert_service.update_rule(db, rule_id, {"enabled": bool(body.get("enabled", not existing.enabled))})
+    return {"ok": True, "message": "状态已更新"}
+
+
+@router.post("/api/rules/{rule_id}/delete")
+def api_rules_delete(rule_id: int, db: Session = Depends(get_db)):
+    """删除告警规则。"""
+    if not alert_service.delete_rule(db, rule_id):
+        return JSONResponse({"ok": False, "message": "规则不存在"}, status_code=404)
+    return {"ok": True, "message": "规则已删除"}
+
+
+@router.get("/api/rules/metrics")
+def api_rules_metrics(db: Session = Depends(get_db)):
+    """返回当前已采集到的指标名列表（供前端规则表单下拉选择）。
+    从 metric_records 取最近有数据的指标名，去重排序。"""
+    from sqlalchemy import distinct, func
+    rows = db.query(MetricRecord.name).distinct().order_by(MetricRecord.name).all()
+    return {"items": sorted({r[0] for r in rows if r[0]})}
 

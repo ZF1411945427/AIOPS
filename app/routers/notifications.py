@@ -167,6 +167,19 @@ def api_channel_delete(channel_id: int, db: Session = Depends(get_db)):
     return {"status": "ok"}
 
 
+@router.post("/api/channels/{channel_id}/toggle")
+def api_channel_toggle(channel_id: int, payload: dict = Body(default=None), db: Session = Depends(get_db)):
+    enabled = (payload or {}).get("enabled")
+    if enabled is None:
+        ch = notification_service.get_channels(db)
+        current = next((c for c in ch if c.id == channel_id), None)
+        enabled = not bool(current.enabled) if current else True
+    ch = notification_service.set_channel_enabled(db, channel_id, enabled)
+    if not ch:
+        return {"status": "error", "detail": "渠道不存在"}, 404
+    return {"status": "ok", "enabled": ch.enabled}
+
+
 @router.get("/api/logs")
 def api_logs_list(db: Session = Depends(get_db)):
     logs = notification_service.get_notification_logs(db)

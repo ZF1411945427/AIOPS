@@ -76,11 +76,13 @@ def _doc_to_dict(d):
 # ─── 文档管理 ───────────────────────────────────────────────────
 
 @router.get("/documents/list")
-def list_documents(search: str = "", db: Session = Depends(get_db)):
+def list_documents(search: str = "", asset_id: int = 0, db: Session = Depends(get_db)):
     try:
         q = db.query(KbDocument)
         if search:
             q = q.filter(KbDocument.title.contains(search))
+        if asset_id:
+            q = q.filter(KbDocument.asset_id == asset_id)
         items = q.order_by(KbDocument.id.desc()).all()
         stats = vector_store.get_stats()
         return JSONResponse({
@@ -142,6 +144,7 @@ async def upload_document(
     title: str = Form(""),
     tags: str = Form(""),
     asset_type: str = Form(""),
+    asset_id: int = Form(0),
     severity: str = Form("warning"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -170,7 +173,8 @@ async def upload_document(
         doc = KbDocument(
             title=doc_title[:256], content=text, source_type="upload",
             file_path=str(saved_path), file_ext=ext, tags=tags,
-            asset_type=asset_type, severity=severity, status="pending",
+            asset_type=asset_type, asset_id=asset_id if asset_id else None,
+            severity=severity, status="pending",
             index_engine="v2",
             created_by=request.session.get("user_id"),
         )
@@ -198,6 +202,7 @@ async def create_document(payload: dict = {}, db: Session = Depends(get_db)):
             title=title[:256], content=content, source_type="manual",
             file_ext="txt", tags=payload.get("tags", ""),
             asset_type=payload.get("asset_type", ""),
+            asset_id=payload.get("asset_id"),
             severity=payload.get("severity", "warning"),
             status="pending", index_engine="v2",
             created_by=payload.get("created_by"),

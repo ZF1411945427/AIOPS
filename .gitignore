@@ -153,3 +153,6 @@ _check.ps1
 # ===== 测试运行时产物 / 临时补丁脚本（不入库）=====
 tests/screenshots/
 tests/_patch_*.py
+
+# ===== AIOps 故障演练靶场（第三方开源业务 demo，不入库）=====
+business-demos/

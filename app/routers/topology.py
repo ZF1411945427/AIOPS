@@ -70,3 +70,23 @@ def api_relation_delete(relation_id: int, db: Session = Depends(get_db)):
         return JSONResponse({"ok": True, "id": relation_id})
     except Exception as e:
         return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
+
+
+@router.get("/api/asset-by-node")
+def api_topology_asset_by_node(db: Session = Depends(get_db)):
+    """Tab1: 全资产拓扑（K8s 仅保留 cluster + node 维度，过滤其余 K8s 子资源）。"""
+    try:
+        return JSONResponse(topology_service.build_asset_topo_by_node(db))
+    except Exception as e:
+        return JSONResponse({"nodes": [], "edges": [], "relations": [], "stats": {}, "warning": str(e)}, status_code=200)
+
+
+@router.get("/api/network")
+def api_topology_network(mode: str = "devices", db: Session = Depends(get_db)):
+    """Tab2: 网络拓扑图。mode=devices(网络设备关系) | subnets(IP 网段聚类)。"""
+    try:
+        if mode not in ("devices", "subnets"):
+            mode = "devices"
+        return JSONResponse(topology_service.build_network_topo(db, mode))
+    except Exception as e:
+        return JSONResponse({"nodes": [], "edges": [], "relations": [], "stats": {}, "mode": mode, "warning": str(e)}, status_code=200)

@@ -10,8 +10,10 @@ from app.models import MetricRecord, Asset
 # 采集命令（兼容 CentOS/Ubuntu 等 Linux 发行版）
 COLLECT_COMMANDS = {
     # === CPU (5) ===
-    "cpu_usage": "top -bn1 | awk '/Cpu/{print $2}'",
-    "cpu_iowait": "top -bn1 | awk '/Cpu/{print $10}'",
+    # 修复: 原 'awk '/Cpu/{print $2}'' 只取 us(user) 列，dd 等 syscall 密集故障消耗 sy(system) 列导致永远不告警
+    # 改为 100-id (真实占用率=us+sy+ni+wa+hi+si+st)，并用 -bn2 -d 0.5 取第二次采样避免首次偏差
+    "cpu_usage": "top -bn2 -d 0.5 | grep Cpu | tail -1 | tr -d ',' | awk '{for(i=1;i<=NF;i++) if($i==\"id\"){print 100-$(i-1); exit}}'",
+    "cpu_iowait": "top -bn2 -d 0.5 | grep Cpu | tail -1 | tr -d ',' | awk '{for(i=1;i<=NF;i++) if($i==\"wa\"){print $(i-1); exit}}'",
     "loadavg_1min": "cut -d' ' -f1 /proc/loadavg",
     "loadavg_5min": "cut -d' ' -f2 /proc/loadavg",
     "loadavg_15min": "cut -d' ' -f3 /proc/loadavg",

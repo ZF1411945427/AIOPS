@@ -140,6 +140,7 @@
                   <span class="badge resolved">✅ {{ r.normal_count }}</span>
                   <span class="badge warning" v-if="r.warning_count">⚠️ {{ r.warning_count }}</span>
                   <span class="badge critical" v-if="r.critical_count">🔴 {{ r.critical_count }}</span>
+                  <span class="badge unknown" v-if="r.unknown_count">⚪ {{ r.unknown_count }}</span>
                 </div>
               </div>
             </div>
@@ -172,6 +173,7 @@
               <span class="badge resolved" style="font-size:14px;padding:8px 16px">✅ 正常 {{ currentRecord.normal_count }}</span>
               <span class="badge warning" style="font-size:14px;padding:8px 16px" v-if="currentRecord.warning_count">⚠️ 警告 {{ currentRecord.warning_count }}</span>
               <span class="badge critical" style="font-size:14px;padding:8px 16px" v-if="currentRecord.critical_count">🔴 严重 {{ currentRecord.critical_count }}</span>
+              <span class="badge unknown" style="font-size:14px;padding:8px 16px" v-if="currentRecord.unknown_count">⚪ 未知 {{ currentRecord.unknown_count }}</span>
             </div>
 
             <div v-if="currentRecord.ai_report" class="ai-report">
@@ -185,13 +187,13 @@
                 <div class="asset-check-header" :class="'border-' + item.worst_status">
                   <span class="asset-check-name">{{ item.asset_name }}</span>
                   <span class="asset-check-type">{{ item.ci_type }} · {{ item.ip }}</span>
-                  <span class="badge" :class="item.worst_status === 'critical' ? 'critical' : item.worst_status === 'warning' ? 'warning' : 'resolved'">
-                    {{ item.worst_status === 'critical' ? '严重' : item.worst_status === 'warning' ? '警告' : '正常' }}
+                  <span class="badge" :class="item.worst_status === 'critical' ? 'critical' : item.worst_status === 'warning' ? 'warning' : item.worst_status === 'unknown' ? 'unknown' : 'resolved'">
+                    {{ item.worst_status === 'critical' ? '严重' : item.worst_status === 'warning' ? '警告' : item.worst_status === 'unknown' ? '未知' : '正常' }}
                   </span>
                 </div>
                 <div class="check-list">
                   <div v-for="(c, ci) in item.checks" :key="ci" class="check-row" :class="'status-' + c.status">
-                    <span class="check-icon">{{ c.status === 'critical' ? '🔴' : c.status === 'warning' ? '🟡' : '✅' }}</span>
+                    <span class="check-icon">{{ c.status === 'critical' ? '🔴' : c.status === 'warning' ? '🟡' : c.status === 'unknown' ? '⚪' : '✅' }}</span>
                     <span class="check-label">{{ c.name }}</span>
                     <span class="check-value">{{ c.value !== null ? c.value + (c.unit || '') : '-' }}</span>
                     <span class="check-detail">{{ c.detail }}</span>
@@ -633,6 +635,7 @@ export default {
 .badge.info { background: #e8f0fe; color: #1967d2; }
 .badge.running { background: #fff3e0; color: #e67e00; animation: pulse 1.5s infinite; }
 .badge.idle { background: #f0f0f0; color: #999; }
+.badge.unknown { background: #f0f0f0; color: #909399; }
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
@@ -699,12 +702,14 @@ export default {
 .asset-check-header.border-critical { border-left: 3px solid #f56c6c; }
 .asset-check-header.border-warning { border-left: 3px solid #e6a23c; }
 .asset-check-header.border-normal { border-left: 3px solid #67c23a; }
+.asset-check-header.border-unknown { border-left: 3px solid #c0c4cc; }
 .asset-check-name { font-weight: 600; font-size: 13px; }
 .asset-check-type { font-size: 12px; color: var(--text-muted, #999); flex: 1; }
 .check-list { padding: 4px 0; }
 .check-row { display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; }
 .check-row.status-critical { background: #fef0f0; }
 .check-row.status-warning { background: #fdf6ec; }
+.check-row.status-unknown { background: #f5f5f5; color: #909399; }
 .check-icon { width: 20px; text-align: center; }
 .check-label { width: 120px; font-weight: 500; }
 .check-value { width: 80px; font-weight: 600; }

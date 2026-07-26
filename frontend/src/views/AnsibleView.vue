@@ -222,8 +222,12 @@
           <input v-model="invForm.description" class="input" placeholder="可选" />
         </div>
         <div class="form-row">
-          <label>清单内容 (YAML)</label>
+          <div class="label-row">
+            <label>清单内容 (YAML)</label>
+            <button class="btn btn-primary btn-sm" type="button" @click="openAssetPicker">📋 从资产选择生成</button>
+          </div>
           <textarea v-model="invForm.content" class="input mono" rows="12" placeholder="all:&#10;  hosts:&#10;    node1:&#10;      ansible_host: 192.168.1.10"></textarea>
+          <span class="text-muted text-sm" style="margin-top:4px;">勾选资产后自动生成标准 YAML 填入文本框（仍可二次编辑）</span>
         </div>
         <div class="modal-actions">
           <button class="btn" @click="closeInvDialog">取消</button>
@@ -251,6 +255,51 @@
         <div class="modal-actions">
           <button class="btn" @click="closePbDialog">取消</button>
           <button class="btn btn-primary" :disabled="pbSaving" @click="savePlaybook">{{ pbSaving ? '保存中...' : '保存' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 资产选择弹窗（生成主机清单） -->
+    <div v-if="showAssetPicker" class="modal-overlay" style="z-index: 1100;" @click.self="closeAssetPicker">
+      <div class="modal-box modal-lg">
+        <h3>从资产生成主机清单</h3>
+        <div class="asset-picker-toolbar">
+          <input v-model="assetKeyword" class="input" placeholder="搜索名称 / IP" @input="filterAssets" />
+          <span class="text-muted text-sm">仅列出 server / virtual_machine / cloud_host 资产 · 已选 {{ selectedAssetIds.length }} 台</span>
+        </div>
+        <div class="asset-picker-body">
+          <div v-if="assetLoading" class="loading-state">加载中...</div>
+          <table v-else-if="filteredAssets.length" class="table">
+            <thead>
+              <tr>
+                <th style="width:40px;"><input type="checkbox" :checked="allAssetChecked" @change="toggleAllAssets($event.target.checked)" /></th>
+                <th>ID</th>
+                <th>名称</th>
+                <th>IP</th>
+                <th>类型</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="a in filteredAssets" :key="a.id" :class="{ rowSelected: selectedAssetIds.includes(a.id) }">
+                <td><input type="checkbox" :checked="selectedAssetIds.includes(a.id)" @change="toggleAsset(a.id)" /></td>
+                <td>{{ a.id }}</td>
+                <td>{{ a.name }}</td>
+                <td class="mono">{{ a.ip || '-' }}</td>
+                <td><span class="badge count">{{ a.ci_type }}</span></td>
+                <td><span class="badge" :class="a.status === 'online' ? 'green' : 'gray'">{{ a.status || '-' }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty-state">
+            <div style="font-size:32px;margin-bottom:8px;">🖥️</div>
+            <div>暂无可用资产</div>
+            <div class="text-muted" style="margin-top:4px;">请先在资产中心添加 server/virtual_machine/cloud_host 资产并配置连接信息</div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="closeAssetPicker">取消</button>
+          <button class="btn btn-primary" :disabled="!selectedAssetIds.length || assetGenerating" @click="confirmAssetPick">{{ assetGenerating ? '生成中...' : `生成清单（${selectedAssetIds.length} 台）` }}</button>
         </div>
       </div>
     </div>
@@ -469,6 +518,20 @@ const showInvDialog = ref(false)
 const invSaving = ref(false)
 const invForm = reactive({ id: null, name: '', description: '', content: '' })
 
+// 资产选择生成主机清单
+const showAssetPicker = ref(false)
+const assetLoading = ref(false)
+const assetGenerating = ref(false)
+const assetList = ref([])
+const assetKeyword = ref('')
+const selectedAssetIds = ref([])
+const filteredAssets = computed(() => {
+  const kw = assetKeyword.value.trim().toLowerCase()
+  if (!kw) return assetList.value
+  return assetList.value.filter(a => (a.name || '').toLowerCase().includes(kw) || (a.ip || '').toLowerCase().includes(kw))
+})
+const allAssetChecked = computed(() => filteredAssets.value.length > 0 && filteredAssets.value.every(a => selectedAssetIds.value.includes(a.id)))
+
 const showPbDialog = ref(false)
 const pbSaving = ref(false)
 const pbForm = reactive({ id: null, name: '', description: '', content: '' })
@@ -637,6 +700,72 @@ function openInvDialog(item) {
 }
 function closeInvDialog() {
   showInvDialog.value = false
+}
+
+async function openAssetPicker() {
+  showAssetPicker.value = true
+  selectedAssetIds.value = []
+  assetKeyword.value = ''
+  await loadAssetOptions()
+}
+
+function closeAssetPicker() {
+  showAssetPicker.value = false
+}
+
+async function loadAssetOptions() {
+  assetLoading.value = true
+  try {
+    const data = await request.get('/assets/api/list', { params: { page: 1, page_size: 500 } })
+    const items = data.items || data.assets || []
+    assetList.value = items.filter(a => ['server', 'virtual_machine', 'cloud_host'].includes(a.ci_type))
+  } catch (e) {
+    ElMessage.error('加载资产列表失败: ' + e.message)
+    assetList.value = []
+  } finally {
+    assetLoading.value = false
+  }
+}
+
+function filterAssets() { /* computed 自动响应，无需额外逻辑 */ }
+
+function toggleAsset(id) {
+  const i = selectedAssetIds.value.indexOf(id)
+  if (i >= 0) selectedAssetIds.value.splice(i, 1)
+  else selectedAssetIds.value.push(id)
+}
+
+function toggleAllAssets(checked) {
+  if (checked) {
+    const ids = new Set(selectedAssetIds.value)
+    filteredAssets.value.forEach(a => ids.add(a.id))
+    selectedAssetIds.value = [...ids]
+  } else {
+    const visibleIds = new Set(filteredAssets.value.map(a => a.id))
+    selectedAssetIds.value = selectedAssetIds.value.filter(id => !visibleIds.has(id))
+  }
+}
+
+async function confirmAssetPick() {
+  if (!selectedAssetIds.value.length) { ElMessage.warning('请至少选择一台资产'); return }
+  assetGenerating.value = true
+  try {
+    const data = await request.post('/ansible/api/inventories/generate-from-assets', { asset_ids: selectedAssetIds.value })
+    if (!data.ok) { ElMessage.error(data.detail || '生成失败'); return }
+    invForm.content = data.content
+    if (!invForm.name.trim()) {
+      invForm.name = `auto-hosts-${data.count}`
+    }
+    ElMessage.success(data.message || `已从 ${data.count} 台资产生成清单`)
+    if (data.skipped && data.skipped.length) {
+      ElMessage.warning(`跳过无 IP 资产：${data.skipped.join(', ')}`)
+    }
+    closeAssetPicker()
+  } catch (e) {
+    ElMessage.error('生成失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    assetGenerating.value = false
+  }
 }
 
 async function saveInventory() {
@@ -818,4 +947,13 @@ const showGuide = ref(false)
 .output-pre.dark { background: #1e293b; color: #e2e8f0; }
 .output-pre.danger { background: #7f1d1d; color: #fecaca; }
 .output-pre.script { background: var(--bg-hover, rgba(0,0,0,0.03)); color: var(--text, #1e293b); }
+.form-actions { display: flex; align-items: center; gap: 8px; }
+.label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.label-row label { margin: 0; }
+.asset-picker-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.asset-picker-toolbar .input { flex: 0 0 240px; }
+.asset-picker-body { max-height: 420px; overflow: auto; border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; }
+.asset-picker-body .table { margin: 0; }
+.asset-picker-body .table th, .asset-picker-body .table td { padding: 8px 10px; font-size: 0.8rem; }
+tr.rowSelected { background: var(--bg-hover, rgba(99,102,241,0.08)); }
 </style>

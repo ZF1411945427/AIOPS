@@ -24,13 +24,6 @@
             "path": "/monitor-view"
           },
           {
-            "key": "dashboard",
-            "label": "仪表盘",
-            "type": "vue",
-            "icon": "TrendCharts",
-            "path": "/dashboard"
-          },
-          {
             "key": "dashboard-designer",
             "label": "自定义仪表盘",
             "type": "vue",
@@ -56,6 +49,13 @@
             "type": "vue",
             "icon": "Bell",
             "path": "/alerts"
+          },
+          {
+            "key": "alert-rules",
+            "label": "告警规则",
+            "type": "vue",
+            "icon": "AlarmClock",
+            "path": "/alert-rules"
           },
           {
             "key": "alert-correlation",
@@ -99,13 +99,6 @@
             "path": "/oncall-schedule"
           },
           {
-            "key": "escalation-policy",
-            "label": "升级策略",
-            "type": "vue",
-            "icon": "ArrowUp",
-            "path": "/escalation-policy"
-          },
-          {
             "key": "notifications",
             "label": "通知管理",
             "type": "vue",
@@ -121,6 +114,102 @@
     "label": "运维工作台",
     "icon": "Tools",
     "description": "运维工程师：资产运维、K8s管理、自愈、变更、诊断",
+    "items": [
+      {
+        "key": "self-healing",
+        "label": "自愈管理",
+        "items": [
+          {
+            "key": "remediation",
+            "label": "自愈规则",
+            "type": "vue",
+            "icon": "Lightning",
+            "path": "/remediation"
+          },
+          {
+            "key": "remediation-workflow",
+            "label": "自愈工作流",
+            "type": "vue",
+            "icon": "Operation",
+            "path": "/remediation-workflows"
+          },
+          {
+            "key": "remediation-effect",
+            "label": "自愈效果分析",
+            "type": "vue",
+            "icon": "Finished",
+            "path": "/remediation-effect"
+          }
+        ]
+      },
+      {
+        "key": "change-release",
+        "label": "流程引擎",
+        "items": [
+          {
+            "key": "workflow-runs",
+            "label": "工作流执行",
+            "type": "vue",
+            "icon": "VideoPlay",
+            "path": "/workflow/runs"
+          },
+          {
+            "key": "workflow-templates",
+            "label": "工作流模板",
+            "type": "vue",
+            "icon": "Document",
+            "path": "/workflow/templates"
+          }
+        ]
+      },
+      {
+        "key": "toolbox",
+        "label": "工具箱",
+        "items": [
+          {
+            "key": "diagnostic-tools",
+            "label": "诊断工具中心",
+            "type": "vue",
+            "icon": "FirstAidKit",
+            "path": "/diagnostic-tools"
+          },
+          {
+            "key": "smart-inspection",
+            "label": "智能巡检",
+            "type": "vue",
+            "icon": "Search",
+            "path": "/smart-inspection"
+          },
+          {
+            "key": "script-exec",
+            "label": "远程脚本",
+            "type": "vue",
+            "icon": "Tools",
+            "path": "/script"
+          },
+          {
+            "key": "network-test",
+            "label": "网络测试",
+            "type": "vue",
+            "icon": "Connection",
+            "path": "/network-test"
+          },
+          {
+            "key": "ansible",
+            "label": "Ansible 编排",
+            "type": "vue",
+            "icon": "Cpu",
+            "path": "/ansible"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "resource",
+    "label": "资源管理",
+    "icon": "Coin",
+    "description": "IT 资产与云原生资源的全生命周期管理:资产台账、Edge 隧道、拓扑、自动发现、K8s 集群与资源",
     "items": [
       {
         "key": "asset-management",
@@ -215,87 +304,6 @@
             "type": "vue",
             "icon": "TrendCharts",
             "path": "/k8s/resource-optimize"
-          }
-        ]
-      },
-      {
-        "key": "self-healing",
-        "label": "自愈管理",
-        "items": [
-          {
-            "key": "remediation",
-            "label": "自愈规则",
-            "type": "vue",
-            "icon": "Lightning",
-            "path": "/remediation"
-          },
-          {
-            "key": "remediation-workflow",
-            "label": "自愈工作流",
-            "type": "vue",
-            "icon": "Operation",
-            "path": "/remediation-workflows"
-          },
-          {
-            "key": "remediation-effect",
-            "label": "自愈效果分析",
-            "type": "vue",
-            "icon": "Finished",
-            "path": "/remediation-effect"
-          }
-        ]
-      },
-      {
-        "key": "change-release",
-        "label": "流程引擎",
-        "items": [
-          {
-            "key": "workflow-runs",
-            "label": "工作流执行",
-            "type": "vue",
-            "icon": "VideoPlay",
-            "path": "/workflow/runs"
-          },
-          {
-            "key": "workflow-templates",
-            "label": "工作流模板",
-            "type": "vue",
-            "icon": "Document",
-            "path": "/workflow/templates"
-          }
-        ]
-      },
-      {
-        "key": "toolbox",
-        "label": "工具箱",
-        "items": [
-          {
-            "key": "diagnostic-tools",
-            "label": "诊断工具中心",
-            "type": "vue",
-            "icon": "FirstAidKit",
-            "path": "/diagnostic-tools"
-          },
-          {
-            "key": "smart-inspection",
-            "label": "智能巡检",
-            "type": "vue",
-            "icon": "Search",
-            "path": "/smart-inspection"
-          },
-          {
-            "key": "script-exec",
-            "label": "远程脚本",
-            "type": "vue",
-            "icon": "Tools",
-            "path": "/script"
-          },
-          {
-            "key": "network-test",
-            "label": "网络测试",
-            "type": "vue",
-            "icon": "Connection",
-            "path": "/network-test"
           }
         ]
       }

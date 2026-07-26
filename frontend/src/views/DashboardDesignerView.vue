@@ -144,8 +144,13 @@ const CARD_COMPONENTS = {
   'chart-health-trend': defineAsyncComponent(() => import('@/components/dashboard/ChartHealthTrendCard.vue')),
   'chart-mttr': defineAsyncComponent(() => import('@/components/dashboard/ChartMttrCard.vue')),
   'chart-remediation': defineAsyncComponent(() => import('@/components/dashboard/ChartRemediationCard.vue')),
-  'chart-ai-tool': defineAsyncComponent(() => import('@/components/dashboard/ChartAiToolCard.vue')),
-  'chart-notification': defineAsyncComponent(() => import('@/components/dashboard/ChartNotificationCard.vue')),
+   'chart-ai-tool': defineAsyncComponent(() => import('@/components/dashboard/ChartAiToolCard.vue')),
+   'chart-notification': defineAsyncComponent(() => import('@/components/dashboard/ChartNotificationCard.vue')),
+   'chart-cpu': defineAsyncComponent(() => import('@/components/dashboard/ChartCpuCard.vue')),
+   'chart-mem': defineAsyncComponent(() => import('@/components/dashboard/ChartMemCard.vue')),
+   'chart-disk': defineAsyncComponent(() => import('@/components/dashboard/ChartDiskCard.vue')),
+   'chart-load': defineAsyncComponent(() => import('@/components/dashboard/ChartLoadCard.vue')),
+   'chart-net': defineAsyncComponent(() => import('@/components/dashboard/ChartNetCard.vue')),
   'list-recent-alerts': defineAsyncComponent(() => import('@/components/dashboard/ListRecentAlertsCard.vue')),
   'list-recent-incidents': defineAsyncComponent(() => import('@/components/dashboard/ListRecentIncidentsCard.vue')),
 }
@@ -188,9 +193,11 @@ function onDrop(e) {
 }
 
 function startDrag(e, card) {
+  // currentTarget 在事件结束后会被置 null，需在闭包外缓存画布引用
+  const canvasEl = e.currentTarget.closest('.grid-canvas')
   draggingCard.value = { card, startX: e.clientX, startY: e.clientY, origX: card.x, origY: card.y }
   const onMove = (ev) => {
-    const dx = Math.round((ev.clientX - draggingCard.value.startX) / (e.currentTarget.parentElement.offsetWidth / COLS))
+    const dx = Math.round((ev.clientX - draggingCard.value.startX) / (canvasEl.offsetWidth / COLS))
     const dy = Math.round((ev.clientY - draggingCard.value.startY) / ROW_H)
     card.x = Math.max(0, Math.min(COLS - card.w, draggingCard.value.origX + dx))
     card.y = Math.max(0, draggingCard.value.origY + dy)
@@ -206,9 +213,11 @@ function startDrag(e, card) {
 
 function startResize(e, card) {
   e.stopPropagation()
+  // currentTarget 在事件结束后会被置 null，且 resize 元素的 parentElement 是卡片而非画布
+  const canvasEl = e.currentTarget.closest('.grid-canvas')
   resizingCard.value = { card, startX: e.clientX, startY: e.clientY, origW: card.w, origH: card.h }
   const onMove = (ev) => {
-    const dw = Math.round((ev.clientX - resizingCard.value.startX) / (e.currentTarget.parentElement.offsetWidth / COLS))
+    const dw = Math.round((ev.clientX - resizingCard.value.startX) / (canvasEl.offsetWidth / COLS))
     const dh = Math.round((ev.clientY - resizingCard.value.startY) / ROW_H)
     card.w = Math.max(2, Math.min(COLS - card.x, resizingCard.value.origW + dw))
     card.h = Math.max(2, resizingCard.value.origH + dh)

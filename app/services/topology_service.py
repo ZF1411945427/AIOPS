@@ -392,3 +392,184 @@ def build_container_topo(db: Session):
 
     return [build_node(root) for root in roots if root in asset_map]
 
+
+# ============================================================
+# 拓扑视图大改（2026-07-25）
+# Tab1: 全资产拓扑（K8s 仅保留 cluster + node 维度，过滤其余 K8s 子资源）
+# Tab2: 网络拓扑（双模式：网络设备关系 / IP 网段聚类）
+# ============================================================
+
+# K8s 子资源过滤清单：Tab1 中不显示这些 ci_type（资源纳管粒度收敛到 Node 维度）
+K8S_CHILD_FILTER = {
+    "namespace", "deployment", "statefulset", "daemonset",
+    "service", "ingress", "pvc", "pv", "configmap", "secret",
+    "pod", "replicaset", "container", "job", "cronjob", "hpa",
+}
+
+# 网络类设备 ci_type（Tab2 网络设备关系模式）
+NETWORK_DEVICE_TYPES = {
+    "network", "network_device", "switch", "router", "firewall",
+    "loadbalancer", "load_balancer", "storage", "storage_device",
+}
+
+
+def build_asset_topo_by_node(db: Session):
+    """Tab1: 全资产拓扑，K8s 仅保留 cluster + node 维度。
+
+    资源纳管粒度收敛（CI Roll-up）：将细粒度 K8s CI（Pod/Deployment/Service/...）
+    过滤，拓扑呈现层只保留 kubernetes_cluster 与 node 两个层级，降低拓扑噪声。
+    非 K8s 资产（server/vm/database/middleware/网络设备等）全部正常显示。
+    """
+    assets = db.query(Asset).order_by(Asset.ci_type, Asset.name).all()
+    # 过滤 K8s 子资源（保留 kubernetes_cluster / node）
+    assets = [a for a in assets if a.ci_type not in K8S_CHILD_FILTER]
+    keep_ids = set(a.id for a in assets)
+
+    relations = db.query(AssetRelation).all()
+    # 仅保留两端均在过滤后集合中的关系
+    relations = [r for r in relations if r.parent_id in keep_ids and r.child_id in keep_ids]
+
+    nodes = [{
+        "id": a.id,
+        "name": a.name,
+        "type": a.ci_type,
+        "ci_type": a.ci_type,
+        "status": a.status,
+        "parent_id": getattr(a, "parent_id", None),
+        "ip": a.ip or "",
+        "k8s_cluster": getattr(a, "k8s_cluster", None) or "",
+    } for a in assets]
+    edges = [{
+        "id": r.id,
+        "source_id": r.parent_id,
+        "target_id": r.child_id,
+        "relation_type": r.relation_type,
+    } for r in relations]
+
+    from collections import Counter
+    type_counter = Counter(a.ci_type for a in assets)
+    stats = {
+        "total": len(nodes),
+        "by_type": dict(type_counter),
+        "edge_count": len(edges),
+        "k8s_hidden": sum(1 for a in db.query(Asset).all() if a.ci_type in K8S_CHILD_FILTER),
+    }
+    return {"nodes": nodes, "edges": edges, "relations": edges, "stats": stats}
+
+
+def _subnet_of(ip: str) -> str:
+    """解析 IPv4 的 /24 网段（前三段 + .0/24）。非法 IP 返回空串。"""
+    if not ip:
+        return ""
+    s = ip.strip().split("/")
+    head = s[0]
+    parts = head.split(".")
+    if len(parts) < 3:
+        return ""
+    try:
+        int(parts[0]); int(parts[1]); int(parts[2])
+    except ValueError:
+        return ""
+    return f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+
+
+def build_network_topo(db: Session, mode: str = "devices"):
+    """Tab2: 网络拓扑图。
+
+    mode="devices": 网络设备关系拓扑——仅展示网络类设备及其 AssetRelation 连接。
+    mode="subnets": IP 网段拓扑——解析所有有 IP 资产的 /24 网段，网段为父节点，
+                    资产为叶子，呈现网段→资产的隶属关系。
+    """
+    if mode == "subnets":
+        assets = db.query(Asset).filter(Asset.ip != None, Asset.ip != "").all()
+        subnet_nodes = {}  # subnet -> {"id": "subnet:xxx", "name": xxx, "items": [...]}
+        node_id_seq = 0
+        graph_nodes = []
+        graph_edges = []
+        for a in assets:
+            subnet = _subnet_of(a.ip or "")
+            if not subnet:
+                continue
+            if subnet not in subnet_nodes:
+                node_id_seq -= 1
+                subnet_nodes[subnet] = {
+                    "id": f"subnet:{subnet}",
+                    "_id": node_id_seq,
+                    "name": subnet,
+                    "ci_type": "subnet",
+                    "count": 0,
+                }
+                graph_nodes.append({
+                    "id": str(node_id_seq),
+                    "name": subnet,
+                    "ci_type": "subnet",
+                    "status": "",
+                    "ip": "",
+                    "is_subnet": True,
+                    "item_count": 0,
+                })
+            sn = subnet_nodes[subnet]
+            sn["count"] += 1
+            # 资产节点
+            graph_nodes.append({
+                "id": str(a.id),
+                "name": a.name,
+                "ci_type": a.ci_type,
+                "status": a.status,
+                "ip": a.ip or "",
+                "is_subnet": False,
+                "subnet": subnet,
+            })
+            # 网段 -> 资产
+            graph_edges.append({
+                "source_id": sn["_id"],
+                "target_id": a.id,
+                "relation_type": "belongs_to_subnet",
+            })
+        # 回填网段节点的 item_count
+        for n in graph_nodes:
+            if n.get("is_subnet"):
+                n["item_count"] = subnet_nodes[n["name"]]["count"]
+        from collections import Counter
+        type_counter = Counter(a.ci_type for a in assets)
+        stats = {
+            "total": len(graph_nodes),
+            "subnet_count": len(subnet_nodes),
+            "asset_count": len(assets),
+            "by_type": dict(type_counter),
+            "edge_count": len(graph_edges),
+        }
+        return {"nodes": graph_nodes, "edges": graph_edges, "relations": graph_edges, "stats": stats, "mode": "subnets"}
+
+    # 默认：网络设备关系
+    assets = db.query(Asset).filter(Asset.ci_type.in_(NETWORK_DEVICE_TYPES)).order_by(Asset.ci_type, Asset.name).all()
+    keep_ids = set(a.id for a in assets)
+    relations = db.query(AssetRelation).all()
+    relations = [r for r in relations if r.parent_id in keep_ids and r.child_id in keep_ids]
+
+    nodes = [{
+        "id": a.id,
+        "name": a.name,
+        "type": a.ci_type,
+        "ci_type": a.ci_type,
+        "status": a.status,
+        "ip": a.ip or "",
+        "parent_id": getattr(a, "parent_id", None),
+    } for a in assets]
+    edges = [{
+        "id": r.id,
+        "source_id": r.parent_id,
+        "target_id": r.child_id,
+        "relation_type": r.relation_type,
+    } for r in relations]
+
+    from collections import Counter
+    type_counter = Counter(a.ci_type for a in assets)
+    stats = {
+        "total": len(nodes),
+        "by_type": dict(type_counter),
+        "edge_count": len(edges),
+        "abnormal_count": sum(1 for a in assets if (a.status or "").lower() in ("offline", "error", "critical", "down")),
+    }
+    return {"nodes": nodes, "edges": edges, "relations": edges, "stats": stats, "mode": "devices"}
+

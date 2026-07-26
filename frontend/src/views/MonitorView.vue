@@ -93,7 +93,7 @@
       <!-- Row 4: Online by type + Severity distribution -->
       <div class="charts-grid">
         <div class="chart-card">
-          <div class="chart-card-header"><span>在线资产类型</span></div>
+          <div class="chart-card-header"><span>资产类型分布</span></div>
           <div ref="onlineTypeChartRef" class="chart-container" style="height:220px"></div>
         </div>
         <div class="chart-card">
@@ -112,6 +112,9 @@
               <template #default="{ row }"><el-tag :type="row.status === 'firing' ? 'danger' : 'warning'" size="small">{{ row.status }}</el-tag></template>
             </el-table-column>
             <el-table-column prop="message" label="消息" min-width="150" show-overflow-tooltip />
+            <el-table-column label="时间" width="150">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
           </el-table>
         </div>
       </div>
@@ -155,7 +158,7 @@ const recentAlerts = ref([])
 const vmMetrics = ref({})
 const alertTrend = ref([])
 const severityDist = ref([])
-const onlineByType = ref([])
+const assetTypeDist = ref([])
 
 const statCards = [
   { key: 'asset_total', label: '资产总数', icon: 'Monitor', color: 'primary' },
@@ -169,6 +172,12 @@ const statCards = [
 
 function sevType(s) {
   return { critical: 'danger', high: 'warning', warning: 'warning', low: 'success', info: 'info' }[s] || 'info'
+}
+
+function formatTime(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 function toggleFullscreen() {
@@ -196,7 +205,7 @@ async function loadData() {
     vmAvailable.value = data.vm_available || false
     alertTrend.value = data.alert_trend || []
     severityDist.value = data.severity_distribution || []
-    onlineByType.value = data.online_by_type || []
+    assetTypeDist.value = data.asset_type_distribution || []
     if (data.assets) {
       assets.value = data.assets
     }
@@ -387,7 +396,7 @@ function renderHealthChart() {
 function renderOnlineTypeChart() {
   const chart = makeChart('onlineTypeChartRef')
   if (!chart) return
-  const data = onlineByType.value
+  const data = assetTypeDist.value
   if (!data.length) {
     chart.setOption({ title: { text: '暂无数据', left: 'center', top: 'center', textStyle: { color: '#94a3b8', fontSize: 13 } } })
     return

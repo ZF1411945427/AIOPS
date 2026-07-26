@@ -31,6 +31,16 @@ def delete_channel(db: Session, channel_id: int):
     db.commit()
 
 
+def set_channel_enabled(db: Session, channel_id: int, enabled: bool):
+    ch = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
+    if not ch:
+        return None
+    ch.enabled = bool(enabled)
+    db.commit()
+    db.refresh(ch)
+    return ch
+
+
 def send_email(config: dict, title: str, content: str) -> tuple[bool, str]:
     try:
         host = config.get("host", "")
@@ -55,18 +65,18 @@ def send_email(config: dict, title: str, content: str) -> tuple[bool, str]:
 
 def send_notification(db: Session, alert: Alert, channel: NotificationChannel) -> NotificationLog:
     config = json.loads(channel.channel_config) if channel.channel_config else {}
-    title = f"[AIOPS] 鍛婅: {alert.metric_name} - {alert.severity}"
+    title = f"[AIOPS] 告警: {alert.metric_name} - {alert.severity}"
     content = (
-        f"鍛婅ID: {alert.id}\n"
-        f"鎸囨爣: {alert.metric_name}\n"
-        f"褰撳墠鍊? {alert.actual_value}\n"
-        f"闃堝€? {alert.threshold}\n"
-        f"绾у埆: {alert.severity}\n"
-        f"娑堟伅: {alert.message}\n"
-        f"鏃堕棿: {alert.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
+        f"告警ID: {alert.id}\n"
+        f"指标: {alert.metric_name}\n"
+        f"当前值: {alert.actual_value}\n"
+        f"阈值: {alert.threshold}\n"
+        f"级别: {alert.severity}\n"
+        f"消息: {alert.message}\n"
+        f"时间: {alert.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
     )
 
-    success, error = False, "鏈煡娓犻亾绫诲瀷"
+    success, error = False, "未知渠道类型"
     recipient = ""
 
     if channel.type == "email":

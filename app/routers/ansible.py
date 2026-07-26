@@ -1,18 +1,21 @@
 import os
 import json
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from datetime import datetime
 
+import yaml
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AnsibleInventory, AnsiblePlaybook, AnsibleRun
+from app.models import AnsibleInventory, AnsiblePlaybook, AnsibleRun, Asset
+from app.template_utils import parse_json_config
 
 router = APIRouter(prefix="/ansible", tags=["ansible"])
 
@@ -152,6 +155,75 @@ def delete_inventory(inv_id: int, db: Session = Depends(get_db)):
     db.delete(inv)
     db.commit()
     return JSONResponse({"ok": True})
+
+
+class GenerateInventoryReq(BaseModel):
+    asset_ids: list[int] = []
+
+
+@router.post("/api/inventories/generate-from-assets")
+def generate_inventory_from_assets(body: GenerateInventoryReq, db: Session = Depends(get_db)):
+    """从资产直接生成 Ansible 主机清单 YAML（仅 server/virtual_machine/cloud_host）。
+
+    凭证策略：有 key_path 写 ansible_ssh_private_key_file；否则有密码写 ansible_password。
+    凭证从 DB 原始 connection_config 读取（不经掩码），与远程脚本页同源。
+    """
+    if not body.asset_ids:
+        return JSONResponse({"ok": False, "detail": "请至少选择一个资产"}, status_code=400)
+    assets = db.query(Asset).filter(
+        Asset.id.in_(body.asset_ids),
+        Asset.ci_type.in_(["server", "virtual_machine", "cloud_host"]),
+    ).all()
+    if not assets:
+        return JSONResponse({"ok": False, "detail": "未找到符合条件的资产（仅支持 server/virtual_machine/cloud_host）"}, status_code=404)
+
+    # 保持用户选择顺序
+    id_order = {aid: i for i, aid in enumerate(body.asset_ids)}
+    assets.sort(key=lambda a: id_order.get(a.id, 9999))
+
+    hosts = {}
+    used_names = set()
+    skipped = []
+    for a in assets:
+        try:
+            cfg = parse_json_config(a.connection_config) if a.connection_config else {}
+        except Exception:
+            cfg = {}
+        host_addr = (a.ip or "").strip()
+        if not host_addr:
+            skipped.append(a.name or f"asset#{a.id}")
+            continue
+        # Ansible 主机变量名仅允许字母数字下划线连字符
+        base = re.sub(r'[^a-zA-Z0-9_-]', '_', a.name or host_addr)[:48] or f"host{a.id}"
+        slug = base
+        if slug in used_names:
+            slug = f"{base}_{a.id}"
+        used_names.add(slug)
+        hv = {"ansible_host": host_addr}
+        try:
+            port = int(cfg.get("ssh_port", 22) or 22)
+        except (TypeError, ValueError):
+            port = 22
+        if port and port != 22:
+            hv["ansible_port"] = port
+        user = (cfg.get("ssh_user") or "root").strip()
+        if user:
+            hv["ansible_user"] = user
+        key_path = (cfg.get("key_path") or "").strip()
+        if key_path:
+            hv["ansible_ssh_private_key_file"] = key_path
+        else:
+            pwd = (cfg.get("ssh_password") or "").strip()
+            if pwd:
+                hv["ansible_password"] = pwd
+        hosts[slug] = hv
+
+    inventory = {"all": {"hosts": hosts}}
+    content = yaml.dump(inventory, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    msg = f"已从 {len(hosts)} 台资产生成清单"
+    if skipped:
+        msg += f"；跳过 {len(skipped)} 台无 IP 资产：{', '.join(skipped)}"
+    return JSONResponse({"ok": True, "content": content, "count": len(hosts), "skipped": skipped, "message": msg})
 
 
 @router.get("/api/playbooks")

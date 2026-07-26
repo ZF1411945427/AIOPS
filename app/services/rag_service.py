@@ -308,12 +308,14 @@ def vector_search(
 
 # ─── 文档 CRUD ──────────────────────────────────────────────────
 
-def list_documents(db: Session, search: str = "", source_type: str = "") -> List[KbDocument]:
+def list_documents(db: Session, search: str = "", source_type: str = "", asset_id: int = 0) -> List[KbDocument]:
     q = db.query(KbDocument)
     if search:
         q = q.filter(KbDocument.title.ilike(f"%{search}%"))
     if source_type:
         q = q.filter(KbDocument.source_type == source_type)
+    if asset_id:
+        q = q.filter(KbDocument.asset_id == asset_id)
     return q.order_by(KbDocument.created_at.desc()).all()
 
 
