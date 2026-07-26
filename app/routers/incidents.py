@@ -5,8 +5,9 @@ from app.template_utils import get_templates
 from app.database import get_db
 from app.services import incident_service, rca_service, knowledge_graph_service, config_service
 from app.services.agent_service import call_llm
-from app.models import AIProvider, AgentConfig
+from app.models import AIProvider, AgentConfig, Incident
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 templates = get_templates()
@@ -27,6 +28,8 @@ def _incident_to_dict(inc, asset_name: str = "", approver_name: str = "") -> dic
         "review_comment": inc.review_comment or "",
         "created_at": inc.created_at.strftime("%Y-%m-%d %H:%M:%S") if inc.created_at else None,
         "resolved_at": inc.resolved_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(inc, "resolved_at", None) else None,
+        "ai_rca_result": getattr(inc, "ai_rca_result", "") or "",
+        "ai_rca_at": inc.ai_rca_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(inc, "ai_rca_at", None) else None,
     }
 
 
@@ -234,11 +237,19 @@ def api_incident_rca(incident_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api/{incident_id}/ai-rca")
-def api_incident_ai_rca(incident_id: int, db: Session = Depends(get_db)):
-    """AI 深度根因分析：结合算法 RCA 结果 + 告警详情，调用 LLM 给出自然语言分析."""
-    detail = incident_service.get_incident_detail(db, incident_id)
-    if not detail:
+def api_incident_ai_rca(incident_id: int, force: int = 0, db: Session = Depends(get_db)):
+    """AI 深度根因分析：结合算法 RCA 结果 + 告警详情，调用 LLM 给出自然语言分析.
+    force=1 时强制重新分析（覆盖缓存）；默认有缓存直接返回，避免重复消耗 LLM."""
+    inc_row = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not inc_row:
         return JSONResponse({"error": "故障单不存在"}, status_code=404)
+
+    # 命中缓存且非强制刷新：直接返回历史分析结果
+    if not force and inc_row.ai_rca_result:
+        return {"ok": True, "analysis": inc_row.ai_rca_result, "cached": True,
+                "analyzed_at": inc_row.ai_rca_at.isoformat() if inc_row.ai_rca_at else None}
+
+    detail = incident_service.get_incident_detail(db, incident_id)
     inc = detail["incident"]
     asset = detail["asset"]
     alerts = detail["alerts"]
@@ -310,7 +321,7 @@ def api_incident_ai_rca(incident_id: int, db: Session = Depends(get_db)):
         {"role": "system", "content": "你是资深 SRE 根因分析专家，根据告警数据和拓扑关系给出精准的根因分析和可操作的修复建议。回答简洁专业，用中文。"},
         {"role": "user", "content": prompt},
     ]
-    result = call_llm(provider, messages, timeout_override=60)
+    result = call_llm(provider, messages, timeout_override=120)
     if "error" in result:
         return JSONResponse({"ok": False, "error": f"AI 调用失败: {result['error']}"}, status_code=502)
     try:
@@ -318,7 +329,12 @@ def api_incident_ai_rca(incident_id: int, db: Session = Depends(get_db)):
     except (KeyError, IndexError, TypeError):
         content = str(result)
 
-    return JSONResponse({"ok": True, "analysis": content})
+    # 缓存分析结果到故障单，避免重复消耗 LLM
+    inc_row.ai_rca_result = content
+    inc_row.ai_rca_at = datetime.now()
+    db.commit()
+
+    return {"ok": True, "analysis": content, "cached": False}
 
 
 # ─── HTML 路由（fallback）───

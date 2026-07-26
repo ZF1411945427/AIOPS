@@ -5,6 +5,17 @@
       <p>支持 3σ / EWMA / STL / MAD / Prophet / LSTM / Transformer 算法 · 共 {{ total }} 个配置</p>
     </div>
 
+    <div class="compare-banner">
+      <span class="compare-banner-icon">💡</span>
+      <div class="compare-banner-body">
+        <div class="compare-banner-title">本页是「动态基线异常检测」—— 根据历史数据自动算正常区间，偏离即报</div>
+        <div class="compare-banner-desc">
+          适合"不知道正常值多少，但行为反常就要报"这种未知异常场景。如果知道明确的危险线（如磁盘>90%），请用
+          <span class="compare-banner-link" @click="goRules">告警规则 →</span>
+        </div>
+      </div>
+    </div>
+
     <div class="toolbar">
       <button class="btn btn-primary" @click="openCreate">+ 新增检测配置</button>
       <button class="btn" @click="loadConfigs">刷新</button>
@@ -201,11 +212,22 @@ onMounted(() => {
   loadConfigs()
   loadMetrics()
 })
+
+function goRules() {
+  if (window._navigateTo) window._navigateTo('alert-rules')
+}
 </script>
 
 <style scoped>
 .anomaly-page { padding: 4px; }
 .page-header { margin-bottom: 16px; }
+.compare-banner { display: flex; gap: 10px; align-items: flex-start; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.18); border-left: 3px solid var(--accent, #6366f1); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }
+.compare-banner-icon { font-size: 1.1rem; line-height: 1.4; }
+.compare-banner-body { flex: 1; }
+.compare-banner-title { font-size: 0.85rem; font-weight: 600; color: var(--text, #1e293b); margin-bottom: 2px; }
+.compare-banner-desc { font-size: 0.78rem; color: var(--text-secondary, #64748b); line-height: 1.5; }
+.compare-banner-link { color: var(--accent, #6366f1); cursor: pointer; font-weight: 600; }
+.compare-banner-link:hover { text-decoration: underline; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text, #1e293b); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary, #64748b); font-size: 0.85rem; margin: 0; }
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }

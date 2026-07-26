@@ -7,7 +7,7 @@ from typing import Optional
 import paramiko
 from sqlalchemy.orm import Session
 
-from app.models import AutoRemediation, RemediationLog, Alert, AlertRule, Asset
+from app.models import AutoRemediation, RemediationLog, Alert, AlertRule, Asset, PendingAction, AIProvider, RemediationWorkflow, DataSource, DiagnosisReport, KbDocument
 
 
 def list_remediations(db: Session):
@@ -15,8 +15,11 @@ def list_remediations(db: Session):
 
 
 def create_remediation(db: Session, data: dict):
-    if isinstance(data.get("params"), dict):
-        data["params"] = json.dumps(data["params"], ensure_ascii=False)
+    params_val = data.pop("params", {})
+    if isinstance(params_val, dict):
+        data["remediation_params"] = json.dumps(params_val, ensure_ascii=False)
+    else:
+        data["remediation_params"] = str(params_val) if params_val else ""
     r = AutoRemediation(**data)
     db.add(r)
     db.commit()
@@ -45,11 +48,100 @@ def get_remediation_logs_paged(db: Session, page: int = 1, per_page: int = 20):
 ACTIONS = {
     "restart": {"label": "重启服务", "template": "systemctl restart {service}"},
     "clean": {"label": "清理磁盘", "template": "清理 {target} 磁盘空间"},
-    "scale": {"label": "scale", "template": "adjust {target} replicas to {count}"},
+    "scale": {"label": "扩缩容", "template": "adjust {target} replicas to {count}"},
     "script": {"label": "执行脚本", "template": "bash {script_path}"},
     "run_command": {"label": "执行命令", "template": "{command}"},
     "notify": {"label": "发送通知", "template": "notify {channel} {message}"},
 }
+
+
+# ── 确定性命令风险分类器（不依赖 LLM 自评，根据命令语义硬判定）──
+# 只读命令白名单（首词匹配）：这些命令默认只读不修改系统状态
+_READONLY_CMD_PREFIXES = {
+    "ps", "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg",
+    "df", "free", "top", "htop", "uptime", "ls", "stat", "file", "ll",
+    "netstat", "ss", "who", "w", "last", "iostat", "vmstat", "sar", "mpstat",
+    "dmesg", "date", "hostname", "uname", "id", "env", "pwd", "which", "whereis",
+    "ping", "traceroute", "dig", "nslookup", "host",
+    "lscpu", "lsmem", "lsblk", "lspci", "lsusb", "lsof",
+}
+# 变更关键词（命令中含这些词则判定为变更操作，需审批）
+_MUTATING_KEYWORDS = {
+    "restart", "start", "stop", "reload", "kill", "killall", "pkill",
+    "rm ", "rmdir", "delete", "scale", "vacuum", "rotate",
+    "mkfs", "dd ", "shutdown", "reboot", "halt", "poweroff",
+    "chmod", "chown", "mv ", "cp ", "scp ", "rsync",
+    "tee ", " > ", " >>",
+}
+
+
+def _classify_command_risk(action_type: str, command: str) -> tuple:
+    """确定性命令风险分类器 — 根据 action_type + 命令语义硬判定风险等级与是否可自动执行.
+
+    返回 (risk_level, auto_exec):
+      - risk_level: low/medium/high
+      - auto_exec: True=只读诊断可自动执行(免审批), False=变更操作需人工审批
+
+    设计原则（fail-safe）：
+    - 只读命令（ps/df/free/journalctl查看/kubectl get 等）→ low，自动执行
+    - 变更命令（restart/kill/clean/scale/delete/vacuum 等）→ high，需审批
+    - 未知命令 → medium，需审批（宁可多审不漏）
+    - notify → low，自动执行
+    """
+    if action_type == "notify":
+        return ("low", True)
+    if action_type in ("restart", "clean", "scale", "script"):
+        return ("high", False)
+    if action_type == "workflow":
+        return ("medium", False)
+
+    # run_command: 解析命令内容判定
+    cmd = (command or "").strip()
+    if not cmd:
+        return ("medium", False)
+    cmd_lower = cmd.lower()
+
+    # 含变更关键词 → 变更操作
+    for kw in _MUTATING_KEYWORDS:
+        if kw in cmd_lower:
+            return ("high", False)
+
+    first_word = cmd.split()[0].lower() if cmd.split() else ""
+
+    # kubectl 只读子命令 vs 变更子命令
+    if first_word == "kubectl":
+        parts = cmd.split()
+        if len(parts) > 1 and parts[1] in ("get", "describe", "logs", "top", "explain", "version", "cluster-info", "api-resources", "api-versions", "nodes", "events"):
+            return ("low", True)
+        return ("high", False)
+    # docker 只读子命令 vs 变更子命令
+    if first_word == "docker":
+        parts = cmd.split()
+        if len(parts) > 1 and parts[1] in ("ps", "stats", "logs", "inspect", "images", "version", "info", "top", "port", "history", "diff"):
+            return ("low", True)
+        return ("high", False)
+    # systemctl status/is-active 只读 vs restart/stop 变更
+    if first_word == "systemctl" or (first_word == "sudo" and len(cmd.split()) > 1 and cmd.split()[1] == "systemctl"):
+        parts = cmd.split()
+        sub = parts[2] if parts[0] == "sudo" else (parts[1] if len(parts) > 1 else "")
+        if sub in ("status", "is-active", "is-enabled", "list-units", "list-unit-files", "show", "cat"):
+            return ("low", True)
+        return ("high", False)
+    # journalctl 查看（无 --vacuum/--rotate）只读
+    if first_word == "journalctl":
+        if "vacuum" in cmd_lower or "rotate" in cmd_lower:
+            return ("high", False)
+        return ("low", True)
+    # find: 含 -delete/-exec 变更，否则只读
+    if first_word == "find":
+        if "-delete" in cmd_lower or "-exec" in cmd_lower:
+            return ("high", False)
+        return ("low", True)
+    # 白名单首词 → 只读
+    if first_word in _READONLY_CMD_PREFIXES:
+        return ("low", True)
+    # 未知命令 → fail-safe 需审批
+    return ("medium", False)
 
 
 # 危险命令黑名单：阻止破坏性命令执行（不依赖 LLM 自律，入口硬拦截）
@@ -69,6 +161,244 @@ _DANGEROUS_CMD_PATTERNS = [
     r"\bwget\b[^|]*\|\s*(?:bash|sh)",  # wget ... | bash 远程脚本执行
 ]
 _DANGEROUS_CMD_RE = re.compile("|".join(_DANGEROUS_CMD_PATTERNS), re.IGNORECASE)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 诊断命令包 —— 按告警指标类型预定义只读诊断命令集（免审批自动执行）
+# 设计原则：只读、快执行（<10s）、输出精简、覆盖关键诊断维度
+# ══════════════════════════════════════════════════════════════════════
+DIAGNOSIS_COMMAND_PACKS = {
+    "cpu_usage": [
+        {"cmd": "top -bn1 | head -20",              "desc": "系统负载概览", "timeout": 10},
+        {"cmd": "ps aux --sort=-%cpu | head -10",    "desc": "CPU占用TOP10进程", "timeout": 10},
+        {"cmd": "vmstat 1 3",                        "desc": "CPU详细统计(3次采样)", "timeout": 10},
+        {"cmd": "uptime",                            "desc": "系统运行时间与负载", "timeout": 5},
+    ],
+    "memory_usage": [
+        {"cmd": "free -m",                           "desc": "内存使用概览", "timeout": 5},
+        {"cmd": "ps aux --sort=-%mem | head -10",    "desc": "内存占用TOP10进程", "timeout": 10},
+        {"cmd": "cat /proc/meminfo | head -20",      "desc": "内存详情", "timeout": 5},
+        {"cmd": "uptime",                            "desc": "系统运行时间与负载", "timeout": 5},
+    ],
+    "disk_usage": [
+        {"cmd": "df -h",                                              "desc": "磁盘使用概览", "timeout": 5},
+        {"cmd": "du -sh /var/log/* 2>/dev/null | sort -rh | head -10","desc": "日志目录大小TOP10", "timeout": 10},
+        {"cmd": "find / -type f -size +100M 2>/dev/null | head -20",  "desc": "大文件排查(>100MB)", "timeout": 15},
+        {"cmd": "lsblk",                                              "desc": "块设备信息", "timeout": 5},
+    ],
+    "k8s_pod_crash": [
+        {"cmd": "kubectl describe pod {pod_name} -n {namespace}",         "desc": "Pod详情(事件/状态)", "timeout": 15},
+        {"cmd": "kubectl logs {pod_name} -n {namespace} --tail=50",      "desc": "Pod日志最近50行", "timeout": 15},
+        {"cmd": "kubectl top pod {pod_name} -n {namespace} 2>/dev/null", "desc": "Pod资源使用", "timeout": 10},
+    ],
+    "docker_container": [
+        {"cmd": "docker stats {container_name} --no-stream",   "desc": "容器资源使用", "timeout": 10},
+        {"cmd": "docker logs {container_name} --tail=50",       "desc": "容器日志最近50行", "timeout": 15},
+        {"cmd": "docker inspect {container_name} --format='{{.State.Status}} {{.State.OOMKilled}} {{.RestartCount}}'", "desc": "容器状态/重启次数", "timeout": 10},
+    ],
+    "_default": [
+        {"cmd": "uptime",     "desc": "系统运行时间与负载", "timeout": 5},
+        {"cmd": "df -h",      "desc": "磁盘使用概览", "timeout": 5},
+        {"cmd": "free -m",    "desc": "内存使用概览", "timeout": 5},
+        {"cmd": "ps aux --sort=-%cpu | head -5", "desc": "CPU TOP5", "timeout": 10},
+    ],
+}
+
+# 指标名 → 命令包 key 的模糊匹配规则（metric_name 包含关键词即匹配）
+_DIAGNOSIS_METRIC_KEYWORDS = {
+    "cpu": "cpu_usage",
+    "load": "cpu_usage",
+    "memory": "memory_usage",
+    "mem": "memory_usage",
+    "disk": "disk_usage",
+    "storage": "disk_usage",
+    "pod_crash": "k8s_pod_crash",
+    "oom": "k8s_pod_crash",
+    "container": "docker_container",
+    "docker": "docker_container",
+}
+
+
+def _match_diagnosis_pack(metric_name: str) -> str:
+    """根据指标名匹配诊断命令包 key."""
+    mn = (metric_name or "").lower()
+    for keyword, pack_key in _DIAGNOSIS_METRIC_KEYWORDS.items():
+        if keyword in mn:
+            return pack_key
+    return "_default"
+
+
+def _fill_template(cmd: str, asset: "Asset | None", channel: str) -> str:
+    """替换诊断命令中的占位符（{pod_name}, {namespace}, {container_name} 等）."""
+    if not asset:
+        return cmd
+    if channel == "k8s":
+        meta = _parse_k8s_meta(asset)
+        cmd = cmd.replace("{pod_name}", meta.get("name", ""))
+        cmd = cmd.replace("{namespace}", meta.get("namespace", "default"))
+        cmd = cmd.replace("{cluster}", meta.get("cluster", ""))
+    elif channel == "docker":
+        container_name = (getattr(asset, "name", "") or "").strip()
+        cmd = cmd.replace("{container_name}", container_name)
+    return cmd
+
+
+def run_diagnosis(db: Session, alert_id: int, asset_id: int = None, metric_name: str = "", force: bool = False) -> dict:
+    """执行自动诊断：按告警类型跑只读命令包，存入 diagnosis_reports 表.
+
+    返回 {"ok": True/False, "report_id": int, "commands": [...]}
+    - force=True 时忽略已有报告直接重新诊断
+    - 命令全部只读，免审批自动执行
+    """
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        return {"ok": False, "error": "告警不存在"}
+
+    aid = asset_id or alert.asset_id
+    mn = metric_name or alert.metric_name or ""
+    asset = db.query(Asset).filter(Asset.id == aid).first() if aid else None
+
+    # 去重：同 alert 已有 completed 诊断报告则跳过（force=True 时跳过）
+    if not force:
+        existing = db.query(DiagnosisReport).filter(
+            DiagnosisReport.alert_id == alert_id,
+            DiagnosisReport.status == DiagnosisReport.STATUS_COMPLETED,
+        ).first()
+        if existing:
+            return {"ok": True, "report_id": existing.id, "cached": True,
+                    "commands": json.loads(existing.commands_run) if existing.commands_run else []}
+
+    # 创建报告记录（状态 running）
+    report = DiagnosisReport(
+        alert_id=alert_id,
+        asset_id=aid,
+        metric_name=mn,
+        status=DiagnosisReport.STATUS_RUNNING,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+
+    # 匹配诊断命令包
+    pack_key = _match_diagnosis_pack(mn)
+    pack = DIAGNOSIS_COMMAND_PACKS.get(pack_key, DIAGNOSIS_COMMAND_PACKS["_default"])
+
+    # 确定执行通道
+    channel = _ci_channel(asset) if asset else "ssh"
+    host_asset = asset  # SSH 通道直接用资产本身
+
+    # Docker 通道需要找宿主机（容器资产的 parent_id 指向宿主机）
+    if channel == "docker" and asset:
+        parent_id = getattr(asset, "parent_id", None)
+        if parent_id:
+            host_asset = db.query(Asset).filter(Asset.id == parent_id).first() or asset
+
+    commands_run = []
+    raw_parts = []
+
+    # ── 复用同一 SSH 连接执行所有诊断命令（避免并发连接触发 MaxStartups 限流）──
+    _shared_ssh = None
+    if asset and channel in ("ssh", "docker") and host_asset:
+        try:
+            _shared_ssh = _ssh_connect(host_asset, timeout=15)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"诊断命令共享SSH连接失败: {e}")
+
+    for item in pack:
+        cmd_template = item["cmd"]
+        desc = item.get("desc", "")
+        cmd_timeout = item.get("timeout", 15)
+
+        # 填充占位符
+        cmd = _fill_template(cmd_template, asset, channel)
+
+        # 执行命令
+        t0 = datetime.now()
+        success, output = False, "未找到目标资产"
+        if asset and channel in ("ssh", "docker"):
+            if _shared_ssh:
+                # 复用共享连接
+                try:
+                    stdin, stdout, stderr = _shared_ssh.exec_command(cmd, timeout=cmd_timeout)
+                    out = stdout.read().decode(errors="ignore").strip()
+                    err = stderr.read().decode(errors="ignore").strip()
+                    code = stdout.channel.recv_exit_status()
+                    output = "\n".join(s for s in [out, err] if s) or f"exit_code={code}"
+                    success = (code == 0)
+                except Exception as e:
+                    output = f"远程命令执行异常: {e}"
+                    success = False
+                    # 连接断了，尝试重连一次
+                    try:
+                        _shared_ssh = _ssh_connect(host_asset, timeout=15)
+                        stdin, stdout, stderr = _shared_ssh.exec_command(cmd, timeout=cmd_timeout)
+                        out = stdout.read().decode(errors="ignore").strip()
+                        err = stderr.read().decode(errors="ignore").strip()
+                        code = stdout.channel.recv_exit_status()
+                        output = "\n".join(s for s in [out, err] if s) or f"exit_code={code}"
+                        success = (code == 0)
+                    except Exception:
+                        pass
+            elif host_asset:
+                success, output = _remote_exec(host_asset, cmd, timeout=cmd_timeout)
+        elif asset and channel == "k8s":
+            success, output = _remote_exec(asset, cmd, timeout=cmd_timeout)
+        elif asset:
+            success, output = _remote_exec(asset, cmd, timeout=cmd_timeout)
+
+        duration_ms = int((datetime.now() - t0).total_seconds() * 1000)
+
+        cmd_result = {
+            "cmd": cmd,
+            "desc": desc,
+            "output": output[:2000] if output else "",
+            "duration_ms": duration_ms,
+            "exit_code": 0 if success else -1,
+        }
+        commands_run.append(cmd_result)
+        raw_parts.append(f"=== {desc} ===\n$ {cmd}\n{output[:2000]}\n")
+
+    # 关闭共享连接
+    if _shared_ssh:
+        try:
+            _shared_ssh.close()
+        except Exception:
+            pass
+
+    # 更新报告状态
+    report.commands_run = json.dumps(commands_run, ensure_ascii=False)
+    report.raw_output = "\n".join(raw_parts)[:8000]
+    report.status = DiagnosisReport.STATUS_COMPLETED
+    report.finished_at = datetime.now()
+    db.commit()
+
+    return {
+        "ok": True,
+        "report_id": report.id,
+        "cached": False,
+        "commands": commands_run,
+    }
+
+
+def get_diagnosis_report(db: Session, report_id: int) -> dict:
+    """获取诊断报告详情."""
+    report = db.query(DiagnosisReport).filter(DiagnosisReport.id == report_id).first()
+    if not report:
+        return {"ok": False, "error": "诊断报告不存在"}
+    return {
+        "ok": True,
+        "id": report.id,
+        "alert_id": report.alert_id,
+        "asset_id": report.asset_id,
+        "metric_name": report.metric_name or "",
+        "commands_run": json.loads(report.commands_run) if report.commands_run else [],
+        "raw_output": report.raw_output or "",
+        "summary": report.summary or "",
+        "status": report.status or "",
+        "created_at": report.created_at.strftime("%Y-%m-%d %H:%M:%S") if report.created_at else "",
+        "finished_at": report.finished_at.strftime("%Y-%m-%d %H:%M:%S") if report.finished_at else "",
+    }
 
 
 def _check_dangerous_command(command: str) -> Optional[str]:
@@ -110,78 +440,297 @@ def _ssh_connect(asset: "Asset", timeout: int = 10) -> "paramiko.SSHClient":
     return ssh
 
 
-def _remote_exec(asset: Asset, command: str, timeout: int = 30) -> tuple:
+def _remote_exec(asset: Asset, command: str, timeout: int = 30, retries: int = 2) -> tuple:
     """在远程资产上执行单条命令，返回 (success, output).
 
     success 由 returncode==0 判定；output 合并 stdout+stderr 便于排错。
     SSH 连接失败、命令超时均返回 (False, 错误描述)，不抛异常给上层，
     由调用方决定如何包装返回（raise 或 return）。
+    retries: SSH banner 失败时的重试次数（默认 2 次，应对 MaxStartups 限流）。
     """
-    try:
-        ssh = _ssh_connect(asset, timeout=timeout)
-    except Exception as e:
-        return (False, f"SSH 连接失败: {e}")
-    try:
-        stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
-        out = stdout.read().decode(errors="ignore").strip()
-        err = stderr.read().decode(errors="ignore").strip()
-        code = stdout.channel.recv_exit_status()
-        output = "\n".join(s for s in [out, err] if s)
-        return (code == 0, output or f"exit_code={code}")
-    except Exception as e:
-        return (False, f"远程命令执行异常: {e}")
-    finally:
-        ssh.close()
+    last_error = ""
+    for attempt in range(retries + 1):
+        try:
+            ssh = _ssh_connect(asset, timeout=timeout)
+        except Exception as e:
+            last_error = str(e)
+            if attempt < retries and "banner" in last_error.lower():
+                import time
+                time.sleep(1 + attempt)
+                continue
+            return (False, f"SSH 连接失败: {e}")
+        try:
+            stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+            out = stdout.read().decode(errors="ignore").strip()
+            err = stderr.read().decode(errors="ignore").strip()
+            code = stdout.channel.recv_exit_status()
+            output = "\n".join(s for s in [out, err] if s)
+            return (code == 0, output or f"exit_code={code}")
+        except Exception as e:
+            last_error = str(e)
+            if attempt < retries and "banner" in last_error.lower():
+                import time
+                time.sleep(1 + attempt)
+                continue
+            return (False, f"远程命令执行异常: {e}")
+        finally:
+            ssh.close()
+    return (False, f"SSH 连接失败(重试{retries}次): {last_error}")
 
 
 # 动作类型别名映射：兼容种子数据生成的非标准名
 _ACTION_ALIASES = {
     "restart_service": "restart",
+    "restart_pod": "restart",
     "clean_disk": "clean",
     "scale_up": "scale",
     "scale_down": "scale",
     "execute_command": "run_command",
     "run_script": "script",
+    "notify_owner": "notify",
 }
 
+# ── 资产类型 → 执行通道分派（CI-Type-Aware Dispatch）──
+# 传统主机/中间件/数据库：走 SSH + systemctl（有 SSH 入口 + systemd）
+_SSH_CI_TYPES = {
+    "server", "virtual_machine", "vm", "cloud_host",
+    "database", "middleware",
+    "network_device", "switch", "router", "firewall", "load_balancer", "loadbalancer",
+    "storage_device", "storage",
+}
+# K8s 资源：走 K8s API（无 SSH 入口，无 systemd）
+_K8S_CI_TYPES = {
+    "kubernetes_cluster", "node",
+    "deployment", "statefulset", "daemonset", "pod", "job", "cronjob",
+    "service", "ingress", "configmap", "secret", "pvc", "pv", "hpa", "replicaset",
+    "namespace",
+}
+# Docker 容器：走 Docker CLI（通过宿主机 SSH 执行 docker 命令）
+_DOCKER_CI_TYPES = {"container"}
 
-def execute_action(action_type: str, params: dict, asset: Asset) -> tuple:
-    """在远程资产上执行修复动作 — 通过 SSH 远程执行，绝不触碰本机.
 
-    params 含业务参数（service/path/script 等）；asset 提供连接信息（ip/ssh 凭据）。
+def _ci_channel(asset: "Asset") -> str:
+    """根据资产 ci_type 判定执行通道：ssh / k8s / docker / unknown."""
+    ci = (getattr(asset, "ci_type", "") or "").strip().lower()
+    if ci in _K8S_CI_TYPES:
+        return "k8s"
+    if ci in _DOCKER_CI_TYPES:
+        return "docker"
+    if ci in _SSH_CI_TYPES:
+        return "ssh"
+    return "unknown"
+
+
+def _parse_k8s_meta(asset: "Asset") -> dict:
+    """从资产解析 K8s 元数据：cluster / namespace / name.
+
+    优先读 ci_attributes JSON；回退用 name 里的 namespace/name 前缀；最后用 asset.k8s_cluster。
+    """
+    meta = {"cluster": "", "namespace": "default", "name": ""}
+    # ci_attributes JSON
+    try:
+        raw = getattr(asset, "ci_attributes", "") or ""
+        attrs = json.loads(raw) if isinstance(raw, str) and raw else (raw if isinstance(raw, dict) else {})
+        if isinstance(attrs, dict):
+            meta["cluster"] = attrs.get("k8s_cluster") or attrs.get("cluster") or ""
+            meta["namespace"] = attrs.get("namespace") or "default"
+    except Exception:
+        pass
+    # k8s_cluster 列兜底
+    if not meta["cluster"]:
+        meta["cluster"] = getattr(asset, "k8s_cluster", "") or ""
+    # name 可能是 "namespace/name" 格式
+    name = getattr(asset, "name", "") or ""
+    if "/" in name:
+        parts = name.split("/", 1)
+        meta["namespace"] = parts[0] or meta["namespace"]
+        meta["name"] = parts[1]
+    else:
+        meta["name"] = name
+    return meta
+
+
+def _get_k8s_client_for_asset(db: Session, asset: "Asset"):
+    """根据资产的 cluster 名反查 DataSource(type=kubernetes) 建立 K8s client.
+
+    返回 (CoreV1Api, AppsV1Api) 或 (None, None)（找不到数据源时）。
+    复用 k8s_resources._get_k8s_client 的连接逻辑。
+    """
+    meta = _parse_k8s_meta(asset)
+    cluster_name = meta["cluster"]
+    ds = None
+    if cluster_name:
+        ds = db.query(DataSource).filter(
+            DataSource.type == "kubernetes", DataSource.name == cluster_name
+        ).first()
+    if not ds:
+        # 回退：取任意启用的 kubernetes 数据源
+        ds = db.query(DataSource).filter(
+            DataSource.type == "kubernetes", DataSource.enabled == True
+        ).first()
+    if not ds:
+        return None, None, "未找到 K8s 数据源（cluster=" + cluster_name + "）"
+    try:
+        from app.routers.k8s_resources import _get_k8s_client
+        core_v1, apps_v1, _ = _get_k8s_client(ds)
+        return core_v1, apps_v1, None
+    except Exception as e:
+        return None, None, f"K8s 连接失败: {e}"
+
+
+def _k8s_exec_restart(db: Session, asset: "Asset", params: dict) -> tuple:
+    """K8s 资源重启：deployment→rollout restart，pod→delete pod，其他→拒绝."""
+    meta = _parse_k8s_meta(asset)
+    ci = (getattr(asset, "ci_type", "") or "").lower()
+    core_v1, apps_v1, err = _get_k8s_client_for_asset(db, asset)
+    if err or not apps_v1:
+        return (False, err or "K8s AppsV1Api 初始化失败")
+    try:
+        if ci in ("deployment", "statefulset", "daemonset"):
+            # rollout restart：patch annotation 触发滚动重启
+            from datetime import datetime as _dt
+            apps_v1.patch_namespaced_deployment(
+                name=meta["name"], namespace=meta["namespace"],
+                body={"spec": {"template": {"metadata": {"annotations": {
+                    "kubectl.kubernetes.io/restartedAt": _dt.now().isoformat()}}}}},
+            )
+            return (True, f"K8s {ci} {meta['namespace']}/{meta['name']} rollout restart 已触发")
+        elif ci == "pod":
+            if not core_v1:
+                return (False, "K8s CoreV1Api 初始化失败")
+            core_v1.delete_namespaced_pod(name=meta["name"], namespace=meta["namespace"])
+            return (True, f"K8s pod {meta['namespace']}/{meta['name']} 已删除（将由控制器重建）")
+        else:
+            return (False, f"K8s 资源类型 {ci} 不支持 restart 动作")
+    except Exception as e:
+        return (False, f"K8s restart 失败: {e}")
+
+
+def _k8s_exec_scale(db: Session, asset: "Asset", params: dict) -> tuple:
+    """K8s 扩缩容：deployment/statefulset → patch scale."""
+    meta = _parse_k8s_meta(asset)
+    ci = (getattr(asset, "ci_type", "") or "").lower()
+    core_v1, apps_v1, err = _get_k8s_client_for_asset(db, asset)
+    if err or not apps_v1:
+        return (False, err or "K8s AppsV1Api 初始化失败")
+    if ci not in ("deployment", "statefulset"):
+        return (False, f"K8s 资源类型 {ci} 不支持 scale 动作（仅 deployment/statefulset）")
+    replicas = params.get("replicas") or params.get("count") or 2
+    try:
+        replicas = int(replicas)
+    except (TypeError, ValueError):
+        return (False, f"非法 replicas 值: {replicas}")
+    try:
+        apps_v1.patch_namespaced_deployment_scale(
+            name=meta["name"], namespace=meta["namespace"],
+            body={"spec": {"replicas": replicas}},
+        )
+        return (True, f"K8s {ci} {meta['namespace']}/{meta['name']} 已扩缩容至 {replicas} 副本")
+    except Exception as e:
+        return (False, f"K8s scale 失败: {e}")
+
+
+def _docker_exec_restart(db: Session, asset: "Asset", params: dict) -> tuple:
+    """Docker 容器重启：通过宿主机 SSH 执行 docker restart.
+
+    宿主机来源：asset.parent_id 指向的父资产（server/vm）；无父资产则拒绝。
+    """
+    parent_id = getattr(asset, "parent_id", None)
+    if not parent_id:
+        return (False, "Docker 容器未关联宿主机（parent_id 为空），无法通过 SSH 执行 docker restart")
+    from app.models import Asset as _Asset
+    host_asset = db.query(_Asset).filter(_Asset.id == parent_id).first()
+    if not host_asset:
+        return (False, f"宿主机资产 #{parent_id} 不存在")
+    container_name = params.get("container") or params.get("name") or getattr(asset, "name", "")
+    if not container_name:
+        return (False, "缺少容器名参数")
+    # 容器名防注入：只允许字母数字下划线-点
+    if not all(c.isalnum() or c in "-_." for c in container_name):
+        return (False, f"非法容器名: {container_name}")
+    command = f"docker restart {container_name}"
+    success, output = _remote_exec(host_asset, command, timeout=60)
+    if success:
+        return (True, f"Docker 容器 {container_name} 在宿主机 {host_asset.ip} 重启成功")
+    return (False, f"Docker 容器 {container_name} 重启失败: {output}")
+
+
+
+def execute_action(action_type: str, params: dict, asset: Asset, db: "Session | None" = None) -> tuple:
+    """在资产上执行修复动作 — 按 ci_type 分派执行通道（CI-Type-Aware Dispatch）.
+
+    通道分派：
+    - ssh（传统主机/中间件/数据库）: SSH + systemctl / find / bash
+    - k8s（deployment/pod/...）: K8s API（rollout restart / delete pod / patch scale）
+    - docker（container）: 通过宿主机 SSH 执行 docker restart
+    - unknown: 拒绝执行
+
+    params 含业务参数（service/path/script 等）；asset 提供连接信息。
+    db 仅 K8s/Docker 通道需要（用于反查 DataSource/父资产），SSH 通道可省略。
     返回 (success, message)。
     """
     # 别名自动转换
     action_type = _ACTION_ALIASES.get(action_type, action_type)
+    channel = _ci_channel(asset)
+
+    # notify 通道无关，所有类型通用
+    if action_type == "notify":
+        return (True, f"通知已发送: {getattr(asset, 'ip', '') or getattr(asset, 'name', '')}")
+
+    # ── restart 动作：按通道分派 ──
     if action_type == "restart":
-        # 远程重启服务：sudo systemctl restart {service}
-        service_name = params.get("service", "")
-        if not service_name:
-            return (False, "缺少参数: service")
-        # 服务名只允许字母数字下划线-点，防注入（systemctl 不接受 shell 元字符）
-        if not all(c.isalnum() or c in "-_." for c in service_name):
-            return (False, f"非法服务名: {service_name}")
-        command = f"sudo systemctl restart {service_name}"
-        success, output = _remote_exec(asset, command, timeout=30)
-        if success:
-            return (True, f"服务 {service_name} 在 {asset.ip} 重启成功")
-        return (False, f"服务 {service_name} 在 {asset.ip} 重启失败: {output}")
-    elif action_type == "clean":
-        # 远程清理磁盘：删除 7 天前的旧文件
-        clean_path = params.get("path", "/tmp")
-        # 路径白名单校验：防 rm -rf / 等危险路径
-        if not clean_path.startswith(("/", "/var", "/tmp", "/opt", "/home")):
-            return (False, f"非法清理路径: {clean_path}，仅允许 /tmp /var /opt /home 下路径")
-        command = f"find {clean_path} -type f -mtime +7 -delete"
+        if channel == "k8s":
+            if db is None:
+                return (False, "K8s restart 需要 db 参数（用于反查数据源）")
+            return _k8s_exec_restart(db, asset, params)
+        if channel == "docker":
+            if db is None:
+                return (False, "Docker restart 需要 db 参数（用于查宿主机）")
+            return _docker_exec_restart(db, asset, params)
+        if channel == "ssh":
+            service_name = params.get("service") or params.get("target", "")
+            if not service_name:
+                return (False, "缺少参数: service")
+            # 服务名只允许字母数字下划线-点，防注入（systemctl 不接受 shell 元字符）
+            if not all(c.isalnum() or c in "-_." for c in service_name):
+                return (False, f"非法服务名: {service_name}")
+            command = f"sudo systemctl restart {service_name}"
+            success, output = _remote_exec(asset, command, timeout=30)
+            if success:
+                return (True, f"服务 {service_name} 在 {asset.ip} 重启成功")
+            return (False, f"服务 {service_name} 在 {asset.ip} 重启失败: {output}")
+        return (False, f"资产 ci_type={getattr(asset, 'ci_type', '?')} 不在已知执行通道，拒绝 restart")
+
+    # ── scale 动作：仅 K8s 通道有效 ──
+    if action_type == "scale":
+        if channel == "k8s":
+            if db is None:
+                return (False, "K8s scale 需要 db 参数")
+            return _k8s_exec_scale(db, asset, params)
+        return (False, f"scale 动作仅支持 K8s 资源（deployment/statefulset），当前 ci_type={getattr(asset, 'ci_type', '?')} 不支持")
+
+    # ── clean 动作：仅 SSH 通道有效（K8s/Docker 无文件系统语义）──
+    if action_type == "clean":
+        if channel != "ssh":
+            return (False, f"clean 动作仅支持有文件系统的主机（SSH 通道），当前 ci_type={getattr(asset, 'ci_type', '?')} 不支持")
+        clean_path = params.get("path") or params.get("target", "/tmp")
+        ALLOWED_CLEAN_PREFIXES = ("/tmp", "/var/log", "/var/cache", "/opt", "/home")
+        clean_path = clean_path.rstrip("/")
+        if clean_path == "/":
+            return (False, "禁止清理根目录 /")
+        if not clean_path.startswith(ALLOWED_CLEAN_PREFIXES):
+            return (False, f"非法清理路径: {clean_path}，仅允许 /tmp /var/log /var/cache /opt /home 下路径")
+        command = f"find {clean_path} -type f -mtime +7 -delete 2>/dev/null"
         success, output = _remote_exec(asset, command, timeout=60)
         if success:
             return (True, f"清理 {asset.ip}:{clean_path} 完成")
         return (False, f"清理 {asset.ip}:{clean_path} 失败: {output}")
-    elif action_type == "scale":
-        return (False, "扩缩容需要 K8s 配置，未执行")
-    elif action_type == "script":
-        # 远程执行脚本
-        script_path = params.get("script", "")
+
+    # ── script 动作：仅 SSH 通道有效 ──
+    if action_type == "script":
+        if channel != "ssh":
+            return (False, f"script 动作仅支持 SSH 通道，当前 ci_type={getattr(asset, 'ci_type', '?')} 不支持")
+        script_path = params.get("script") or params.get("target", "")
         if not script_path:
             return (False, "未指定脚本路径")
         # 脚本路径防注入：只允许字母数字下划线-点/斜杠
@@ -192,9 +741,12 @@ def execute_action(action_type: str, params: dict, asset: Asset) -> tuple:
         if success:
             return (True, f"脚本 {script_path} 在 {asset.ip} 执行完成: {output[:500]}")
         return (False, f"脚本 {script_path} 在 {asset.ip} 执行失败: {output[:500]}")
-    elif action_type == "run_command":
-        # 远程执行任意命令（critical，危险命令黑名单拦截）
-        command = params.get("command", "")
+
+    # ── run_command 动作：仅 SSH 通道有效 ──
+    if action_type == "run_command":
+        if channel != "ssh":
+            return (False, f"run_command 动作仅支持 SSH 通道，当前 ci_type={getattr(asset, 'ci_type', '?')} 不支持")
+        command = params.get("command") or params.get("target", "")
         if not command:
             return (False, "缺少参数: command")
         # 命令长度限制：防超长命令攻击（正常诊断命令不超过 1000 字符）
@@ -208,65 +760,1113 @@ def execute_action(action_type: str, params: dict, asset: Asset) -> tuple:
         if success:
             return (True, f"命令在 {asset.ip} 执行完成: {output[:500]}")
         return (False, f"命令在 {asset.ip} 执行失败: {output[:500]}")
-    elif action_type == "notify":
-        return (True, f"通知已发送: {asset.ip}")
-    else:
-        return (False, f"未知操作类型: {action_type}")
+
+    return (False, f"未知操作类型: {action_type}")
 
 
 def check_and_remediate(db: Session):
+    """后台轮询：对触发中的告警生成待审批自愈动作（不直接执行）.
+
+    改造点（fail-safe 审批闸门）：
+    - 路径1（规则）：每条告警只匹配1条最优规则 → 生成1条 PendingAction(source=rule)
+    - 路径2（AI）：对触发告警自动调 LLM 分析 → 生成1条 PendingAction(source=ai)
+    - 每条告警最多产出 2 条方案（1规则 + 1AI），审批时人工择优执行，另一方案保留待手动取消
+    - 去重：同 alert 当天已有对应来源的 PendingAction 则跳过
+    """
     now = datetime.now()
-    remediations = db.query(AutoRemediation).filter(AutoRemediation.enabled == True).all()
-    logs = []
+    today_start = datetime(now.year, now.month, now.day)
+    alerts = db.query(Alert).filter(Alert.status == "triggered").order_by(
+        Alert.created_at.desc()
+    ).limit(20).all()
 
-    for rem in remediations:
-        q = db.query(Alert).filter(Alert.status == "triggered")
-        if rem.rule_id:
-            q = q.filter(Alert.rule_id == rem.rule_id)
-        alerts = q.order_by(Alert.created_at.desc()).limit(5).all()
+    # ── 路径1：每条告警只匹配1条最优规则 → 生成1条 PendingAction(source=rule) ──
+    for alert in alerts:
+        # 去重：同 alert 当天已有 source=rule 的 PendingAction 则跳过
+        has_rule_pa = False
+        for pa in db.query(PendingAction).filter(
+            PendingAction.alert_id == alert.id,
+            PendingAction.created_at >= today_start,
+        ).all():
+            try:
+                pl = json.loads(pa.action_payload) if pa.action_payload else {}
+                if pl.get("source") == "rule":
+                    has_rule_pa = True
+                    break
+            except Exception:
+                pass
+        if has_rule_pa:
+            continue
 
-        for alert in alerts:
-            recent = db.query(RemediationLog).filter(
-                RemediationLog.alert_id == alert.id,
-                RemediationLog.remediation_id == rem.id,
-                RemediationLog.created_at > now,
+        # 只取 rule_id 精确匹配的规则（不再用 rule_id=None 的通配规则匹配所有告警）
+        rem = None
+        if alert.rule_id:
+            rem = db.query(AutoRemediation).filter(
+                AutoRemediation.rule_id == alert.rule_id,
+                AutoRemediation.enabled == True,
             ).first()
-            if recent:
-                continue
+        if not rem:
+            continue
 
-            params = json.loads(rem.remediation_params) if rem.remediation_params else {}
-            target = params.get("target", f"asset_{alert.asset_id}")
-            # execute_action 现在要求 asset 对象；自动响应场景按 alert.asset_id 查资产
-            asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
-            if asset:
-                success, output = execute_action(rem.action_type, params, asset)
-            else:
-                success, output = (False, f"未找到资产 alert.asset_id={alert.asset_id}，无法远程执行")
+        params = json.loads(rem.remediation_params) if rem.remediation_params else {}
+        target = params.get("target", f"asset_{alert.asset_id}")
+        action_label = ACTIONS.get(rem.action_type, {}).get("label", rem.action_type)
+        title = f"规则自愈: {action_label} {target}"[:60]
+        reason = f"规则#{rem.id}({rem.name}) 匹配告警#{alert.id}，建议执行 {action_label}"
+        # 查关联资产，用于按 ci_type 生成对应通道的展示命令
+        rule_asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
+        payload = {
+            "source": "rule",
+            "remediation_id": rem.id,
+            "remediation_name": rem.name or "",
+            "action_type": rem.action_type,
+            "params": params,
+            "command": _build_rule_command(rem.action_type, params, rule_asset),
+        }
+        pa = PendingAction(
+            alert_id=alert.id,
+            title=title,
+            action_type=rem.action_type,
+            risk_level=_rule_risk_level(rem.action_type),
+            reason=reason,
+            status=PendingAction.STATUS_PENDING,
+            action_payload=json.dumps(payload, ensure_ascii=False),
+        )
+        db.add(pa)
+    db.commit()
 
-            log = RemediationLog(
-                remediation_id=rem.id,
-                alert_id=alert.id,
-                action_type=rem.action_type,
-                target=target,
-                is_success=success,
-                output=output,
-            )
-            db.add(log)
-            logs.append(log)
-            alert.status = "acknowledged"
-            alert.message += f" [已触发自动响应: {rem.action_type}]"
-
-    if logs:
-        db.commit()
-        for log in logs:
-            db.refresh(log)
+    # ── 路径2：先跑自动诊断 → 再调 AI 分析（带诊断证据）──
+    for alert in alerts:
+        # 去重：同 alert 当天已有 AI 来源的 PendingAction 则跳过诊断
+        exist_ai = False
+        for pa in db.query(PendingAction).filter(
+            PendingAction.alert_id == alert.id,
+            PendingAction.created_at >= today_start,
+        ).all():
+            try:
+                pl = json.loads(pa.action_payload) if pa.action_payload else {}
+                if pl.get("source") == "ai":
+                    exist_ai = True
+                    break
+            except Exception:
+                pass
+        if exist_ai:
+            continue
+        # 自动跑诊断命令（只读，免审批）
         try:
-            from app.services import remediation_effect_service
-            for log in logs:
-                remediation_effect_service.track_effect(log.id, db, delay_minutes=30)
+            run_diagnosis(db, alert.id, alert.asset_id, alert.metric_name or "")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"自动诊断失败 alert#{alert.id}: {e}")
+
+    try:
+        auto_ai_analyze_alerts(db, limit=1)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"auto_ai_analyze_alerts 失败: {e}")
+
+    return []
+
+
+def _build_rule_command(action_type: str, params: dict, asset: "Asset | None" = None) -> str:
+    """根据动作类型 + 资产类型构造可读命令字符串（用于审批展示，与执行层一致）.
+
+    展示-执行一致性（Display-Execution Parity）：展示的命令必须与 execute_action 实际执行的命令通道一致。
+    - SSH 通道（server/vm/...）: systemctl restart / find / bash
+    - K8s 通道（deployment/pod/...）: kubectl rollout restart / kubectl delete pod / kubectl scale
+    - Docker 通道（container）: docker restart
+    无 asset 时回退按 action_type 推断（向后兼容）。
+    """
+    channel = _ci_channel(asset) if asset else "ssh"
+    ci = (getattr(asset, "ci_type", "") or "").lower() if asset else ""
+    # K8s 元数据（仅 k8s 通道用）
+    meta = _parse_k8s_meta(asset) if asset and channel == "k8s" else {}
+
+    if action_type in ("restart", "restart_service"):
+        if channel == "k8s":
+            if ci in ("deployment", "statefulset", "daemonset"):
+                ns, nm = meta.get("namespace", "default"), meta.get("name", "")
+                if not nm:
+                    return f"kubectl rollout restart deployment ⚠缺deployment名 -n {ns}"
+                return f"kubectl rollout restart deployment {nm} -n {ns}"
+            if ci == "pod":
+                ns, nm = meta.get("namespace", "default"), meta.get("name", "")
+                if not nm:
+                    return f"kubectl delete pod ⚠缺pod名 -n {ns}"
+                return f"kubectl delete pod {nm} -n {ns}"
+            return f"K8s {ci} restart ⚠该资源类型不支持restart"
+        if channel == "docker":
+            cn = params.get("container") or params.get("name") or (getattr(asset, "name", "") if asset else "")
+            if not cn:
+                return "docker restart ⚠缺容器名"
+            return f"docker restart {cn}"
+        # ssh 通道
+        svc = params.get("service") or params.get("target", "")
+        if not svc:
+            return "systemctl restart ⚠缺service名"
+        return f"systemctl restart {svc}".strip()
+    if action_type == "restart_pod":
+        # 显式 restart_pod 动作：强制 K8s 语义
+        ns = params.get("namespace") or meta.get("namespace", "default")
+        label = params.get("label", "")
+        nm = params.get("name") or meta.get("name", "")
+        if nm:
+            return f"kubectl delete pod {nm} -n {ns}"
+        if not label:
+            return f"kubectl delete pod -n {ns} ⚠缺label或pod名"
+        return f"kubectl delete pod -n {ns} -l {label} --ignore-not-found".strip()
+    if action_type in ("clean", "clean_disk"):
+        if channel != "ssh":
+            return f"clean ⚠仅支持SSH通道主机，当前ci_type={ci or '?'}"
+        path = params.get("path") or params.get("target", "/tmp")
+        return f"find {path} -type f -mtime +7 -delete"
+    if action_type == "script":
+        if channel != "ssh":
+            return f"script ⚠仅支持SSH通道主机，当前ci_type={ci or '?'}"
+        sc = params.get("script") or params.get("target", "")
+        if not sc:
+            return "bash ⚠缺脚本路径"
+        return f"bash {sc}".strip()
+    if action_type == "run_command":
+        if channel != "ssh":
+            return f"run_command ⚠仅支持SSH通道主机，当前ci_type={ci or '?'}"
+        return params.get("command") or params.get("target", "") or "⚠缺命令"
+    if action_type in ("scale", "scale_up"):
+        if channel != "k8s":
+            return f"scale ⚠仅支持K8s资源，当前ci_type={ci or '?'}"
+        ns = meta.get("namespace", "default")
+        dep = params.get("deployment") or params.get("target", "") or meta.get("name", "")
+        replicas = params.get("replicas") or params.get("count", 2)
+        if not dep:
+            return f"kubectl scale deployment ⚠缺deployment名 --replicas={replicas} -n {ns}"
+        return f"kubectl scale deployment {dep} --replicas={replicas} -n {ns}".strip()
+    if action_type in ("notify", "notify_owner"):
+        ch = params.get("channel", "email")
+        tpl = params.get("template") or params.get("target", "alert")
+        return f"notify via {ch}: {tpl}"
+    return action_type
+
+
+def _rule_risk_level(action_type: str) -> str:
+    """规则动作默认风险等级（供审批参考）."""
+    if action_type in ("restart", "scale"):
+        return PendingAction.RISK_MEDIUM
+    if action_type in ("clean", "script", "run_command"):
+        return PendingAction.RISK_HIGH
+    if action_type == "notify":
+        return PendingAction.RISK_LOW
+    return PendingAction.RISK_MEDIUM
+
+
+def auto_ai_analyze_alerts(db: Session, limit: int = 1):
+    """对触发中的告警自动调 AI 分析，生成 PendingAction(source=ai).
+
+    限流：每轮最多分析 limit 条（默认 1，防 LLM token 爆炸 + 防后台任务超时）。
+    去重：同 alert 当天已有 source=ai 的 PendingAction 则跳过。
+    无可用 AI Provider 时静默跳过（不阻塞规则路径）。
+    """
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day)
+    alerts = db.query(Alert).filter(Alert.status == "triggered").order_by(
+        Alert.created_at.desc()
+    ).limit(20).all()
+
+    analyzed = 0
+    for alert in alerts:
+        if analyzed >= limit:
+            break
+        # 去重：同 alert 当天已有 AI 来源的 PendingAction
+        exist_ai = False
+        for pa in db.query(PendingAction).filter(
+            PendingAction.alert_id == alert.id,
+            PendingAction.created_at >= today_start,
+        ).all():
+            try:
+                pl = json.loads(pa.action_payload) if pa.action_payload else {}
+                if pl.get("source") == "ai":
+                    exist_ai = True
+                    break
+            except Exception:
+                pass
+        if exist_ai:
+            continue
+        # 调 AI 分析（内部已生成 PendingAction，source=ai）
+        try:
+            result = ai_self_heal_analyze(db, alert.id)
+            if result.get("ok"):
+                analyzed += 1
         except Exception:
             pass
-    return logs
 
 
+def get_triggered_alerts(db: Session, limit: int = 30):
+    """获取触发中的告警列表（供 AI 自愈工作台使用）."""
+    alerts = db.query(Alert).filter(Alert.status == "triggered").order_by(Alert.created_at.desc()).limit(limit).all()
+    result = []
+    for a in alerts:
+        asset_name = ""
+        if a.asset_id:
+            asset = db.query(Asset).filter(Asset.id == a.asset_id).first()
+            if asset:
+                asset_name = f"{asset.name}({asset.ip or ''})"
+        result.append({
+            "id": a.id,
+            "rule_id": a.rule_id,
+            "asset_id": a.asset_id,
+            "asset_name": asset_name,
+            "metric_name": a.metric_name or "",
+            "severity": a.severity or "info",
+            "message": a.message or "",
+            "actual_value": a.actual_value,
+            "threshold": a.threshold,
+            "created_at": a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "",
+            "status": a.status or "",
+        })
+    return result
+
+
+def ai_self_heal_analyze(db: Session, alert_id: int) -> dict:
+    """AI 自愈分析：分析告警根因 + 生成修复建议 + 创建待审批动作.
+
+    改造点：AI 分析时同时评估是否匹配已有自愈工作流（Playbook），
+    - 匹配则推荐执行该工作流（多步骤全自动），action_type='workflow'
+    - 不匹配则走单步动作（run_command/restart/clean/notify）
+    形成「已知场景走 Playbook，未知场景走 AI 单步」的分级自愈策略。
+    """
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        return {"ok": False, "error": "告警不存在"}
+
+    provider = db.query(AIProvider).filter(AIProvider.is_enabled == True).first()
+    if not provider:
+        return {"ok": False, "error": "未配置启用的 AI Provider"}
+
+    asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
+    # 构造资产类型感知的上下文（引导 AI 按通道给命令）
+    if asset:
+        ci = (asset.ci_type or "").lower()
+        channel = _ci_channel(asset)
+        channel_hint = {
+            "ssh": "传统主机/中间件（SSH+systemctl 通道）— restart 用 systemctl restart {服务名}",
+            "k8s": "K8s 资源（K8s API 通道）— deployment 用 kubectl rollout restart，pod 用 kubectl delete pod，scale 用 kubectl scale",
+            "docker": "Docker 容器（宿主机 SSH+docker 通道）— restart 用 docker restart {容器名}",
+            "unknown": "未知资产类型 — 请用 notify 通知人工处理",
+        }.get(channel, "")
+        meta = _parse_k8s_meta(asset) if channel == "k8s" else {}
+        k8s_meta_str = f"，namespace={meta.get('namespace','')}，cluster={meta.get('cluster','')}" if channel == "k8s" else ""
+        asset_info = f"资产: {asset.name}(ip={asset.ip}, ci_type={asset.ci_type}{k8s_meta_str})\n执行通道: {channel_hint}"
+    else:
+        asset_info = "未关联资产"
+
+    # ── 查询已启用的自愈工作流，供 AI 评估匹配 ──
+    workflows = db.query(RemediationWorkflow).filter(RemediationWorkflow.enabled == True).all()
+    wf_lines = []
+    wf_id_map = {}  # id -> name，用于校验 AI 返回的 workflow_id
+    for w in workflows:
+        try:
+            steps = json.loads(w.steps) if isinstance(w.steps, str) else (w.steps or [])
+            step_names = [s.get("action", str(s)) if isinstance(s, dict) else str(s) for s in steps]
+        except Exception:
+            step_names = []
+        wf_lines.append(f"  - 工作流ID={w.id} 名称={w.name} 步骤={step_names}")
+        wf_id_map[w.id] = w.name
+    workflow_catalog = "\n".join(wf_lines) if wf_lines else "  （无已配置工作流）"
+
+    system_prompt = """你是一名资深 SRE 运维专家。你的任务是根据告警信息和自动诊断结果，分析故障根因并生成修复方案。
+
+请严格输出 JSON，不要包含其他内容：
+{
+  "root_cause": "根因分析（详细，200字内，必须引用诊断输出中的具体数据）",
+  "impact": "影响评估（100字内）",
+  "diagnosis_reasoning": "推理链：从诊断证据→根因结论→修复建议的完整推理过程（300字内，逐条引用诊断命令的输出数据作为证据）",
+  "risk_level": "风险等级：low/medium/high/critical",
+  "recommended_workflow_id": null,
+  "action_type": "修复动作类型：workflow / run_command / restart / clean / notify",
+  "command": "具体的修复命令（当 action_type 非 workflow 时必填）",
+  "command_description": "方案要做什么的通俗说明（30字内）",
+  "command_explanation": "命令详细解释（面向非技术人员的审批人，100-200字）",
+  "step_params": {}
+}
+
+⚠️ 根因分析要求：
+- 必须引用诊断输出中的具体数据（如"ps aux 显示 java 进程 PID=12345 占 CPU 95%"）
+- 不能只说"CPU 过高"，要指出具体是什么进程/服务导致的
+- 如果诊断数据不足以确定根因，明确说明还需要什么信息
+
+⚠️ 推理链（diagnosis_reasoning）要求（这是审批人判断是否执行修复的关键依据）：
+- 格式：① 诊断发现 → ② 根因判断 → ③ 修复逻辑
+- 示例："① 诊断发现：ps aux 显示 nginx: worker 进程占用 CPU 95%（PID=5678），vmstat 显示 us=95 sy=3，系统负载 15.2（4核）。② 根因判断：nginx worker 进程异常占用 CPU，可能是请求量过大或存在死循环。③ 修复逻辑：重启 nginx 可以终止异常 worker 进程并重新 fork 新进程，恢复正常处理能力。"
+
+决策规则（按优先级）：
+1. 若已有工作流能覆盖该故障场景（步骤匹配且合理），设 recommended_workflow_id 为该工作流 ID，action_type="workflow"，command 可留空
+2. 若无匹配工作流，按单步动作决策：run_command（诊断/修复命令）/ restart（重启服务）/ clean（清理磁盘）/ notify（仅通知）
+3. recommended_workflow_id 必须是给定工作流列表中的真实 ID，不确定时填 null
+4. 禁止高危命令：rm -rf、reboot、shutdown、mkfs、dd
+
+⚠️ 关键要求（参数具体化 + 资产类型感知）：
+- 必须根据资产的 ci_type 和执行通道给出对应类型的命令，不同通道命令完全不同：
+  · 传统主机(server/vm/database/middleware) → restart 用 "systemctl restart {服务名}"
+  · K8s 资源(deployment/pod) → restart 用 "kubectl rollout restart deployment {name} -n {ns}" 或 "kubectl delete pod {name} -n {ns}"，scale 用 "kubectl scale deployment {name} --replicas=N -n {ns}"
+  · Docker 容器(container) → restart 用 "docker restart {容器名}"
+  · 未知类型 → 用 notify 通知人工处理，不要盲目执行
+- 推荐工作流时，必须根据根因分析在 step_params 中填入每个步骤的具体参数，不能留空让系统瞎猜。
+  例如 CPU 高告警定位到是 nginx 引起，workflow 步骤含 restart_service，则 step_params 应为：
+  {"restart_service": {"service": "nginx"}, "notify": {"channel": "email", "template": "alert"}}
+- 单步 restart 时 command 必须是完整可执行命令（如 "systemctl restart nginx" 或 "kubectl rollout restart deployment nginx -n prod"），不能只写服务名。
+- 服务名/资源名必须是真实存在的（如 nginx/mysql/redis 或 deployment 名），绝不能用 IP 地址或资产名当服务名。
+- K8s 资源若需 namespace，从资产信息的 namespace 字段获取。
+
+⚠️ 命令解释（command_explanation）要求（面向不懂命令行的审批人）：
+- 必须用通俗语言说明：① 这条命令会做什么操作 ② 操作会影响什么（会中断服务吗？会丢数据吗？） ③ 操作完成后预期效果
+- 示例："systemctl restart nginx 命令会重启 Nginx Web 服务器。重启期间（约 5-10 秒）所有 HTTP 请求会暂时无法连接，已建立的长连接会断开。重启后 Nginx 会重新加载配置并恢复服务，之前的请求日志不会丢失。"
+- 不能只说"重启服务"，必须说清楚影响范围和恢复预期"""
+
+    # ── 查找该告警的诊断报告，注入诊断证据到 prompt ──
+    diagnosis_section = ""
+    diagnosis_report_id = None
+    diag_report = db.query(DiagnosisReport).filter(
+        DiagnosisReport.alert_id == alert_id,
+        DiagnosisReport.status == DiagnosisReport.STATUS_COMPLETED,
+    ).order_by(DiagnosisReport.id.desc()).first()
+    if diag_report and diag_report.raw_output:
+        diagnosis_report_id = diag_report.id
+        # 截断 6000 字符防 token 爆炸，保留关键信息
+        diag_output = diag_report.raw_output[:6000]
+        diagnosis_section = f"""
+以下是对该告警自动执行的诊断命令及输出（只读命令，已自动执行）：
+══════════════════════════════════════
+{diag_output}
+══════════════════════════════════════
+
+⚠️ 请务必基于以上诊断结果分析根因，不要忽略诊断输出中的关键信息。
+如果诊断输出显示具体进程/服务名，在推荐修复命令时应引用这些真实信息。"""
+
+    # ── 查询该资产关联的部署知识文档，注入 AI prompt ──
+    deployment_section = ""
+    if asset and asset.id:
+        try:
+            deploy_docs = db.query(KbDocument).filter(
+                KbDocument.asset_id == asset.id,
+                KbDocument.status == "indexed",
+            ).order_by(KbDocument.id.desc()).limit(5).all()
+            if deploy_docs:
+                doc_parts = []
+                for dd in deploy_docs:
+                    title = dd.title or ""
+                    content = (dd.content or "")[:2000]
+                    doc_parts.append(f"【{title}】\n{content}")
+                deployment_section = f"""
+═══ 该资产的部署知识文档（供参考安装方式/服务名/配置路径）═══
+{"".join(doc_parts)}
+═══════════════════════════════════════════════════════════════
+
+⚠️ 请参考以上部署文档确定正确的服务名、安装方式（systemd/docker/手动部署）、配置路径等信息，避免给出错误的服务名或命令。"""
+        except Exception:
+            pass
+
+    user_prompt = f"""告警信息：
+- ID: {alert.id}
+- 指标: {alert.metric_name or '-'}
+- 级别: {alert.severity or '-'}
+- 消息: {alert.message or '-'}
+- 实际值: {alert.actual_value}
+- 阈值: {alert.threshold}
+- 时间: {alert.created_at or '-'}
+{asset_info}
+{diagnosis_section}
+{deployment_section}
+
+已有自愈工作流清单：
+{workflow_catalog}
+
+请分析并输出 JSON。若推荐工作流，recommended_workflow_id 必须是上述清单中的 ID。"""
+
+    from app.services.agent_service import call_llm
+    try:
+        resp = call_llm(provider, [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content:
+            return {"ok": False, "error": "AI 返回为空"}
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+        analysis = json.loads(content)
+
+        risk_level = analysis.get("risk_level", "medium")
+        if risk_level not in ("low", "medium", "high", "critical"):
+            risk_level = "medium"
+
+        # ── 解析 AI 推荐的工作流（校验 ID 真实存在）──
+        rec_wf_id_raw = analysis.get("recommended_workflow_id")
+        rec_wf_id = None
+        rec_wf_name = ""
+        if rec_wf_id_raw is not None:
+            try:
+                rec_wf_id = int(rec_wf_id_raw)
+            except (TypeError, ValueError):
+                rec_wf_id = None
+        if rec_wf_id is not None and rec_wf_id not in wf_id_map:
+            rec_wf_id = None  # AI 编造的 ID，回退到单步
+        if rec_wf_id is not None:
+            rec_wf_name = wf_id_map[rec_wf_id]
+
+        action_type_raw = analysis.get("action_type", "notify")
+        command = analysis.get("command", "")
+        command_desc = analysis.get("command_description", "")
+        command_explanation = analysis.get("command_explanation", "")
+
+        # ── 决定最终 action_type：推荐工作流优先，否则单步 ──
+        if rec_wf_id is not None and action_type_raw == "workflow":
+            action_type = "workflow"
+            # AI 给出的每步具体参数（如 {"restart_service": {"service": "nginx"}}），注入 payload 供执行时使用
+            step_params_ai = analysis.get("step_params") or {}
+            if not isinstance(step_params_ai, dict):
+                step_params_ai = {}
+            action_payload = {"workflow_id": rec_wf_id, "source": "ai", "step_params": step_params_ai, "diagnosis_report_id": diagnosis_report_id}
+            title = f"AI 自愈: 执行工作流 #{rec_wf_id} {rec_wf_name}"[:60]
+        else:
+            action_type = action_type_raw if action_type_raw in ("run_command", "restart", "clean", "notify") else "notify"
+            action_payload = {"command": command, "source": "ai", "diagnosis_report_id": diagnosis_report_id, "command_explanation": command_explanation}
+            if action_type == "restart":
+                action_payload = {"service": command.replace("systemctl restart ", "").strip(), "command": command, "source": "ai", "diagnosis_report_id": diagnosis_report_id, "command_explanation": command_explanation}
+            elif action_type == "clean":
+                action_payload = {"path": "/tmp", "command": command, "source": "ai", "diagnosis_report_id": diagnosis_report_id, "command_explanation": command_explanation}
+            title = f"AI 自愈: {command_desc or command}"[:60]
+
+        # ── 确定性风险分类（覆盖 AI 自评，不依赖 LLM）──
+        classified_risk, auto_exec = _classify_command_risk(action_type, command)
+        risk_level = classified_risk
+
+        # 详细根因 + 推理链（供审批人判断是否执行）
+        root_cause = analysis.get("root_cause", "")
+        diagnosis_reasoning = analysis.get("diagnosis_reasoning", "")
+        impact = analysis.get("impact", "")
+        reason = f"根因: {root_cause}"
+        if diagnosis_reasoning:
+            reason += f"\n\n推理链: {diagnosis_reasoning}"
+
+        # 推理链也存入 payload，供前端展示
+        action_payload["diagnosis_reasoning"] = diagnosis_reasoning
+        action_payload["root_cause"] = root_cause
+        action_payload["impact"] = impact
+
+        pending = PendingAction(
+            alert_id=alert.id,
+            title=title,
+            action_type=action_type,
+            risk_level=risk_level,
+            reason=reason[:1000],
+            status=PendingAction.STATUS_PENDING,
+            action_payload=json.dumps(action_payload, ensure_ascii=False),
+        )
+        db.add(pending)
+        db.commit()
+        db.refresh(pending)
+
+        # ── 只读诊断命令自动放行执行（免审批），变更命令保持 pending 等人工 ──
+        if auto_exec:
+            exec_result = _auto_execute_readonly(db, pending, asset, alert)
+            return {
+                "ok": True,
+                "auto_executed": True,
+                "analysis": {
+                    "root_cause": analysis.get("root_cause", ""),
+                    "impact": analysis.get("impact", ""),
+                    "risk_level": risk_level,
+                    "action_type": action_type,
+                    "command": command,
+                    "command_description": command_desc,
+                    "recommended_workflow_id": rec_wf_id,
+                    "recommended_workflow_name": rec_wf_name,
+                },
+                "pending_action_id": pending.id,
+                "pending_action_title": pending.title,
+                "exec_result": exec_result,
+            }
+
+        return {
+            "ok": True,
+            "auto_executed": False,
+            "analysis": {
+                "root_cause": analysis.get("root_cause", ""),
+                "impact": analysis.get("impact", ""),
+                "risk_level": risk_level,
+                "action_type": action_type,
+                "command": command,
+                "command_description": command_desc,
+                "recommended_workflow_id": rec_wf_id,
+                "recommended_workflow_name": rec_wf_name,
+            },
+            "pending_action_id": pending.id,
+            "pending_action_title": pending.title,
+            "diagnosis_report_id": diagnosis_report_id,
+        }
+    except Exception as e:
+        return {"ok": False, "error": f"AI 分析失败: {e}"}
+
+
+def _auto_execute_readonly(db: Session, pa: PendingAction, asset, alert) -> dict:
+    """只读诊断命令自动执行（免审批闸门），结果写入 pending + log.
+
+    与 confirm_ai_action 的区别：
+    - 不改变告警状态（告警仍 triggered，等真正的修复动作）
+    - 不设 confirmed_by（标记为 auto）
+    - 仍写 RemediationLog 便于审计
+    """
+    payload = {}
+    try:
+        payload = json.loads(pa.action_payload) if pa.action_payload else {}
+    except Exception:
+        pass
+
+    pa.status = PendingAction.STATUS_EXECUTING
+    db.commit()
+
+    success, output = False, "未找到目标资产"
+    if asset:
+        success, output = execute_action(pa.action_type, payload, asset, db)
+
+    pa.status = PendingAction.STATUS_EXECUTED if success else PendingAction.STATUS_FAILED
+    pa.result_payload = json.dumps({"output": output[:1000], "auto_executed": True}, ensure_ascii=False)
+    pa.confirmed_by = "auto"
+    pa.confirmed_at = datetime.now()
+    db.commit()
+
+    log = RemediationLog(
+        remediation_id=None,
+        alert_id=pa.alert_id,
+        action_type=pa.action_type,
+        target=asset.name if asset else "",
+        is_success=success,
+        output=f"[自动执行-只读诊断] {output[:400]}",
+    )
+    db.add(log)
+    db.commit()
+
+    return {"success": success, "output": output[:500]}
+
+
+def get_ai_pending_actions(db: Session, status: str = "all", limit: int = 50):
+    """获取待审批动作（含规则自愈 source=rule 与 AI 自愈 source=ai）."""
+    q = db.query(PendingAction).filter(
+        PendingAction.alert_id.isnot(None),
+        PendingAction.run_id.is_(None),
+    )
+    if status != "all":
+        q = q.filter(PendingAction.status == status)
+    items = q.order_by(PendingAction.id.desc()).limit(limit).all()
+    result = []
+    for pa in items:
+        alert_msg = ""
+        if pa.alert_id:
+            alert = db.query(Alert).filter(Alert.id == pa.alert_id).first()
+            if alert:
+                alert_msg = alert.message or ""
+        payload = {}
+        try:
+            payload = json.loads(pa.action_payload) if pa.action_payload else {}
+        except Exception:
+            pass
+        source = payload.get("source", "ai")
+        # 对 workflow 类型解析工作流步骤，供前端展示具体执行内容
+        workflow_steps = None
+        wf_name = ""
+        wf_id = payload.get("workflow_id") if pa.action_type == "workflow" else None
+        if wf_id is not None:
+            wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
+            if wf:
+                wf_name = wf.name or ""
+                # AI 给出的每步具体参数（如 {"restart_service": {"service": "nginx"}}）
+                ai_step_params = payload.get("step_params") or {}
+                if not isinstance(ai_step_params, dict):
+                    ai_step_params = {}
+                # 查关联资产，用于按 ci_type 生成对应通道的展示命令
+                wf_asset = None
+                if alert and alert.asset_id:
+                    wf_asset = db.query(Asset).filter(Asset.id == alert.asset_id).first()
+                try:
+                    steps = json.loads(wf.steps) if isinstance(wf.steps, str) else (wf.steps or [])
+                    workflow_steps = []
+                    for idx, s in enumerate(steps, 1):
+                        if isinstance(s, dict):
+                            s_action = s.get("action", "notify")
+                            s_name = s.get("step", "")
+                            s_params = {k: v for k, v in s.items() if k not in ("step", "action")}
+                            # 优先用 AI 给的该步参数（key 优先 action 名，回退 step 名）
+                            ai_p = ai_step_params.get(s_action) or ai_step_params.get(s_name)
+                            if isinstance(ai_p, dict) and ai_p:
+                                s_params = {**s_params, **ai_p}
+                            # 按 ci_type 生成对应通道的展示命令（含缺参警告，与执行层一致）
+                            real_cmd = _build_rule_command(s_action, s_params, wf_asset)
+                            workflow_steps.append(
+                                f"{idx}. {real_cmd}  ← {s_name}" if s_name else f"{idx}. {real_cmd}"
+                            )
+                        else:
+                            workflow_steps.append(f"{idx}. {s}")
+                except Exception:
+                    workflow_steps = None
+        # ── 查关联诊断报告（供前端展示诊断过程折叠面板）──
+        # 优先用 payload 中的 diagnosis_report_id；若无则按 alert_id 反查最新诊断报告
+        diagnosis_commands = []
+        diag_report_id = payload.get("diagnosis_report_id")
+        if diag_report_id:
+            try:
+                diag_report = db.query(DiagnosisReport).filter(DiagnosisReport.id == diag_report_id).first()
+                if diag_report and diag_report.commands_run:
+                    diagnosis_commands = json.loads(diag_report.commands_run)
+            except Exception:
+                pass
+        elif pa.alert_id:
+            try:
+                diag_report = db.query(DiagnosisReport).filter(
+                    DiagnosisReport.alert_id == pa.alert_id,
+                    DiagnosisReport.status == DiagnosisReport.STATUS_COMPLETED,
+                ).order_by(DiagnosisReport.id.desc()).first()
+                if diag_report and diag_report.commands_run:
+                    diagnosis_commands = json.loads(diag_report.commands_run)
+                    diag_report_id = diag_report.id
+            except Exception:
+                pass
+
+        result.append({
+            "id": pa.id,
+            "alert_id": pa.alert_id,
+            "alert_message": alert_msg[:80],
+            "title": pa.title or "",
+            "action_type": pa.action_type or "",
+            "risk_level": pa.risk_level or "low",
+            "reason": pa.reason or "",
+            "status": pa.status or "pending",
+            "command": payload.get("command", ""),
+            "command_explanation": payload.get("command_explanation", ""),
+            "workflow_id": wf_id,
+            "workflow_name": wf_name,
+            "workflow_steps": workflow_steps,
+            "source": source,
+            "remediation_id": payload.get("remediation_id") if source == "rule" else None,
+            "result_message": "",
+            "diagnosis_commands": diagnosis_commands,
+            "diagnosis_report_id": diag_report_id,
+            "root_cause": payload.get("root_cause", ""),
+            "diagnosis_reasoning": payload.get("diagnosis_reasoning", ""),
+            "impact": payload.get("impact", ""),
+            "created_at": pa.created_at.strftime("%Y-%m-%d %H:%M:%S") if pa.created_at else "",
+        })
+    return result
+
+
+def confirm_ai_action(db: Session, action_id: int, username: str = "admin") -> dict:
+    """确认 AI 自愈动作并执行.
+
+    支持两种动作类型：
+    - workflow: 执行 AI 推荐的多步骤自愈工作流（循环执行 steps，失败即停）
+    - 单步动作: run_command/restart/clean/notify（走 execute_action）
+    """
+    pa = db.query(PendingAction).filter(PendingAction.id == action_id).first()
+    if not pa:
+        return {"ok": False, "error": "动作不存在"}
+    if pa.status != PendingAction.STATUS_PENDING:
+        return {"ok": False, "error": f"动作状态不是待确认（当前: {pa.status}）"}
+
+    pa.status = PendingAction.STATUS_CONFIRMED
+    pa.confirmed_by = username
+    pa.confirmed_at = datetime.now()
+    db.commit()
+
+    payload = {}
+    try:
+        payload = json.loads(pa.action_payload) if pa.action_payload else {}
+    except Exception:
+        pass
+
+    alert = db.query(Alert).filter(Alert.id == pa.alert_id).first() if pa.alert_id else None
+    asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert and alert.asset_id else None
+
+    # ── workflow 类型：多步骤执行（复用 RemediationWorkflow 引擎）──
+    if pa.action_type == "workflow":
+        wf_id = payload.get("workflow_id")
+        wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first() if wf_id else None
+        if not wf:
+            pa.status = PendingAction.STATUS_FAILED
+            pa.result_payload = json.dumps({"output": f"工作流 #{wf_id} 不存在"}, ensure_ascii=False)
+            db.commit()
+            return {"ok": True, "success": False, "output": f"工作流 #{wf_id} 不存在"}
+        try:
+            steps = json.loads(wf.steps) if isinstance(wf.steps, str) else (wf.steps or [])
+        except Exception:
+            steps = []
+
+        step_outputs = []
+        all_success = True
+        target_name = asset.name if asset else f"asset_{alert.asset_id}" if alert else ""
+        # AI 给出的每步具体参数（如 {"restart_service": {"service": "nginx"}}）
+        ai_step_params = payload.get("step_params") or {}
+        if not isinstance(ai_step_params, dict):
+            ai_step_params = {}
+        for idx, step in enumerate(steps):
+            if isinstance(step, dict):
+                step_action = step.get("action", "notify")
+                step_params = {k: v for k, v in step.items() if k not in ("step", "action")}
+            else:
+                step_action = str(step)
+                step_params = {}
+            # 优先用 AI 给的该步参数（key 优先用 action 名，回退 step 名）
+            ai_p = ai_step_params.get(step_action) or ai_step_params.get(step.get("step", "")) if isinstance(step, dict) else None
+            if isinstance(ai_p, dict) and ai_p:
+                step_params = {**step_params, **ai_p}
+            # 直接调 execute_action（内部按 ci_type 通道分派 + 缺参判断，缺关键参数会返回 False）
+            if not asset:
+                s_success, s_output = False, f"未找到资产，无法执行步骤 {idx+1}"
+            else:
+                s_success, s_output = execute_action(step_action, step_params, asset, db)
+            step_outputs.append(f"[Step {idx+1}/{len(steps)} {step_action}] {'OK' if s_success else 'FAIL'}: {s_output[:200]}")
+            # 每步落 RemediationLog
+            log = RemediationLog(
+                remediation_id=wf.id,
+                alert_id=pa.alert_id,
+                action_type=step_action,
+                target=target_name,
+                is_success=s_success,
+                output=f"[Step {idx+1}/{len(steps)}] {s_output[:400]}",
+            )
+            db.add(log)
+            if not s_success:
+                all_success = False
+                break  # 失败即停，避免后续步骤雪崩
+        db.commit()
+        output = "\n".join(step_outputs)
+        pa.status = PendingAction.STATUS_EXECUTED if all_success else PendingAction.STATUS_FAILED
+        pa.result_payload = json.dumps({"output": output[:1000], "workflow_id": wf_id, "workflow_name": wf.name}, ensure_ascii=False)
+        db.commit()
+        if alert:
+            alert.status = "acknowledged"
+            alert.message += f" [AI 自愈执行工作流: {wf.name}]"
+            db.commit()
+        return {"ok": True, "success": all_success, "output": output[:500],
+                "workflow_id": wf_id, "workflow_name": wf.name}
+
+    # ── 单步动作 ──
+    success, output = False, "未找到目标资产"
+    # 规则来源(source=rule)的参数嵌套在 payload["params"]；AI 来源参数在 payload 顶层
+    source = payload.get("source", "ai")
+    exec_params = payload.get("params", payload) if source == "rule" else payload
+    remediation_id_for_log = payload.get("remediation_id") if source == "rule" else None
+    if asset:
+        success, output = execute_action(pa.action_type, exec_params, asset, db)
+
+    pa.status = PendingAction.STATUS_EXECUTED if success else PendingAction.STATUS_FAILED
+    pa.result_payload = json.dumps({"output": output[:1000]}, ensure_ascii=False)
+    db.commit()
+
+    if alert:
+        alert.status = "acknowledged"
+        alert.message += f" [自愈执行: {pa.action_type}]"
+        db.commit()
+
+    log = RemediationLog(
+        remediation_id=remediation_id_for_log,
+        alert_id=pa.alert_id,
+        action_type=pa.action_type,
+        target=asset.name if asset else "",
+        is_success=success,
+        output=output[:500],
+    )
+    db.add(log)
+    db.commit()
+
+    return {"ok": True, "success": success, "output": output[:500]}
+
+
+def cancel_ai_action(db: Session, action_id: int) -> dict:
+    """取消 AI 自愈动作."""
+    pa = db.query(PendingAction).filter(PendingAction.id == action_id).first()
+    if not pa:
+        return {"ok": False, "error": "动作不存在"}
+    if pa.status != PendingAction.STATUS_PENDING:
+        return {"ok": False, "error": f"动作状态不是待确认（当前: {pa.status}）"}
+    pa.status = PendingAction.STATUS_CANCELED
+    db.commit()
+    return {"ok": True}
+
+
+def reanalyze_with_failure_context(db: Session, failed_action_id: int) -> dict:
+    """基于失败经验重新分析，生成新修复方案.
+
+    保留原始诊断上下文，注入失败命令+错误输出，让 AI 换个思路。
+    """
+    pa = db.query(PendingAction).filter(PendingAction.id == failed_action_id).first()
+    if not pa:
+        return {"ok": False, "error": "动作不存在"}
+    if pa.status != PendingAction.STATUS_FAILED:
+        return {"ok": False, "error": f"只有失败的动作才能重新分析（当前: {pa.status}）"}
+
+    payload = {}
+    try:
+        payload = json.loads(pa.action_payload) if pa.action_payload else {}
+    except Exception:
+        pass
+
+    # 找关联的告警和资产
+    alert = db.query(Alert).filter(Alert.id == pa.alert_id).first() if pa.alert_id else None
+    if not alert:
+        return {"ok": False, "error": "关联告警不存在"}
+    asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
+
+    # 找原始诊断报告
+    diag_report = None
+    diag_report_id = payload.get("diagnosis_report_id")
+    if diag_report_id:
+        diag_report = db.query(DiagnosisReport).filter(DiagnosisReport.id == diag_report_id).first()
+    if not diag_report:
+        diag_report = db.query(DiagnosisReport).filter(
+            DiagnosisReport.alert_id == alert.id,
+            DiagnosisReport.status == DiagnosisReport.STATUS_COMPLETED,
+        ).order_by(DiagnosisReport.id.desc()).first()
+
+    # 读取原始诊断输出
+    diag_output = ""
+    if diag_report and diag_report.raw_output:
+        diag_output = diag_report.raw_output[:6000]
+
+    # 读取失败信息
+    failed_command = payload.get("command", "")
+    result_payload = {}
+    try:
+        result_payload = json.loads(pa.result_payload) if pa.result_payload else {}
+    except Exception:
+        pass
+    failed_output = result_payload.get("output", "")
+
+    # AI 配置
+    from app.models import AIProvider
+    provider = db.query(AIProvider).filter(AIProvider.enabled == True).first()
+    if not provider:
+        return {"ok": False, "error": "未配置 AI 提供商"}
+
+    # 构建资产信息
+    asset_info = ""
+    if asset:
+        ci_type = getattr(asset, 'ci_type', '') or ''
+        asset_info = f"- 资产: {asset.name} (ID={asset.id}, 类型={ci_type}"
+        # 收集扩展属性
+        try:
+            from app.models import CIAttribute
+            attrs = db.query(CIAttribute).filter(CIAttribute.asset_id == asset.id).all()
+            if attrs:
+                extra = ", ".join(f"{a.attr_key}={a.attr_value}" for a in attrs if a.attr_value)
+                asset_info += f", {extra}" if extra else ""
+        except Exception:
+            pass
+        asset_info += ")"
+
+    # 查询可用工作流
+    from app.models import RemediationWorkflow
+    wf_lines = []
+    wf_id_map = {}
+    for w in db.query(RemediationWorkflow).filter(RemediationWorkflow.enabled == True).all():
+        try:
+            steps = json.loads(w.steps) if isinstance(w.steps, str) else (w.steps or [])
+        except Exception:
+            steps = []
+        step_names = [s.get("step", s.get("action", "?")) if isinstance(s, dict) else str(s) for s in steps]
+        wf_lines.append(f"  ID={w.id} 名称={w.name} 步骤=[{', '.join(step_names)}]")
+        wf_id_map[w.id] = w.name
+    workflow_catalog = "\n".join(wf_lines) if wf_lines else "  （无已配置工作流）"
+
+    system_prompt = """你是一名资深 SRE 运维专家。之前的修复尝试失败了，现在需要你换一个思路。
+
+请严格输出 JSON，不要包含其他内容：
+{
+  "root_cause": "根因分析（可更新，200字内）",
+  "impact": "影响评估（100字内）",
+  "diagnosis_reasoning": "推理链：从失败经验→新判断→新修复方案（300字内）",
+  "risk_level": "风险等级：low/medium/high/critical",
+  "recommended_workflow_id": null,
+  "action_type": "修复动作类型：workflow / run_command / restart / clean / notify",
+  "command": "新的修复命令",
+  "command_description": "方案要做什么的通俗说明（30字内）",
+  "command_explanation": "命令详细解释（面向非技术人员的审批人，100-200字）",
+  "step_params": {}
+}
+
+⚠️ 失败分析要求：
+- 上一条命令执行失败，你必须分析失败原因（如：服务名不对、权限不够、安装方式不同等）
+- 根据失败原因调整方案，不能重复同样的错误
+- 如果是服务名问题，尝试用其他方式定位真实服务名（如 docker ps、systemctl list-units）
+- 如果是权限问题，建议通知人工处理
+- 如果是安装方式问题（如 Docker 安装而非 systemd），换用对应的命令
+
+⚠️ 推理链要求：
+- 格式：① 失败原因分析 → ② 新的修复思路 → ③ 为什么这个新方案能成功
+- 必须明确说明上一条命令为什么失败，以及新方案如何避免同样的问题
+
+决策规则（按优先级）：
+1. 若已有工作流能覆盖该场景，设 recommended_workflow_id，action_type="workflow"
+2. 否则按单步动作决策
+3. 禁止高危命令：rm -rf、reboot、shutdown、mkfs、dd
+
+⚠️ 命令解释（command_explanation）要求：
+- 用通俗语言说明：① 这条命令做什么 ② 影响什么 ③ 预期效果"""
+
+    # 构建 user_prompt
+    failure_section = f"""
+═══ 上一次修复尝试（已失败）═══
+命令: {failed_command}
+失败输出: {failed_output}
+═══════════════════════════════════
+
+⚠️ 请分析上一条命令为什么失败，并给出不同的修复方案。不要重复同样的错误。"""
+
+    diagnosis_section = ""
+    if diag_output:
+        diagnosis_section = f"""
+以下是对该告警自动执行的诊断命令及输出：
+═══════════════════════════════════════
+{diag_output}
+═══════════════════════════════════════"""
+
+    # ── 查询该资产关联的部署知识文档 ──
+    deployment_section = ""
+    if asset and asset.id:
+        try:
+            deploy_docs = db.query(KbDocument).filter(
+                KbDocument.asset_id == asset.id,
+                KbDocument.status == "indexed",
+            ).order_by(KbDocument.id.desc()).limit(5).all()
+            if deploy_docs:
+                doc_parts = []
+                for dd in deploy_docs:
+                    title = dd.title or ""
+                    content = (dd.content or "")[:2000]
+                    doc_parts.append(f"【{title}】\n{content}")
+                deployment_section = f"""
+═══ 该资产的部署知识文档 ═══
+{"".join(doc_parts)}
+═══════════════════════════════
+
+⚠️ 请参考以上部署文档确定正确的服务名、安装方式、配置路径，避免给出错误的命令。"""
+        except Exception:
+            pass
+
+    user_prompt = f"""告警信息：
+- ID: {alert.id}
+- 指标: {alert.metric_name or '-'}
+- 级别: {alert.severity or '-'}
+- 消息: {alert.message or '-'}
+- 实际值: {alert.actual_value}
+- 阈值: {alert.threshold}
+- 时间: {alert.created_at or '-'}
+{asset_info}
+{diagnosis_section}
+{deployment_section}
+{failure_section}
+
+已有自愈工作流清单：
+{workflow_catalog}
+
+请分析并输出 JSON。上次失败了，请换一个思路。"""
+
+    from app.services.agent_service import call_llm
+    try:
+        resp = call_llm(provider, [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+    except Exception as e:
+        return {"ok": False, "error": f"AI 调用失败: {e}"}
+
+    # 解析 JSON
+    import re
+    content = content.strip()
+    if "```json" in content:
+        content = content.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in content:
+        content = content.split("```", 1)[1].split("```", 1)[0].strip()
+    try:
+        analysis = json.loads(content)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]*\}', content)
+        if m:
+            analysis = json.loads(m.group())
+        else:
+            return {"ok": False, "error": f"AI 输出无法解析: {content[:200]}"}
+
+    # 提取结果
+    rec_wf_id = analysis.get("recommended_workflow_id")
+    if rec_wf_id is not None:
+        try:
+            rec_wf_id = int(rec_wf_id)
+        except (TypeError, ValueError):
+            rec_wf_id = None
+    if rec_wf_id is not None and rec_wf_id not in wf_id_map:
+        rec_wf_id = None
+    rec_wf_name = wf_id_map.get(rec_wf_id, "")
+
+    action_type_raw = analysis.get("action_type", "notify")
+    command = analysis.get("command", "")
+    command_desc = analysis.get("command_description", "")
+    command_explanation = analysis.get("command_explanation", "")
+
+    # 决定 action_type
+    if rec_wf_id is not None and action_type_raw == "workflow":
+        action_type = "workflow"
+        step_params_ai = analysis.get("step_params") or {}
+        if not isinstance(step_params_ai, dict):
+            step_params_ai = {}
+        new_payload = {"workflow_id": rec_wf_id, "source": "ai", "step_params": step_params_ai, "diagnosis_report_id": diag_report.id if diag_report else None}
+        title = f"AI 换思路: 执行工作流 #{rec_wf_id} {rec_wf_name}"[:60]
+    else:
+        action_type = action_type_raw if action_type_raw in ("run_command", "restart", "clean", "notify") else "notify"
+        new_payload = {"command": command, "source": "ai", "diagnosis_report_id": diag_report.id if diag_report else None, "command_explanation": command_explanation}
+        if action_type == "restart":
+            new_payload = {"service": command.replace("systemctl restart ", "").strip(), "command": command, "source": "ai", "diagnosis_report_id": diag_report.id if diag_report else None, "command_explanation": command_explanation}
+        elif action_type == "clean":
+            new_payload = {"path": "/tmp", "command": command, "source": "ai", "diagnosis_report_id": diag_report.id if diag_report else None, "command_explanation": command_explanation}
+        title = f"AI 换思路: {command_desc or command}"[:60]
+
+    # 风险分类
+    classified_risk, auto_exec = _classify_command_risk(action_type, command)
+
+    # 保留原始根因，追加失败经验
+    root_cause = analysis.get("root_cause", "")
+    diagnosis_reasoning = analysis.get("diagnosis_reasoning", "")
+    impact = analysis.get("impact", "")
+    reason = f"根因: {root_cause}"
+    if diagnosis_reasoning:
+        reason += f"\n\n推理链: {diagnosis_reasoning}"
+
+    new_payload["diagnosis_reasoning"] = diagnosis_reasoning
+    new_payload["root_cause"] = root_cause
+    new_payload["impact"] = impact
+
+    # 创建新的 PendingAction
+    new_pa = PendingAction(
+        alert_id=alert.id,
+        title=title,
+        action_type=action_type,
+        risk_level=classified_risk,
+        reason=reason[:1000],
+        status=PendingAction.STATUS_PENDING,
+        action_payload=json.dumps(new_payload, ensure_ascii=False),
+    )
+    db.add(new_pa)
+    db.commit()
+    db.refresh(new_pa)
+
+    return {
+        "ok": True,
+        "pending_action_id": new_pa.id,
+        "analysis": {
+            "root_cause": root_cause,
+            "impact": impact,
+            "risk_level": classified_risk,
+            "action_type": action_type,
+            "command": command,
+            "command_description": command_desc,
+        },
+    }
 

@@ -38,9 +38,10 @@ DB_TYPES = [
 ]
 
 # K8s 子资源不在 CMDB 台账中展示，由 K8sResourceListView 管理
+# namespace 由 K8s 同步创建供拓扑构建使用，但不在 CMDB 台账展示
 ASSET_EXCLUDE_CI_TYPES = {"deployment", "statefulset", "daemonset", "pod", "job",
                           "service", "ingress", "pvc", "configmap", "secret",
-                          "replicaset"}
+                          "replicaset", "namespace"}
 
 
 @router.get("/api/list")
@@ -51,7 +52,7 @@ def asset_api_list(
     page_size: int = 20,
     db: Session = Depends(get_db),
 ):
-    assets, total = asset_service.list_assets_paged(db, search, "", ci_type, page, page_size)
+    assets, total = asset_service.list_assets_paged(db, search, "", ci_type, page, page_size, exclude_types=ASSET_EXCLUDE_CI_TYPES)
     # 查询所有资产的最新生命周期状态
     all_lcs = db.query(AssetLifecycle).order_by(AssetLifecycle.asset_id, AssetLifecycle.created_at.desc()).all()
     lc_map = {}
@@ -230,6 +231,7 @@ def api_asset_create(payload: dict, db: Session = Depends(get_db)):
     ip = payload.get("ip") or ""
     status = payload.get("status") or "offline"
     probe_status = status
+    connection_result = None
     if ci_type == "kubernetes_cluster":
         probe_status = "online"
     elif ip and connection_type:
@@ -239,9 +241,6 @@ def api_asset_create(payload: dict, db: Session = Depends(get_db)):
             connection_result = result
         except Exception:
             probe_status = status
-            connection_result = None
-    else:
-        connection_result = None
 
     # 数据库资产强制权限检测，非 safe 附加风险警告
     risk_warning = None

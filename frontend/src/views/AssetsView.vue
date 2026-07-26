@@ -50,6 +50,7 @@
                 <a href="javascript:void(0)" class="btn btn-sm btn-lifecycle" @click="goLifecycle(a.id)">生命周期</a>
                 <button class="btn btn-sm btn-ai" @click="openAssistant(a.id)">💬 智能助手</button>
                 <button v-if="a.edge_agent_id" class="btn btn-sm btn-terminal" @click="openWebSSH(a)">🖥 终端</button>
+                <button class="btn btn-sm btn-deploy" @click="openDeployDocs(a)">📄 部署报告</button>
                 <a href="javascript:void(0)" class="btn btn-sm" @click="openEdit(a.id)">编辑</a>
                 <button class="btn btn-sm btn-danger" @click="deleteAsset(a.id, a.name)">删除</button>
               </td>
@@ -81,9 +82,12 @@
       </div>
     </div>
 
-    <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
+    <div v-if="showForm" class="modal-overlay">
       <div class="modal-box wide">
-        <h3>{{ formMode === 'create' ? '新增资产' : '编辑资产' }}</h3>
+        <div class="modal-header">
+          <h3>{{ formMode === 'create' ? '新增资产' : '编辑资产' }}</h3>
+          <button class="modal-close-btn" title="关闭" @click="closeForm">✕</button>
+        </div>
 
         <div class="form-section">
           <div class="section-title">基本信息</div>
@@ -323,6 +327,36 @@
         <div id="webssh-terminal" class="webssh-body"></div>
       </div>
     </div>
+
+    <!-- 部署报告抽屉 -->
+    <div v-if="deployDocAsset" class="modal-overlay" @click.self="deployDocAsset = null">
+      <div class="modal-box wide">
+        <div class="modal-header">
+          <h3>📄 部署报告 — {{ deployDocAsset.name }}</h3>
+          <button class="modal-close-btn" @click="deployDocAsset = null">✕</button>
+        </div>
+        <div class="deploy-docs-body">
+          <div class="deploy-upload-area">
+            <input type="file" ref="deployFileInput" accept=".md,.txt,.pdf,.docx" multiple style="display:none" @change="onDeployFileUpload">
+            <button class="btn btn-primary btn-sm" @click="$refs.deployFileInput.click()">+ 上传部署文档</button>
+            <button class="btn btn-sm" @click="createDeployDoc">+ 手动创建</button>
+          </div>
+          <div v-if="deployDocsLoading" class="loading-state">加载中...</div>
+          <div v-else-if="deployDocs.length === 0" class="empty-state" style="padding:24px;">暂无部署报告，上传文档让 AI 了解这台机器的部署情况</div>
+          <div v-else class="deploy-docs-list">
+            <div v-for="doc in deployDocs" :key="doc.id" class="deploy-doc-item">
+              <div class="deploy-doc-head">
+                <span class="deploy-doc-title">{{ doc.title }}</span>
+                <span class="badge" :class="doc.status === 'indexed' ? 'resolved' : 'info'">{{ doc.status }}</span>
+                <span class="deploy-doc-time">{{ doc.created_at }}</span>
+                <button class="btn btn-sm btn-danger" @click="deleteDeployDoc(doc)">删除</button>
+              </div>
+              <div class="deploy-doc-preview">{{ (doc.content || '').slice(0, 200) }}{{ doc.content?.length > 200 ? '...' : '' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -352,7 +386,7 @@ const ciTypeGroups = [
   ]},
   { label: '☁️ 云资源层', items: [
     { value: 'cloud_host', label: '云主机' }, { value: 'kubernetes_cluster', label: 'K8s 集群' },
-    { value: 'node', label: 'Node 节点' }, { value: 'namespace', label: 'Namespace' },
+    { value: 'node', label: 'Node 节点' },
   ]},
   { label: '📊 业务层', items: [
     { value: 'business_app', label: '业务应用' }, { value: 'api_service', label: 'API 服务' },
@@ -800,6 +834,61 @@ async function openAssistant(assetId) {
   }
 }
 
+// ─── 部署报告（关联资产的知识库文档）──
+const deployDocAsset = ref(null)
+const deployDocs = ref([])
+const deployDocsLoading = ref(false)
+
+async function openDeployDocs(asset) {
+  deployDocAsset.value = asset
+  deployDocsLoading.value = true
+  try {
+    const data = await request.get('/knowledge/documents/api/list', { params: { asset_id: asset.id } })
+    deployDocs.value = data.items || data || []
+  } catch (e) { deployDocs.value = [] }
+  finally { deployDocsLoading.value = false }
+}
+
+async function onDeployFileUpload(e) {
+  const files = e.target.files
+  if (!files || !files.length) return
+  for (const file of files) {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('asset_id', deployDocAsset.value.id)
+    fd.append('asset_type', deployDocAsset.value.ci_type || '')
+    fd.append('source_type', 'manual')
+    try {
+      await request.post('/knowledge/documents/api/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      ElMessage.success(`已上传: ${file.name}`)
+    } catch (err) { ElMessage.error(`上传失败: ${err.message}`) }
+  }
+  e.target.value = ''
+  openDeployDocs(deployDocAsset.value)
+}
+
+async function createDeployDoc() {
+  const { value } = await ElMessageBox.prompt('文档标题', '手动创建部署报告', { inputType: 'text' }).catch(() => ({ value: null }))
+  if (!value) return
+  try {
+    await request.post('/knowledge/documents/api/create', {
+      title: value, asset_id: deployDocAsset.value.id,
+      asset_type: deployDocAsset.value.ci_type || '', source_type: 'manual',
+    })
+    ElMessage.success('已创建')
+    openDeployDocs(deployDocAsset.value)
+  } catch (e) { ElMessage.error('创建失败: ' + e.message) }
+}
+
+async function deleteDeployDoc(doc) {
+  if (!await ElMessageBox.confirm(`确认删除「${doc.title}」？`, '删除确认', { type: 'warning' }).catch(() => false)) return
+  try {
+    await request.post(`/knowledge/documents/api/${doc.id}/delete`)
+    ElMessage.success('已删除')
+    openDeployDocs(deployDocAsset.value)
+  } catch (e) { ElMessage.error('删除失败: ' + e.message) }
+}
+
 // ─── P2: WebSSH 终端（通过 edge agent 反向隧道）──
 const websshVisible = ref(false)
 const websshAsset = ref(null)
@@ -908,6 +997,10 @@ onMounted(() => { loadAssets() })
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 540px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
 .modal-box.wide { min-width: 540px; }
 .modal-box h3 { margin: 0 0 16px; font-size: 1rem; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.modal-header h3 { margin: 0; font-size: 1rem; }
+.modal-close-btn { background: none; border: none; font-size: 18px; line-height: 1; color: #909399; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: all .15s; }
+.modal-close-btn:hover { color: #f56c6c; background: #fef0f0; }
 .form-section { margin-bottom: 20px; }
 .section-title { font-size: 0.82rem; font-weight: 700; color: var(--text, #1e293b); padding-bottom: 6px; margin-bottom: 10px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -971,4 +1064,19 @@ tr.row-orphan td { background: rgba(239,68,68,0.03); }
 .webssh-close { margin-left: auto; background: transparent; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; }
 .webssh-close:hover { color: #ef4444; }
 .webssh-body { flex: 1; padding: 12px; overflow: hidden; }
+
+/* ── 部署报告 ── */
+.btn-deploy { background: rgba(59,130,246,0.08); color: #3b82f6; border-color: rgba(59,130,246,0.25); }
+.btn-deploy:hover { background: rgba(59,130,246,0.15); }
+.deploy-docs-body { padding: 16px; max-height: 60vh; overflow-y: auto; }
+.deploy-upload-area { display: flex; gap: 8px; margin-bottom: 16px; }
+.deploy-docs-list { display: flex; flex-direction: column; gap: 10px; }
+.deploy-doc-item {
+  border: 1px solid var(--border, rgba(0,0,0,0.08)); border-radius: 8px;
+  padding: 12px; background: var(--bg-card-solid, #fff);
+}
+.deploy-doc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.deploy-doc-title { font-weight: 600; font-size: 0.88rem; color: var(--text, #1e293b); }
+.deploy-doc-time { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); margin-left: auto; }
+.deploy-doc-preview { font-size: 0.78rem; color: var(--text-secondary, #64748b); line-height: 1.5; white-space: pre-wrap; }
 </style>

@@ -82,6 +82,7 @@ def user_guide(request: Request):
 @router.get("/product/overview", response_class=HTMLResponse)
 def product_overview(request: Request):
     return templates.TemplateResponse("product_overview.html", {"request": request})
+@router.post("/login")
 @_limiter.limit("10/minute")
 async def login(request: Request, db: Session = Depends(get_db)):
     content_type = request.headers.get("content-type", "")

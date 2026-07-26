@@ -90,6 +90,9 @@
           <el-button type="primary" @click="executeTool" :loading="executing" :disabled="!selectedAssetId || (currentTool.custom && !customCommand)">
             <el-icon><VideoPlay /></el-icon> 执行诊断
           </el-button>
+          <el-button type="primary" plain :loading="aiAnalyzing" :disabled="!result" @click="analyzeOutput">
+            <el-icon><MagicStick /></el-icon> {{ aiAnalyzing ? 'AI 分析中...' : (aiAnalysis ? '重新解读' : 'AI 智能解读') }}
+          </el-button>
         </div>
 
         <!-- 输出结果 -->
@@ -100,6 +103,18 @@
           </div>
           <pre class="output-body">{{ result.output }}</pre>
         </div>
+
+        <!-- AI 智能解读 -->
+        <div v-if="result" class="ai-section">
+          <div class="ai-header">
+            <span class="ai-title"><el-icon :size="16"><MagicStick /></el-icon> AI 智能解读</span>
+          </div>
+          <div v-if="aiAnalyzing" class="ai-loading">
+            <el-icon class="is-loading"><Loading /></el-icon> 正在调用 AI 进行根因分析，请稍候（最长约 2 分钟）...
+          </div>
+          <div v-else-if="aiAnalysis" class="ai-content" v-html="aiAnalysis"></div>
+          <div v-else class="ai-tip">点击「AI 智能解读」，AI 将对上方诊断输出进行根因推断、异常定位与修复建议。</div>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -109,9 +124,12 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  Cpu, Timer, Monitor, VideoPlay, View, Aim, EditPen
+  Cpu, Timer, Monitor, VideoPlay, View, Aim, EditPen, MagicStick, Loading
 } from '@element-plus/icons-vue'
+import MarkdownIt from 'markdown-it'
 import request from '@/api/request'
+
+const md = new MarkdownIt({ html: false, breaks: true, linkify: true })
 
 const assets = ref([])
 const selectedAssetId = ref(null)
@@ -126,6 +144,9 @@ const executing = ref(false)
 const result = ref(null)
 const validating = ref(false)
 const validateResult = ref(null)
+const aiAnalyzing = ref(false)
+const aiAnalysis = ref('')
+const aiAnalyzedAt = ref('')
 
 function getCatIcon(key) {
   return { snapshot: View, focused: Aim, flexible: EditPen }[key] || View
@@ -168,6 +189,8 @@ function openTool(tool) {
   result.value = null
   customCommand.value = ''
   validateResult.value = null
+  aiAnalysis.value = ''
+  aiAnalyzedAt.value = ''
   resultDialog.value = true
 }
 
@@ -221,6 +244,40 @@ function copyOutput() {
     navigator.clipboard.writeText(result.value.output)
     ElMessage.success('已复制到剪贴板')
   }
+}
+
+async function analyzeOutput() {
+  if (!result.value || !result.value.output) {
+    ElMessage.warning('请先执行诊断获取输出')
+    return
+  }
+  aiAnalyzing.value = true
+  aiAnalysis.value = ''
+  aiAnalyzedAt.value = ''
+  try {
+    const data = await request.post('/api/diagnostic-tools/analyze', {
+      tool_id: currentTool.value.id,
+      asset_id: selectedAssetId.value,
+      command: result.value.command,
+      output: result.value.output,
+      exit_code: result.value.exit_code,
+    }, { timeout: 130000 })
+    if (data.ok) {
+      aiAnalysis.value = md.render(data.analysis || '')
+      aiAnalyzedAt.value = data.analyzed_at || ''
+      ElMessage.success('AI 解读完成')
+    } else {
+      ElMessage.error(data.error || 'AI 解读失败')
+    }
+  } catch (e) {
+    ElMessage.error('AI 解读失败: ' + (e.message || e))
+  } finally {
+    aiAnalyzing.value = false
+  }
+}
+
+function reAnalyze() {
+  analyzeOutput()
 }
 
 onMounted(async () => {
@@ -282,7 +339,7 @@ onMounted(async () => {
 .tool-meta span { display: flex; align-items: center; gap: 2px; }
 .result-meta { margin-bottom: 12px; }
 .custom-cmd-area { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.exec-bar { margin-bottom: 12px; }
+.exec-bar { margin-bottom: 12px; display: flex; gap: 10px; align-items: center; }
 .result-output { margin-top: 12px; }
 .output-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -296,5 +353,60 @@ onMounted(async () => {
   font-size: 12px; line-height: 1.6;
   max-height: 400px; overflow: auto;
   white-space: pre-wrap; word-break: break-all;
+}
+.ai-section {
+  margin-top: 16px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ai-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: linear-gradient(90deg, rgba(99,102,241,0.08), rgba(99,102,241,0.02));
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+.ai-title {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 600;
+  color: var(--primary-color, #6366f1);
+}
+.ai-loading {
+  display: flex; align-items: center; gap: 8px;
+  padding: 24px 14px;
+  font-size: 13px; color: var(--text-secondary, #6b7280);
+}
+.ai-content {
+  padding: 14px 16px;
+  font-size: 13px; line-height: 1.8;
+  color: var(--text-primary, #1f2937);
+  max-height: 460px; overflow: auto;
+}
+.ai-content :deep(h3) {
+  font-size: 15px; margin: 16px 0 6px; font-weight: 700;
+  color: var(--primary-color, #6366f1);
+  border-left: 3px solid var(--primary-color, #6366f1);
+  padding-left: 8px;
+}
+.ai-content :deep(h3:first-child) { margin-top: 0; }
+.ai-content :deep(p) { margin: 6px 0; }
+.ai-content :deep(ul), .ai-content :deep(ol) { margin: 6px 0; padding-left: 22px; }
+.ai-content :deep(li) { margin: 3px 0; }
+.ai-content :deep(code) {
+  background: rgba(99,102,241,0.1); color: var(--primary-color, #6366f1);
+  padding: 1px 5px; border-radius: 4px;
+  font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px;
+}
+.ai-content :deep(pre) {
+  background: #1e1e2e; color: #cdd6f4;
+  padding: 10px 12px; border-radius: 8px; overflow: auto;
+  font-size: 12px; line-height: 1.6;
+}
+.ai-content :deep(pre code) { background: none; color: inherit; padding: 0; }
+.ai-content :deep(strong) { color: var(--text-primary, #1f2937); }
+.ai-tip {
+  padding: 20px 16px;
+  font-size: 13px; color: var(--text-tertiary, #9ca3af);
+  text-align: center;
 }
 </style>

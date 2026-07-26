@@ -10,6 +10,28 @@
         <span v-if="!appStore.sidebarCollapsed" class="brand-name">AIOps</span>
       </div>
 
+      <div v-if="!appStore.sidebarCollapsed" class="sidebar-search">
+        <el-autocomplete
+          v-model="searchKeyword"
+          :fetch-suggestions="fetchMenuSuggestions"
+          :trigger-on-focus="false"
+          placeholder="搜索菜单功能…"
+          class="menu-search-input"
+          clearable
+          @select="handleSearchSelect"
+        >
+          <template #prefix>
+            <el-icon class="menu-search-icon"><Search /></el-icon>
+          </template>
+          <template #default="{ item }">
+            <div class="menu-search-item">
+              <div class="menu-search-label">{{ item.label }}</div>
+              <div class="menu-search-crumbs">{{ item.crumbs.join(' / ') }}</div>
+            </div>
+          </template>
+        </el-autocomplete>
+      </div>
+
       <el-menu
         :default-active="activeMenu"
         :collapse="appStore.sidebarCollapsed"
@@ -147,7 +169,6 @@
       <main class="content">
         <div class="content-inner">
           <MonitorView v-if="activeView === 'monitor-view'" />
-          <DashboardView v-else-if="activeView === 'dashboard'" />
           <SystemPosture v-else-if="activeView === 'system-posture'" />
       <AgentAudit v-else-if="activeView === 'audit'" />
       <OperationAudit v-else-if="activeView === 'op-audit'" />
@@ -162,12 +183,12 @@
           <SLOConfigView v-else-if="activeView === 'slo-config'" />
           <SLAView v-else-if="activeView === 'sla-agreement'" />
           <OnCallView v-else-if="activeView === 'oncall-schedule'" />
-          <EscalationPolicyView v-else-if="activeView === 'escalation-policy'" />
           <AvailabilityReportView v-else-if="activeView === 'availability-report'" />
           <ChaosExperimentView v-else-if="activeView === 'chaos-experiment'" />
           <ChaosReportView v-else-if="activeView === 'chaos-report'" />
           <ChaosScenarioView v-else-if="activeView === 'chaos-scenario'" />
           <AlertsView v-else-if="activeView === 'alerts'" />
+          <AlertRulesView v-else-if="activeView === 'alert-rules'" />
           <AssetsView v-else-if="activeView === 'asset-list'" />
           <DatasourcesView v-else-if="activeView === 'datasources'" />
           <LogsView v-else-if="activeView === 'logs'" />
@@ -265,7 +286,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
 import {
@@ -287,7 +308,6 @@ import {
   Suitcase, SuitcaseLine, Operation as OpIcon, Lock
 } from '@element-plus/icons-vue'
 import AIOpsChatWidget from '@/components/AIOpsChatWidget.vue'
-import DashboardView from '@/views/DashboardView.vue'
 const AgentAudit = defineAsyncComponent(() => import('@/views/AgentAudit.vue'))
 const OperationAudit = defineAsyncComponent(() => import('@/views/OperationAudit.vue'))
 const AgentChatView = defineAsyncComponent(() => import('@/views/AgentChatView.vue'))
@@ -302,12 +322,12 @@ const BurnRateView = defineAsyncComponent(() => import('@/views/BurnRateView.vue
 const SLOConfigView = defineAsyncComponent(() => import('@/views/SLOConfigView.vue'))
 const SloDashboardView = defineAsyncComponent(() => import('@/views/SloDashboardView.vue'))
 const SLAView = defineAsyncComponent(() => import('@/views/SLAView.vue'))
-const EscalationPolicyView = defineAsyncComponent(() => import('@/views/EscalationPolicyView.vue'))
 const AvailabilityReportView = defineAsyncComponent(() => import('@/views/AvailabilityReportView.vue'))
 const ChaosExperimentView = defineAsyncComponent(() => import('@/views/ChaosExperimentView.vue'))
 const ChaosReportView = defineAsyncComponent(() => import('@/views/ChaosReportView.vue'))
 const ChaosScenarioView = defineAsyncComponent(() => import('@/views/ChaosScenarioView.vue'))
 const AlertsView = defineAsyncComponent(() => import('@/views/AlertsView.vue'))
+const AlertRulesView = defineAsyncComponent(() => import('@/views/AlertRulesView.vue'))
 const AssetsView = defineAsyncComponent(() => import('@/views/AssetsView.vue'))
 const DatasourcesView = defineAsyncComponent(() => import('@/views/DatasourcesView.vue'))
 const LogsView = defineAsyncComponent(() => import('@/views/LogsView.vue'))
@@ -395,10 +415,12 @@ const chatWidgetRef = ref(null)
 // 切换数据库重载时，同步读取上次菜单位置，避免首帧闪烁仪表盘
 const _savedMenu = localStorage.getItem('aiops-active-menu')
 const menuLoading = ref(!!_savedMenu)  // 有待恢复的菜单时，显示 loading 遮罩
-const activeView = ref('dashboard')
+// 兼容旧默认页 dashboard（已合并入 monitor-view）
+const _initialMenu = (_savedMenu === 'dashboard') ? 'monitor-view' : (_savedMenu || 'monitor-view')
+const activeView = ref('monitor-view')
 const activePath = ref(null)
-const currentTitle = ref(_savedMenu ? '' : '运行概览')
-const activeMenu = ref(_savedMenu || 'dashboard')
+const currentTitle = ref(_savedMenu ? '' : '实时监控看板')
+const activeMenu = ref(_initialMenu)
 const noticeCount = ref(0)
 const notifications = ref([])
 const userInfo = ref(null)
@@ -427,6 +449,36 @@ async function loadUserInfo() {
 }
 const menuGroups = ref([])
 
+// 菜单搜索：把树形菜单平铺成叶子节点列表（含父级面包屑路径）
+const searchKeyword = ref('')
+const flatMenuItems = computed(() => {
+  const result = []
+  function walk(items, parents) {
+    for (const it of (items || [])) {
+      const path = [...parents, it.label]
+      if (it.type) {
+        result.push({ key: it.key, label: it.label, value: it.label, crumbs: parents, type: it.type })
+      }
+      if (it.items && it.items.length) walk(it.items, path)
+    }
+  }
+  walk(menuGroups.value, [])
+  return result
+})
+function fetchMenuSuggestions(qs, cb) {
+  const kw = (qs || '').trim().toLowerCase()
+  if (!kw) { cb([]); return }
+  cb(flatMenuItems.value.filter(it =>
+    it.label.toLowerCase().includes(kw) || it.crumbs.some(c => c.toLowerCase().includes(kw))
+  ))
+}
+function handleSearchSelect(item) {
+  if (item && item.key) {
+    handleMenuSelect(item.key)
+    searchKeyword.value = ''
+  }
+}
+
 const ICON_MAP = {
   Odometer, ChatDotSquare, DataLine, Tickets, Operation, Monitor,
   Box, Setting, TrendCharts, Coin, Connection, WarningFilled, Search,
@@ -448,7 +500,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['dashboard', 'roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'escalation-policy', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'alert-correlation', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'ab-test', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'agent-ground-truth', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
+const VUE_PAGES = new Set(['roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'alert-correlation', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'ab-test', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'agent-ground-truth', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
 
 function _flattenItems(items) {
   const result = []
@@ -547,9 +599,14 @@ onMounted(async () => {
     menuGroups.value = Array.isArray(data) ? data : (data.menu || [])
     // 恢复上次菜单位置（刷新或切换数据库后均生效）
     if (_savedMenu) {
-      const item = _findItem(_savedMenu)
+      // 旧默认页 dashboard 已合并入 monitor-view，迁移历史存储
+      const restoreKey = _savedMenu === 'dashboard' ? 'monitor-view' : _savedMenu
+      const item = _findItem(restoreKey)
       if (item) {
-        handleMenuSelect(_savedMenu)
+        handleMenuSelect(restoreKey)
+        if (_savedMenu === 'dashboard') {
+          localStorage.setItem('aiops-active-menu', 'monitor-view')
+        }
       } else {
         // 菜单项不存在（如切换数据库后菜单变化），清除存储回到默认
         localStorage.removeItem('aiops-active-menu')
@@ -649,5 +706,66 @@ async function handleDbModeSwitch() {
   color: #6366f1;
   font-weight: 500;
   white-space: nowrap;
+}
+/* 菜单搜索框 */
+.sidebar-search {
+  flex-shrink: 0;
+  padding: 0 12px 10px;
+}
+.menu-search-input {
+  width: 100%;
+}
+.menu-search-icon {
+  color: var(--sidebar-text, #94a3b8);
+}
+.sidebar-search :deep(.menu-search-input .el-input__wrapper) {
+  border-radius: 10px;
+  background: var(--sidebar-hover, rgba(0, 0, 0, 0.04));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.2s;
+}
+.sidebar-search :deep(.menu-search-input .el-input__wrapper:hover) {
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.4);
+}
+.sidebar-search :deep(.menu-search-input .el-input__wrapper.is-focus) {
+  box-shadow: inset 0 0 0 1.5px var(--primary, #6366f1);
+}
+.sidebar-search :deep(.menu-search-input .el-input__inner) {
+  font-size: 13px;
+  height: 34px;
+  color: var(--text-primary, #1f2937);
+}
+.sidebar-search :deep(.menu-search-input .el-input__inner::placeholder) {
+  color: var(--sidebar-text, #94a3b8);
+}
+</style>
+
+<style>
+/* 菜单搜索下拉项（popper teleport 到 body，需用全局样式） */
+.menu-search-item {
+  padding: 6px 4px;
+  line-height: 1.35;
+}
+.menu-search-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #1f2937);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-search-crumbs {
+  font-size: 11px;
+  color: var(--text-secondary, rgba(0, 0, 0, 0.45));
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-theme="dark"] .menu-search-label {
+  color: var(--text-primary, #e5e7eb);
+}
+html[data-theme="dark"] .menu-search-crumbs {
+  color: rgba(255, 255, 255, 0.45);
 }
 </style>

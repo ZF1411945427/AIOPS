@@ -1,205 +1,92 @@
 # 项目规则
 
-##
-每次回复请先称呼我为爸爸
-
-## 专业风格
-每当我的描述不太专业像大白话一样，请你最后给出专业的名词供我学习，也可以最后输出专业提问话术供我学习。
-全程使用中文
-
-## 代码格式
-项目后端用python代码编写
-项目前端用vue代码编写
-做的哪些有个单独记录文件
+## 基本约定
+- 每次回复请先称呼我为爸爸
+- 全程使用中文;若我的描述像大白话,最后给出专业名词或专业提问话术供我学习
+- 后端用 Python,前端用 Vue;做的内容有单独记录文件
 
 ## 会话记忆机制
-每次会话开始时，必须读取 MEMORY.md 了解项目背景和之前的决策。
-会话过程中，只要有新的进展、决策或发现，就要及时更新 MEMORY.md。
-MEMORY.md 按时间倒序记录，最新的在最上面。
+- 每次会话开始时,必须读取 `MEMORY.md` 了解项目背景和之前的决策
+- 会话过程中,有新的进展/决策/发现,及时更新 `MEMORY.md`(时间倒序,最新在最上面)
+- 新条目格式:`### YYYY-MM-DD: 标题` + 关键决策/变更/发现
 
-## ⚠️ 字段规范契约（重要！）
-**`CONTRACT.md` 是全项目字段命名的 Single Source of Truth（唯一数据源）。**
-凡是涉及资产字段、连接配置、CI 类型、数据源字段的开发，**必须**：
-1. **先读 `CONTRACT.md`**，确认现有字段定义和命名规范
-2. **新增/修改字段时，先改 `CONTRACT.md`**，再同步前后端代码
-3. 后端写入路径（`_build_connection_config` 等）读取的字段名必须与 CONTRACT.md 一致
-4. 前端 `buildPayload`/`testConnection`/`openEdit` 发送和加载的字段名必须与 CONTRACT.md 一致
-5. 数据库列名、DataSource.auth_config 字段名必须与 CONTRACT.md 一致
-6. 敏感字段（密码/Token）必须按 CONTRACT.md 掩码规则处理：后端返回 `***` + `has_*` 标记，前端编辑时置空、保存时空值=不更新
-7. 不得在代码中自行发明字段名，不得使用 CONTRACT.md 中标注 ~~删除线~~ 的已废弃字段名
+## ⚠️ 字段规范契约(重要!)
+**`CONTRACT.md` 是全项目字段命名的 Single Source of Truth(唯一数据源)。**
+涉及资产字段、连接配置、CI 类型、数据源字段的开发,**必须**:
+1. **先读 `CONTRACT.md`** 确认现有字段定义和命名规范
+2. **新增/修改字段时,先改 `CONTRACT.md`** 再同步前后端代码
+3. 后端写入路径(`_build_connection_config` 等)、前端 `buildPayload`/`testConnection`/`openEdit`、数据库列名、`DataSource.auth_config` 字段名必须与 CONTRACT.md 一致
+4. 敏感字段(密码/Token):后端返回 `***` + `has_*` 标记,前端编辑时置空、保存时空值=不更新
+5. 不得自行发明字段名,不得使用 CONTRACT.md 中标注 ~~删除线~~ 的已废弃字段名
 
-**违反契约会导致：** 前后端字段不匹配 → 静默数据丢失（保存了但实际没存进去）→ 功能失效且不报错，极难排查
+**违反契约会导致:** 前后端字段不匹配 → 静默数据丢失(保存了但实际没存进去)→ 功能失效且不报错,极难排查
 
-## ⚠️ 路径规范契约（重要！）
-**所有文件路径必须基于 `__file__` 或 `%~dp0` 动态计算，禁止硬编码绝对路径（如 `D:\AIOPS\project08\xxx`）。**
+## ⚠️ 路径规范契约(重要!)
+**所有文件路径必须基于 `__file__`(Python)或 `%~dp0`(.bat)动态计算,禁止硬编码绝对路径(如 `D:\AIOPS\project08\xxx`)。**
 
-### 适用场景
 | 场景 | 规范写法 |
 |------|---------|
-| Python 脚本追加 `sys.path` / `os.chdir` | `os.path.dirname(os.path.abspath(__file__))` |
-| Python 引用项目内资源（static、logs、models、fonts） | `Path(__file__).resolve().parent.parent / "logs"` |
+| Python 追加 `sys.path` / `os.chdir` | `os.path.dirname(os.path.abspath(__file__))` |
+| Python 引用项目内资源(static/logs/models/fonts) | `Path(__file__).resolve().parent.parent / "logs"` |
 | 日志目录默认值 | `os.environ.get("AIOPS_LOG_DIR", str(PROJECT_ROOT / "logs"))` |
-| `.bat` 启动脚本的 `cd` | `cd /d %~dp0` |
-| `.bat` 引用项目内目录 | `cd /d %~dp0frontend` |
+| `.bat` 的 `cd` / 引用项目内目录 | `cd /d %~dp0` / `cd /d %~dp0frontend` |
 | 测试脚本截图目录 | `os.path.join(os.path.dirname(__file__), "screenshots", "e2e_xxx")` |
 | 部署脚本项目根目录 | `os.path.dirname(os.path.abspath(__file__))` |
 | e2e 测试引用项目数据库 | `os.path.dirname(os.path.dirname(os.path.dirname(__file__))) / "db"` |
 
-### 禁止行为
-1. **禁止**在 `.py` 中写 `sys.path.insert(0, 'D:/AIOPS/project08')` 或 `os.chdir('D:/AIOPS/project08')`
-2. **禁止**在 `.bat` 中写 `cd /d D:\AIOPS\project08` 或硬编码 `python.exe` 绝对路径
-3. **禁止**在测试脚本中硬编码 `E:\Program Files\hermes\` 或 `E:\AIOPS\project03\` 等外机路径
-4. **禁止**在代码中硬编码 `C:\Windows\Fonts\` — 应使用项目 `fonts/` 目录
+**禁止:** 在 `.py` 写 `sys.path.insert(0, 'D:/AIOPS/project08')` 或 `os.chdir('...')`;在 `.bat` 写 `cd /d D:\AIOPS\project08` 或硬编码 `python.exe` 绝对路径;在测试脚本硬编码外机路径;硬编码 `C:\Windows\Fonts\`(用项目 `fonts/` 目录)。
 
-**违反路径规范会导致：** 项目换机器/目录后全部路径失效 → 后端拒绝启动 → 所有功能不可用，且排查极其困难。
-
-## 更新格式
-在 MEMORY.md 顶部插入新条目，格式为：
-### YYYY-MM-DD: 标题
-- 关键决策、变更、发现
+**违反会导致:** 项目换机器/目录后全部路径失效 → 后端拒绝启动 → 所有功能不可用,且排查极其困难。
 
 ## 开发流程
 ### 启动项目
-终端1: python run.py          # FastAPI 后端 (端口 8000，需在项目根目录执行)
-终端2: npm run dev --prefix frontend  # Vue 前端 (端口 3000，自动代理 API 到 8000)
+- 后端:`python run.py`(FastAPI,端口 8000,需在项目根目录执行)
+- 前端:`npm run dev --prefix frontend`(端口 3000,自动代理 API 到 8000)
+- 构建:`npm run build --prefix frontend`(修改 `frontend/src/views/*.vue` 后必须构建)
+- 浏览器访问 http://localhost:3000(Vite dev server)或 http://localhost:8000(Vue SPA,`/` 和 `/login` 返回 `frontend/dist/index.html`)
+- 仅 product_intro/overview、容器日志/终端等少量辅助页仍用 Jinja2 模板,主体已全部 Vue 化
 
-浏览器访问 http://localhost:3000 使用 Vue 前端 (Vite dev server，开发热更新)
-浏览器访问 http://localhost:8000 同样是 Vue SPA 前端 (`/` 和 `/login` 均返回 `frontend/dist/index.html`)
-  - 仅 product_intro/overview、容器日志/终端等少量辅助页仍用 Jinja2 模板，主体已全部 Vue 化
-  - 修改前端 UI 必须改 `frontend/src/views/*.vue` 然后 `npm run build --prefix frontend` 构建
+### 后端启动方式(opencode bash 工具内)
+直接运行 `python run.py` 会随 bash 会话超时终止进程,必须在新窗口启动:
+```powershell
+Start-Process -FilePath 'python.exe' -ArgumentList 'run.py' -WorkingDirectory '<项目根目录>' -WindowStyle Normal
+```
 
-### ⚠️ Windows 热重载大坑（重要！）
-`uvicorn --reload` 在 Windows 上**热重载不可靠**：
-- 修改 Python 文件后，uvicorn 检测到变更→尝试重启子进程
-- 但**旧子进程不会真正退出**，仍然占用端口 8000
-- 新子进程因端口被占而启动失败
-- 结果是：**代码看似改了，实际运行的还是旧代码**
+## ⚠️ 高频必踩大坑
 
-**强制重启的正确方式**（三步）：
+### Windows 热重载不可靠
+`uvicorn --reload` 在 Windows 上旧子进程不退出 → 端口 8000 被占 → 新代码不生效。强制重启三步:
 ```bash
-# 1. 杀掉所有残留 Python 进程
+# 1. 杀残留 Python 进程(用 Win32_Process 命令行区分项目 python vs VSCode 插件 python)
 powershell -Command "Get-Process python* | Stop-Process -Force"
-
-# 2. 确认端口已释放
+# 2. 确认端口释放
 python -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',8000)); s.close(); print('OK')"
-
 # 3. 重新启动
 python run.py
 ```
+不要依赖 `npx kill-port 8000` 或 `taskkill`,常杀不干净。端口 LISTENING ≠ 服务可用,CLOSE_WAIT 堆积 + curl 超时是死锁信号。
 
-**不要依赖** `npx kill-port 8000` 或 `taskkill`，它们常杀不干净。
-
-### ⚠️ uni-app switchTab 不能传参（重要！）
-`uni.switchTab({ url })` 会忽略所有 query 参数（`?tab=xxx` 无效）。
-**跨 tab 页传参必须用 `getApp().globalData`。**
-示例：
-```js
-// 发
-const app = getApp(); app.globalData.alertTab = 'triggered'
-uni.switchTab({ url: '/pages/alert/list' })
-// 收（在目标页 onLoad 里读）
-const app = typeof getApp === 'function' ? getApp() : null
-const tab = app && app.globalData && app.globalData.alertTab
-if (tab) { activeTab.value = tab; app.globalData.alertTab = null }
+### Vue SPA 路由 404 坑
+FastAPI + Vue SPA 架构下,新增 Vue 页面后**必须**在 `main.py` 的 `@app.get("/")` 后加 catch-all 兜底,且必须在所有 `app.include_router()` **之后**(否则拦截 API):
+```python
+@app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+def serve_vue_spa(path: str):
+    return HTMLResponse(content=_VUE_INDEX.read_text(encoding="utf-8"))
 ```
+否则点击菜单 Network 出现 `GET /xxx 404`,页面空白。
 
-### ⚠️ uni-app H5 publicPath 覆盖 vite base 导致资源 404（重要！）
-**`manifest.json` 的 `h5.publicPath` 优先级高于 `vite.config.js` 的 `base`，缺失会覆盖！**
-- 现象：访问 `/mobile-app/` 页面 HTML 200，但 `/assets/*.js`、`/assets/*.css` 全部 404 → 白屏
-- 根因：`mobile/src/manifest.json` 的 `h5` 节点缺 `publicPath`，uni-app 默认 `/`，**覆盖** `vite.config.js` 的 `base: '/mobile-app/'` → build 产物资源路径为 `/assets/`
-- 404 链路：HTML 引用 `/assets/xxx.js` → 5173 proxy `/assets` → 后端 8000 的 `/assets/` 是 API 路由（`app/routers/assets.py`，`prefix="/assets"`，无静态文件）→ 404
-- **修复**（`mobile/src/manifest.json` h5 节点必须同时配）：
-  ```json
-  "h5": {
-      "router": { "mode": "hash", "base": "/mobile-app/" },
-      "publicPath": "/mobile-app/",
-      "title": "AIOps 移动运维",
-      "template": "index.html"
-  }
-  ```
-- 改完必须重新 `npm run build:h5 --prefix mobile`，新产物 `dist/build/h5/index.html` 资源路径变为 `/mobile-app/assets/*`
-- **教训**：uni-app 的 H5 资源前缀由 `manifest.json` 决定，`vite.config.js` 的 base 会被覆盖；同一 `/assets` 路径既是静态资源又是 API，需通过前缀隔离
+### menu_config.json 分组与叶子 key 冲突
+同一层分组的 key 不能与叶子节点 key 相同(如分组用 `correlation-analysis`,叶子用 `observability-correlation`)。否则菜单项可见但点击无响应(`AppLayout.vue` 匹配到分组层无 `type` 属性 → 提前 return)。排查:浏览器 Console 执行 `window._navigateTo('xxx')` 看 `activeView` 是否被设置。`menu.py` 启动时缓存到内存,改 menu_config.json 后必须重启后端。
 
-### ⚠️ Vue SPA 路由 404 坑（新增页面必须加 catch-all 路由！）
-**FastAPI + Vue SPA 架构下，所有非根路径的 Vue 路由（如 `/alerts`、`/logs`、`/observability-correlation`）必须加 catch-all 兜底路由！**
-- 现象：新增的 Vue 页面，点击菜单后 **Network 出现 `GET /xxx 404`**，页面空白
-- 根因：FastAPI 只在 `/` 返回 `index.html`，其他路径没有兜底，被 API 路由匹配后返回 404
-- 修复：在 `main.py` 的 `@app.get("/")` 后加 catch-all 路由：
-  ```python
-  @app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
-  def serve_vue_spa(path: str):
-      content = _VUE_INDEX.read_text(encoding="utf-8")
-      return HTMLResponse(content=content)
-  ```
-- **注意**：这个 catch-all 必须在所有 `app.include_router()` **之后**定义，否则会拦截 API 路由（如 `/api/menu` 返回 HTML 而不是 JSON）
-- **教训**：新增 Vue 页面后必须同时修改 `main.py` 加兜底路由，且位置必须在所有 `include_router` 之后
+### 新增 Vue 页面四步
+无需改 `router/index.js`,但需改:① `AppLayout.vue` 注册组件 + `activeView` 分支 ② `menu_config.json` 加菜单项 ③ `role_menus` 补权限 ④(若 SPA 404)`main.py` 加 catch-all。菜单 key=activeView,`type=vue` 时 `handleMenuSelect` 设 `activeView.value = key`。
 
-### ⚠️ 后端启动方式（重要！）
-在 opencode 的 bash 工具中直接运行 `python run.py` 会**随 bash 会话超时而终止进程**。
-必须在新窗口中启动（PowerShell 环境用 `Start-Process`，cmd 环境用 `start`）：
+### 登录页由 Vue SPA 渲染
+路由 `GET /login` → `auth.py:_serve_vue()` → `frontend/dist/index.html`;真正登录页组件是 `frontend/src/views/LoginView.vue`(旧 Jinja2 模板 `app/templates/login.html` 已删除)。修改登录页 UI 必须改 `LoginView.vue` 后构建。
 
-```powershell
-# PowerShell（opencode bash 工具实际是 PowerShell）
-Start-Process -FilePath 'D:\AIOPS\project08\.venv\Scripts\python.exe' -ArgumentList 'run.py' -WorkingDirectory 'D:\AIOPS\project08' -WindowStyle Normal
-```
-```bash
-# cmd 环境
-start "AIOps Backend" python run.py
-```
+## ⚠️ uni-app 移动端四坑(若涉及移动端开发)
 
-### ⚠️ uni-app H5 页面组件缓存大坑（重要！）
-**uni-app 的 Vite 插件对 `src/pages/` 下的页面组件（如 `oncall/my.vue`）有深层编译缓存**
-- 修改 `.vue` 页面文件（模板/脚本/样式）后，即使重启 dev server，改动**可能不生效**
-- `curl` 验证 Vite 返回的是新文件，但浏览器 DOM 仍渲染旧版本（CSS 背景色、调试条全不显示）
-- **`src/main.js` 的改动总是生效**（因为它是入口模块，Vite 每次都重新加载）
-- 用 `document.addEventListener('click', ...)` 捕获阶段监听可以全局拦截组件内事件
-
-**遇到页面组件改动不生效时：**
-1. 先把补丁逻辑写在 `main.js` 里验证（入口文件改动一定生效）
-2. 确认逻辑正确后，再排查页面组件缓存问题（可能需 `npm run build:h5` 全量构建）
-3. 绕过方案：通过全局事件拦截 + 直接调 API 来实现功能，不依赖页面组件内的代码
-
-### ⚠️ menu_config.json 分组与叶子 key 冲突（重要！）
-**`menu_config.json` 中同一层分组的 key 不能与叶子节点 key 相同。**
-- 现象：菜单项可见，点击后无任何响应（无 Network 请求，页面不跳转，Console 无报错）
-- 根因：`AppLayout.vue` 的 `qe()` 函数遍历菜单数据，先匹配到分组层（key 相同），返回分组对象（无 `type` 属性）；`ce()` 函数检查 `!b.type` 为 true → **提前 return**，不设 `activeView`
-- 修复：确保分组 key 与叶子 key 不同名
-  - 分组（items 容器）用 `correlation-analysis`，叶子用 `observability-correlation`
-- 排查：在浏览器 Console 执行 `window._navigateTo('xxx')` 看 `activeView` 是否被设置
-
-### ⚠️ @tap 事件的 DOM 拦截
-- uni-app 的 `@tap` 事件在 H5 中同时触发 `touchstart` 和 `click` 事件
-- `<view>` 渲染为 `<uni-view>` 自定义元素
-- 全局拦截应用 `document.addEventListener('click', handler, true)`（捕获阶段）
-- 通过文本内容匹配（如 `el.textContent.trim() === '拨号'`）比类名匹配更可靠
-**登录页由 Vue SPA 渲染，不是 Jinja2 模板！**
-- 路由 `GET /login` → `auth.py:_serve_vue()` → `frontend/dist/index.html`
-- **真正的登录页组件**: `frontend/src/views/LoginView.vue`
-- ~~`app/templates/login.html` 是旧 Jinja2 模板，**已废弃不用**（死代码 dead code）~~ **已删除**
-- 修改登录页 UI 必须改 `LoginView.vue`，然后 `npm run build --prefix frontend` 构建
-
-### 构建 Vue 前端
-```bash
-cd frontend && npm run build
-```
-
-### Vue 项目结构
-```
-frontend/
-├── index.html              # 入口 HTML
-├── vite.config.js          # Vite 配置 (代理 /api, /agent, /ai 到 FastAPI)
-├── package.json
-├── src/
-│   ├── main.js             # Vue 入口
-│   ├── App.vue             # 根组件
-│   ├── assets/main.css     # 设计系统 (从 sxdevops 移植)
-│   ├── layout/
-│   │   └── AppLayout.vue   # 主布局 (侧边栏 + 顶栏 + 内容区)
-│   ├── router/index.js     # Vue Router
-│   ├── stores/
-│   │   └── app.js          # Pinia store (侧边栏折叠状态)
-│   ├── api/
-│   │   └── request.js      # Axios 封装
-│   └── views/
-│       └── ChatView.vue    # AI 智能助手聊天页 (第一个 Vue 页面)
-```
+1. **switchTab 不能传参**:`uni.switchTab({ url })` 忽略所有 query 参数,跨 tab 页传参必须用 `getApp().globalData`(发送方设 `app.globalData.xxx`,目标页 `onLoad` 读取后置空)
+2. **H5 publicPath 覆盖 vite base**:`manifest.json` 的 `h5.publicPath` 优先级高于 `vite.config.js` 的 `base`,缺失会覆盖 → `/assets/*.js` 404 白屏。`mobile/src/manifest.json` 的 h5 节点必须同时配 `publicPath: "/mobile-app/"`,改完重新 `npm run build:h5 --prefix mobile`
+3. **页面组件深层编译缓存**:`src/pages/` 下 `.vue` 改动可能不生效(浏览器 DOM 渲染旧版本),但 `src/main.js` 改动总生效。遇问题先在 `main.js` 验证逻辑,再排查组件缓存(可能需 `npm run build:h5` 全量构建);绕过方案用 `document.addEventListener('click', handler, true)` 全局事件拦截 + 直接调 API
+4. **@tap 事件 DOM 拦截**:uni-app `@tap` 在 H5 同时触发 touchstart + click;`<view>` 渲染为 `<uni-view>`;全局拦截用捕获阶段 `document.addEventListener('click', handler, true)`,文本内容匹配比类名匹配可靠

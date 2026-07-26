@@ -144,63 +144,83 @@ def check_rules(db: Session):
             suppressed.append(rule.id)
             continue
 
-        latest = (
+        # 修复: 原 latest 只取全局最新一条 metric，未按 asset 区分 → 多资产时只有最新采样的资产会被检查
+        # 改为按资产分组取各自最新值，逐资产判断是否触发
+        latest_rows = (
             db.query(MetricRecord)
             .filter(MetricRecord.name == rule.metric_name)
             .order_by(MetricRecord.timestamp.desc())
-            .first()
+            .limit(50)
+            .all()
         )
-        if not latest:
-            continue
-        triggered = False
-        if rule.condition == "gt" and latest.value > rule.threshold:
-            triggered = True
-        elif rule.condition == "lt" and latest.value < rule.threshold:
-            triggered = True
-        if triggered:
-            active = (
-                db.query(Alert)
-                .filter(
-                    Alert.rule_id == rule.id,
-                    Alert.asset_id == latest.asset_id,
-                    Alert.status.in_(["triggered", "acknowledged"]),
+        # 按 asset_id 去重，保留每个资产最新一条
+        seen_assets = set()
+        latest_per_asset = []
+        for lr in latest_rows:
+            if lr.asset_id in seen_assets:
+                continue
+            seen_assets.add(lr.asset_id)
+            latest_per_asset.append(lr)
+        for latest in latest_per_asset:
+            if not latest:
+                continue
+            triggered = False
+            # 兼容 ">" 和 "gt" 两种写法（规则表实际存的是 ">" 符号）
+            cond = (rule.condition or "").strip().lower()
+            if cond in (">", "gt") and latest.value > rule.threshold:
+                triggered = True
+            elif cond in ("<", "lt") and latest.value < rule.threshold:
+                triggered = True
+            elif cond in (">=", "gte") and latest.value >= rule.threshold:
+                triggered = True
+            elif cond in ("<=", "lte") and latest.value <= rule.threshold:
+                triggered = True
+            elif cond in ("=", "==", "eq") and latest.value == rule.threshold:
+                triggered = True
+            if triggered:
+                active = (
+                    db.query(Alert)
+                    .filter(
+                        Alert.rule_id == rule.id,
+                        Alert.asset_id == latest.asset_id,
+                        Alert.status.in_(["triggered", "acknowledged"]),
+                    )
+                    .first()
                 )
-                .first()
-            )
-            recent_resolved = (
-                db.query(Alert)
-                .filter(
-                    Alert.rule_id == rule.id,
-                    Alert.asset_id == latest.asset_id,
-                    Alert.status == "resolved",
-                    Alert.created_at > now - dedup_window,
+                recent_resolved = (
+                    db.query(Alert)
+                    .filter(
+                        Alert.rule_id == rule.id,
+                        Alert.asset_id == latest.asset_id,
+                        Alert.status == "resolved",
+                        Alert.created_at > now - dedup_window,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if not active and not recent_resolved:
-                alert = Alert(
-                    rule_id=rule.id,
-                    asset_id=latest.asset_id,
-                    metric_name=rule.metric_name,
-                    actual_value=latest.value,
-                    threshold=rule.threshold,
-                    severity=rule.severity,
-                    status="triggered",
-                    message=f"{rule.name} - {rule.metric_name} 褰撳墠鍊?{latest.value} 瓒呭嚭闃堝€?{rule.threshold}",
-                )
-                db.add(alert)
-                new_alerts.append(alert)
-            elif not active and recent_resolved:
-                sup = db.query(AlertSuppression).filter(
-                    AlertSuppression.rule_id == rule.id,
-                    AlertSuppression.reason == "dedup",
-                    AlertSuppression.created_at > now - timedelta(hours=1),
-                ).first()
-                if sup:
-                    sup.suppressed_count += 1
-                else:
-                    db.add(AlertSuppression(rule_id=rule.id, rule_name=rule.name, metric_name=rule.metric_name, reason="dedup"))
-                db.commit()
+                if not active and not recent_resolved:
+                    alert = Alert(
+                        rule_id=rule.id,
+                        asset_id=latest.asset_id,
+                        metric_name=rule.metric_name,
+                        actual_value=latest.value,
+                        threshold=rule.threshold,
+                        severity=rule.severity,
+                        status="triggered",
+                        message=f"{rule.name} - {rule.metric_name} 当前值:{latest.value} 超出阈值:{rule.threshold}",
+                    )
+                    db.add(alert)
+                    new_alerts.append(alert)
+                elif not active and recent_resolved:
+                    sup = db.query(AlertSuppression).filter(
+                        AlertSuppression.rule_id == rule.id,
+                        AlertSuppression.reason == "dedup",
+                        AlertSuppression.created_at > now - timedelta(hours=1),
+                    ).first()
+                    if sup:
+                        sup.suppressed_count += 1
+                    else:
+                        db.add(AlertSuppression(rule_id=rule.id, rule_name=rule.name, metric_name=rule.metric_name, reason="dedup"))
+                    db.commit()
     if new_alerts:
         db.commit()
         for a in new_alerts:

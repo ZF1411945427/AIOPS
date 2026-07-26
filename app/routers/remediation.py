@@ -48,6 +48,9 @@ def api_remediation_list(db: Session = Depends(get_db)):
     remediations = remediation_service.list_remediations(db)
     rules = list_rules(db)
     actions = {k: v["label"] for k, v in remediation_service.ACTIONS.items()}
+    for alias, target in remediation_service._ACTION_ALIASES.items():
+        if alias not in actions and target in actions:
+            actions[alias] = actions[target]
     return JSONResponse({
         "remediations": [_remediation_to_dict(r) for r in remediations],
         "rules": [{"id": r.id, "name": r.name} for r in rules],
@@ -82,12 +85,16 @@ def api_remediation_create(
     """创建自愈规则 JSON API."""
     import json as _json
     params = {"target": params_target}
+    if action_type == "restart":
+        params["service"] = params_target
+    elif action_type == "clean":
+        params["path"] = params_target
+    elif action_type == "script":
+        params["script"] = params_script or params_target
+    elif action_type == "run_command":
+        params["command"] = params_command or params_target
     if action_type == "scale":
         params["count"] = params_count
-    if action_type == "script":
-        params["script"] = params_script
-    if action_type == "run_command":
-        params["command"] = params_command
     r = remediation_service.create_remediation(db, {
         "name": name,
         "rule_id": rule_id if rule_id > 0 else None,
@@ -150,5 +157,67 @@ def api_effect_recommendations(limit: int = 5, db: Session = Depends(get_db)):
     from app.services import remediation_effect_service
     recs = remediation_effect_service.get_remediation_recommendations(db, limit=limit)
     return JSONResponse({"items": recs})
+
+
+# ── AI 自愈工作台 API ──
+
+@router.get("/api/triggered-alerts")
+def api_triggered_alerts(limit: int = 30, db: Session = Depends(get_db)):
+    """获取触发中的告警列表."""
+    alerts = remediation_service.get_triggered_alerts(db, limit=limit)
+    return JSONResponse({"alerts": alerts, "total": len(alerts)})
+
+
+@router.post("/api/ai-analyze/{alert_id}")
+def api_ai_analyze(alert_id: int, request: Request, db: Session = Depends(get_db)):
+    """AI 自愈分析告警：分析根因 + 生成修复建议 + 创建待审批动作."""
+    username = request.session.get("username", "admin")
+    result = remediation_service.ai_self_heal_analyze(db, alert_id)
+    return JSONResponse(result)
+
+
+@router.get("/api/ai-pending")
+def api_ai_pending(status: str = "all", limit: int = 50, db: Session = Depends(get_db)):
+    """获取 AI 自愈的待审批动作."""
+    items = remediation_service.get_ai_pending_actions(db, status=status, limit=limit)
+    return JSONResponse({"items": items, "total": len(items)})
+
+
+@router.post("/api/ai-pending/{action_id}/confirm")
+def api_ai_confirm(action_id: int, request: Request, db: Session = Depends(get_db)):
+    """确认 AI 自愈动作并执行."""
+    username = request.session.get("username", "admin")
+    result = remediation_service.confirm_ai_action(db, action_id, username=username)
+    return JSONResponse(result)
+
+
+@router.post("/api/ai-pending/{action_id}/cancel")
+def api_ai_cancel(action_id: int, db: Session = Depends(get_db)):
+    """取消 AI 自愈动作."""
+    result = remediation_service.cancel_ai_action(db, action_id)
+    return JSONResponse(result)
+
+
+# ── 诊断报告 API ──
+
+@router.post("/api/diagnose/{alert_id}")
+def api_diagnose_alert(alert_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """对指定告警执行自动诊断（手动触发 / 重新诊断）."""
+    result = remediation_service.run_diagnosis(db, alert_id, force=force)
+    return JSONResponse(result)
+
+
+@router.get("/api/diagnosis/{report_id}")
+def api_diagnosis_report(report_id: int, db: Session = Depends(get_db)):
+    """获取诊断报告详情."""
+    result = remediation_service.get_diagnosis_report(db, report_id)
+    return JSONResponse(result)
+
+
+@router.post("/api/ai-reanalyze/{action_id}")
+def api_ai_reanalyze(action_id: int, db: Session = Depends(get_db)):
+    """基于失败经验重新分析，生成新修复方案."""
+    result = remediation_service.reanalyze_with_failure_context(db, action_id)
+    return JSONResponse(result)
 
 

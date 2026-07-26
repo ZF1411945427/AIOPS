@@ -239,6 +239,8 @@ class Incident(Base):
     review_comment = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
     resolved_at = Column(DateTime, nullable=True)
+    ai_rca_result = Column(Text, default="")
+    ai_rca_at = Column(DateTime, nullable=True)
 
 
 class IncidentAlert(Base):
@@ -1131,6 +1133,7 @@ class PendingAction(Base):
     STATUS_FAILED = "failed"
 
     id = Column(Integer, primary_key=True, index=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True)
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
     message_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=True)
     run_id = Column(Integer, nullable=True)
@@ -1323,6 +1326,7 @@ class KbDocument(Base):
     status = Column(String(32), default="pending")       # pending / indexed / failed
     tags = Column(String(256), default="")
     asset_type = Column(String(32), default="")
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True)  # 关联具体资产（部署报告用）
     severity = Column(String(32), default="warning")
     index_engine = Column(String(16), default="v1")        # v1 / v2 / both（标识索引归属引擎）
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -2099,6 +2103,26 @@ class EdgeSession(Base):
             return json.loads(self.ip_addresses) if self.ip_addresses else []
         except (json.JSONDecodeError, TypeError):
             return []
+
+
+class DiagnosisReport(Base):
+    """诊断报告 —— 自愈流程的"证据链"，记录自动诊断阶段执行的只读命令及输出."""
+    __tablename__ = "diagnosis_reports"
+
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
+    metric_name = Column(String(100), default="")
+    commands_run = Column(Text, default="[]")     # JSON: [{cmd, desc, output, duration_ms, exit_code}]
+    raw_output = Column(Text, default="")          # 拼接后的完整输出（供 AI prompt 注入）
+    summary = Column(String(500), default="")      # 一句话摘要（可选，后期可由 AI 生成）
+    status = Column(String(20), default=STATUS_RUNNING)
+    created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
+    finished_at = Column(DateTime, nullable=True)
 
 
 class EdgeCommandLog(Base):

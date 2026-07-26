@@ -297,9 +297,7 @@ def run_inspection(db: Session, task_id: int) -> Optional[dict]:
         else:
             normal_count += 1
 
-    score = 100.0
-    if len(assets) > 0:
-        score = round((normal_count / len(assets)) * 100, 1)
+    score = _calc_overall_score(item_results)
 
     record.checked_assets = len(assets)
     record.normal_count = normal_count
@@ -419,9 +417,7 @@ def run_inspection_for_alert(db: Session, task_id: int, triggered_by_alert_id: i
         else:
             normal_count += 1
 
-    score = 100.0
-    if assets:
-        score = round((normal_count / len(assets)) * 100, 1)
+    score = _calc_overall_score(item_results)
 
     record.checked_assets = len(assets)
     record.normal_count = normal_count
@@ -442,6 +438,35 @@ def run_inspection_for_alert(db: Session, task_id: int, triggered_by_alert_id: i
     db.refresh(record)
 
     return _record_to_dict(record)
+
+
+# 检查项严重度权重与状态得分（加权评分，避免无数据被误判为异常）
+SEVERITY_WEIGHT = {"critical": 2.0, "warning": 1.0, "info": 0.5}
+STATUS_SCORE = {"normal": 1.0, "warning": 0.5, "critical": 0.0}
+
+
+def _score_asset(checks: list):
+    """按检查项 severity 加权打分（0~1）。全部为 unknown 时返回 None（该资产不参与总分）."""
+    total_weight = 0.0
+    total_score = 0.0
+    for c in checks:
+        status = c.get("status")
+        if status == "unknown":
+            continue
+        weight = SEVERITY_WEIGHT.get(c.get("severity", "warning"), 1.0)
+        total_weight += weight
+        total_score += STATUS_SCORE.get(status, 0.0) * weight
+    if total_weight == 0:
+        return None
+    return round(total_score / total_weight, 3)
+
+
+def _calc_overall_score(item_results: list) -> float:
+    """按资产 asset_score 平均计算总评分（0~100）。全部 unknown 返回 0."""
+    valid = [r.get("asset_score") for r in item_results if r.get("asset_score") is not None]
+    if not valid:
+        return 0.0
+    return round((sum(valid) / len(valid)) * 100, 1)
 
 
 def _check_asset(db: Session, asset: Asset, check_items: list) -> dict:
@@ -467,9 +492,14 @@ def _check_asset(db: Session, asset: Asset, check_items: list) -> dict:
             "value": value,
             "threshold": threshold,
             "unit": item.get("unit", ""),
+            "severity": severity,
             "status": status,
             "detail": detail,
         })
+
+    asset_score = _score_asset(results)
+    if asset_score is None:
+        worst = "unknown"
 
     return {
         "asset_id": asset.id,
@@ -479,6 +509,7 @@ def _check_asset(db: Session, asset: Asset, check_items: list) -> dict:
         "layer": LAYER_MAP.get(asset.ci_type or "", "infra"),
         "checks": results,
         "worst_status": worst,
+        "asset_score": asset_score,
     }
 
 
@@ -503,7 +534,7 @@ def _evaluate_check(db: Session, asset: Asset, metric: str, threshold, severity:
         return "online", "normal", "资产在线"
     elif metric == "last_checked_at":
         if not asset.last_checked_at:
-            return None, "warning", "从未检查"
+            return None, "unknown", "从未检查（无采集记录，不参与扣分）"
         elapsed = (datetime.now() - asset.last_checked_at).total_seconds()
         status = "warning" if elapsed > threshold else "normal"
         return int(elapsed), status, f"{int(elapsed)} 秒前检查"
@@ -525,7 +556,7 @@ def _check_metric_threshold(db: Session, asset_id: int, metric_name: str, thresh
         .first()
     )
     if not row:
-        return None, "warning", f"无 {metric_name} 数据"
+        return None, "unknown", f"无 {metric_name} 数据（未采集或采集失败，不参与扣分）"
     value = row[0]
     if op == ">" and value > threshold:
         status = "critical" if severity == "critical" else "warning"
@@ -809,6 +840,8 @@ def _task_to_dict(t: InspectionTask) -> dict:
 
 
 def _record_to_dict(r: InspectionRecord) -> dict:
+    items = json.loads(r.item_results or "[]")
+    unknown_count = sum(1 for it in items if it.get("worst_status") == "unknown")
     return {
         "id": r.id,
         "task_id": r.task_id,
@@ -818,11 +851,12 @@ def _record_to_dict(r: InspectionRecord) -> dict:
         "normal_count": r.normal_count,
         "warning_count": r.warning_count,
         "critical_count": r.critical_count,
+        "unknown_count": unknown_count,
         "overall_score": r.overall_score,
         "ai_report": r.ai_report or "",
         "ai_risk_summary": r.ai_risk_summary or "",
         "ai_recommendations": json.loads(r.ai_recommendations or "[]"),
-        "item_results": json.loads(r.item_results or "[]"),
+        "item_results": items,
         "started_at": r.started_at.isoformat() if r.started_at else None,
         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
         "duration_seconds": r.duration_seconds,

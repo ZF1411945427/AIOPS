@@ -32,6 +32,17 @@
   --info: #3b82f6;
 
   --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 兼容别名 — AssetsView/AlertsView 等页面使用的变量名，映射到主变量，避免 dark 主题下 fallback 失效 */
+  --text: var(--text-primary);
+  --text-tertiary: var(--text-muted);
+  --bg-card: var(--card-bg);
+  --bg-card-solid: #ffffff;
+  --accent: var(--primary);
+  --accent-hover: var(--primary-dark);
+  --border: rgba(0,0,0,0.07);
+  --border-strong: rgba(0,0,0,0.12);
+  --bg-hover: rgba(0,0,0,0.03);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -829,6 +840,17 @@ html[data-theme="dark"] {
   --warning: #f59e0b;
   --danger: #ef4444;
   --info: #3b82f6;
+
+  /* 兼容别名 — dark 主题下重映射，避免 AssetsView/AlertsView 文字与背景同色 */
+  --text: var(--text-primary);
+  --text-tertiary: var(--text-muted);
+  --bg-card: var(--card-bg);
+  --bg-card-solid: #1a2132;
+  --accent: var(--primary);
+  --accent-hover: var(--primary-light);
+  --border: rgba(148,163,184,0.12);
+  --border-strong: rgba(148,163,184,0.2);
+  --bg-hover: rgba(255,255,255,0.06);
 }
 
 html[data-theme="dark"] body {

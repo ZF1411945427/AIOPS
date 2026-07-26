@@ -111,6 +111,10 @@
         <div class="toolbar">
           <button class="btn btn-primary" @click="openCreate">+ 手动创建</button>
           <button class="btn" @click="loadList">刷新</button>
+          <select v-model="filterAssetId" class="filter-select" @change="loadList">
+            <option value="0">全部资产</option>
+            <option v-for="a in assetOptions" :key="a.id" :value="a.id">{{ a.name }}</option>
+          </select>
           <span v-if="uploading" class="uploading-tip">上传中...</span>
         </div>
 
@@ -201,6 +205,8 @@ const showHelp = ref(false)
 
 const showCreate = ref(false)
 const form = ref({ title: '', content: '', tags: '', source: 'manual' })
+const filterAssetId = ref(0)
+const assetOptions = ref([])
 
 const showDetail = ref(false)
 const detail = ref({})
@@ -279,7 +285,9 @@ async function loadList() {
   loading.value = true
   try {
     if (smartMode.value) {
-      const data = await request.get(`${v2Prefix}/documents/list`)
+      const params = {}
+      if (filterAssetId.value) params.asset_id = filterAssetId.value
+      const data = await request.get(`${v2Prefix}/documents/list`, { params })
       docs.value = data.items || []
       stats.value = {
         total_docs: data.total,
@@ -295,7 +303,9 @@ async function loadList() {
         stats.value.embedding_mode = st.embedding_mode || 'bge-m3'
       }
     } else {
-      const data = await request.get(`${v1Prefix}/api/list`)
+      const params = {}
+      if (filterAssetId.value) params.asset_id = filterAssetId.value
+      const data = await request.get(`${v1Prefix}/api/list`, { params })
       docs.value = data.items || []
       stats.value = { total_docs: data.total_docs, indexed_count: data.indexed_count, total_chunks: data.total_chunks }
     }
@@ -447,8 +457,16 @@ async function confirmDelete(d) {
 
 onMounted(() => {
   loadList()
+  loadAssets()
   if (smartMode.value) loadRerankStatus()
 })
+
+async function loadAssets() {
+  try {
+    const data = await request.get('/assets/api/list', { params: { page: 1, per_page: 500 } })
+    assetOptions.value = (data.items || []).map(a => ({ id: a.id, name: a.name }))
+  } catch { /* ignore */ }
+}
 </script>
 
 <style scoped>

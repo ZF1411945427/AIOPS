@@ -21,6 +21,16 @@
       <div class="panel-body">
         <div v-if="loading" class="loading-state">加载中...</div>
         <table v-else-if="incidents.length" class="table">
+          <colgroup>
+            <col style="width:60px" />
+            <col />
+            <col style="width:70px" />
+            <col style="width:80px" />
+            <col style="width:80px" />
+            <col style="width:140px" />
+            <col style="width:100px" />
+            <col style="width:470px" />
+          </colgroup>
           <thead>
             <tr>
               <th>ID</th><th>标题</th><th>级别</th><th>状态</th>
@@ -36,11 +46,14 @@
               <td>{{ inc.alert_count }}</td>
               <td>{{ inc.asset_name || inc.asset_id || '-' }}</td>
               <td class="text-sm">{{ formatTime(inc.created_at) }}</td>
-              <td>
+              <td class="actions-cell">
                 <button v-if="inc.status === 'open'" class="btn btn-sm btn-primary" @click="resolveIncident(inc.id)">解决</button>
                 <button v-if="inc.status === 'open'" class="btn btn-sm btn-approve" @click="submitApprovalFromList(inc.id)">提交审批</button>
                 <button v-if="inc.status === 'pending_approval' && canApprove" class="btn btn-sm btn-approve" @click="approveFromList(inc.id)">审批通过</button>
                 <button v-if="inc.status === 'pending_approval' && canApprove" class="btn btn-sm btn-reject" @click="rejectFromList(inc.id)">驳回</button>
+                <button class="btn btn-sm" @click="quickRca(inc.id)">根因分析</button>
+                <button class="btn btn-sm btn-ai" :disabled="!!aiRcaLoading[inc.id]" @click="quickAiRca(inc.id)">{{ aiRcaLoading[inc.id] ? 'AI 分析中...' : 'AI 深度分析' }}</button>
+                <button class="btn btn-sm btn-sop" :disabled="!!sopGenerating[inc.id]" @click="quickSop(inc.id)">{{ sopGenerating[inc.id] ? '生成中...' : '生成 SOP' }}</button>
                 <button class="btn btn-sm" @click="showDetail(inc.id)">详情</button>
               </td>
             </tr>
@@ -86,8 +99,9 @@
             <button v-if="detail.incident.status === 'pending_approval' && canApprove" class="btn btn-reject" @click="showRejectPanel = true">驳回</button>
             <span v-if="detail.incident.status === 'pending_approval' && !canApprove" class="no-perm-hint">⚠ 您不在审批人列表中，无审批权限</span>
             <button class="btn" @click="doRca">根因分析</button>
-            <button class="btn btn-ai" :disabled="aiRcaLoading" @click="doAiRca">{{ aiRcaLoading ? 'AI 分析中...' : 'AI 深度分析' }}</button>
-            <button class="btn btn-sop" @click="generateSop(detail.incident.id)">{{ sopGenerating ? '生成中...' : '生成 SOP 知识' }}</button>
+            <button class="btn btn-ai" :disabled="!!aiRcaLoading[detail.incident.id]" @click="doAiRca()">{{ aiRcaLoading[detail.incident.id] ? 'AI 分析中...' : (aiRcaResult ? 'AI 深度分析' : 'AI 深度分析') }}</button>
+            <button v-if="aiRcaResult && !aiRcaLoading[detail.incident.id]" class="btn btn-ai" style="opacity:0.75" @click="reAnalyze">重新分析</button>
+            <button class="btn btn-sop" :disabled="!!sopGenerating[detail.incident.id]" @click="generateSop(detail.incident.id)">{{ sopGenerating[detail.incident.id] ? '生成中...' : '生成 SOP 知识' }}</button>
           </div>
           <h4 class="sub-title">关联告警 ({{ detail.alerts.length }})</h4>
           <table class="table inner-table">
@@ -208,8 +222,8 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const rcaResult = ref('')
 const aiRcaResult = ref('')
-const aiRcaLoading = ref(false)
-const sopGenerating = ref(false)
+const aiRcaLoading = ref({})   // 按 incident id 跟踪，避免全局联动
+const sopGenerating = ref({})  // 按 incident id 跟踪
 const showApprovalPanel = ref(false)
 const showRejectPanel = ref(false)
 const approvalComment = ref('')
@@ -287,6 +301,12 @@ async function showDetail(id) {
     const data = await request.get(`/incidents/api/${id}`)
     detail.value = data
     detailVisible.value = true
+    // 若已有 AI 分析缓存，直接展示，避免重复消耗 LLM
+    if (data.incident?.ai_rca_result) {
+      aiRcaResult.value = md.render(data.incident.ai_rca_result)
+    } else {
+      aiRcaResult.value = ''
+    }
     loadApprovalHistory(id)
   } catch (e) {
     ElMessage.error('加载详情失败: ' + e.message)
@@ -340,25 +360,32 @@ async function doRca() {
   }
 }
 
-async function doAiRca() {
+async function doAiRca(force = false) {
   if (!detail.value) return
-  aiRcaLoading.value = true
-  aiRcaResult.value = ''
+  const id = detail.value.incident.id
+  aiRcaLoading.value[id] = true
+  if (force) aiRcaResult.value = ''  // 强制重新分析时清空旧结果
   try {
-    const data = await request.post(`/incidents/api/${detail.value.incident.id}/ai-rca`)
+    const data = await request.post(`/incidents/api/${id}/ai-rca?force=${force ? 1 : 0}`, {}, { timeout: 130000 })
     if (data.ok === false) { ElMessage.error(data.error || 'AI 分析失败'); return }
     aiRcaResult.value = md.render(data.analysis || '')
+    if (data.cached) ElMessage.info('已加载上次 AI 分析结果（' + (data.analyzed_at || '') + '）')
   } catch (e) {
     ElMessage.error('AI 深度分析失败: ' + (e.message || e))
   } finally {
-    aiRcaLoading.value = false
+    aiRcaLoading.value[id] = false
   }
 }
 
+// 强制重新分析（覆盖缓存）
+function reAnalyze() {
+  doAiRca(true)
+}
+
 async function generateSop(incidentId) {
-  sopGenerating.value = true
+  sopGenerating.value[incidentId] = true
   try {
-    const data = await request.post(`/knowledge/api/auto-gen/sop/incident/${incidentId}`)
+    const data = await request.post(`/knowledge/api/auto-gen/sop/incident/${incidentId}`, {}, { timeout: 130000 })
     if (data.ok === false) {
       ElMessage.error(data.error || 'SOP 生成失败')
     } else {
@@ -367,7 +394,7 @@ async function generateSop(incidentId) {
   } catch (e) {
     ElMessage.error('SOP 生成失败: ' + (e.message || e))
   } finally {
-    sopGenerating.value = false
+    sopGenerating.value[incidentId] = false
   }
 }
 
@@ -381,6 +408,19 @@ async function submitApprovalFromList(id) {
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('提交失败: ' + (e.message || e))
   }
+}
+
+// 列表行快捷操作：打开详情弹窗并自动触发分析（结果在弹窗内展示）
+async function quickRca(id) {
+  await showDetail(id)
+  doRca()
+}
+async function quickAiRca(id) {
+  await showDetail(id)
+  doAiRca()
+}
+function quickSop(id) {
+  generateSop(id)
 }
 
 async function submitApprovalFromDetail() {
@@ -538,14 +578,18 @@ onMounted(() => {
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary:disabled, .btn-ai:disabled, .btn-sop:disabled, .btn-approve:disabled, .btn-reject:disabled { opacity: 0.6; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-body { padding: 16px 18px; }
-.table { width: 100%; border-collapse: collapse; }
+.table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .table th { text-align: left; padding: 10px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary, #64748b); border-bottom: 1px solid var(--border-strong, rgba(0,0,0,0.12)); text-transform: uppercase; letter-spacing: 0.3px; }
-.table td { padding: 10px 12px; font-size: 0.85rem; color: var(--text, #1e293b); border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
+.table td { padding: 10px 12px; font-size: 0.85rem; color: var(--text, #1e293b); border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); vertical-align: middle; word-break: break-word; }
 .table tr:hover td { background: var(--bg-hover, rgba(0,0,0,0.03)); }
-.title-cell { cursor: pointer; color: var(--accent, #6366f1); }
+.title-cell { cursor: pointer; color: var(--accent, #6366f1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title-cell:hover { text-decoration: underline; }
+.actions-cell { display: flex; flex-wrap: wrap; gap: 4px; }
+.actions-cell .btn { white-space: nowrap; }
 .text-sm { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
 .badge.info, .badge.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }

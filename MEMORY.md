@@ -1,377 +1,207 @@
 # AIOps 项目记忆
 
-> 每次会话开始时读取本文件了解项目背景和之前的决策。按时间倒序排列。
+> 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
-### 2026-07-21: TopologyView 加类型筛选 + 搜索 + 大力布局 + GuideDrawer
-- **类型筛选**: 工具栏新增 `<select>` 下拉框，按 `ci_type`/`type` 过滤节点；选项来自该页面实际数据中出现的所有类型
-- **搜索过滤**: `<input>` 按节点 `name` 模糊匹配；类型+搜索联合过滤时同步裁剪无关的边
-- **力布局优化**: `repulsion` 从 220 → 350, `edgeLength` 120 → 180, `gravity` 0.08 → 0.05, 新增 `friction: 0.15`，节点间距增大减少重叠
-- **图表高度**: `480px` → `600px`，提供更大可视区域
-- **操作说明**: 新增 GuideDrawer（📖 操作说明按钮），5 节说明覆盖筛选、交互、拓扑浏览、关系管理、自动刷新
-> **压缩说明**：2026-07-19 由 2384 行压缩至 ~430 行，原始完整版见 `MEMORY.md.bak.20260719_compress`。
-> 07-19 当天保留较详细，07-10~18 压成单行摘要。专业名词/话术/测试细节见对应 docs 文件。
+### 2026-07-27: 诊断折叠面板 Bug 验证 + 前端重建
+- **验证结论**: "查看诊断过程"折叠面板 bug 实际不存在。API 返回 PA #10 有 4 条 diagnosis_commands;前端 v-if 条件正确;构建文件含诊断代码。之前记录的 bug 可能是后端未运行时测试导致
+- **操作**: 前端重新构建(`npm run build --prefix frontend`),后端重启(`python run.py`)
+- **提醒**: 验证 API 时必须先登录获取 session cookie,否则 AuthMiddleware 会重定向到 /login 返回 SPA HTML
 
----
-
-### 2026-07-21: 拓扑树默认只展开集群级 + GuideDrawer 覆盖 10 个新页 + CSRF 修复
-- **拓扑折叠优化**：`expandAll` → `expandClustersOnly`，页面加载后集群卡展开、命名空间和资源默认收起，解决成千上万节点"一眼看不到东西"的问题
-- **命名空间筛选 bug 修复**：`topology_service.py` 命名空间筛选用反向传播算法（匹配叶子→向上保留父级路径），不再过滤掉 `kubernetes_cluster`/`namespace` 层级节点；`ota-system` 搜索从空结果修复为正确显示
-- **GuideDrawer 操作说明**：同 SLO 配置页风格，添加到 10 个新功能页：
-  - `EdgeTunnelView.vue` — Edge Agent 反向隧道使用流程
-  - `ContainerTopologyView.vue` — 三层纳管模型 & 图例 & 孤岛检测
-  - `K8sOverviewView.vue` — 多集群卡片状态颜色 & 指标含义
-  - `DockerOverviewView.vue` — 容器管理 & 状态颜色
-  - `K8sPodsView.vue` — Pod 状态含义 & 日志/终端
-  - `K8sDeploymentsView.vue` — 扩缩容 & 滚动更新 & HPA
-  - `K8sResourceListView.vue` — 多资源类型切换 & 搜索
-  - `K8sMonitorView.vue` — 集群监控 & 指标图表
-  - `K8sHpaRecommendView.vue` — HPA 推荐 & 目标利用率
-  - `K8sResourceOptimizeView.vue` — 超配/欠配 & Request/Limit
-- **CSRF 403 修复**：`config.py` 的 `CORS_ORIGINS` 加入 `http://localhost:8000` 和 `http://127.0.0.1:8000`，解决从 8000 端口访问时的 CSRF 拦截
-- **筛选栏 UI 统一**：`ContainerTopologyView.vue` 筛选栏样式与 K8sPodsView 保持一致（`.toolbar`/`.input`/`.btn`/`.btn-primary` 组件化），加「查询」和「重置」按钮
-
-### 2026-07-21: K8s 集群概览卡片级视觉状态 + probe 排查
-- 卡片添加 `card-online`/`card-error`/`card-probing`/`card-unknown` 动态 class，**卡片左边框颜色**区分状态（绿/红/蓝/灰）+ 渐变背景微色
-- `loadClusters` 中 `pageLoaded` 提前到 mount → stat-cards 和页面框架秒出
-- probing 状态改为紧凑 spinner + "正在连接集群..."，error 状态改为 ⚠️ "集群不可达"
-- **162 集群**：如 overview 返回 status=online 但仍显示异常，请检查后端 `k8s_resources.py:87` probe 的 `_get_k8s_client(ds)` 连接配置（kubeconfig/token/超时）是否正确
-
-### 2026-07-21: K8s 集群概览卡片即时渲染 + EdgeTunnel 403 错误提示优化
-- **K8sOverviewView.vue**：去掉全页 `v-if="!pageLoaded"` 加载阻塞，`pageLoaded` 提前到 mount 时设为 true，stat-cards 即时渲染；probing 状态从全骨架屏改为紧凑 spinner + "正在连接集群..." 文字；error 状态改为紧凑错误提示；去掉废弃的 skeleton/shimmer/spinner-overlay/loading-state CSS
-- **EdgeTunnelView.vue**：`generateToken` catch 从固定 "生成失败" 改为显示服务端真实错误信息 `e.response?.data?.error || e.message`
-- **403 根因**：`edge_tunnel.py:_require_admin` 要求 `user.role == "admin"`，当前用户角色非 admin 导致 403
-
-### 2026-07-20: P2 Edge Agent 反向隧道完成
-- **架构**：edge agent 主动 WebSocket 拨出 + HTTP 轮询获取命令 + WebSocket 回传结果 + WebSSH PTY
-- **关键决策**：用 HTTP 轮询模式（非 WebSocket 推送）避开 Starlette/uvicorn Windows 上 WebSocket 跨协程 send 的已知问题
-- **`EdgeSession` + `EdgeCommandLog` 模型** + `Asset.edge_agent_id` 关联
-- **`app/services/edge_tunnel_service.py`（新建）**：在线连接池 + `_PENDING_COMMANDS` 命令队列 + 心跳监控后台线程 + future 机制
-- **`app/routers/edge_tunnel.py`（新建）**：WebSocket `/edge/tunnel/connect` 接入 + 管理 API + `GET /edge/commands/pending` HTTP 轮询接口
-- **`app/routers/webssh.py`（新建）**：浏览器 WebSSH WebSocket → 反向隧道 → edge agent PTY（xterm.js 兼容）
-- **`edge_agent/edge_agent.py`（新建）**：主机侧守护进程（拨出 + 心跳 + HTTP 轮询 + PTY + 断线重连指数退避）
-- **前端 `EdgeTunnelView.vue`（新建）**：隧道管理页 + 命令测试 + WebSSH 终端 + 命令审计日志
-- **`AssetsView.vue`** 加"🖥 终端"按钮（edge_agent_id 存在时显示）+ WebSSH 模态框
-- **入口**：菜单 资产管理 → Edge 隧道管理（key=`edge-tunnel`）；资产列表 → 🖥 终端按钮
-- **测试**：注册+心跳+在线列表 ✅；HTTP 轮询命令执行 exit_code=0 duration=158ms ✅；命令审计日志全记录 ✅；WebSSH PTY 全链路 ✅
-- **涉及文件**：models.py / edge_tunnel_service.py(新) / edge_tunnel.py(新) / webssh.py(新) / edge_agent/edge_agent.py(新) / EdgeTunnelView.vue(新) / AssetsView.vue / menu_config.json / main.py
-
----
-
-### 2026-07-20: P1 子专家分派 + IM 双向通道完成
-- **P1-1 子专家分派(Multi-Agent Orchestration)**：
-  - `SubAgent` 模型 + 6 个预置子专家(general/SRE/网络/数据库/中间件/K8s)
-  - `app/services/sub_agent_service.py`：关键词路由(零 LLM 调用) + 工具白名单过滤 + system_prompt 注入
-  - `agent_sse.py` 改造：读 session.sub_agent → 路由 → 过滤工具 → 注入 prompt → SSE 推 `sub_agent` 事件
-  - `app/routers/sub_agents.py`：CRUD + `/route` 路由测试 + `/{name}/tools` 工具清单
-  - `agent_chat.py` 加 `/session/{id}/set-sub-agent`
-  - 前端 `AgentChatView.vue` 加 chips 切换条 + 头部子专家标签；`SubAgentsView.vue` 管理页
-  - `useAgentSSE.js` 加 `sub_agent` 事件 + `currentSubAgent` ref
-  - **入口**：菜单 AI 运维智能体 → 子智能体管理(key=`sub-agents`)；对话页头部 chips
-- **P1-2 IM 双向通道(ChatOps)**：
-  - `NotificationChannel` 加 `bidirectional`/`callback_token`/`callback_secret`/`default_sub_agent`
-  - `ImIncomingMessage` 模型存 IM 回调 + Agent 回复
-  - `app/services/im_chatops_service.py`：飞书/钉钉/企微签名校验 + 指令解析(/ai /alert /help) + Agent 调用 + 回推
-  - `app/routers/im_chatops.py`：3 平台回调端点 + URL 校验 + incoming 查询 + 通道配置 + 测试回推
-  - 修复 `notification_service.create_channel` 兼容 config/channel_config
-  - 前端 `ImChatopsView.vue`：双向通道配置 + 消息列表 + 签名密钥弹窗
-  - **入口**：菜单 AI 运维智能体 → IM 双向通道(key=`im-chatops`)
-- **测试**：P1-1 路由 7 场景全通过 + SSE sub_agent 事件 + 工具过滤(network 11/db 12/k8s 14/sre 45)；P1-2 指令解析 6 用例 + 飞书/钉钉/企微 mock 回调 + /help /alert 回复内容正确
-- **涉及文件**：models.py / sub_agent_service.py(新) / sub_agents.py(新) / im_chatops_service.py(新) / im_chatops.py(新) / agent_sse.py / agent_chat.py / notification_service.py / AgentChatView.vue / SubAgentsView.vue(新) / ImChatopsView.vue(新) / useAgentSSE.js / menu_config.json
-- **下一步**：P2 edge agent 反向隧道(架构级)
-
----
-
-### 2026-07-20: P0 竞品差距优化完成（工具安全元数据 + PromQL 解析器）
-- **背景**：对照 Ongrid 公众号文章（`docs/20260720_竞品对比_Ongrid差距分析与优化方向.md`）识别 5 项差距，按 P0/P1/P2 分级推进
-- **P0-1 工具安全元数据（Capability Metadata）**：
-  - `MCPToolDef` 新增 `location`(cloud/edge/hybrid) + `category`(15 分类) 字段 + `safe`/`read_only`/`ai_only` 派生属性
-  - 45 个 MCP 工具全补齐（cloud 39 + edge 6）；`tools/patch_mcp_metadata.py` 批量补元数据脚本
-  - `/agent/api/capabilities` 返回 location_counts/category_counts/safe_count/unsafe_count
-  - `AgentCapabilitiesView.vue` 改造：分类侧边栏 + 位置/安全/只读筛选 + 展开详情 6 项元数据
-  - **入口**：左侧菜单 → AI 运维智能体 → Agent 能力中心（key=`agent-capabilities`）
-- **P0-2 PromQL 子集解析器**：
-  - 新建 `app/services/promql_parser.py`（parse_promql + PromQLQuery）
-  - `query_metrics` 工具新增 `promql` 参数，支持 topk/bottomk/rate/avg_over_time/avg/max/min/sum + 标签过滤 + 嵌套聚合
-  - 字段模式完全兼容（metric_name + asset_id + hours + limit）
-- **测试**：3 轮全通过（字段模式 / PromQL 7 种语法 / 嵌套聚合 / 非法表达式 / capabilities API 元数据完整性）
-- **涉及文件**：mcp_registry.py / mcp_tools.py / promql_parser.py(新) / agent_chat.py / AgentCapabilitiesView.vue / patch_mcp_metadata.py(新)
-- **下一步**：P1 子专家分派 + IM 双向通道；P2 edge agent 反向隧道
-
----
-
-### 2026-07-20: 企业级安全加固 + 性能修复 + 后台BUG修复
-- **后台BUG修复**：
-  - `notification_service.py` NotificationLog 字段名 `content` → `notification_content`（模型字段不匹配导致 anomaly_detect 持续报错）
-  - `metric_collector.py` summary 键名 `is_success` → `success`（KeyError 导致指标采集持续异常）
-- **性能修复**：
-  - `log_anomaly_service.py` ES 连接超时 8s→3s + 失败缓存 5 分钟（避免不可达 ES 拖慢 88s）
-  - `log_anomaly_service.py` k8s/metric 源查询加 limit 500（避免全表扫描 15 万条 MetricRecord）
-  - `datasource_service.py` 从 120s 超时池移到辅助任务区（不再阻塞其他后台服务）
-  - `datasource_service.py` 失败源 5 分钟冷却 + 整体 80s 时间预算
-- **安全加固**（企业级 Phase 6）：
-  - 启动时检测默认 SECRET_KEY/MOBILE_JWT_SECRET 并警告（`main.py:_security_startup_check`）
-  - 登录检测弱密码返回 `must_change_password` 标记 + 前端 LoginView 提示
-  - CSRF 中间件：写操作校验 Origin/Referer（evil origin 403 拦截）
-  - 危险命令黑名单从 18 条扩展到 52 条 + 可选白名单模式（`AIOPS_COMMAND_WHITELIST` 环境变量）
-- 已发现已有中间件：AuditMiddleware（审计写操作）、SecurityHeadersMiddleware（HSTS/X-Frame-Options等）
-- 服务器后端 8000/前端 3000/移动端 5173 三端口正常运行
-- commit: 2e944fa（BUG修复）、70a5e50（安全加固+性能修复）
-
----
-
-## 关键信息（始终保留，最新）
+## 关键信息(始终保留)
 
 | 项 | 值 |
 |----|----|
-| **项目路径** | `E:\AIOPS\project05`（当前工作目录） |
-| **Python venv** | 复用上级目录 `.venv\Scripts\python.exe` |
-| **启动后端** | `Start-Process -FilePath '<venv>\python.exe' -ArgumentList 'run.py' -WorkingDirectory '<项目目录>' -WindowStyle Normal`（端口 8000，bash 工具内直接跑会随会话超时终止） |
-| **启动前端** | `npm run dev --prefix frontend`（端口 3000，proxy → 8000） |
-| **启动移动端** | `npm run dev:h5 --prefix mobile`（端口 5173） |
-| **构建前端** | `npm run build --prefix frontend`（后端 mount `/vue-assets` → `frontend/dist`，启动前必须先 build） |
-| **登录密码** | admin / **admin123**（⚠️ 不是 1234，`main.py:395` 默认 admin123） |
-| **数据库** | SQLite（`db/aiops.db` + `db/aiops_real.db`） |
-| **向量库** | Milvus Lite（`db/milvus/kb_v2.db`） |
-| **Embedding** | BGE-small-zh-v1.5（512维）；RAG V2 用 BGE-M3（1024维） |
-| **部署服务器** | 39.96.51.45（`/data/AIOPS`），git push → SSH 拉取 → 构建 → 重启 |
-| **一键重启** | `python tools/restart.py restart`（SSH 重启服务器后端；子命令 `status` / `logs [N]`） |
+| 项目路径 | `E:\AIOPS\project05` |
+| Python venv | 上级目录 `.venv\Scripts\python.exe` |
+| 启动后端 | `Start-Process python.exe -ArgumentList 'run.py' -WorkingDirectory '<项目>'`(端口 8000,bash 内直接跑会随会话超时终止) |
+| 启动前端 | `npm run dev --prefix frontend`(端口 3000 → 8000) |
+| 启动移动端 | `npm run dev:h5 --prefix mobile`(端口 5173) |
+| 构建前端 | `npm run build --prefix frontend`(启动前必须先 build) |
+| 登录密码 | admin / **admin123**(⚠️ 不是 1234) |
+| 数据库 | SQLite(`db/aiops.db` + `db/aiops_real.db`) |
+| 向量库 | Milvus Lite(`db/milvus/kb_v2.db`) |
+| Embedding | BGE-small-zh-v1.5(512维);RAG V2 用 BGE-M3(1024维) |
+| 部署服务器 | 39.96.51.45(`/data/AIOPS`),git push → SSH 拉取 → 构建 → 重启 |
+| 一键重启 | `python tools/restart.py restart`(子命令 `status` / `logs [N]`) |
 
-**⚠️ Windows 热重载大坑**：`uvicorn --reload` 旧子进程不退出 → 端口被占。强制重启三步：杀 Python 进程 → 确认端口释放 → 重新 `python run.py`。详见 AGENTS.md。
+**⚠️ Windows 热重载大坑**:`uvicorn --reload` 旧子进程不退出 → 端口被占。强制重启三步:杀 Python 进程 → 确认端口释放 → 重新 `python run.py`。端口 LISTENING ≠ 服务可用,CLOSE_WAIT 堆积 + curl 超时是死锁信号;杀进程用 `Win32_Process` 命令行区分项目 python vs VSCode 插件 python。
 
-**⚠️ License 机制**：`LicenseMiddleware` 拦截非白名单路径，无 `license.lic` → 403。项目只内置公钥（验签），`tools/generate_license.py` 需 `tools/private_key.pem` 签发。换机器需重新生成密钥对 + license（指纹绑定本机 MAC/CPU/磁盘/主机名）。`private_key.pem` 与 `license.lic` 勿提交。
-
----
-
-## 2026-07-19（最新，保留较详细）
-
-### 2026-07-19: 移动端安全改造决策（不做代码改造，只追加发布前清单）
-- **决策**：打磨期**不动移动端代码**，理由：已有 Token + SOTER 生物识别 + HMAC-SHA256 签名 + 设备指纹，核心防护到位；appid/HTTPS/签名证书是发布配置，打磨期改了要反复打包返工
-- **动作**：在 `docs/系统安全改造记录.md` 追加「📱 移动端发布前安全检查清单」章节（M1~M7 共 7 项）
-- **M1** manifest.json 配置补齐（appid/targetSdkVersion 30→33/urlCheck true）
-- **M2** HTTPS 强制（生产环境 Nginx 反代 + SSL）
-- **M3** Token 持久化加密（App 端 native crypto，H5/小程序暂缓）
-- **M4** WebSocket token 改子协议头（防 Nginx access log 泄露）
-- **M5** 代码混淆（H5 已压缩，App 用 DCloud 加固）
-- **M6** 权限最小化（删 WRITE/READ_EXTERNAL_STORAGE）
-- **M7** 发布前 npm audit + 改 md5 设备指纹为 sha256
-- **已加入待办表**：3 项 P1 + 2 项 P2，启动时机为「移动端打包发布前」
-
-### 2026-07-19: 安全自查模块落地（打磨期 P0 全部完成）
-- **入口**：左侧菜单 → 系统管理 → 安全自查（`/security-audit`，图标 Lock）
-- **后端**：`app/routers/security_audit.py` + `app/services/security_audit_service.py`（bandit + pip-audit + pip-licenses + 配置基线 4 合 1）
-- **前端**：`frontend/src/views/SecurityAuditView.vue`（5 Tab：配置基线/SAST/依赖CVE/License/SBOM）
-- **交付物**：`THIRD_PARTY_LICENSES.txt` + `SBOM.json`（193 个组件，0 高危 License）
-- **代码修复**：关 /docs /redoc /openapi（生产）+ 安全响应头中间件 + SQL 注入修复（SHOW GRANTS 白名单）+ SSRF 防护（validate_url_scheme）+ md5 usedforsecurity=False + jinja2/exec/paramiko nosec 标注
-- **依赖升级**：jinja2/pyjwt/python-multipart/urllib3/pillow/pygments/click/idna/pydantic-settings/sqlparse/filelock 共 11 个包
-- **扫描结果**：Bandit HIGH 6→0 / CVE 124→85 / License 0 高危 / 配置 5 pass 3 warn 1 fail
-- **缓存**：`security_reports/latest.json`（1 小时 TTL，可 force 刷新）
-- **文档**：`docs/系统安全改造记录.md` 顶部新增「📌 最新进展」章节
-
-### 2026-07-19: 系统安全改造方案记录文件创建
-- **产物**：`docs/系统安全改造记录.md` 记录 IP 保护 + 代码扫描防护（SAST/DAST/SCA/逆向四类）完整方案
-- **关键决策**：当前打磨期先做 P0（漏洞自查 + License 自查），P1（数字签名 + Pyarmor）P2（License 硬件绑定 + 云端化）待产品稳定后启动
-- **防护分层**：L4 架构隔离（云端化）> L3 代码加密（Cython/Pyarmor）> L2 运行时校验（License）> L1 反调试
-
-### 2026-07-19: 移动端 P0 严重 Bug 7 项全部修复
-依据 `docs/20260719_系统app优化方案.md` P0 7 项：
-- **P0-1 日志搜索白屏**：`mobile/src/pages/logs/index.vue` 重写走 `api/log.js` 统一封装（注入 Bearer token）
-- **P0-2 告警详情全量拉取**：后端 `alerts.py` 新增 `GET /alerts/api/{alert_id}` 单条接口；前端改 `getDetail(id)` 替代 `getList({per_page:100})` 再 find
-- **P0-3 oncall/my.vue 调试背景**：删除 `background:#ff00ff !important`
-- **P0-4 推送开关联通后端**：H5 跳过 API（无原生推送），iOS/Android 走 `registerDevice`/`unregisterDevice`
-- **P0-5 manifest.json appid**：DCloud/微信/极光 appid 全空，**需运维补齐**（H5 不受影响）
-- **P0-6 故障单真分页**：`incident/index.vue` 改 page/per_page 真分页，PAGE_SIZE=20
-- **P0-7 资产详情假按钮**：`asset/detail.vue` "重启服务" 是空壳（未修复记录，待确认）
-
-### 2026-07-19: 移动端系统优化方案输出
-- 新增 `docs/20260719_系统app优化方案.md`（7300 字，6 章），扫描 `mobile/` 全量代码识别 **36 项问题**：P0 严重 Bug 7 / P1 性能体验 10 / P2 架构工程化 11 / P3 锦上添花 8
-
-### 2026-07-19: 公众号文章撰写并归档
-- 新增 `docs/公众号文章_AIOps智能运维平台深度解析_20260719.md`（7800 字，8 章），素材全部来自项目真实文档
-
-### 2026-07-19: P2 中（质量层）4 项全部落地
-- 新增 `scripts/check_contract.py`（CONTRACT.md 字段漂移检测 CLI）；其余 3 项见 `docs/20260719_系统优化方案.md`
-
-### 2026-07-19: P1 高（架构层）4 项全部落地
-- 依据 `docs/20260719_系统优化方案.md` P1 高 4 项实施完成
-
-### 2026-07-19: 系统优化方案归档
-- 新增 `docs/20260719_系统优化方案.md`
-
-### 2026-07-19: 全项目 fail-soft 改造（109 处 500 错误清零）
-- 全项目 109 处接口 500 错误改为 fail-soft（200 + warning/error 字段），详见 `docs/20260719_系统优化方案.md`
-
-### 2026-07-19: K8s 接口 fail-soft 改造（47 个接口全量）
-- `k8s_resources.py` 47 个接口全部 fail-soft 化
-
-### 2026-07-19: 资产类型扩展——中间件子类型 + 数据库子类型全面补齐
-- 中间件（mysql/redis/nginx/kafka 等）+ 数据库（mysql/postgresql/mongodb 等）子类型补齐
-
-### 2026-07-19: 审批设置按钮 admin 专属权限隔离
-- 审批设置按钮仅 admin 可见
-
-### 2026-07-19: 故障单审批分角色权限校验（双模式开关 + 审批人勾选）
-- 双模式：严格审批 / 宽松模式开关；审批人勾选列表；分角色权限校验
-
-### 2026-07-19: 其他 7 项（单行摘要）
-- 实时监控看板 Row 2 布局空缺修复
-- 异常检测基准 + Trace 异常检测配置 新增「📖 操作说明」
-- 异常检测基准 422 修复 + Trace 异常检测窗口可配置
-- SLO 管理 2 个 API 设计问题修复（CRUD 完整性 + 概念混淆）
-- SLO 管理 4 页面端到端测试
-- SLO 管理下 4 个菜单页操作说明按钮样式升级
-- 知识草稿 LLM Provider Fallback 修复（遗留问题）
-- GroundTruth / A/B 测试 / 知识草稿审批 三模块强力修复 + E2E 验证
-- Agent 评估看板 / A/B 测试 / 全失败工具三项修复
-- Agent 评估看板中文化 + 字段 bug 修复 + 排查全 0 根因
-- Agent 工具中文化 SSOT 改造
+**⚠️ License 机制**:`LicenseMiddleware` 拦截非白名单路径,无 `license.lic` → 403。换机器需 `tools/generate_license.py` + `tools/private_key.pem` 重新签发(指纹绑定本机 MAC/CPU/磁盘/主机名)。
 
 ---
 
-## 2026-07-18
+## 重要架构决策(长期有效)
 
-- **AI 智能助手 32 场景自动化测试完成**：按 `docs/AI智能助手多轮对话测试场景.md` 32 场景全测
-- **AI 智能助手三按钮多轮复杂测试场景补充（23-32）**：扩展 10 个复杂场景
+### AI 自愈 + 工作流协同(分级自愈)
+- 已知场景走 Playbook(多步骤全自动),未知场景走 AI 单步
+- `remediation_service.py`:`ai_self_heal_analyze` 注入启用的 RemediationWorkflow 列表,AI 返回 workflow_id 经校验后 action_type='workflow';`confirm_ai_action` 循环执行 workflow.steps,失败即停
+- workflow 容错:restart 缺 service 用 asset.name 补;clean 缺 path 补 /tmp
+- `PendingAction.alert_id` 关联告警;危险命令黑名单 `_DANGEROUS_CMD_RE` 52 条正则,`execute_action` 入口拦截
 
----
+### 自愈引擎成熟度演进(三阶段)
+1. **确定性风险分类器**:`_classify_command_risk` 按 SSH 白名单(ps/cat/grep/df 等只读)/变更黑名单(restart/kill/rm/scale 等)/未知三档硬判定,只读自动执行,变更入审批。LLM 自评风险不可靠,必须确定性规则兜底
+2. **资产类型感知分派(CI-Type-Aware Dispatch)**:`_ci_channel` 返回 ssh/k8s/docker,`execute_action` 按通道分派;K8s 走 rollout/scale API,Docker 走 docker restart,SSH 走 systemctl。展示层 `_build_rule_command` 与执行层一致(Display-Execution Parity)
+3. **诊断先行(Evidence-Driven Approval)**:`DiagnosisReport` 模型 + `DIAGNOSIS_COMMAND_PACKS`(按指标预定义只读命令) + `run_diagnosis` 自动跑诊断 → 注入 AI prompt → 生成 PendingAction 附 `diagnosis_report_id`/`root_cause`/`diagnosis_reasoning`/`impact`/`command_explanation` → 审批人看「诊断证据→根因→修复逻辑→命令解释」四段式推理链
+4. **失败闭环(Failure Feedback Loop)**:`reanalyze_with_failure_context` 注入原始诊断+失败命令+错误输出 → AI 分析失败原因 → 换思路生成新 PendingAction → 审批 → 执行 → ... ;前端失败卡片显示「🔄 换个思路」按钮;设计原则:不是推翻重来,而是带着失败经验继续
+5. **部署知识赋能(Deployment Knowledge)**:`KbDocument.asset_id` FK 绑定文档到具体资产;AssetsView 上传/管理部署报告;AI 分析(`ai_self_heal_analyze` + `reanalyze_with_failure_context`)时查询该资产关联的已索引部署文档注入 prompt,让 AI 基于实际安装方式/服务名/配置路径给出正确修复命令,避免"猜服务名"导致修复失败
 
-## 2026-07-17
+### fail-safe 审批闸门 + 双路径并行
+- `check_and_remediate` 不再自动 SSH,改为生成 `PendingAction(source=rule)`,末尾调 `auto_ai_analyze_alerts` 生成 `PendingAction(source=ai)`(限流 1 条/轮防 token 爆炸)
+- 同告警下规则方案与 AI 方案并排,前端按 `source` 着色(规则蓝/AI 紫),人工择优;`confirm_ai_action` 按 source 区分参数路径
+- **关键教训**:审批展示层与执行层参数补全逻辑必须一致;缺关键参数宁可拒绝执行也不能用资产名/IP 兜底(`systemctl restart 39.106.16.32` 比报错更危险);AI 必须输出可执行具体参数(Parameter Concretization),不能只给 action 类型
 
-- **菜单点击无响应修复**：`frontend/dist` 是 7-13 旧构建（`@xterm/xterm` 缺失致 build 失败），`npm install @xterm/xterm` + 重新 build 修复
-- **GitHub 拉取 + seed_data 字段修复 + 全服务启动**：拉 9 个 commit；seed_data 9 处字段名修复（CONTRACT 重命名后）；8000/3000/5173 全 LISTENING
-- **网络测试工具开发 + 智能助手时间显示修复 + 依赖审计 + 推送 GitHub**：`network_test.py` Ping/Traceroute/TCP/DNS 4 工具（命令注入防护 + 频率限制）；commit 07f6b66 推送
-- **文档与系统实现对齐审查**：发现 7 处不一致（静默规则路由 / ChangeRecord 模型 / OnCall 字段等）
-- **新版产品介绍页 v2**：`ProductIntroView.vue` 亮色系 + GSAP ScrollTrigger；新建 `graph_inference_service.py`（networkx 推理引擎，故障传播/根因定位/知识推荐）
-- **实时监控看板 + Synthetic 拨测 + 拓扑刷新**：`MonitorView.vue` 10 张 ECharts 图
-- **Windows/WinRM 资产支持 + 修复多个预存 Bug**
-- **AI 智能助手真实场景打磨**：System Prompt + MCP 工具 + Bug 修复 + 新增 5 个复杂场景
-- **P1-P4 前后端功能验证通过**：Chat/Agent 双模式 + 会话管理 + SSE 全链路
-- **AI 智能助手任务进度卡片**：`TaskProgressCard.vue` + SSE 结构化步骤事件协议（task_card/step_start/step_finish/progress/done），超越竞品 AIChat 的核心差异化
-- **扩展 AI 智能助手多轮对话测试场景文档**：场景 5-17 共 13 个新场景
-- **AI 智能助手多轮对话场景全面测试与优化**：4 场景全通过；修复 mcp_tools 未注册等 6 项
-- **AI 智能助手多轮对话场景全面优化**：`query_alerts` 加 asset_id/hours；新增 `query_change_records` MCP 工具；新增 `POST /knowledge/api/auto-gen/from-incident/{id}`
-- **修复 agent_sse 多轮工具调用上限耗尽**：max_rounds 提至 15 + 检测思考模式自动追加总结
-- **修复 agent_sse.py 多个严重 bug**：变量名 `tr`→`t_result`、缩进错误、keepalive 2s 心跳、EventSource 重连错误优先
+### Edge Agent 反向隧道(P2)
+- edge agent 主动 WebSocket 拨出 + HTTP 轮询获取命令 + WS 回传结果 + WebSSH PTY
+- 关键决策:用 HTTP 轮询(非 WS 推送)避开 Starlette/uvicorn Windows 上 WS 跨协程 send 的已知问题
+- `EdgeSession`/`EdgeCommandLog` + `Asset.edge_agent_id`;文件 `edge_tunnel_service.py`/`edge_tunnel.py`/`webssh.py`/`edge_agent/edge_agent.py`/`EdgeTunnelView.vue`
+- 入口:资产管理 → Edge 隧道管理;资产列表 → 🖥 终端按钮
 
----
+### 子专家分派 + IM 双向通道(P1)
+- `SubAgent` 模型 + 6 预置子专家(general/SRE/网络/数据库/中间件/K8s)
+- `sub_agent_service.py`:关键词路由(零 LLM)+ 工具白名单过滤 + system_prompt 注入
+- `agent_sse.py` 读 session.sub_agent → 路由 → 过滤工具 → 注入 prompt → SSE 推 `sub_agent` 事件
+- IM ChatOps:`NotificationChannel` 加 `bidirectional`/`callback_token`/`callback_secret`/`default_sub_agent`;`im_chatops_service.py` 飞书/钉钉/企微签名校验 + 指令解析(/ai /alert /help)
+- 入口:AI 运维智能体 → 子智能体管理 / IM 双向通道
 
-## 2026-07-16
+### 竞品差距优化(P0)
+- `MCPToolDef` 加 `location`(cloud/edge/hybrid) + `category`(15 分类) + `safe`/`read_only`/`ai_only` 派生属性(45 工具全补齐)
+- `promql_parser.py`:parse_promql + PromQLQuery,`query_metrics` 支持 topk/bottomk/rate/avg_over_time + 标签过滤 + 嵌套聚合
+- `/agent/api/capabilities` 返回 location_counts/category_counts/safe_count;入口 AI 运维智能体 → Agent 能力中心
 
-- **修复智能助手 SSE 连接中断**：`call_llm` 同步阻塞事件循环 → 改 `await loop.run_in_executor`；vite proxy 加 `proxyTimeout: 300000`
-- **修复智能助手 SSE 聊天 ImportError**：删除不存在的 `get_session`/`_max_hallucination_retries` import；修复 `get_message_history` 缺 db 参数
-- **后端验证通过**：连接池 + 中止按钮 + 关联分析三件套生效
-- **注册 query_correlation_analysis MCP 工具**：AI 可主动调关联分析；`format_correlation_for_llm` 迁至 `observability_correlation.py`
-- **修复 /login 接口畸形 JSON 导致 500**
-- **实现"关联分析结果发送 AI 深度分析"功能**：`POST /agent/correlation-analyze` → 注入关联数据 → 自动 SSE 流式分析；入口：智能分析室→日志·指标·链路关联→黄色「AI 深度分析」按钮
-- **修复关联分析页面服务/资产下拉无数据**：Span 无数据时降级查 Asset 表
-- **冲刺10分收官——四大方向补齐**：知识管理（unified-search API + KB 版本追踪）/ AI 智能体（A/B 测试集成 + GroundTruth）/ 异常检测（Trace 异常配置 CRUD）/ 容器 K8s（HPA 推荐 + 资源优化）
-- **系统态势加载性能优化**：`GET /heatmap` 900 次 SQL → 4 次（`_batch_alert_incident_counts` GROUP BY 批量查）
-- **菜单补齐 4 个缺失入口**：自定义仪表盘 / Agent 评估 / A/B 测试 / 知识草稿审批；7 份操作手册统一优化
-- **关联分析全面升级**：`observability_correlation.py` 全量重写；前端 ECharts 时间轴泳道图 + 服务拓扑图
-- **可观测性三支柱关联分析功能完成**：`ObservabilityCorrelationView.vue` 4 Tab + 关联资产面板
-- **巡检模板类型过滤**：模板 `target_ci_types` 真正生效，`browse_assets` 加 `ci_types` 参数
-- **RolesView bug 修复 + UI 重新设计 + UsersView 角色字段合并**：变量名冲突修复；左右两栏布局；删除 legacy `role` 字段
-- **多租户菜单与代理修复**：`menu_config.json` 加 `tenant-management`；vite 加 `/tenant` proxy
+### 灭火图分层健康引擎
+- `compute_health()` 分层:api→Span / microservice+middleware→Alert / infra→Metric
+- `_normalize_service_name` 去 K8s 前缀+哈希后缀;`health_engine.py` + `health_map.py`;Asset 加 `health_status`
 
----
+### RAG V2
+- BGE-M3(1024维)+ Milvus + 异步索引;`KbDocument.index_engine` 区分 V1/V2;V1 删 Milvus V2 删 SQLite
 
-## 2026-07-15
-
-- **实现多租户隔离功能**：`Tenant` 模型 + `tenant_context.py`（TLS）+ `tenant_management.py`；默认单租户模式
-- **菜单按用户场景重组（7 大舱系替代技术分类）**：值班驾驶舱 / 运维工作台 / 智能分析室 / 可靠性工程 / 知识库 / AI 运维智能体 / 系统配置
-- **角色管理与菜单权限系统（RBAC）**：`Role`/`RoleMenu` 模型；`menu.py` 按 role_id 过滤；admin/operator/viewer 种子角色
-- **InspectionView 模板编辑功能补全**：弹窗表单 + 23 种 CI 类型 checkbox + 检查项动态增删
-- **AIOps 架构交互图 PPT 重建**：`docs/AIOps系统架构交互图_客户交流PPT_20260715_可编辑版.pptx`（python-pptx 30 页可编辑）
-- **AIOps 架构交互图客户交流 PPT 生成**：30 页 SVG + 30 页讲稿
-- **灭火图重构**：每层级只关联对应可观测信号（api→Trace / microservice→Log / middleware→Log+中间件指标 / infra→Metric）
-- **修复指标监控页空白**：`metric_v2_service.py` 3 个 bug（labels 端点错 / status 检查错 / range status 错）
-- **字段重命名遗留修复（第二批）**：DB schema + chaos + agent_eval 字段同步
-- **三大功能开发完成**：运营数据看板 `OpsAnalyticsView` + 仪表盘拖拽编辑器 `DashboardDesignerView`（16 卡片类型）+ 诊断 Tool 标准化 `DiagnosticToolsView`（20 工具 + 命令白名单）
-- **后端启动修复 + 三端访问验证通过**：paramiko 重装；`db_migrate.py` 修为读 `DEMO_DB_PATH`/`REAL_DB_PATH`；SystemConfig.value→config_value 6 文件修复
-- **全库 80 表字段名规范化重构（57 字段重命名）**：时间加 `_at` / 布尔加 `is_`/`has_` / JSON 加业务前缀 / FK 统一 `user_id` / 删除 `assets.type`；跨 47 router + 28 service + 14 Vue；`db_migrate.py` 61 条 ALTER TABLE
-- **ChaosRun.is_auto_recovered 空壳字段修复**：cleanup 结果捕获 + 落库 + summary 统计
-- **系统架构交互图补充（12→24 条链路）**：新增 12 条链路（告警触发巡检 / 混沌回滚 / OnCall 轮转 / Agent 评估 / 异常回测 / SOP 生成 / 运营飞轮 / 诊断工具 / 仪表盘拖拽 / 健康评分 / 移动端闭环 / Agent 能力中心）
-- **后端大量报错修复（SQLite 缺列迁移补全）**：`_MIGRATIONS` 漏配 4 类字段 → 补 `chaos_runs.auto_recovered`/`inspection_records.triggered_by_alert_id`/`knowledge_drafts.sop_steps`/`incidents.impact+description`。**教训**：新增模型字段必须同步补 `_MIGRATIONS`，`create_all` 不 ALTER 已有表
-- **系统访问故障修复（后端进程异常 + 登录密码勘误）**：系统 Python3.13 进程异常 → 杀掉用 project07 venv 重启；**登录密码确认 admin/admin123**
-- **Investigation Package 6 部分结构化 RCA**：`rca_service.py` 输出 Facts/Timeline/Candidates/Evidence/Exclusions/NextSteps；资产健康度评分；SLO 自动计算 + Dashboard；Remediation Workflow 可视化编排；VM 进程嵌入 run.py
-- **Agent 能力中心完成**：`AgentCapabilitiesView.vue` 41 个工具可视化管理
-- **知识审批流 + SOP 自动生成完成**：`KnowledgeDraft` 加 `source_type`/`sop_steps`/`reject_reason`；`POST /knowledge/api/auto-gen/sop/incident/{id}`
-- **Phase 5 移动端优化完成**：WS 实时告警 / 告警批量操作 / 日志搜索 / 交接班 / 故障单 / AI 会话列表
-- **SSE 实时推送完成**：`agent_sse.py` + `ws.py` + `useAgentSSE.js`
-- **Phase 3 冲刺 4 项完成**：自愈效果追踪 / 告警触发巡检 / 混沌自动回滚 / OnCall 自动排班；删除 GPS 打卡（不合规）
-- **Phase 2 冲刺 5 项完成**：Agent 评估 / A/B 测试 / RAG 重排 / 异常基准 / 资产自动发现
-- **4.6 知识自动沉淀 + 5.1 自愈成功率分析**：`KnowledgeDraft` 模型 + `generate_draft(alert_id)` LLM 生成；`RemediationEffect` 模型 + 30 分钟延迟追踪
-- **告警推荐接入 AI 分析 + 菜单移至 AIOps 智能体**：`ai_analyze_alert()` LLM 根因分析
-- **ci_type 别名映射修复**：`virtual_machine`→`server` 等别名，模板查找先走映射
-- **AssetsView 排除 K8s 子资源**：11 个 K8s 子类型不在 CMDB 台账展示，由 K8sResourceListView 管理
-- **资产基线安全检查**：`SecurityBaselineTemplate`（38 条模板 6 CI 类型）+ `AssetBaselineCheck` + AI 分析
-- **智能指标推荐系统**：`MetricTemplate`（48 条 13 类 CI）+ `AssetMetricRecommendation` + AI 推荐
-- **智能巡检模块**：`InspectionTemplate/Task/Record` + 8 类检查项 + AI 报告，21 场景 125 项测试全通过
-- **灭火图分层健康引擎（三源驱动）**：`compute_health()` 分层逻辑（api→Span / microservice+middleware→Alert / infra→Metric）；`_normalize_service_name` 去 K8s 前缀+哈希后缀
+### 拓扑视图双 Tab
+- Tab1 资产拓扑(K8s 节点维度):后端 `build_asset_topo_by_node` + `K8S_CHILD_FILTER` 过滤子资源收敛
+- Tab2 网络拓扑双模式:devices(显式 AssetRelation)/ subnets(IP 网段聚类,父节点 roundRect)
+- 教训:认证中间件拦截无 token 请求重定向 SPA(非 401),验证后端接口必须带 `Authorization: Bearer`;CI Roll-up 应在后端做避免前端过滤大图卡顿
 
 ---
 
-## 2026-07-14
+## 字段规范与契约
 
-- **FireMapView 亮色主题适配**：CSS 变量驱动，`color-mix()` 替代硬编码透明度
-- **灭火图（FireMap）健康驾驶舱**：`health_engine.py` + `health_map.py`；Asset 加 `health_status` 字段；445 实体正确分层
-- **全量硬编码路径清理 + 标签翻页 + 远程部署**：31 文件 54 处硬编码改 `__file__`/`%~dp0`；写入 AGENTS.md
-- **蓝绿发布增强**：`BlueGreenDeploy.last_switched_at` + `BlueGreenSwitchRecord` 模型；回滚按钮 + 历史记录
-- **标签管理分类 + 标签云**：`TagCategory`/`Tag` 模型；`TagsView.vue` 全新 UI
-- **资产管理数据库资产新增/编辑超高危权限确认弹框**：high/medium/unknown 三档弹框 + HTML 换行
-- **服务器部署到 39.96.51.45**：`/data/AIOPS`，后端 8000 / 前端 3000 / 移动 5173
-- **MySQL 安装 + query_mysql 工具 + check_mysql_permissions 工具**：192.168.100.129 MySQL 8.0；数据库资产创建时强制权限检测，high/medium/unknown 三档风险警告
+### CONTRACT.md(字段命名 SSoT)
+- 资产/连接配置/CI类型/数据源字段以 `CONTRACT.md` 为唯一数据源
+- 新增/修改字段先改 CONTRACT.md 再同步前后端;敏感字段(密码/Token)后端返回 `***` + `has_*`,前端编辑置空、保存空值=不更新
+- `scripts/check_contract.py` 检测字段漂移;违反契约会静默数据丢失
 
----
+### 全库字段名规范化(57 字段重命名)
+- 时间加 `_at` / 布尔加 `is_`/`has_` / JSON 加业务前缀 / FK 统一 `user_id` / 删除 `assets.type`
+- `db_migrate.py` 61 条 ALTER TABLE;**新增模型字段必须同步补 `_MIGRATIONS`,`create_all` 不 ALTER 已有表**
 
-## 2026-07-13
+### 路径规范契约
+- 所有文件路径基于 `__file__`(Python)或 `%~dp0`(.bat)动态计算,禁止硬编码绝对路径
+- 违反会导致换机器/目录后路径全部失效
 
-- **异步安装 + 回滚机制 + 工具规范化**：`BackgroundJob` 模型 + 线程池 + `get_task_status` 轮询 + `execute_install_package` 异步安装 + `rollback_cmds[]` 补偿式回滚
-- **AI 智能助手日志查询工具**：`query_log_sources` + `query_logs`；`LogQueryAdapter` 适配器模式
-- **AI 智能助手链路追踪工具**：`query_traces` 支持 trace_id/service/status/time_range 过滤
-- **远程脚本「生成 Playbook」功能**：执行成功后生成 Ansible YAML
-- **SRE 页面服务名字段改为 ServicePicker 关联资产**：`ServicePicker.vue` 替代文本输入；`GET /assets/api/services`
-- **任务中心页面添加操作说明**：GuideDrawer 右侧抽屉
-- **K8s 终端字符翻倍修复**：K8s 用 `tty=True` TTY 自带回显，移除前端本地回显
-- **Docker 终端排版阶梯缩进修复**：非 TTY pipe 输出只有 `\n`，`docker_to_browser()` 改 `\n`→`\r\n`（模拟 OPOST）
-- **Docker 终端改为 TTY 模式（backspace 修复）**：`docker exec -i`→`-it` 失败回退；改用前端本地行编辑 buffer 方案
-- **Docker/K8s 终端修复（输入重复 + 命令不执行 + 二进制接收）**：移除 onKey 统一 onData；`\r`→`\n` ICRNL；`ws.binaryType='arraybuffer'`
-- **Docker 容器查看/日志/终端集成 + xterm CSS 修复**：Docker 日志/终端 WebSocket；`docker/` 改名 `docker-build/` 避免与 SDK 包冲突
-- **Docker 化交付 + requirements 清洗**：多阶段构建（node:20 + python:3.12）；镜像 3.02GB；`docker save | gzip` 离线交付
-- **K8s Pod 终端 WebSocket 认证修复**：登录后 `localStorage.setItem('aiops-token')`；WS URL 拼 `?token=`；**教训**：WS 不能依赖 session cookie
-- **K8s overview 接口超时修复**：TCP 预检 5s 快速失败 + `configuration.retries=0` + 多集群并发 + `_request_timeout=(5,10)`；120s+→5s。**教训**：kubernetes python client 的 `configuration.timeout` 不自动作用于 API 调用
-- **项目克隆到 project08 + 本地开发 license 签发**：RSA-2048 密钥对；license.lic 旗舰版到期 2027-07-13
-- **服务器一键重启脚本**：`tools/restart.py` paramiko SSH 重启；restart/status/logs 子命令
-- **服务器全量部署 (39.96.51.45)**：FastAPI 8000 统一服务 Web+Mobile；torch CPU fallback；BGE 模型加载
-- **V1/V2 引擎标识 + 跨引擎安全删除**：`KbDocument.index_engine` 字段；V1 删 Milvus V2 删 SQLite
-- **告警与 AI 智能助手联动**：`AlertSessionLink`/`AssetSessionLink`；`POST /alerts/api/{id}/open-assistant`
+### CSS 变量契约
+- 全局 `main.css` 定义 `--text-primary`/`--card-bg`/`--primary` 等
+- 页面 scoped CSS 必须复用全局变量名,不要自创别名;仅靠 fallback 值多主题下会失效
 
 ---
 
-## 2026-07-12
+## 关键教训(按主题)
 
-- **Reranker 双模式 + Mobile H5 修复 + 培训 PPT + 安全/架构修复**：Reranker 经典版(CPU) + 智能版(AuroraX GPU)；Mobile H5 publicPath 修复；26 页培训 PPT；系统评估 818/1000 (A-)；91 个 SOP 模板；`CONTRACT.md` 字段规范契约 SSoT；K8S ci_type 统一 `kubernetes_cluster`
+### 后端/Python
+- **乱码溯源三层验证**:源文件字节 `open('f','rb').read()` + DB 存储字节 `hex(message)` + API 响应字节,区分历史脏数据 vs 运行时编码 vs 源码污染;Mojibake 特征是 UTF-8 字节被按 GBK 解码
+- **Edit 工具对含 PUA 不可见字符的乱码行匹配失败**,改用 python 按行号重写;bash 里 `python -c "..."` 写含 `\n` 字符串会被双重转义 → 复杂修复脚本应 Write 到 .py 文件再执行
+- **Python 局部变量分支条件赋值**,后续引用必须在入口处先初始化默认值
+- **写查询脚本前先 `PRAGMA table_info` 确认列名**,不要凭记忆猜
+
+### 前端/Vue
+- **新增 Vue 页面**:无需改 router/index.js,但需改 AppLayout 注册组件 + activeView 分支 + menu_config.json + role_menus 四处
+- **FastAPI + Vue SPA 404**:所有非根 Vue 路由必须在 `main.py` 加 catch-all 兜底,且必须在所有 `include_router` 之后,否则拦截 API
+- **menu_config.json**:分组 key 不能与叶子 key 相同(否则点击无响应);`menu.py` 启动时缓存到内存,改 menu_config.json 后必须重启后端
+- **axios timeout**:LLM 调用需 `{ timeout: 130000 }`(后端 120s 留余量);loading 状态按 id 跟踪(`ref({})`)不要用单个全局 ref
+- **event.currentTarget 失效**:DOM 事件传播结束置 null,闭包内需入口处缓存
+
+### 采集/告警/自愈
+- **采集命令取 `100-id`** 比 `us` 列更全面(覆盖 sy/wa/hi/si/st);故障注入可观测缺口:注入的故障、采集的指标、告警判断三者维度必须对齐
+- **规则匹配应精确关联**(rule_id 外键),`rule_id IS NULL` 不应作为"匹配所有告警"通配语义(Wildcard Rule Trap)
+- **跨 OS 脚本传输必须做换行符规范化**(CRLF→LF),且在危险命令检测之前做,否则 `rm -rf /\r` 可能绕过正则
+- **跨 OS 采集需抽象层**(LinuxCollector/WindowsCollector)+ `Asset.os_type` 字段;"无数据"≠"异常",评分不能二元扣分
+- **K8s Python Client**:`configuration.timeout` 不自动作用于 API 调用,需 TCP 预检 5s + `configuration.retries=0` + `_request_timeout=(5,10)`
+- **SSH banner 限流重试**:诊断命令包连续新建 SSH 连接时触发 132 机器 `MaxStartups` 限流 → `Error reading SSH protocol banner`;解法:`run_diagnosis` 改为共享单个 SSH 连接执行所有诊断命令(不再每条命令新建连接);`_remote_exec` 保留 `retries=2` 兜底重试;同时应考虑在服务器端调大 `MaxStartups`（`sshd_config`）
+
+### 知识库/部署报告
+- **AI 修复"猜服务名"根治**:AI 建议 `systemctl restart elasticsearch` 但实际是 Docker 安装 → 根因是 AI 不知道资产部署方式;解法:KbDocument.asset_id FK + 资产部署报告上传 → AI prompt 注入实际部署信息;设计原则:"诊断先行"之后是"知识赋能",让 AI 有足够上下文才能给出正确命令
+- **KnowledgeDocumentsView 资产筛选**:下拉框 + loadList() 传 asset_id 参数;AssetsView 从资产维度管理部署报告,KnowledgeDocumentsView 从文档维度查看所有/筛选资产
+
+### uni-app H5
+- `manifest.json` 的 `h5.publicPath` 优先级高于 `vite.config.js` 的 `base`,缺失会覆盖
+- `uni.switchTab` 忽略 query 参数,跨 tab 传参用 `getApp().globalData`
+- `src/pages/` 下页面组件有深层编译缓存,改动不生效时先验证 `main.js`
+
+### WebSocket/移动端
+- WS 不能依赖 session cookie,需 `?token=` 拼接;移动端登录后 `localStorage.setItem('aiops-token')`
+- SSE keepalive 2s 心跳 + `run_in_executor`;`agent_sse` max_rounds 提至 15
+
+### opencode 性能维护
+- SQLite WAL 不自动 checkpoint,定期 `wal_checkpoint(TRUNCATE)` + `VACUUM`;`scripts/cleanup_opencode.py --keep N`
 
 ---
 
-## 2026-07-11
+## 近期变更摘要(2026-07)
 
-- **核心功能修复**：异常检测 7 种算法全面修复；告警根因分析 + AI 深度分析 + K8S 事件告警；资源拓扑图 4 个 BUG 修复；27 种 CI 类型 + 蓝绿发布/变更审批端到端测试
+### 2026-07-27(部署知识赋能 + 告警聚合降噪 + SSH 复用)
+- 部署报告与资产绑定:KbDocument 加 `asset_id` FK → 查询资产部署文档注入 AI prompt
+- KnowledgeDocumentsView 加资产下拉筛选(按 `asset_id` 过滤文档列表)
+- V2 文档列表/上传/创建接口均支持 `asset_id` 参数
+- `ai_self_heal_analyze` + `reanalyze_with_failure_context` 均注入资产部署知识文档(最多 5 篇,每篇截断 2000 字)
+- AssetsView 已有部署报告上传/管理抽屉(上一会话完成)
+- SSH 连接复用:run_diagnosis 共享单个 SSH 连接执行所有诊断命令,不再每条命令新建连接,根治 MaxStartups 限流 banner 错误;_remote_exec 保留 retries=2 兜底
+- 告警聚合降噪:RemediationView 待处理告警按 metric_name+asset_name 聚合,折叠展开,消除同类告警刷屏
 
----
+### 2026-07-26(自愈诊断先行 + 三架构靶场)
+- 自愈引擎"诊断先行"改造:`DiagnosisReport` + `DIAGNOSIS_COMMAND_PACKS` + `run_diagnosis` + AI prompt 注入诊断数据 + 前端诊断折叠面板 + 推理链/命令解释展示
+- 第7次会话状态盘点:10 条 pending_actions(6待审+1自动成功+3 SSH失败);列名是 `action_payload`/`action_type` 非 `command`/`action_taken`
+- 确定性风险分类器 + 只读命令自动放行:26 用例通过,LLM 自评风险不可靠
+- 告警规则 vs 异常检测页加对比横幅(静态阈值 vs 动态基线)
+- 新增 AlertRulesView + 6 个 API;补齐数据库驱动(psycopg2/redis/oracledb/pymssql/pymongo)
+- namespace 从 CMDB 移除保留拓扑依赖;修复资产列表"全部"只显示1条(SQL 分页+Python 过滤反模式);修复 K8s 资产创建 `connection_result` 未初始化
+- K8s admin ServiceAccount 创建(K8s 1.24+ 不自动生成 token);平台数据全清(24585 行,VACUUM 5968KB→1260KB)
+- 三架构靶场部署完成:131=K8s microservices-demo(12 pod),132=Docker mall-swarm + 裸机 mall;访问 K8s http://11.0.1.131:30443,Docker http://11.0.1.132/(admin/macro123),裸机 http://11.0.1.132:81
+- 关键:mall-swarm 前端 baseURL 须含 `/mall-admin` 前缀匹配 Gateway 路由;Nacos 2.1 需 9848/9849 gRPC 端口;`--network host` 模式容器需用 localhost 非 docker hostname
 
-## 2026-07-10
+### 2026-07-25(自愈资产感知 + 拓扑Tab化 + 多功能补齐)
+- 自愈资产类型感知改造(三通道分派 ssh/k8s/docker);修复自愈 workflow 用资产名/IP 当 service 名生成废命令(参数具体化 + 禁止语义兜底)
+- 修复自愈待审批 workflow 步骤只显示 action 名不显示真实命令(审批透明化);修复 `_build_rule_command` 不支持带后缀 action_type
+- 告警消息乱码根治(alert_service + notification_service 两层编码污染);修复通配规则风暴(rule_id IS NULL 通配)
+- 拓扑视图大改 Tab 化(资产拓扑 K8s 节点维度 + 网络拓扑双模式)
+- 自愈改 fail-safe 审批闸门 + 双路径并行择优(规则+AI 并排)
+- 诊断工具中心补 AI 解读层(`POST /api/diagnostic-tools/analyze` 6 段 RCA)
+- Ansible 主机清单支持从资产生成;远程脚本多行命令 CRLF 修复;恢复 Ansible 编排菜单;新增「资源管理」一级菜单
+- 智能巡检评分模型修复(无数据→unknown 不扣分,按 severity 加权);AI 深度分析结果缓存;通知渠道启停;自定义仪表盘;合并 DashboardView 到 MonitorView;菜单搜索框
 
-- **RAG V2 升级 + 基础设施**：RAG V2（BGE-M3 + Milvus + 异步索引）；预测引擎 5 种模型；Runbook 三场景集成
+### 2026-07-24
+- AI 自愈端到端 6 轮 70 用例通过;PendingAction 加 `alert_id`;自愈规则 action label 中文化
 
----
+### 2026-07-21
+- 拓扑树默认只展开集群级;GuideDrawer 覆盖 10 个 K8s/容器页;CSRF 修复;K8s 集群概览卡片级状态色
 
-## 2026-07-08~09
+### 2026-07-20
+- 企业级安全加固(默认密钥检测+弱密码标记+CSRF+危险命令黑名单 52 条+白名单模式);性能修复(ES 超时 3s+失败缓存 5 分钟);NotificationLog.content→notification_content
 
-- **拓扑/自愈/部署**：拓扑视图异常筛选 + 关联资产面板；自愈规则端到端测试（39.96.51.45 nginx 重启验证）；部署到 39.96.51.45 + Ansible 三步流程验证
+### 2026-07-19
+- 安全自查模块(bandit+pip-audit+pip-licenses+配置基线 4 合 1);移动端 P0 7 项修复;全项目 fail-soft 改造(109 处 500 清零);K8s 47 接口 fail-soft 化
 
----
+### 2026-07-17~18
+- AI 助手 32 场景测试 + SSE 中断修复;`agent_sse` max_rounds 15;GitHub 拉取 + 网络测试工具;产品介绍页 v2 + graph_inference;MonitorView 10 张 ECharts
 
-## 历史备份
+### 2026-07-16
+- SSE 实时推送;关联升级 ECharts 时间轴泳道图;系统态势 900 次 SQL→4 次(GROUP BY);多租户隔离;菜单按场景重组 7 大舱系 + RBAC
 
-- `MEMORY.md.bak.20260712` — 早期完整版
-- `MEMORY.md.bak.20260719_compress` — 2026-07-19 压缩前完整版（2384 行 213KB）
+### 2026-07-15
+- 全库 80 表字段规范化(57 字段重命名);运营数据看板 + 仪表盘拖拽编辑器 + 诊断工具(20 工具);智能巡检 + 资产基线 38 条模板 + 指标推荐 48 条模板;知识审批流 + SOP 自动生成;Investigation Package 6 部 RCA;Phase 5 移动端 + Phase 3 自愈/巡检/混沌/OnCall + Phase 2 Agent评估/RAG重排
+
+### 2026-07-14
+- 灭火图健康驾驶舱 + 全量硬编码路径清理(31 文件 54 处→`__file__`/`%~dp0`);蓝绿发布 + 标签管理 + 服务器部署;MySQL 工具 + 数据库资产权限检测三档
+
+### 2026-07-13
+- 异步安装 + 回滚机制;AI 助手日志/链路追踪工具 + 远程脚本生成 Playbook;Docker 化交付(3.02GB)+ K8s/Docker 终端 WS 修复;V1/V2 引擎标识 + 跨引擎安全删除;告警与 AI 助手联动
+
+### 2026-07-10~12
+- Reranker 双模式(经典 CPU + 智能 GPU)+ Mobile H5 publicPath 修复;RAG V2 + 预测引擎 5 模型 + Runbook 三场景;CONTRACT.md 字段规范契约;异常检测 7 算法修复 + 告警根因分析 + K8S 事件告警;拓扑/自愈/部署
