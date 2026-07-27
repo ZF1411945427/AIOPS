@@ -2,6 +2,14 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-07-27: License公钥重导+K8s资产状态修复+离线资产告警抑制+AI自愈JSON容错
+- **License 验签失败修复**: `tools/public_key.pem` 与 `private_key.pem` 不配对(历史"重新生成RSA密钥对"只更新一半)。用现有私钥重导公钥,同步更新 `license_service.py` 硬编码 `PUBLIC_KEY_PEM`。license 现为 active(剩358天)
+- **K8s 资产关机仍 online 修复**: `_sync_k8s_asset` 只更新 attrs 不更新 status;node 同步未采集 Ready 条件;`probe_assets` 跳过无 IP 资产。修复:① attrs 的 status 字段映射资产状态 ② node 同步采集 `node.status.conditions` Ready ③ `scrape_source` 失败时该集群所有 K8s 资产标 offline
+- **离线资产仍触发告警修复**: `check_rules`(alert_service.py) 从 metric_records 读最新指标判断触发,未检查资产 online/offline。离线资产历史高值(如内存95%)反复触发告警。修复:遍历前查 offline 资产 ID 集合,跳过其指标
+- **AI 自愈 JSON 解析失败修复**: GLM-5.2 返回的 JSON 字符串值含未转义双引号(如 `"SSH 连接失败"`),`json.loads` 报 `Expecting ',' delimiter`。`strict=False` 无效(引号匹配问题非控制字符)。新增 `_parse_lenient_ai_json()`:按已知字段名定位,用下一个字段名/闭合括号作值边界截取
+- **LLM 超时修复**: GLM-5.2 推理 25-90s,provider `timeout_seconds=30` 太短。调至 90s
+- **数据清理**: 清空全部告警(13)+pending_actions(12)+diagnosis_reports(10)供重新测试;K8s 集群 k8s-prod-131 下 57 个资产标 offline
+
 ### 2026-07-27: 诊断折叠面板 Bug 验证 + 前端重建
 - **验证结论**: "查看诊断过程"折叠面板 bug 实际不存在。API 返回 PA #10 有 4 条 diagnosis_commands;前端 v-if 条件正确;构建文件含诊断代码。之前记录的 bug 可能是后端未运行时测试导致
 - **操作**: 前端重新构建(`npm run build --prefix frontend`),后端重启(`python run.py`)
