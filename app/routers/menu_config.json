@@ -10,6 +10,13 @@
         "label": "监控总览",
         "items": [
           {
+            "key": "firemap",
+            "label": "灭火图",
+            "type": "vue",
+            "icon": "WarningFilled",
+            "path": "/firemap"
+          },
+          {
             "key": "system-posture",
             "label": "系统态势",
             "type": "vue",
@@ -379,15 +386,8 @@
         "key": "anomaly-detection",
         "label": "异常检测",
         "items": [
-          {
-            "key": "firemap",
-            "label": "灭火图",
-            "type": "vue",
-            "icon": "WarningFilled",
-            "path": "/firemap"
-          },
-          {
-            "key": "anomaly-benchmark",
+            {
+              "key": "anomaly-benchmark",
             "label": "异常检测基准",
             "type": "vue",
             "icon": "TrophyBase",
