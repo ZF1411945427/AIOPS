@@ -156,3 +156,5 @@ tests/_patch_*.py
 
 # ===== AIOps 故障演练靶场（第三方开源业务 demo，不入库）=====
 business-demos/
+
+tools/public_key.pem

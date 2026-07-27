@@ -110,8 +110,11 @@
               </select>
             </div>
             <div class="form-row"><label>标签</label><input v-model="form.tags" class="input" placeholder="逗号分隔，如 prod,web"></div>
+            <div class="form-row"><label>业务域</label>
+              <input v-model="form.domain" class="input" placeholder="如 K8s在线商城；多域逗号分隔：Docker微服务电商,裸机单体电商">
+              <div class="field-hint" style="font-size:11px;color:var(--text-muted,#94a3b8);margin-top:2px">灭火图按此分组，多域用逗号分隔</div>
+            </div>
           </div>
-        </div>
 
         <div class="form-section" v-if="showSpecSection">
           <div class="section-title">规格属性</div>
@@ -355,9 +358,10 @@
             </div>
           </div>
         </div>
-      </div>
     </div>
   </div>
+</div>
+</div>
 </template>
 
 <script setup>
@@ -619,6 +623,7 @@ async function openEdit(id) {
     connTestResult.value = null
     const meta = ciTypeMetaMap[detail.ci_type] || {}
     const attrs = (typeof detail.ci_attributes === 'object' ? detail.ci_attributes : {}) || {}
+    form.value.domain = attrs.domain || ''
     if (meta.specFields) {
       meta.specFields.forEach(f => { specValues.value[f.key] = attrs[f.key] || '' })
     }
@@ -734,6 +739,8 @@ function buildPayload() {
   else if (ci === 'ssl_certificate') { attrs.cert_domain = form.value.cert_domain; attrs.cert_issuer = form.value.cert_issuer; attrs.cert_expiry = form.value.cert_expiry }
   else if (ci === 'dns_record') { attrs.dns_domain = form.value.dns_domain; attrs.dns_type = form.value.dns_type; attrs.dns_value = form.value.dns_value }
   else if (ci === 'monitoring_endpoint') { attrs.monitor_url = form.value.monitor_url; attrs.monitor_type = form.value.monitor_type; attrs.monitor_interval = form.value.monitor_interval }
+  // 业务域(全 CI 类型通用)
+  if (form.value.domain && form.value.domain.trim()) attrs.domain = form.value.domain.trim()
   if (Object.keys(attrs).length) p.ci_attributes = attrs
   // 连接配置存 connection_config（按 CONTRACT.md 字段名）
   if (ci === 'kubernetes_cluster') {
@@ -1080,3 +1087,4 @@ tr.row-orphan td { background: rgba(239,68,68,0.03); }
 .deploy-doc-time { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); margin-left: auto; }
 .deploy-doc-preview { font-size: 0.78rem; color: var(--text-secondary, #64748b); line-height: 1.5; white-space: pre-wrap; }
 </style>
+

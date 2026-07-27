@@ -2,6 +2,31 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-07-28: SVG拓扑连线+资产依赖关系49条+链路面板
+- **SVG拓扑连线**: FireMap 域视图内,`fm-canvas-wrapper` 包裹层卡片 + 动态创建的 SVG overlay。`drawRelations()` 通过 `data-eid` 查找实体卡片 DOM 位置,用三次贝塞尔曲线(Cubic Bezier)连接有依赖关系的卡片。故障实体间的线变红(`#ef4444`,stroke-width 2.5),正常线灰色(0.45透明度)。`resize`/`toggleLayer` 时自动重绘
+- **资产依赖关系**: DB `asset_relations` 表写入49条关系。Docker域: nginx→5个mall(proxies_to)→nacos/mysql/redis/rabbitmq(depends_on)→vm-132(runs_on)。mall-search 额外→ES/Mongo。裸机域: nginx-bare→2个mall-bare→共享中间件
+- **后端改动**: `fetch_overview()` 返回 `relations` 字段(仅本域内的依赖);`fetch_entity_detail()` 中 parent/children 带 `relation_type`
+- **前端改动**: `FireMapView.vue` 模板中 layer 循环改为 `template v-for="layer in groupedLayers"` 支持 data group 和普通层分支;所有 `.entity-node` 加 `:data-eid="e.id"`;`loadDomainDetail`/`toggleLayer`/`resize` 后 `nextTick` 触发 `drawRelations()`
+- **命名修正**: "接口层"→"接入层";LAYER_LABELS 中 3-db="数据库" 3-mq="中间件";get_layer() fallback 返回新值("microservice"→"2","infra"→"4");LAYER_MAP 全部映射到新值
+- **卡片居中**: `.layer-entities` 加 `justify-content: center`;`.layer-header` 改 `justify-content: center`;大卡片 `width:100%` 但由 `fm-layers align-items:center` 控制自适应
+
+### 2026-07-28: 灭火图4层分层模型(接口/应用/数据/基础设施)
+- **4层分层模型**: FireMap 域内视图按 4层 展示: 1接口层(Nginx/API Gateway) → 2应用层(微服务/business_app) → 3组件层(数据库左卡片 + 中间件右卡片,左右并排) → 4基础设施层(VM/Node/Cluster)
+- **实现方案**: 资产 `ci_attributes` JSON 加 `layer` 字段(1/2/3-db/3-mq/4),`get_layer()` 优先读属性再 fallback 旧 `LAYER_MAP`。不改表结构,零 migration
+- **后端改动**: `health_engine.py` — `LAYER_LABELS`/`LAYER_ORDER`/`LAYER_SIGNALS` 改为新 key;`get_layer()` 加属性读取;`compute_health()` 用 `_LAYER_TO_COMPUTE` 映射表代替 if-else;`fetch_entity_detail()` 兼容新旧 layer 值
+- **前端改动**: `FireMapView.vue` — 第3层(3-db+3-mq)用 `fm-layer-row.data-layer` flex 并排,`layer === '4'` 和 `layer === '1'` 兼容旧值;CSS 加 `.fm-layer-row` 样式
+- **资产打标**: 全部69资产 `ci_attributes.layer` 已写入。nginx→1,business_app/deployment/pod/service→2,database→3-db,middleware(非nginx)→3-mq,VM/node/cluster/namespace→4
+- **验证结果**: 三个域 API 返回均正确。Docker域 5层全有(1/2/3-db/3-mq/4),裸机域共享中间件(无独立VM),K8s域仅有第2层(44微服务)+第4层(9基础设施)。前端构建成功
+
+### 2026-07-27: 灭火图按业务域划分(3域多域交叉)+资产编辑页加业务域字段+aiops.db修复+菜单迁移+告警全清理
+- **灭火图业务域划分**: 69 资产按三套业务靶场划分为3域,共享中间件多域交叉。K8s平台组件并入K8s在线商城(53实体),共享中间件(MySQL/Redis/ES/Mongo/Nacos/RabbitMQ,6实体)同时属于Docker微服务电商(13实体)+裸机单体电商(9实体)。后端加 `_extract_domains()` 返回列表,`fetch_domains`/`fetch_overview` 多域展开,一个资产可出现在多个域
+- **资产编辑页加业务域字段**: `AssetsView.vue` 基本信息区加「业务域」输入框,支持逗号分隔多域。`buildPayload` 写入 `ci_attributes.domain`,`openEdit` 从 `ci_attributes` 读回。构建后生效
+- **修复 html 闭合 Bug**: 有多余 `</div>` 和缺少 `</div>` 导致 vite build 报 `Element is missing end tag`
+- **手动的业务域管理方法**: 进资产管理→编辑→业务域字段。写 `K8s在线商城` 归单域,写 `Docker微服务电商,裸机单体电商` 归多域。清空回到默认域。新域名自动出现
+- **aiops.db 严重损坏修复**: `database disk image is malformed`,B-tree 页面级损坏。写 `_fix_db.py` 逐表容错导出→重建→导入→索引。120表重建,860行恢复。**metric_records 全丢**,表结构在,60s内采集写入新数据。备份 `db/aiops.db.malformed_bak_*`
+- **灭火图菜单迁移**: 从「智能分析室→异常检测」移到「值班驾驶舱→监控总览」首位。改 `menu_config.json`,必须重启后端
+- **告警数据全清**: aiops.db+aiops_real.db 告警相关表清空
+
 ### 2026-07-27: License公钥重导+K8s资产状态修复+离线资产告警抑制+AI自愈JSON容错
 - **License 验签失败修复**: `tools/public_key.pem` 与 `private_key.pem` 不配对(历史"重新生成RSA密钥对"只更新一半)。用现有私钥重导公钥,同步更新 `license_service.py` 硬编码 `PUBLIC_KEY_PEM`。license 现为 active(剩358天)
 - **K8s 资产关机仍 online 修复**: `_sync_k8s_asset` 只更新 attrs 不更新 status;node 同步未采集 Ready 条件;`probe_assets` 跳过无 IP 资产。修复:① attrs 的 status 字段映射资产状态 ② node 同步采集 `node.status.conditions` Ready ③ `scrape_source` 失败时该集群所有 K8s 资产标 offline

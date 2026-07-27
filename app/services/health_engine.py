@@ -50,10 +50,11 @@ ALERT_SIGNAL_MAP = {
 
 # 层级 → 可观测信号类型
 LAYER_SIGNALS = {
-    "api": ["trace"],
-    "microservice": ["log"],
-    "middleware": ["log", "middleware_metric"],
-    "infra": ["metric"],
+    "1": ["trace"],
+    "2": ["log"],
+    "3-db": ["log", "middleware_metric"],
+    "3-mq": ["log", "middleware_metric"],
+    "4": ["metric"],
 }
 
 
@@ -72,74 +73,99 @@ def _is_alert_for_layer(metric_name: str, layer: str) -> bool:
     signal = _get_alert_signal(metric_name)
     return signal in LAYER_SIGNALS.get(layer, [])
 
-# 实体分层映射 ci_type -> layer key
+# 实体分层映射 ci_type -> layer key (新值 1/2/3/4)
 LAYER_MAP = {
-    "api_service": "api",
-    "api_gateway": "api",
-    "api": "api",
-    "deployment": "microservice",
-    "service": "microservice",
-    "pod": "microservice",
-    "container": "microservice",
-    "statefulset": "microservice",
-    "daemonset": "microservice",
-    "middleware": "middleware",
-    "database": "middleware",
-    "redis": "middleware",
-    "mysql": "middleware",
-    "postgresql": "middleware",
-    "kafka": "middleware",
-    "rabbitmq": "middleware",
-    "rocketmq": "middleware",
-    "mongodb": "middleware",
-    "elasticsearch": "middleware",
-    "server": "infra",
-    "host": "infra",
-    "vm": "infra",
-    "network_device": "infra",
-    "switch": "infra",
-    "router": "infra",
-    "firewall": "infra",
-    "loadbalancer": "infra",
-    "storage": "infra",
+    "api_service": "1",
+    "api_gateway": "1",
+    "api": "1",
+    "deployment": "2",
+    "service": "2",
+    "pod": "2",
+    "container": "2",
+    "statefulset": "2",
+    "daemonset": "2",
+    "business_app": "2",
+    "middleware": "3-mq",
+    "database": "3-db",
+    "redis": "3-db",
+    "mysql": "3-db",
+    "postgresql": "3-db",
+    "kafka": "3-mq",
+    "rabbitmq": "3-mq",
+    "rocketmq": "3-mq",
+    "mongodb": "3-db",
+    "elasticsearch": "3-db",
+    "server": "4",
+    "host": "4",
+    "vm": "4",
+    "virtual_machine": "4",
+    "node": "4",
+    "kubernetes_cluster": "4",
+    "namespace": "4",
+    "network_device": "4",
+    "switch": "4",
+    "router": "4",
+    "firewall": "4",
+    "loadbalancer": "4",
+    "storage": "4",
 }
 
 LAYER_LABELS = {
-    "api": "功能接口",
-    "microservice": "微服务",
-    "middleware": "中间件",
-    "infra": "基础设施",
+    "1": "接入层",
+    "2": "应用层",
+    "3-db": "数据库",
+    "3-mq": "中间件",
+    "4": "基础设施层",
 }
 
-LAYER_ORDER = ["api", "microservice", "middleware", "infra"]
+LAYER_ORDER = ["1", "2", "3-db", "3-mq", "4"]
 
 
-def _extract_domain(asset: Asset) -> str:
+def _extract_domains(asset: Asset) -> list:
+    """提取资产所属业务域列表(支持多域,逗号分隔)。一个中间件可同时属于多个业务域。"""
+    domains = []
     try:
         attrs = json.loads(asset.ci_attributes or "{}")
-        domain = attrs.get("domain") or attrs.get("business_domain") or attrs.get("biz")
-        if domain:
-            return str(domain).strip()
+        raw = attrs.get("domain") or attrs.get("business_domain") or attrs.get("biz")
+        if raw:
+            if isinstance(raw, list):
+                domains = [str(d).strip() for d in raw if str(d).strip()]
+            else:
+                domains = [d.strip() for d in str(raw).split(",") if d.strip()]
     except (json.JSONDecodeError, TypeError):
         pass
+    if domains:
+        return domains
     tags_str = (asset.tags or "").strip()
     if tags_str:
         for tag in tags_str.split(","):
             tag = tag.strip()
             if tag and tag not in ("", "0"):
-                return tag
-    return DOMAIN_DEFAULT
+                domains.append(tag)
+    return domains if domains else [DOMAIN_DEFAULT]
+
+
+def _extract_domain(asset: Asset) -> str:
+    """兼容旧调用,返回首个业务域"""
+    return _extract_domains(asset)[0]
 
 
 def get_layer(asset: Asset) -> str:
+    try:
+        attrs = json.loads(asset.ci_attributes or "{}")
+        explicit = attrs.get("layer")
+        if explicit and str(explicit) in LAYER_ORDER:
+            return str(explicit)
+    except (json.JSONDecodeError, TypeError):
+        pass
     ct = (asset.ci_type or "").strip().lower()
     layer = LAYER_MAP.get(ct)
     if layer:
         return layer
     tags_lower = (asset.tags or "").lower()
     if "microservice" in tags_lower or "service" in tags_lower:
-        return "microservice"
-    return "infra"
+        return "2"
+    return "4"
 
 
 # ── Asset.name → Span.service_name 模糊匹配 ──
@@ -302,29 +328,24 @@ def _compute_infra_health(asset: Asset, db_session) -> str:
     return HEALTH_GREEN
 
 
+_LAYER_TO_COMPUTE = {
+    "1": "_compute_api_health",
+    "2": "_compute_microservice_health",
+    "3-db": "_compute_middleware_health",
+    "3-mq": "_compute_middleware_health",
+    "4": "_compute_infra_health",
+}
+
 def compute_health(asset: Asset, active_alerts: list, db_session=None, layer: str = None) -> str:
     if layer is None:
         layer = get_layer(asset)
 
-    if layer == "api":
-        if db_session is not None:
-            return _compute_api_health(asset, db_session)
-        return _compute_middleware_fallback(asset)
-
-    elif layer == "microservice":
-        if db_session is not None:
-            return _compute_microservice_health(asset, db_session)
-        return _compute_middleware_fallback(asset)
-
-    elif layer == "middleware":
-        if db_session is not None:
-            return _compute_middleware_health(asset, db_session)
-        return _compute_middleware_fallback(asset)
-
-    else:
-        if db_session is not None:
-            return _compute_infra_health(asset, db_session)
-        return _compute_middleware_fallback(asset)
+    func_name = _LAYER_TO_COMPUTE.get(layer, "_compute_infra_health")
+    if db_session is not None:
+        func = globals().get(func_name)
+        if func:
+            return func(asset, db_session)
+    return _compute_middleware_fallback(asset)
 
 
 def _compute_middleware_fallback(asset: Asset) -> str:
@@ -350,19 +371,22 @@ def fetch_domains(db_session=None):
 
         domain_map = {}
         for asset in assets:
-            domain = _extract_domain(asset)
-            if domain not in domain_map:
-                domain_map[domain] = {"total": 0, HEALTH_GREEN: 0, HEALTH_GRAY: 0, HEALTH_RED: 0, "entities": []}
+            domains = _extract_domains(asset)
             status = compute_health(asset, [], db_session=db_session)
-            domain_map[domain]["entities"].append({
+            entity = {
                 "id": asset.id,
                 "name": asset.name,
                 "ci_type": asset.ci_type or "",
                 "health_status": status,
                 "alert_count": 0,
-            })
-            domain_map[domain]["total"] += 1
-            domain_map[domain][status] += 1
+            }
+            # 一个资产可属于多个业务域(如共享中间件),在每个域里都计入
+            for domain in domains:
+                if domain not in domain_map:
+                    domain_map[domain] = {"total": 0, HEALTH_GREEN: 0, HEALTH_GRAY: 0, HEALTH_RED: 0, "entities": []}
+                domain_map[domain]["entities"].append(entity)
+                domain_map[domain]["total"] += 1
+                domain_map[domain][status] += 1
 
         result = []
         for name, d in sorted(domain_map.items(), key=lambda x: -x[1]["total"]):
@@ -392,7 +416,7 @@ def fetch_overview(db_session=None, domain: str = None):
     try:
         assets = db_session.query(Asset).all()
         if domain:
-            assets = [a for a in assets if _extract_domain(a) == domain]
+            assets = [a for a in assets if domain in _extract_domains(a)]
 
         layers = {k: [] for k in LAYER_ORDER}
         stats = {"total": 0, HEALTH_GREEN: 0, HEALTH_GRAY: 0, HEALTH_RED: 0}
@@ -430,11 +454,63 @@ def fetch_overview(db_session=None, domain: str = None):
             stats["total"] += 1
             stats[status] += 1
 
+        # 构建 entity_id -> layer_key 映射
+        entity_layer_map = {}
+        for k, elist in layers.items():
+            for e in elist:
+                entity_layer_map[e["id"]] = k
+
+        # 为每层计算层间聚合依赖
+        rels_all = []
+        if domain:
+            rels_all = db_session.query(AssetRelation).all()
+
+        domain_asset_ids = {a.id for a in assets}
+        # 层间聚合: 每层到其他层的依赖计数
+        layer_deps = {k: {"up": {}, "down": {}} for k in LAYER_ORDER}
+        for r in rels_all:
+            if r.parent_id not in domain_asset_ids or r.child_id not in domain_asset_ids:
+                continue
+            p_layer = entity_layer_map.get(r.parent_id)
+            c_layer = entity_layer_map.get(r.child_id)
+            if p_layer and c_layer and p_layer != c_layer:
+                # parent -> child: parent 的 down 方向, child 的 up 方向
+                layer_deps[p_layer]["down"][c_layer] = layer_deps[p_layer]["down"].get(c_layer, 0) + 1
+                layer_deps[c_layer]["up"][p_layer] = layer_deps[c_layer]["up"].get(p_layer, 0) + 1
+
+        # 每个实体加上 up/down 简要信息
+        for k, elist in layers.items():
+            for e in elist:
+                up_ids, down_ids = [], []
+                for r in rels_all:
+                    if r.parent_id not in domain_asset_ids or r.child_id not in domain_asset_ids:
+                        continue
+                    if r.child_id == e["id"]:
+                        up_ids.append(r.parent_id)
+                    if r.parent_id == e["id"]:
+                        down_ids.append(r.child_id)
+                # 找这些 id 的名字
+                up_names = []
+                for uid in up_ids:
+                    a = next((a for a in assets if a.id == uid), None)
+                    if a:
+                        up_names.append(a.name)
+                down_names = []
+                for did in down_ids:
+                    a = next((a for a in assets if a.id == did), None)
+                    if a:
+                        down_names.append(a.name)
+                e["dep_up"] = up_names[:4]
+                e["dep_down"] = down_names[:4]
+                e["dep_up_count"] = len(up_ids)
+                e["dep_down_count"] = len(down_ids)
+
         result_layers = []
         for k in LAYER_ORDER:
             entities = layers[k]
             if not entities:
                 continue
+            deps = layer_deps[k]
             result_layers.append({
                 "name": LAYER_LABELS.get(k, k),
                 "key": k,
@@ -443,9 +519,21 @@ def fetch_overview(db_session=None, domain: str = None):
                 "fault": sum(1 for e in entities if e["health_status"] == HEALTH_RED),
                 "offline": sum(1 for e in entities if e["health_status"] == HEALTH_GRAY),
                 "entities": entities,
+                "dep_up": {LAYER_LABELS.get(lk, lk): cnt for lk, cnt in deps["up"].items()},
+                "dep_down": {LAYER_LABELS.get(lk, lk): cnt for lk, cnt in deps["down"].items()},
             })
 
-        return {"stats": stats, "layers": result_layers}
+        relations = []
+        if domain:
+            for r in rels_all:
+                if r.parent_id in domain_asset_ids and r.child_id in domain_asset_ids:
+                    relations.append({
+                        "from": r.parent_id,
+                        "to": r.child_id,
+                        "type": r.relation_type or "depends_on",
+                    })
+
+        return {"stats": stats, "layers": result_layers, "relations": relations}
     finally:
         if close_db:
             db_session.close()
@@ -491,7 +579,19 @@ def fetch_entity_detail(entity_id: int, db_session=None):
         if asset.parent_id:
             p = db_session.query(Asset).filter(Asset.id == asset.parent_id).first()
             if p:
-                parent = {"id": p.id, "name": p.name, "ci_type": p.ci_type}
+                parent_rel = (
+                    db_session.query(AssetRelation)
+                    .filter(
+                        AssetRelation.child_id == entity_id,
+                    )
+                    .first()
+                )
+                parent = {
+                    "id": p.id,
+                    "name": p.name,
+                    "ci_type": p.ci_type,
+                    "relation_type": parent_rel.relation_type if parent_rel else "parent_of",
+                }
 
         children = []
         child_assets = (
@@ -531,6 +631,7 @@ def fetch_entity_detail(entity_id: int, db_session=None):
             )
             if child_rels:
                 child_ids = [r.child_id for r in child_rels]
+                rel_map = {r.child_id: r.relation_type for r in child_rels}
                 rel_assets = db_session.query(Asset).filter(Asset.id.in_(child_ids)).all()
                 for c in rel_assets:
                     c_layer = get_layer(c)
@@ -539,6 +640,7 @@ def fetch_entity_detail(entity_id: int, db_session=None):
                         "name": c.name,
                         "ci_type": c.ci_type,
                         "health_status": compute_health(c, [], db_session=db_session, layer=c_layer),
+                        "relation_type": rel_map.get(c.id, "depends_on"),
                     })
 
         result = {
@@ -578,10 +680,10 @@ def fetch_entity_detail(entity_id: int, db_session=None):
             "children": children,
         }
 
-        if layer == "api":
+        if layer in ("1", "api"):
             result["trace_info"] = _build_trace_info(asset, db_session)
 
-        if layer == "infra":
+        if layer in ("4", "infra"):
             result["infra_metrics"] = _build_infra_metrics(asset, db_session)
 
         return result

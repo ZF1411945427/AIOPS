@@ -826,7 +826,8 @@ html[data-theme="dark"] .fm-layer-card:hover {
 .layer-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  gap: 12px;
   padding: 14px 20px;
   background: color-mix(in srgb, var(--text-muted, #94a3b8) 6%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--text-muted, #94a3b8) 15%, transparent);
@@ -866,6 +867,7 @@ html[data-theme="dark"] .layer-badge.ok { background: rgba(16,185,129,0.15); col
 .layer-entities {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
   padding: 14px 20px;
 }
@@ -906,8 +908,7 @@ html[data-theme="dark"] .layer-toggle:hover {
   border: 1px solid color-mix(in srgb, var(--text-muted, #94a3b8) 12%, transparent);
   cursor: pointer;
   transition: all 0.18s;
-  min-width: 180px;
-  flex: 0 1 auto;
+  min-width: 160px;
 }
 html[data-theme="dark"] .entity-node {
   background: rgba(30,41,59,0.3);
