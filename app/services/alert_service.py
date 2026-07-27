@@ -161,8 +161,14 @@ def check_rules(db: Session):
                 continue
             seen_assets.add(lr.asset_id)
             latest_per_asset.append(lr)
+        # 跳过已离线资产：离线资产不再产生新指标，旧指标值不应触发告警
+        _offline_asset_ids = set(
+            a.id for a in db.query(Asset).filter(Asset.status == "offline").all()
+        ) if latest_per_asset else set()
         for latest in latest_per_asset:
             if not latest:
+                continue
+            if latest.asset_id in _offline_asset_ids:
                 continue
             triggered = False
             # 兼容 ">" 和 "gt" 两种写法（规则表实际存的是 ">" 符号）

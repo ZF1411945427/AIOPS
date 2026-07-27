@@ -1024,6 +1024,77 @@ def get_triggered_alerts(db: Session, limit: int = 30):
     return result
 
 
+# AI 自愈分析返回 JSON 的已知字段（按 system_prompt 定义）
+_AI_HEAL_JSON_FIELDS = [
+    "root_cause", "impact", "diagnosis_reasoning", "risk_level",
+    "recommended_workflow_id", "action_type", "command",
+    "command_description", "command_explanation", "step_params",
+]
+
+
+def _parse_lenient_ai_json(content: str) -> dict:
+    """容错解析 AI 返回的 JSON：字符串值内可能含未转义双引号（如 "SSH 连接失败"）.
+
+    策略：标准 json.loads 失败时，按已知字段名定位，用下一个字段名/闭合括号作为值边界截取。
+    """
+    # 先尝试标准解析
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(content, strict=False)
+    except json.JSONDecodeError:
+        pass
+    # lenient：按字段名定位提取
+    import re
+    result = {}
+    # 找所有字段名的位置："field_name"
+    field_positions = []
+    for f in _AI_HEAL_JSON_FIELDS:
+        m = re.search(r'"' + re.escape(f) + r'"\s*:\s*', content)
+        if m:
+            field_positions.append((m.end(), f))
+    if not field_positions:
+        return {}
+    field_positions.sort()
+    for i, (pos, fname) in enumerate(field_positions):
+        # 值的结束位置：下一个字段开始，或最后一个 }
+        if i + 1 < len(field_positions):
+            end = field_positions[i + 1][0]
+            # 回退到上一个逗号/换行（去掉字段间的 ",\n  "nextfield）
+            # 从 pos 到 end 之间，找最后一个未被引号包裹的逗号
+            segment = content[pos:end]
+            # 去掉尾部 `,` 和空白和下一个字段名前缀
+            segment = re.sub(r',\s*"[^"]*"\s*:\s*$', '', segment).rstrip()
+        else:
+            # 最后一个字段：到 } 结束
+            brace = content.rfind("}")
+            segment = content[pos:brace if brace > pos else len(content)]
+        # 去掉首尾引号和空白
+        segment = segment.strip()
+        if segment.startswith('"'):
+            segment = segment[1:]
+        if segment.endswith('"'):
+            segment = segment[:-1]
+        # 反转义常见转义
+        segment = segment.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
+        # 尝试转数字/bool/null/JSON
+        if fname in ("recommended_workflow_id",):
+            try:
+                result[fname] = int(segment) if segment not in ("null", "") else None
+            except (ValueError, TypeError):
+                result[fname] = None if segment in ("null", "") else segment
+        elif fname == "step_params":
+            try:
+                result[fname] = json.loads(segment) if segment else {}
+            except Exception:
+                result[fname] = {}
+        else:
+            result[fname] = segment
+    return result
+
+
 def ai_self_heal_analyze(db: Session, alert_id: int) -> dict:
     """AI 自愈分析：分析告警根因 + 生成修复建议 + 创建待审批动作.
 
@@ -1193,7 +1264,22 @@ def ai_self_heal_analyze(db: Session, alert_id: int) -> dict:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
             content = content.split("```")[1].split("```")[0].strip()
-        analysis = json.loads(content)
+        # 容错解析：AI 返回的 JSON 可能含未转义字符/中文引号/控制字符
+        try:
+            analysis = json.loads(content)
+        except json.JSONDecodeError:
+            try:
+                # strict=False 允许字符串内含未转义控制字符（如裸换行）
+                analysis = json.loads(content, strict=False)
+            except json.JSONDecodeError:
+                # lenient 解析：按已知字段名定位提取（AI 在字符串值里用未转义双引号时）
+                analysis = _parse_lenient_ai_json(content)
+                if not analysis:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"AI 自愈分析 JSON 解析失败 alert#{alert_id}\n原始内容(前2000字符):\n{content[:2000]}"
+                    )
+                    return {"ok": False, "error": "AI 返回的 JSON 格式错误，无法解析", "raw_content": content[:1000]}
 
         risk_level = analysis.get("risk_level", "medium")
         if risk_level not in ("low", "medium", "high", "critical"):

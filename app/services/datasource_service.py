@@ -329,6 +329,9 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
 
 
 def _sync_k8s_asset(db: Session, ci_type: str, name: str, parent_id: int, k8s_cluster: str, attrs: dict) -> Asset:
+    # attrs 中的 status 字段映射为资产 status（Ready/Running -> online，否则 offline）
+    attr_status = attrs.pop("status", None)
+    asset_status = "online" if attr_status in ("Ready", "Running", "Active", "online") else ("offline" if attr_status in ("NotReady", "Failed", "Unknown", "Terminating", "Succeeded", "offline") else None)
     existing = db.query(Asset).filter(Asset.ci_type == ci_type, Asset.name == name, Asset.k8s_cluster == k8s_cluster).first()
     if not existing:
         existing = db.query(Asset).filter(Asset.ci_type == ci_type, Asset.name == name).first()
@@ -338,6 +341,9 @@ def _sync_k8s_asset(db: Session, ci_type: str, name: str, parent_id: int, k8s_cl
         if parent_id:
             existing.parent_id = parent_id
         existing.k8s_cluster = k8s_cluster
+        if asset_status:
+            existing.status = asset_status
+        existing.ci_attributes = json.dumps(attrs, ensure_ascii=False)
         db.commit()
         return existing
     asset = Asset(
@@ -345,7 +351,7 @@ def _sync_k8s_asset(db: Session, ci_type: str, name: str, parent_id: int, k8s_cl
         name=name,
         ci_type=ci_type,
         parent_id=parent_id,
-        status="online",
+        status=asset_status or "online",
         k8s_cluster=k8s_cluster,
         ci_attributes=json.dumps(attrs, ensure_ascii=False),
     )
@@ -451,6 +457,16 @@ def scrape_source(db: Session, source: DataSource) -> tuple:
     except Exception as e:
         source.last_status = "error"
         source.last_error = str(e)
+        # K8s 数据源采集失败（集群关机/不可达）→ 该集群下所有 K8s 资产标 offline
+        if source.type == "kubernetes":
+            try:
+                cluster_name = source.name
+                k8s_assets = db.query(Asset).filter(Asset.k8s_cluster == cluster_name).all()
+                for a in k8s_assets:
+                    a.status = "offline"
+                db.commit()
+            except Exception:
+                pass
         db.commit()
         return (False, str(e))
 
@@ -704,12 +720,20 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
     # 2. Nodes
     nodes = v1.list_node().items
     for node in nodes:
+        # 解析 Node Ready 状态（conditions 里 type=Ready 的 status=True 表示就绪）
+        node_ready = "Unknown"
+        for cond in (node.status.conditions or []):
+            if getattr(cond, "type", "") == "Ready":
+                node_ready = "Ready" if getattr(cond, "status", "") == "True" else "NotReady"
+                break
         attrs = {
             "kubelet_version": node.status.node_info.kubelet_version,
             "os_image": node.status.node_info.os_image,
             "cpu_capacity": node.status.capacity.get("cpu", "?"),
             "memory_capacity": node.status.capacity.get("memory", "?"),
             "pod_capacity": node.status.capacity.get("pods", "?"),
+            "status": node_ready,
+            "ready": node_ready,
         }
         _sync_k8s_asset(db, "node", node.metadata.name, cluster_asset.id, cluster_name, attrs)
         created += 1
