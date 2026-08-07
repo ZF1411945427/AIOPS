@@ -51,8 +51,29 @@
                     <button class="action-btn silence" @tap="handleSilence">静默</button>
                     <button class="action-btn heal" @tap="handleHeal">触发自愈</button>
                 </view>
-                <button class="ai-btn" @tap="goAI">
-                    <text class="ai-btn-text">AI 根因分析</text>
+                <button class="ai-btn" @tap="handleAIAnalyze" :disabled="aiLoading">
+                    <text class="ai-btn-text">{{ aiLoading ? '分析中...' : '🤖 AI 自愈分析' }}</text>
+                </button>
+                <view v-if="aiResult" class="ai-result-card">
+                    <view class="ai-result-header">
+                        <text class="ai-result-title">AI 分析结果</text>
+                        <text class="ai-result-dedup" v-if="aiResult.dedup">（复用已有方案）</text>
+                    </view>
+                    <view class="ai-result-section">
+                        <text class="ai-result-label">根因</text>
+                        <text class="ai-result-text">{{ aiResult.root_cause || '无' }}</text>
+                    </view>
+                    <view class="ai-result-section">
+                        <text class="ai-result-label">修复方案</text>
+                        <text class="ai-result-text">{{ aiResult.command || aiResult.action_type || '无' }}</text>
+                    </view>
+                    <view class="ai-result-actions" v-if="aiResult.pending_action_id">
+                        <button class="action-btn ack" @tap="confirmRemediation(aiResult.pending_action_id)">确认执行</button>
+                        <button class="action-btn silence" @tap="cancelRemediation(aiResult.pending_action_id)">取消</button>
+                    </view>
+                </view>
+                <button class="assistant-btn" @tap="goAI">
+                    <text class="assistant-btn-text">💬 AI 根因分析（对话）</text>
                 </button>
                 <button class="assistant-btn" @tap="openAssistant">
                     <text class="assistant-btn-text">💬 智能助手</text>
@@ -65,11 +86,13 @@
 <script setup>
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { getList, getDetail, acknowledge, resolve, triggerHeal, silence } from '@/api/alert.js'
+import { getList, getDetail, acknowledge, resolve, triggerHeal, silence, aiAnalyze, confirmRemediationAction, cancelRemediationAction } from '@/api/alert.js'
 import { setPendingPreset, openAlertAssistant, setPendingSessionId } from '@/api/agent.js'
 
 const alert = ref(null)
 const loading = ref(true)
+const aiLoading = ref(false)
+const aiResult = ref(null)
 
 function severityText(s) {
     const map = { critical: '致命', high: '严重', medium: '中等', low: '低', info: '信息' }
@@ -165,6 +188,71 @@ async function handleHeal() {
             } catch (e) {
                 uni.hideLoading()
                 uni.showToast({ title: '自愈请求失败', icon: 'none' })
+            }
+        },
+    })
+}
+
+async function handleAIAnalyze() {
+    if (!alert.value || !alert.value.id) {
+        uni.showToast({ title: '告警信息缺失', icon: 'none' })
+        return
+    }
+    aiLoading.value = true
+    aiResult.value = null
+    try {
+        const data = await aiAnalyze(alert.value.id)
+        if (data.ok) {
+            const a = data.analysis || data
+            aiResult.value = {
+                root_cause: a.root_cause || '',
+                command: a.command || '',
+                action_type: a.action_type || '',
+                risk_level: a.risk_level || 'medium',
+                pending_action_id: data.pending_action_id || a.pending_action_id,
+                dedup: data.dedup || false,
+            }
+            uni.showToast({ title: data.dedup ? '已有方案，可确认执行' : 'AI 分析完成', icon: 'success' })
+        } else {
+            uni.showToast({ title: data.error || 'AI 分析失败', icon: 'none' })
+        }
+    } catch (e) {
+        uni.showToast({ title: 'AI 分析请求失败', icon: 'none' })
+    } finally {
+        aiLoading.value = false
+    }
+}
+
+async function confirmRemediation(actionId) {
+    uni.showLoading({ title: '执行中...' })
+    try {
+        const data = await confirmRemediationAction(actionId)
+        uni.hideLoading()
+        if (data.success) {
+            uni.showToast({ title: '执行成功: ' + (data.output || ''), icon: 'success' })
+            aiResult.value = null
+            alert.value.status = 'acknowledged'
+        } else {
+            uni.showToast({ title: '执行失败: ' + (data.output || data.error || ''), icon: 'none' })
+        }
+    } catch (e) {
+        uni.hideLoading()
+        uni.showToast({ title: '执行请求失败', icon: 'none' })
+    }
+}
+
+async function cancelRemediation(actionId) {
+    uni.showModal({
+        title: '取消操作',
+        content: '确认取消该修复方案？',
+        success: async (r) => {
+            if (!r.confirm) return
+            try {
+                await cancelRemediationAction(actionId)
+                uni.showToast({ title: '已取消', icon: 'none' })
+                aiResult.value = null
+            } catch (e) {
+                uni.showToast({ title: '取消失败', icon: 'none' })
             }
         },
     })
@@ -347,5 +435,58 @@ onLoad((opts) => {
     color: $primary;
     font-size: $font-md;
     font-weight: 600;
+}
+
+.ai-result-card {
+    margin-top: 24rpx;
+    padding: 24rpx;
+    background: rgba($primary, 0.04);
+    border: 2rpx solid rgba($primary, 0.12);
+    border-radius: 16rpx;
+}
+
+.ai-result-header {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
+    margin-bottom: 16rpx;
+}
+
+.ai-result-title {
+    font-size: $font-md;
+    font-weight: 700;
+    color: $primary;
+}
+
+.ai-result-dedup {
+    font-size: $font-xs;
+    color: $text-muted;
+}
+
+.ai-result-section {
+    margin-bottom: 12rpx;
+}
+
+.ai-result-label {
+    font-size: $font-xs;
+    color: $text-muted;
+    display: block;
+    margin-bottom: 4rpx;
+}
+
+.ai-result-text {
+    font-size: $font-sm;
+    color: $text;
+    line-height: 1.5;
+}
+
+.ai-result-actions {
+    display: flex;
+    gap: 16rpx;
+    margin-top: 16rpx;
+}
+.ai-result-actions .action-btn {
+    width: auto;
+    flex: 1;
 }
 </style>

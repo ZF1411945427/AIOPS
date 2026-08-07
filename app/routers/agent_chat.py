@@ -582,6 +582,111 @@ async def correlation_analyze(request: Request, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/transfer-from-remediation")
+async def transfer_from_remediation(request: Request, db: Session = Depends(get_db)):
+    """自愈方案转交智能助手深度分析：注入告警+诊断报告+AI方案上下文 → 创建会话 → 自动发起分析."""
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+
+    data = await request.json()
+    alert_id = int(data.get("alert_id", 0))
+    pending_action_id = int(data.get("pending_action_id", 0))
+
+    if not alert_id:
+        return JSONResponse({"error": "缺少 alert_id"}, status_code=400)
+
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        return JSONResponse({"error": "告警不存在"}, status_code=404)
+
+    asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
+    asset_name = asset.name if asset else "未知"
+    asset_ip = asset.ip if asset else ""
+
+    # 1. 创建新会话（Agent 模式，启用工具）
+    session = ChatSession(user_id=user_id, title=f"自愈转交: {alert.metric_name or '告警'} #{alert_id}", context="{}")
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    # 2. 注入上下文
+    ctx = json.loads(session.context or "{}")
+    ctx["alert_id"] = alert.id
+    ctx["alert_metric"] = alert.metric_name
+    ctx["alert_severity"] = alert.severity
+    ctx["alert_status"] = alert.status
+    ctx["alert_value"] = alert.actual_value
+    ctx["alert_threshold"] = alert.threshold
+    ctx["transfer_from"] = "remediation"
+    ctx["transfer_pending_action_id"] = pending_action_id
+    if asset:
+        ctx["asset_id"] = asset.id
+        ctx["asset_name"] = asset.name
+        ctx["asset_ip"] = asset.ip
+    session.context = json.dumps(ctx, ensure_ascii=False)
+    db.commit()
+
+    # 3. 收集诊断报告 + AI 方案内容，注入系统消息
+    from app.models import DiagnosisReport, PendingAction as _PA
+    diag_parts = []
+    # 诊断报告
+    diag_reports = db.query(DiagnosisReport).filter(
+        DiagnosisReport.alert_id == alert_id,
+        DiagnosisReport.status == "completed",
+    ).order_by(DiagnosisReport.id.asc()).all()
+    if diag_reports:
+        diag_parts.append("【自愈诊断报告】")
+        for dr in diag_reports:
+            try:
+                cmds = json.loads(dr.commands_run) if dr.commands_run else []
+                for c in cmds:
+                    diag_parts.append(f"  $ {c.get('cmd','')}  ({c.get('desc','')})")
+                    if c.get("output"):
+                        diag_parts.append(f"    输出: {c['output'][:300]}")
+            except Exception:
+                pass
+    # AI 方案
+    if pending_action_id:
+        pa = db.query(_PA).filter(_PA.id == pending_action_id).first()
+        if pa:
+            try:
+                pl = json.loads(pa.action_payload) if pa.action_payload else {}
+            except Exception:
+                pl = {}
+            diag_parts.append("【自愈 AI 方案】")
+            diag_parts.append(f"  动作类型: {pa.action_type}")
+            diag_parts.append(f"  风险等级: {pa.risk_level}")
+            diag_parts.append(f"  根因: {pl.get('root_cause', '-')}")
+            diag_parts.append(f"  影响: {pl.get('impact', '-')}")
+            diag_parts.append(f"  修复命令: {pl.get('command', '-')}")
+            diag_parts.append(f"  命令解释: {pl.get('command_explanation', '-')}")
+
+    context_text = (
+        f"**用户从自愈管理转交此告警到智能助手进行深度分析**\n\n"
+        f"告警 #{alert.id} ({alert.severity}): {alert.message or ''}\n"
+        f"- 指标: {alert.metric_name}，当前值: {alert.actual_value}，阈值: {alert.threshold}\n"
+        f"- 资产: {asset_name} ({asset_ip})\n\n"
+        + "\n".join(diag_parts)
+        + "\n\n请基于以上诊断数据和 AI 方案，利用你的全域工具（日志/链路/变更/知识库等）进行更深入的分析，"
+        "给出更全面的根因定位和修复建议。"
+    )
+    add_message(db, session.id, "system", context_text, message_type="text")
+
+    # 4. 添加用户消息（自动发起深度分析）
+    analysis_prompt = (
+        "请基于以上自愈诊断报告和 AI 方案，进行深度分析：\n"
+        "1. 查询相关日志、链路追踪、变更记录，验证或补充根因分析\n"
+        "2. 检查是否有同时段的其他关联告警或指标异常\n"
+        "3. 评估自愈 AI 方案的修复命令是否正确、安全\n"
+        "4. 如有更好的修复方案，请提议新的运维动作\n"
+        "5. 查询知识库是否有类似故障的处置经验"
+    )
+    add_message(db, session.id, "user", analysis_prompt, message_type="text")
+
+    return {"session_id": session.id, "title": session.title}
+
+
 # ─── P1-P4: 会话级配置接口（模型切换 / 模式切换 / 重命名 / 多设备绑定） ───
 
 @router.post("/session/{session_id}/set-provider")

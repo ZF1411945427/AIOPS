@@ -10,7 +10,7 @@
             </svg>
           </div>
           <div>
-            <h1 class="fm-title">灭火图</h1>
+            <h1 class="fm-title">架构巡检图</h1>
             <span class="fm-subtitle">全域 Entity 健康驾驶舱</span>
           </div>
         </div>
@@ -104,7 +104,7 @@
           </div>
           <div>
             <h1 class="fm-title">{{ currentDomain.name }}</h1>
-            <span class="fm-subtitle">灭火图 · 实体分层视图</span>
+            <span class="fm-subtitle">架构巡检图 · 实体分层视图</span>
           </div>
         </div>
         <div class="fm-stats">

@@ -244,6 +244,7 @@ def seed_all():
         ("API 错误率过高", "api_error_rate", ">", 5, "critical"),
         ("MySQL 慢查询", "mysql_slow_queries", ">", 50, "warning"),
         ("Redis 内存过高", "redis_memory", ">", 80, "warning"),
+        ("服务进程离线", "svc_up", "<", 1, "critical"),
         ("磁盘 IO 等待", "disk_iowait", ">", 30, "warning"),
         ("进程数过多", "process_count", ">", 500, "info"),
     ]

@@ -5,22 +5,20 @@ from sqlalchemy import func, Integer, Float
 from app.models import RemediationEffectRecord, RemediationLog, Alert, Asset, AutoRemediation
 
 
-def track_effect(log_id: int, db: Session) -> dict:
+def track_effect(log_id: int, db: Session, status_before: str = "triggered") -> dict:
     """追踪单次自愈执行的效果：执行后检查告警状态，记录到 RemediationEffectRecord"""
     log = db.query(RemediationLog).filter(RemediationLog.id == log_id).first()
     if not log:
         return {"ok": False, "error": "执行记录不存在"}
 
     alert = db.query(Alert).filter(Alert.id == log.alert_id).first() if log.alert_id else None
-    asset = db.query(Asset).filter(Asset.id == log.asset_id).first() if log.asset_id else None
+    asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert and alert.asset_id else None
 
     effect_value = "no_change"
-    status_before = "triggered"
     status_after = "unknown"
     notes = ""
 
     if alert:
-        status_before = alert.status or "triggered"
         if alert.status == "resolved":
             effect_value = "resolved"
             status_after = "resolved"
@@ -38,7 +36,7 @@ def track_effect(log_id: int, db: Session) -> dict:
         remediation_id=log.remediation_id,
         log_id=log_id,
         alert_id=log.alert_id,
-        asset_id=alert.asset_id if alert else None,
+        asset_id=asset.id if asset else None,
         status_before=status_before,
         status_after=status_after,
         effect=effect_value,

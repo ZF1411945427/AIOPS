@@ -11,7 +11,7 @@
         "items": [
           {
             "key": "firemap",
-            "label": "灭火图",
+            "label": "架构巡检图",
             "type": "vue",
             "icon": "WarningFilled",
             "path": "/firemap"

@@ -221,3 +221,10 @@ def api_ai_reanalyze(action_id: int, db: Session = Depends(get_db)):
     return JSONResponse(result)
 
 
+@router.post("/api/ai-reanalyze-alert/{alert_id}")
+def api_ai_reanalyze_alert(alert_id: int, db: Session = Depends(get_db)):
+    """对指定告警重新 AI 分析（取消旧 PA，生成新方案，让 AI 考虑工作流并填参数）."""
+    result = remediation_service.reanalyze_alert(db, alert_id)
+    return JSONResponse(result)
+
+

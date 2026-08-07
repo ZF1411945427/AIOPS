@@ -84,7 +84,7 @@
             <el-icon :size="14"><DataBoard /></el-icon>
             <span class="db-mode-label">{{ appStore.dbMode === 'demo' ? 'DEMO' : 'REAL' }}</span>
           </div>
-          <el-popover trigger="click" placement="bottom-end" :width="180">
+          <el-popover trigger="click" placement="bottom-end" :width="250">
             <template #reference>
               <button class="header-action" title="外观设置">
                 <el-icon><Brush /></el-icon>
@@ -109,6 +109,14 @@
                   <el-icon :size="14"><MoonNight /></el-icon>
                   <span>暗色</span>
                 </span>
+                <span
+                  class="theme-opt"
+                  :class="{ active: appStore.theme === 'dark-glass' }"
+                  @click="appStore.theme = 'dark-glass'"
+                >
+                  <el-icon :size="14"><Monitor /></el-icon>
+                  <span>暗色玻璃</span>
+                </span>
               </div>
               <div class="appearance-label">色系</div>
               <div class="scheme-row">
@@ -122,6 +130,11 @@
                   :class="{ active: appStore.colorScheme === 'terra-cotta' }"
                   @click="appStore.setColorScheme('terra-cotta')"
                 >赤陶</span>
+                <span
+                  class="color-dot fluorescent-green"
+                  :class="{ active: appStore.colorScheme === 'fluorescent-green' }"
+                  @click="appStore.setColorScheme('fluorescent-green')"
+                >荧光绿</span>
               </div>
             </div>
           </el-popover>

@@ -96,6 +96,7 @@
     <div class="panel">
       <div class="panel-head">效果历史</div>
       <div class="panel-body">
+        <p class="hint-text">修复前 = 告警执行自愈操作前的状态（通常为"告警触发中"），修复后 = 执行后的状态（"已确认处理"表示自愈成功）。效果列显示本次自愈是否真正解决了问题。</p>
         <div v-if="loading" class="loading-state">加载中...</div>
         <div v-else-if="!history.length" class="empty-state">暂无效果记录</div>
         <div v-else class="gap-table-wrap">
@@ -113,8 +114,8 @@
                 <td>
                   <span class="effect-badge" :class="'effect-' + e.effect">{{ effectLabel(e.effect) }}</span>
                 </td>
-                <td>{{ e.status_before || '-' }}</td>
-                <td>{{ e.status_after || '-' }}</td>
+                <td>{{ statusLabel(e.status_before) }}</td>
+                <td>{{ statusLabel(e.status_after) }}</td>
                 <td class="text-sm text-muted">{{ e.notes || '-' }}</td>
               </tr>
             </tbody>
@@ -143,6 +144,11 @@ function actionLabel(type) {
 function effectLabel(e) {
   const m = { resolved: '完全恢复', improved: '改善', no_change: '无变化', worsened: '恶化' }
   return m[e] || e
+}
+
+function statusLabel(s) {
+  const m = { triggered: '告警触发中', acknowledged: '已确认处理', resolved: '已解决', pending: '待处理' }
+  return m[s] || s || '-'
 }
 
 function rateClass(rate) {
@@ -236,5 +242,6 @@ onMounted(() => {
 
 .text-sm { font-size: 0.78rem; }
 .text-muted { color: var(--text-tertiary, #94a3b8); }
+.hint-text { font-size: 0.78rem; color: var(--text-tertiary, #94a3b8); margin: 0 0 12px; line-height: 1.6; padding: 8px 12px; background: rgba(99,102,241,0.04); border-radius: 6px; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 </style>

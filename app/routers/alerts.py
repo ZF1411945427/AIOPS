@@ -121,16 +121,23 @@ def api_resolve_alert(alert_id: int, db: Session = Depends(get_db)):
 
 @router.post("/api/{alert_id}/heal")
 def api_heal_alert(alert_id: int, db: Session = Depends(get_db)):
-    """触发自愈：对指定告警运行第一个启用的自愈工作流."""
+    """触发自愈：按告警规则 ID 匹配启用的工作流，按步骤执行."""
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
     if not alert:
         return JSONResponse({"error": "告警不存在"}, status_code=404)
 
-    wf = db.query(RemediationWorkflow).filter(
-        RemediationWorkflow.enabled == True
-    ).order_by(RemediationWorkflow.id.asc()).first()
+    wf = None
+    if alert.rule_id:
+        wf = db.query(RemediationWorkflow).filter(
+            RemediationWorkflow.rule_id == alert.rule_id,
+            RemediationWorkflow.enabled == True,
+        ).first()
     if not wf:
-        return JSONResponse({"error": "没有启用的自愈工作流"}, status_code=400)
+        wf = db.query(RemediationWorkflow).filter(
+            RemediationWorkflow.enabled == True
+        ).order_by(RemediationWorkflow.id.asc()).first()
+    if not wf:
+        return JSONResponse({"error": "没有匹配的自愈工作流（告警规则未关联工作流或无可启用工作流）"}, status_code=400)
 
     steps = json.loads(wf.steps) if isinstance(wf.steps, str) else (wf.steps or [])
     asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
@@ -150,12 +157,20 @@ def api_heal_alert(alert_id: int, db: Session = Depends(get_db)):
             success, output = execute_action(action_type, params, asset)
         log = RemediationLog(
             remediation_id=wf.id,
+            remediation_type="workflow",
             alert_id=alert.id,
             action_type=action_type,
             target=target,
             is_success=success,
             output=f"[Step {step_idx+1}/{len(steps)}] {output}")
+        _abs2 = alert.status if alert else "triggered"
         db.add(log)
+        db.commit()
+        try:
+            from app.services.remediation_effect_service import track_effect
+            track_effect(log.id, db, status_before=_abs2)
+        except Exception:
+            pass
         results.append({"step": step_idx + 1, "action": action_type, "is_success": success, "output": output})
         if not success:
             break

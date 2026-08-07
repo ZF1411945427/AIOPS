@@ -4,7 +4,7 @@ import threading
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.models import Alert, AlertRule, MetricRecord, AlertSilence, AlertSuppression, AlertEscalation, SystemConfig, NotificationChannel, AlertSilenceSchedule
+from app.models import Alert, AlertRule, MetricRecord, Asset, AlertSilence, AlertSuppression, AlertEscalation, SystemConfig, NotificationChannel, AlertSilenceSchedule
 from app.services import notification_service
 
 
@@ -161,14 +161,22 @@ def check_rules(db: Session):
                 continue
             seen_assets.add(lr.asset_id)
             latest_per_asset.append(lr)
-        # 跳过已离线资产：离线资产不再产生新指标，旧指标值不应触发告警
-        _offline_asset_ids = set(
+        # 跳过已离线资产（但 svc_up 指标例外：离线=0 是有效告警信号）
+        _skip_asset_ids = set(
             a.id for a in db.query(Asset).filter(Asset.status == "offline").all()
         ) if latest_per_asset else set()
+        # 也跳过维护/退役状态的资产
+        from app.models import AssetLifecycle
+        _lifecycle_skip = set(
+            lc.asset_id for lc in db.query(AssetLifecycle).filter(
+                AssetLifecycle.status.in_(["maintenance", "decommissioned", "retired"])
+            ).all()
+        )
+        _skip_asset_ids.update(_lifecycle_skip)
         for latest in latest_per_asset:
             if not latest:
                 continue
-            if latest.asset_id in _offline_asset_ids:
+            if latest.asset_id in _skip_asset_ids and latest.name != "svc_up":
                 continue
             triggered = False
             # 兼容 ">" 和 "gt" 两种写法（规则表实际存的是 ">" 符号）
@@ -203,7 +211,21 @@ def check_rules(db: Session):
                     )
                     .first()
                 )
-                if not active and not recent_resolved:
+                # svc_up 特殊处理：即使已有活跃告警，只要值仍异常就重复触发（服务持续离线需要持续告警）
+                if rule.metric_name == "svc_up" and latest.value < rule.threshold:
+                    alert = Alert(
+                        rule_id=rule.id,
+                        asset_id=latest.asset_id,
+                        metric_name=rule.metric_name,
+                        actual_value=latest.value,
+                        threshold=rule.threshold,
+                        severity=rule.severity,
+                        status="triggered",
+                        message=f"{rule.name} - {rule.metric_name} 当前值:{latest.value} 超出阈值:{rule.threshold}",
+                    )
+                    db.add(alert)
+                    new_alerts.append(alert)
+                elif not active and not recent_resolved:
                     alert = Alert(
                         rule_id=rule.id,
                         asset_id=latest.asset_id,

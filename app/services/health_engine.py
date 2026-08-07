@@ -45,6 +45,7 @@ ALERT_SIGNAL_MAP = {
     "middleware_metric": [
         "mysql_slow_queries", "redis_memory", "redis_connections",
         "kafka_lag", "mongodb_connections", "es_health",
+        "svc_up",
     ],
 }
 

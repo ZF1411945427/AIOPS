@@ -49,13 +49,16 @@ def _call_llm_with_fallback(db: Session, messages: list, tools=None, max_tokens_
     return None, "所有 AI Provider 调用失败: " + "; ".join(errors)
 
 
-def generate_draft(alert_id: int, db: Session) -> dict:
-    """当告警解决后，调用 LLM 自动生成知识草稿"""
+def generate_draft(alert_id: int, db: Session, force: bool = False) -> dict:
+    """当告警解决后，调用 LLM 自动生成知识草稿.
+
+    force=True 时跳过 status=resolved 检查，允许从执行成功回调直接调用。
+    """
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
     if not alert:
         return {"ok": False, "error": "告警不存在"}
 
-    if alert.status != "resolved":
+    if not force and alert.status != "resolved":
         return {"ok": False, "error": "仅已解决的告警可生成知识草稿"}
 
     existing = db.query(KnowledgeDraft).filter(
