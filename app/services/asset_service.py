@@ -95,26 +95,34 @@ def probe_assets(db: Session):
     import json
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
+    import socket
 
     assets = db.query(Asset).all()
     changed = []
 
-    # 为每个资产新建独立 Session，线程安全地并行探测
-    # ThreadPoolExecutor 最多 10 并发，防止大量离线资产 SSH 超时串行拖垮总耗时
     _probe_db_factory = lambda: get_session_for(get_db_mode())()
     _lock = threading.Lock()
+
+    def _probe_middleware_port(ip, port, timeout=5):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            t0 = datetime.now()
+            s.connect((ip, int(port)))
+            lat = int((datetime.now() - t0).total_seconds() * 1000)
+            s.close()
+            return {"ok": True, "message": f"端口 {port} 连通", "latency_ms": lat}
+        except Exception as e:
+            return {"ok": False, "message": f"端口 {port} 不通: {e}"}
 
     def _probe_one(asset):
         if not asset.ip:
             return None
-        # 用独立 Session 避免跨线程共用
         sess = _probe_db_factory()
         try:
-            # 重新从 DB 获取资产行
             a = sess.query(Asset).filter(Asset.id == asset.id).first()
             if not a:
                 return None
-            # 解析连接配置
             config = {}
             try:
                 raw = a.connection_config
@@ -125,13 +133,51 @@ def probe_assets(db: Session):
             except (json.JSONDecodeError, TypeError):
                 config = {}
 
-            result = ConnectionTester.test(a.connection_type or "ssh", a.ip, config)
+            ci_attrs = {}
+            try:
+                raw_attrs = a.ci_attributes
+                if isinstance(raw_attrs, str):
+                    ci_attrs = json.loads(raw_attrs) if raw_attrs else {}
+                else:
+                    ci_attrs = raw_attrs or {}
+            except (json.JSONDecodeError, TypeError):
+                ci_attrs = {}
+
+            # 按 CI 类型选择探活方式：有业务端口的探业务端口，否则按 connection_type
+            probe_port = None
+            if a.ci_type == "middleware":
+                probe_port = ci_attrs.get("mw_port", "")
+            elif a.ci_type == "database":
+                probe_port = ci_attrs.get("db_port", "")
+
+            if probe_port:
+                result = _probe_middleware_port(a.ip, probe_port)
+            else:
+                result = ConnectionTester.test(a.connection_type or "ssh", a.ip, config)
+
             old_status = a.status
             new_status = "online" if result.get("ok") else "offline"
             a.status = new_status
             a.last_checked_at = datetime.now()
             a.latency_ms = int(result.get("latency_ms", 0)) if result.get("ok") else None
             sess.commit()
+
+# 每次探测都写入 svc_up 指标（不限于状态变化），确保告警系统总能拿到最新值
+            try:
+                from app.models import MetricRecord, AssetLifecycle
+                lifecycle = sess.query(AssetLifecycle).filter(
+                    AssetLifecycle.asset_id == a.id,
+                    AssetLifecycle.status.in_(["maintenance", "decommissioned", "retired"])
+                ).first()
+                if not (lifecycle and new_status == "offline"):
+                    svc_up = 1.0 if new_status == "online" else 0.0
+                    sess.add(MetricRecord(
+                        asset_id=a.id, name="svc_up", value=svc_up,
+                        unit="", timestamp=datetime.now()
+                    ))
+                sess.commit()
+            except Exception:
+                sess.rollback()
 
             if old_status != new_status:
                 return {"id": a.id, "name": a.name,
@@ -146,7 +192,6 @@ def probe_assets(db: Session):
         finally:
             sess.close()
 
-    # 限制并发数 10，避免同时开太多 SSH 连接
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(_probe_one, a): a for a in assets}
         for future in as_completed(futures):

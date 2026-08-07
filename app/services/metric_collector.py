@@ -49,6 +49,7 @@ METRIC_UNITS = {
     "tcp_established": "", "tcp_time_wait": "",
     "uptime_seconds": "s", "process_count": "", "zombie_process": "", "open_files": "",
     "ssh_connections": "", "http_connections": "", "mysql_connections": "",
+    "svc_up": "",
 }
 
 
@@ -116,6 +117,30 @@ def collect_asset_metrics(asset, db):
                     result["metrics"].append({"name": name, "value": val, "asset_id": asset.id})
             except Exception:
                 pass
+
+        # 服务型资产通用探活：SSH 进宿主机检查本地端口是否存活
+        if asset.ci_type in ("middleware", "database"):
+            try:
+                ci_attrs = {}
+                raw_attrs = getattr(asset, "ci_attributes", "{}")
+                if isinstance(raw_attrs, str):
+                    ci_attrs = json.loads(raw_attrs) if raw_attrs else {}
+                else:
+                    ci_attrs = raw_attrs or {}
+            except (json.JSONDecodeError, TypeError):
+                ci_attrs = {}
+            port = ci_attrs.get("mw_port", "") or ci_attrs.get("db_port", "")
+            if port:
+                try:
+                    stdin, stdout, stderr = ssh.exec_command(
+                        f"timeout 3 bash -c 'echo >/dev/tcp/127.0.0.1/{port}' 2>/dev/null && echo 1 || echo 0",
+                        timeout=5)
+                    raw = stdout.read().decode(errors="ignore").strip()
+                    val = 1.0 if raw == "1" else 0.0
+                    db.add(MetricRecord(asset_id=asset.id, name="svc_up", value=val, unit="", timestamp=now))
+                    result["metrics"].append({"name": "svc_up", "value": val, "asset_id": asset.id})
+                except Exception:
+                    pass
 
         ssh.close()
         db.commit()

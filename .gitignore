@@ -49,8 +49,13 @@ backend_new.log
 logs/*.png
 nul
 
-# ===== 根目录临时测试脚本 / 临时依赖 =====
+# ===== 根目录临时测试脚本 / 调试工具 / 临时依赖 =====
 /test_*.py
+/check_*.py
+/debug_*.py
+/fix_*.py
+/force_alert.py
+/opencode_tmp.json
 /package.json
 /package-lock.json
 
@@ -97,6 +102,7 @@ test_user.json
 
 # ===== 授权许可证（防破解，禁止入库）=====
 tools/private_key.pem
+tools/public_key.pem
 license.lic
 tools/license.lic
 data/license_state.json

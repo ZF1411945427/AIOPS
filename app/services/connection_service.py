@@ -431,7 +431,7 @@ class ConnectionTester:
         timeout = 10
 
         # TCP 端口连通类（无标准 HTTP 健康检查接口）
-        tcp_only_types = {"kafka", "rocketmq", "zookeeper"}
+        tcp_only_types = {"kafka", "rocketmq", "zookeeper", "memcached"}
         if mw_subtype in tcp_only_types:
             return ConnectionTester._tcp_only(host, mw_port, mw_subtype)
 

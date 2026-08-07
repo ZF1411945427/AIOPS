@@ -102,6 +102,28 @@ def api_workflow_toggle(wf_id: int, db: Session = Depends(get_db)):
     return JSONResponse({"ok": True, "enabled": bool(wf.enabled)})
 
 
+@router.post("/api/{wf_id}/update")
+def api_workflow_update(
+    wf_id: int,
+    name: str = Form(...),
+    steps: str = Form("[]"),
+    rule_id: int = Form(0),
+    db: Session = Depends(get_db)):
+    """更新自愈工作流 JSON API."""
+    wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
+    if not wf:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        steps_list = json.loads(steps)
+    except Exception:
+        steps_list = [s.strip() for s in steps.split("\n") if s.strip()]
+    wf.name = name
+    wf.rule_id = rule_id if rule_id else None
+    wf.steps = json.dumps(steps_list, ensure_ascii=False)
+    db.commit()
+    return JSONResponse({"ok": True, "id": wf.id})
+
+
 @router.post("/api/{wf_id}/delete")
 def api_workflow_delete(wf_id: int, db: Session = Depends(get_db)):
     """删除自愈工作流 JSON API."""
@@ -114,14 +136,15 @@ def api_workflow_delete(wf_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api/{wf_id}/run")
-def api_workflow_run(wf_id: int, db: Session = Depends(get_db)):
-    """运行自愈工作流 JSON API."""
+def api_workflow_run(wf_id: int, dry_run: bool = False, db: Session = Depends(get_db)):
+    """运行自愈工作流 JSON API. dry_run=True 时只模拟不执行."""
     wf = db.query(RemediationWorkflow).filter(RemediationWorkflow.id == wf_id).first()
     if not wf:
         return JSONResponse({"error": "not found"}, status_code=404)
     steps = json.loads(wf.steps) if isinstance(wf.steps, str) else (wf.steps or [])
     alerts = db.query(Alert).filter(Alert.status == "triggered").order_by(Alert.created_at.desc()).limit(3).all()
     ran = 0
+    results = []
     for alert in alerts:
         asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
         for step_idx, step in enumerate(steps):
@@ -132,21 +155,39 @@ def api_workflow_run(wf_id: int, db: Session = Depends(get_db)):
                 action_type = step
                 params = {}
             target = asset.name if asset else f"asset_{alert.asset_id}"
-            if not asset:
+            if dry_run:
+                success, output = True, f"[模拟] 步骤 {step_idx+1}: {action_type} {params} (dry-run)"
+            elif not asset:
                 success, output = False, f"未找到资产 alert.asset_id={alert.asset_id}，无法远程执行"
             else:
                 success, output = _run_step(action_type, params, asset)
-            log = RemediationLog(
-                remediation_id=wf.id,
-                alert_id=alert.id,
-                action_type=action_type,
-                target=target,
-                is_success=success,
-                output=f"[Step {step_idx+1}/{len(steps)}] {output}")
-            db.add(log)
-            if not success:
+            results.append({
+                "alert_id": alert.id, "step": step_idx + 1,
+                "action": action_type, "target": target,
+                "success": success, "output": output[:200],
+            })
+            if not dry_run:
+                log = RemediationLog(
+                    remediation_id=wf.id,
+                    remediation_type="workflow",
+                    alert_id=alert.id,
+                    action_type=action_type,
+                    target=target,
+                    is_success=success,
+                    output=f"[Step {step_idx+1}/{len(steps)}] {output}")
+                _abs = alert.status if alert else "triggered"
+                db.add(log)
+                db.commit()
+                try:
+                    from app.services.remediation_effect_service import track_effect
+                    track_effect(log.id, db, status_before=_abs)
+                except Exception:
+                    pass
+            if not success and not dry_run:
                 break
-        alert.status = "acknowledged"
+        if not dry_run:
+            alert.status = "acknowledged"
         ran += 1
-    db.commit()
-    return JSONResponse({"ok": True, "ran": ran})
+    if not dry_run:
+        db.commit()
+    return JSONResponse({"ok": True, "ran": ran, "dry_run": dry_run, "results": results})

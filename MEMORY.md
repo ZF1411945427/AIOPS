@@ -2,6 +2,66 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-07-30: 新增「暗色玻璃」全局主题 + 智能助手页适配
+- **新增全局主题 `dark-glass`**: 顶栏 Brush 弹窗新增第三个主题选项「暗色玻璃」。`html[data-theme="dark-glass"]` 覆盖全部 CSS 变量:纯黑背景 `#000`、卡片 `rgba(255,255,255,0.04)` + `backdrop-filter: blur(20px)`、细白描边 `rgba(255,255,255,0.07)`、青绿强调色 `#00e096`
+- **智能助手页适配**: AgentChatView.vue 全部硬编码色值通过 `!important` 全局覆盖，涵盖侧边栏/消息气泡/输入框/发送按钮/模式标签/子智能体/待办确认等所有组件，切到 dark-glass 主题时颜色正确切换
+- **改动文件**: `AppLayout.vue`(弹窗加第三个选项)、`main.css`(新增 dark-glass 全局变量 ~300 行 + AgentChatView 适配 ~200 行)
+
+### 2026-07-30: 顶栏外观设置弹窗→玻璃拟态风格改造
+- **顶栏 Brush 弹窗重设计**: 去掉多余的全屏页面和菜单项，原样保留顶栏 Brush 图标交互。弹窗改用玻璃拟态风格（纯黑半透明背景 `rgba(10,10,10,0.92)` + `backdrop-filter: blur(32px)` + 细白描边 + 多层软阴影 + 青绿强调色 `#00e096`）
+- **弹窗结构**: 顶部 SVG 齿轮图标 + 标题区域 → 主题模式（亮色/暗色，带发光圆点指示器）→ 强调色系（靛蓝/赤陶，带色块选中光晕）→ 玻璃拟态概念预览（3层亚克力磨砂方块 + 说明文字）
+- **改动文件**: `AppLayout.vue`（弹窗模板）、`main.css`（`.glass-popover` + `.ap-*` 样式类）。新建的 `AppearanceSettingsView.vue` 已删除，菜单项已移除
+
+### 2026-07-30: 自愈工作流大修 — 从不可用到真实可用
+- **工作流 3 个致命硬伤修复**:
+  1. **healthcheck 动作不存在** → 前端下拉菜单有但 `execute_action` 未实现，执行必报"未知操作类型"。新增 `healthcheck` 分支：SSH 执行 `systemctl is-active` 或 `uptime`；K8s 执行 `kubectl rollout status`/`get pod`；Docker 执行 `docker exec echo`
+  2. **规则触发不走工作流** → `check_and_remediate` 只匹配 `AutoRemediation`（单动作规则），不匹配 `RemediationWorkflow`，工作流只能手动或 AI 推荐触发。修复：在 AutoRemediation 匹配失败后，按 `alert.rule_id` 匹配 `RemediationWorkflow.rule_id`，匹配成功则生成 `PendingAction(action_type="workflow")`
+  3. **手动触发不按 rule_id 匹配** → `alerts.py` 的 `/api/{alert_id}/heal` 取第一个全局启用的工作流，而不是按告警规则匹配。修复：先按 `alert.rule_id` 匹配 `workflow.rule_id`，无匹配再回退到第一个全局启用工作流
+- **前端编辑功能** → 原来只有创建/删除，无编辑。新增编辑按钮 + 编辑弹窗（复用创建弹窗，isEditing 模式），新增 `POST /api/{wf_id}/update` 后端端点
+- **步骤参数预览** → 卡片上显示每个步骤的参数（如 `healthcheck`、`restart:nginx`、`clean:/var/log`），让用户不用点开就能看到完整步骤
+- **dry-run 模拟模式** → 新增「🔍 模拟」按钮，调用 `POST /api/{wf_id}/run?dry_run=true`，不执行真实操作只返回模拟结果，弹窗展示每步的预期输出
+- **日志 FK 修复** → `RemediationLog.remediation_id` 原 FK 指向 `auto_remediations.id`，但工作流日志写入的是 `workflow.id`，两表 ID 冲突。修复：改为无 FK 的普通列，新增 `remediation_type` 列（"rule"/"workflow"）区分来源
+- **迁移** → `main.py` `_MIGRATIONS` 新增 `remediation_logs` + `remediation_effects` 的 `remediation_type` 列
+- **操作手册** → `docs/自愈工作流操作手册.md` 含 3 种触发方式、6 种动作对比表、模拟/运行/日志查看流程、常见问题排查、3 个推荐模板
+- **验证**: 前端构建通过；后端启动正常；workflow 创建 API 返回 `{"ok":true, "id":1}`；healthcheck 执行不崩溃（资产不可达时返回明确错误信息）
+- **改动文件**: `remediation_service.py`(healthcheck 分支 + check_and_remediate 工作流匹配)、`remediation_workflow.py`(编辑 API + dry-run + remediation_type)、`alerts.py`(heal 按 rule_id 匹配 + remediation_type)、`models.py`(RemediationLog 修复 FK + 加 remediation_type)、`main.py`(迁移)、`RemediationWorkflowView.vue`(编辑/模拟/参数预览/全量重写)
+
+### 2026-07-30: 新增「暗色玻璃」全局主题 + 智能助手页适配
+- **AI 方案状态消失 Bug 修复**: `RemediationView.vue` 的 `restoreAiState()` 原从 `pendingActions`(按 `pendingFilter` 过滤)恢复,但已执行/取消的 PA 不在列表中 → 刷新后 AI 按钮变回 idle。改为独立 `async restoreAiState()`,单独请求 `/remediation/api/ai-pending?status=all` 获取全状态 PA 匹配,不受筛选影响
+- **功能1 自愈→智能助手转交通道**: 后端新增 `POST /agent/transfer-from-remediation`(注入告警+诊断报告+AI方案上下文→创建 Agent 会话→自动发起深度分析)。前端 PA 卡片加"🔄 转交智能助手"按钮(pending/failed/executed 三态均可用),用 `window._pendingAgentSessionId` 跳转打开对应会话
+- **功能2 执行成功自动沉淀知识**: `confirm_ai_action` 单步+workflow 两条路径,执行成功后将 alert 置 resolved 并调 `knowledge_autogen_service.generate_draft(alert_id)` 自动生成知识草稿(失败静默不阻塞)
+- **功能3 风险分类器复用**: `mcp_tools.py` 的 `propose_action` 对 `run_command` 类型新增确定性分类器覆盖 — 调 `remediation_service._classify_command_risk` 按 SQL 命令语义硬判定,取分类器与 LLM 评估中更高者,防 LLM 降级高危命令
+- **功能4 CI-Type-Aware 执行通道复用**: `mcp_tools.py` 的 4 个 `execute_*` 工具移除 `connection_type != "ssh"` 硬限制,改为传 `db` 给 `execute_action` 让其按 ci_type 自动分派 SSH/K8s/Docker 通道
+- **功能5 关联分析注入**: `ai_self_heal_analyze` 的 user_prompt 新增 `correlation_section`,调 `run_correlation_analysis(db, hours=1, asset_id)` 获取同期告警/指标异常/日志异常/变更记录注入,让自愈 AI 看到多维数据而非仅本机诊断
+- **功能6 预置诊断命令包 MCP 工具**: `mcp_tools.py` 新增 `run_preset_diagnosis` 工具(expose_to_llm=True, read_only),复用自愈 `DIAGNOSIS_COMMAND_PACKS` + `run_diagnosis`,按 metric_name 自动匹配诊断包执行,AI Agent 可一键跑完整诊断命令集
+- **验证**: 前端构建通过;后端重启后 `/agent/transfer-from-remediation` 返回 `{"session_id":1}`;`/agent/api/capabilities` 含 `run_preset_diagnosis` + `query_correlation_analysis`
+- **二次修复(自检发现3个缺点已修复,3个限制已优化)**:
+  1. `_RISK_MAP` 缺 critical → execute_run_command/script 注册为 critical 但分类器覆盖逻辑 `_RISK_MAP.get("critical",2)` 返回 2(medium) → critical 被降级为 high。修复:加 critical:4
+  2. `execute_action` 的 run_command 分支仍有 `channel != "ssh"` 限制 → 功能4移除 mcp_tools 限制后 K8s/Docker 资产仍被底层拒绝。修复:K8s/Docker 通道放行只读命令(分类器 auto_exec=True),变更命令拒绝并提示用 restart/scale
+  3. `run_preset_diagnosis` 无 alert_id 时调 `run_diagnosis(alert_id=0)` → run_diagnosis 第一步查 Alert 失败返回"告警不存在"。修复:无 alert_id 时直接用 DIAGNOSIS_COMMAND_PACKS+_remote_exec 执行不存报告;有 alert_id 时走 run_diagnosis 存报告
+- **3个限制优化**:
+  1. 自动沉淀知识不再强制置 resolved → `generate_draft` 加 `force=True` 参数跳过 status 检查,调用方传 `force=True` 不改变告警状态语义
+  2. 关联分析加短时缓存 → `_get_correlation_cached(asset_id, hours=1)` 60 秒内复用,避免每次 AI 分析重复查询
+  3. script 动作扩展到 K8s/Docker → 新增 `_k8s_exec_command`(kubectl exec)+`_docker_exec_command`(宿主机 SSH docker exec),K8s/Docker 也可执行脚本
+
+### 2026-07-29: 规则自愈 AI 分析前端超时修复(axios 默认 30s 掐断 LLM 请求)
+- **根因**:`RemediationView.vue` 的 4 个 AI/诊断请求未传 timeout,用 axios 全局默认 `timeout:30000`(30s)。而 diagnose 接口 SSH 跑多条诊断命令(30s+),ai-analyze 调 GLM-5.2 推理(25~90s,后端 `timeout_override=120`),均超 30s → 前端 axios 主动断开 → "请求超时"。后端其实仍在跑但 `ai_self_heal_analyze` 无入口日志,故日志看不到请求
+- **对比**:其他 LLM 页面(IncidentsView/DiagnosticToolsView/AlertsView/AgentGroundTruthView)均正确传 `{timeout:130000}`,唯独 RemediationView 漏传
+- **修复**:`RemediationView.vue` 4 处加 `{ timeout: 130000 }`:`restoreDiagnosisState`(451)、`runDiagnoseGroup`(482)、`aiAnalyzeGroup`(504 diagnose+505 ai-analyze)、`reanalyze`(618 ai-reanalyze)。构建通过
+- **教训**:凡调 LLM(call_llm)或 SSH 诊断的接口,前端 axios 必须显式传 timeout≥130000,不能用全局默认 30s;否则"前端先断、后端还在跑"的静默超时极难排查
+
+### 2026-07-29: 自愈 AI 迭代诊断循环(Agentic Diagnostic Loop)+ 菜单改名 + .gitignore
+- **菜单改名**: "灭火图"→"架构巡检图"（`menu_config.json` + `FireMapView.vue` 标题/副标题）
+- **.gitignore**: 新增 `tools/public_key.pem`（`tools/private_key.pem`、`license.lic` 原有）
+- **迭代诊断循环**: `ai_self_heal_analyze` 从 One-shot 改为最多 5 轮迭代。每轮 AI 判断 `diagnosis_sufficient`，不够则推荐 `next_tools`（最多 5 个/轮），系统自动执行只读诊断工具（复用 `diagnostic_tools.py` 工具池），补诊结果存入 `DiagnosisReport`（带 `round_num`），下一轮 AI 基于累积证据再分析，直到根因确定或达上限
+- **后端改动**: 
+  - `models.py`: `DiagnosisReport` 加 `round_num` 字段（0=初诊，1..N=补诊）
+  - `main.py`: `_MIGRATIONS` 加 `diagnosis_reports.round_num` 列
+  - `remediation_service.py`: 新增 `_execute_diagnostic_tool()` 复用 diagnostic_tools 工具池+SSH 通道；`ai_self_heal_analyze` 加迭代循环（MAX_ROUNDS=5, MAX_TOOLS_PER_ROUND=5）；`get_ai_pending_actions` 返回所有轮次诊断命令（按 round_num 分组）
+  - system_prompt 加 `diagnosis_sufficient` + `next_tools` 字段
+- **前端改动**: `RemediationView.vue` 诊断过程折叠面板按轮次分组展示（"静态初诊"/"第N轮 AI 补诊"标签），加 `groupedByRound()`/`diagnosisRounds()` 辅助函数 + `.diag-round-label` CSS
+- **设计**: 对标 GOPS 2026 秦晓辉 Layer3 实时诊断层 + AI 反馈闭环（Agentic Diagnostic Loop with Tool Calling），业界标杆 Dynatrace Davis Causal AI Engine
+
 ### 2026-07-28: SVG拓扑连线+资产依赖关系49条+链路面板
 - **SVG拓扑连线**: FireMap 域视图内,`fm-canvas-wrapper` 包裹层卡片 + 动态创建的 SVG overlay。`drawRelations()` 通过 `data-eid` 查找实体卡片 DOM 位置,用三次贝塞尔曲线(Cubic Bezier)连接有依赖关系的卡片。故障实体间的线变红(`#ef4444`,stroke-width 2.5),正常线灰色(0.45透明度)。`resize`/`toggleLayer` 时自动重绘
 - **资产依赖关系**: DB `asset_relations` 表写入49条关系。Docker域: nginx→5个mall(proxies_to)→nacos/mysql/redis/rabbitmq(depends_on)→vm-132(runs_on)。mall-search 额外→ES/Mongo。裸机域: nginx-bare→2个mall-bare→共享中间件

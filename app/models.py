@@ -305,7 +305,8 @@ class RemediationLog(Base):
     __tablename__ = "remediation_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    remediation_id = Column(Integer, ForeignKey("auto_remediations.id"), nullable=True)
+    remediation_id = Column(Integer, nullable=True)
+    remediation_type = Column(String(16), default="rule")  # "rule" or "workflow"
     alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True)
     action_type = Column(String(32), nullable=False)
     target = Column(String(128), default="")
@@ -318,7 +319,7 @@ class RemediationEffect(Base):
     __tablename__ = "remediation_effects"
 
     id = Column(Integer, primary_key=True, index=True)
-    remediation_id = Column(Integer, ForeignKey("auto_remediations.id"), nullable=True)
+    remediation_id = Column(Integer, nullable=True)
     alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True)
     executed_at = Column(DateTime, nullable=False)
     check_at = Column(DateTime, nullable=False)
@@ -2117,10 +2118,11 @@ class DiagnosisReport(Base):
     alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True, index=True)
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
     metric_name = Column(String(100), default="")
-    commands_run = Column(Text, default="[]")     # JSON: [{cmd, desc, output, duration_ms, exit_code}]
+    commands_run = Column(Text, default="[]")     # JSON: [{cmd, desc, output, duration_ms, exit_code, tool_id, round_num}]
     raw_output = Column(Text, default="")          # 拼接后的完整输出（供 AI prompt 注入）
     summary = Column(String(500), default="")      # 一句话摘要（可选，后期可由 AI 生成）
     status = Column(String(20), default=STATUS_RUNNING)
+    round_num = Column(Integer, default=0)         # 诊断轮次：0=静态初诊，1..N=AI 驱动补诊轮次
     created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
     finished_at = Column(DateTime, nullable=True)
 

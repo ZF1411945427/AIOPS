@@ -150,6 +150,15 @@ _MIGRATIONS = {
     "audit_logs": [
         "route_path VARCHAR(256) DEFAULT ''",
     ],
+    "diagnosis_reports": [
+        "round_num INTEGER DEFAULT 0",
+    ],
+    "remediation_logs": [
+        "remediation_type VARCHAR(16) DEFAULT 'rule'",
+    ],
+    "remediation_effects": [
+        "remediation_type VARCHAR(16) DEFAULT 'rule'",
+    ],
 }
 for _eng in get_all_engines().values():
     with _eng.connect() as _conn:

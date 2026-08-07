@@ -36,25 +36,51 @@
                 <span class="group-metric">{{ g.metric_name || '未知指标' }}</span>
                 <span class="group-asset">· {{ g.asset_name || '未知资产' }}</span>
                 <span v-if="g.items.length > 1" class="group-count">共 {{ g.items.length }} 条同类告警</span>
+                <div class="group-actions" @click.stop>
+                  <!-- 诊断按钮：idle / loading / done 三态 -->
+                  <button v-if="groupDiagState[g.key] === 'done'"
+                    class="btn btn-sm btn-done" @click="openDiagModal(g.key)">
+                    📋 诊断报告
+                  </button>
+                  <button v-else class="btn btn-sm"
+                    @click="runDiagnoseGroup(g)"
+                    :disabled="groupDiagState[g.key] === 'loading'">
+                    {{ groupDiagState[g.key] === 'loading' ? '诊断中...' : '🔬 诊断' }}
+                  </button>
+                  <!-- 重新诊断：始终可见，强制重新执行诊断命令 -->
+                  <button class="btn btn-sm btn-rediagnose"
+                    :disabled="groupDiagState[g.key] === 'loading'"
+                    @click="runDiagnoseGroup(g, true)">
+                    {{ groupDiagState[g.key] === 'loading' ? '诊断中...' : '🔄 重新诊断' }}
+                  </button>
+                  <!-- AI分析按钮：idle / loading / done 三态 -->
+                  <button v-if="groupAiState[g.key] === 'done'"
+                    class="btn btn-sm btn-done-ai" @click="openAiModal(g.key)">
+                    📊 AI 方案
+                  </button>
+                  <button v-else class="btn btn-sm btn-primary"
+                    @click="aiAnalyzeGroup(g)"
+                    :disabled="groupAiState[g.key] === 'loading'">
+                    {{ groupAiState[g.key] === 'loading' ? '分析中...' : '🤖 AI 分析' }}
+                  </button>
+                  <!-- 重新分析：始终可见，无 PA 时也可触发生成 -->
+                  <button class="btn btn-sm btn-reanalyze"
+                    :disabled="groupReanalyzing === g.key"
+                    @click="reanalyzeGroup(g)">
+                    {{ groupReanalyzing === g.key ? '分析中...' : '🔄 重新分析' }}
+                  </button>
+                </div>
               </div>
               <div v-if="alertGroupOpen[g.key]" class="alert-group-body">
                 <table class="table table-compact">
-                  <thead><tr><th>ID</th><th>告警消息</th><th>实际值</th><th>阈值</th><th>时间</th><th>操作</th></tr></thead>
+                  <thead><tr><th>ID</th><th>告警消息</th><th>实际值</th><th>阈值</th><th>时间</th></tr></thead>
                   <tbody>
-                    <tr v-for="a in g.items" :key="a.id" :class="{ 'analyzing-row': analyzingId === a.id }">
+                    <tr v-for="a in g.items" :key="a.id">
                       <td>{{ a.id }}</td>
                       <td class="text-sm" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ a.message }}</td>
                       <td>{{ a.actual_value ?? '-' }}</td>
                       <td>{{ a.threshold ?? '-' }}</td>
                       <td class="text-sm">{{ a.created_at }}</td>
-                      <td>
-                        <button class="btn btn-sm" @click.stop="runDiagnose(a)" :disabled="diagnosingId === a.id" style="margin-right:4px;">
-                          {{ diagnosingId === a.id ? '诊断中...' : '🔬 诊断' }}
-                        </button>
-                        <button class="btn btn-sm btn-primary" @click.stop="aiAnalyze(a)" :disabled="analyzingId === a.id">
-                          {{ analyzingId === a.id ? '分析中...' : '🤖 AI 分析' }}
-                        </button>
-                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -65,31 +91,59 @@
         </div>
       </div>
 
-      <div v-if="analysisResult" class="panel analysis-panel">
-        <div class="panel-header"><h3>AI 分析结果</h3><button class="modal-close" @click="analysisResult = null">×</button></div>
-        <div class="panel-body">
-          <div class="analysis-grid">
-            <div class="analysis-item"><span class="kv-key">根因分析</span><p class="kv-val">{{ analysisResult.root_cause }}</p></div>
-            <div class="analysis-item"><span class="kv-key">影响评估</span><p class="kv-val">{{ analysisResult.impact }}</p></div>
-            <div v-if="analysisResult.action_type === 'workflow'" class="analysis-item">
-              <span class="kv-key">推荐工作流</span>
-              <p class="kv-val"><span class="badge action">工作流 #{{ analysisResult.recommended_workflow_id }}</span> {{ analysisResult.recommended_workflow_name }}</p>
+      <!-- ═══ 诊断报告弹窗 ═══ -->
+      <div v-if="diagModal.visible" class="modal-overlay" @click.self="diagModal.visible = false">
+        <div class="modal-box modal-wide">
+          <div class="modal-header">
+            <h3>📋 诊断报告 · {{ diagModal.groupLabel }}</h3>
+            <button class="modal-close" @click="diagModal.visible = false">×</button>
+          </div>
+          <div class="modal-body diag-modal-body">
+            <div v-if="diagModal.cached" class="diag-cache-tip">使用缓存结果（本次未重新连接）</div>
+            <div v-for="(cmd, i) in diagModal.commands" :key="i" class="diag-result-item">
+              <div class="diag-result-header">
+                <span class="diag-cmd-idx">{{ i + 1 }}.</span>
+                <code class="diag-cmd-text">{{ cmd.cmd }}</code>
+                <span class="diag-cmd-status" :class="cmd.exit_code === 0 ? 'diag-ok' : 'diag-fail'">
+                  {{ cmd.exit_code === 0 ? '✅' : '❌' }}
+                </span>
+                <span class="diag-cmd-time">{{ cmd.duration_ms }}ms</span>
+              </div>
+              <div v-if="cmd.desc" class="diag-cmd-desc">{{ cmd.desc }}</div>
+              <pre v-if="cmd.output" class="diag-cmd-output">{{ cmd.output }}</pre>
+              <div v-else class="diag-cmd-desc" style="color:#94a3b8;">(无输出)</div>
             </div>
-            <div v-else class="analysis-item"><span class="kv-key">修复命令</span><code class="cmd-block">{{ analysisResult.command }}</code></div>
-            <div class="analysis-item"><span class="kv-key">方案说明</span><p class="kv-val">{{ analysisResult.command_description || '执行推荐的多步骤自愈工作流' }}</p></div>
-            <div class="analysis-item"><span class="kv-key">风险等级</span><span class="badge" :class="severityClass(analysisResult.risk_level)">{{ analysisResult.risk_level }}</span></div>
-            <div class="analysis-item"><span class="kv-key">动作类型</span><span class="badge action">{{ actionLabel(analysisResult.action_type) }}</span></div>
           </div>
-          <div class="analysis-actions">
-            <button class="btn btn-primary" @click="confirmAction(pendingActionId)" :disabled="actionBusy">
-              {{ actionBusy ? '执行中...' : '✅ 确认执行' }}
-            </button>
-            <button class="btn btn-danger" @click="cancelAction(pendingActionId)" :disabled="actionBusy">
-              取消
-            </button>
+        </div>
+      </div>
+
+      <!-- ═══ AI方案弹窗（只读查看，审批在下方） ═══ -->
+      <div v-if="aiModal.visible" class="modal-overlay" @click.self="aiModal.visible = false">
+        <div class="modal-box modal-wide">
+          <div class="modal-header">
+            <h3>📊 AI 方案预览 · {{ aiModal.groupLabel }}</h3>
+            <button class="modal-close" @click="aiModal.visible = false">×</button>
           </div>
-          <div v-if="actionResult" class="action-result" :class="actionResult.success ? 'success' : 'fail'">
-            {{ actionResult.success ? '✅ 执行成功' : '❌ 执行失败' }}: {{ actionResult.output }}
+          <div class="modal-body">
+            <div v-if="aiModal.dedup" class="diag-cache-tip">已复用当天已有方案（未重新调用 AI）</div>
+            <div class="analysis-grid">
+              <div class="analysis-item"><span class="kv-key">根因分析</span><p class="kv-val">{{ aiModal.root_cause || '-' }}</p></div>
+              <div class="analysis-item"><span class="kv-key">影响评估</span><p class="kv-val">{{ aiModal.impact || '-' }}</p></div>
+              <div v-if="aiModal.action_type === 'workflow'" class="analysis-item" style="grid-column:1/-1">
+                <span class="kv-key">推荐工作流</span>
+                <p class="kv-val"><span class="badge action">工作流 #{{ aiModal.recommended_workflow_id }}</span> {{ aiModal.recommended_workflow_name }}</p>
+              </div>
+              <div v-else class="analysis-item" style="grid-column:1/-1">
+                <span class="kv-key">修复命令</span>
+                <code class="cmd-block">{{ aiModal.command || '-' }}</code>
+              </div>
+              <div class="analysis-item"><span class="kv-key">方案说明</span><p class="kv-val">{{ aiModal.command_description || '执行推荐的多步骤自愈工作流' }}</p></div>
+              <div class="analysis-item">
+                <span class="kv-key">风险等级</span>
+                <span class="badge" :class="severityClass(aiModal.risk_level)">{{ aiModal.risk_level }}</span>
+              </div>
+            </div>
+            <div class="modal-tip">✅ 审批与执行操作请在下方「待审批动作」中进行</div>
           </div>
         </div>
       </div>
@@ -146,22 +200,25 @@
                   <div v-if="pa.diagnosis_commands && pa.diagnosis_commands.length" class="diagnosis-section">
                     <button class="diagnosis-toggle" @click="toggleDiagnosis(pa.id)">
                       <span class="diagnosis-icon">{{ diagnosisOpen[pa.id] ? '▼' : '▶' }}</span>
-                      📋 查看诊断过程 ({{ pa.diagnosis_commands.length }}条命令)
+                      📋 查看诊断过程 ({{ pa.diagnosis_commands.length }}条命令{{ diagnosisRounds(pa.diagnosis_commands) > 1 ? '，' + diagnosisRounds(pa.diagnosis_commands) + '轮' : '' }})
                       <span class="diagnosis-time">{{ diagnosisDuration(pa.diagnosis_commands) }}</span>
                     </button>
                     <div v-if="diagnosisOpen[pa.id]" class="diagnosis-commands">
-                      <div v-for="(cmd, ci) in pa.diagnosis_commands" :key="ci" class="diag-cmd-item">
-                        <div class="diag-cmd-header">
-                          <span class="diag-cmd-idx">{{ ci + 1 }}.</span>
-                          <code class="diag-cmd-text">{{ cmd.cmd }}</code>
-                          <span class="diag-cmd-status" :class="cmd.exit_code === 0 ? 'diag-ok' : 'diag-fail'">
-                            {{ cmd.exit_code === 0 ? '✅' : '❌' }}
-                          </span>
-                          <span class="diag-cmd-time">{{ cmd.duration_ms }}ms</span>
+                      <template v-for="(group, gi) in groupedByRound(pa.diagnosis_commands)" :key="gi">
+                        <div v-if="groupedByRound(pa.diagnosis_commands).length > 1" class="diag-round-label">{{ group.label }}</div>
+                        <div v-for="(cmd, ci) in group.commands" :key="gi + '-' + ci" class="diag-cmd-item">
+                          <div class="diag-cmd-header">
+                            <span class="diag-cmd-idx">{{ ci + 1 }}.</span>
+                            <code class="diag-cmd-text">{{ cmd.cmd }}</code>
+                            <span class="diag-cmd-status" :class="cmd.exit_code === 0 ? 'diag-ok' : 'diag-fail'">
+                              {{ cmd.exit_code === 0 ? '✅' : '❌' }}
+                            </span>
+                            <span class="diag-cmd-time">{{ cmd.duration_ms }}ms</span>
+                          </div>
+                          <div class="diag-cmd-desc">{{ cmd.desc }}</div>
+                          <pre v-if="cmd.output" class="diag-cmd-output">{{ cmd.output }}</pre>
                         </div>
-                        <div class="diag-cmd-desc">{{ cmd.desc }}</div>
-                        <pre v-if="cmd.output" class="diag-cmd-output">{{ cmd.output }}</pre>
-                      </div>
+                      </template>
                     </div>
                   </div>
                   <!-- ═══ 根因 + 推理链 ═══ -->
@@ -180,11 +237,19 @@
                     <template v-if="pa.status === 'pending'">
                       <button class="btn btn-sm btn-primary" @click="confirmAction(pa.id)">确认执行</button>
                       <button class="btn btn-sm btn-danger" @click="cancelAction(pa.id)">取消</button>
+                      <button class="btn btn-sm btn-warning" :disabled="reanalyzingId === pa.id" @click="reanalyzeAlert(pa)">
+                        {{ reanalyzingId === pa.id ? '分析中...' : '🔄 重新分析' }}
+                      </button>
+                      <button class="btn btn-sm btn-transfer" @click="transferToAgent(pa)">🔄 转交智能助手</button>
                     </template>
                     <template v-else-if="pa.status === 'failed'">
                       <button class="btn btn-sm btn-warning" :disabled="reanalyzingId === pa.id" @click="reanalyze(pa)">
                         {{ reanalyzingId === pa.id ? '分析中...' : '🔄 换个思路' }}
                       </button>
+                      <button class="btn btn-sm btn-transfer" @click="transferToAgent(pa)">🔄 转交智能助手</button>
+                    </template>
+                    <template v-else-if="pa.status === 'executed'">
+                      <button class="btn btn-sm btn-transfer" @click="transferToAgent(pa)">🔄 转交智能助手</button>
                     </template>
                     <span v-else class="text-sm">—</span>
                   </div>
@@ -233,7 +298,7 @@
           <table v-if="logs.length" class="table">
             <thead><tr><th>时间</th><th>动作</th><th>目标</th><th>结果</th><th>输出</th></tr></thead>
             <tbody>
-              <tr v-for="lg in logs" :key="lg.id">
+              <tr v-for="lg in logs" :key="lg.id" class="log-row" @click="openLogDetail(lg)">
                 <td class="text-sm">{{ formatTime(lg.created_at) }}</td>
                 <td>{{ actionLabel(lg.action_type) }}</td>
                 <td class="text-sm">{{ lg.target }}</td>
@@ -255,6 +320,24 @@
         </div>
       </div>
     </template>
+
+    <!-- 执行记录详情弹窗 -->
+    <div v-if="logDetail" class="modal-overlay" @click.self="logDetail = null">
+      <div class="modal-box log-detail-modal">
+        <div class="modal-header">
+          <h3>执行记录详情</h3>
+          <button class="modal-close" @click="logDetail = null">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="detail-row"><label>时间</label><span>{{ formatTime(logDetail.created_at) }}</span></div>
+          <div class="detail-row"><label>动作</label><span>{{ actionLabel(logDetail.action_type) }}</span></div>
+          <div class="detail-row"><label>目标</label><span>{{ logDetail.target }}</span></div>
+          <div class="detail-row"><label>结果</label><span :style="{ color: logDetail.is_success ? '#10b981' : '#ef4444', fontWeight: 600 }">{{ logDetail.is_success ? '成功' : '失败' }}</span></div>
+          <div class="detail-row"><label>完整输出</label></div>
+          <pre class="log-output-full">{{ logDetail.output }}</pre>
+        </div>
+      </div>
+    </div>
 
     <!-- 新增规则弹窗 -->
     <div v-if="createVisible" class="modal-overlay" @click.self="createVisible = false">
@@ -322,19 +405,39 @@ const tab = ref('ai')
 // ── AI 自愈工作台 ──
 const triggeredAlerts = ref([])
 const alertLoading = ref(false)
-const analyzingId = ref(0)
-const diagnosingId = ref(0)
 const reanalyzingId = ref(0)
-const analysisResult = ref(null)
-const pendingActionId = ref(0)
-const actionBusy = ref(false)
-const actionResult = ref(null)
 const pendingActions = ref([])
 const pendingLoading = ref(false)
 const pendingFilter = ref('pending')
 const actionTotal = ref(0)
-const diagnosisOpen = ref({})  // { [paId]: true/false } 折叠状态
+const diagnosisOpen = ref({})   // { [paId]: true/false } 折叠状态
 const alertGroupOpen = ref({})  // { [groupKey]: true/false } 告警聚合组展开状态
+
+// 按钮状态：idle / loading / done（分组粒度）
+const groupDiagState = ref({})  // { [groupKey]: 'idle'|'loading'|'done' }
+const groupAiState  = ref({})   // { [groupKey]: 'idle'|'loading'|'done' }
+const groupReanalyzing = ref('')  // groupKey currently re-analyzing
+// 各分组缓存的数据，用于弹窗展示
+const groupDiagData = ref({})   // { [groupKey]: { groupLabel, commands, cached } }
+const groupAiData   = ref({})   // { [groupKey]: { groupLabel, ...analysisFields, dedup } }
+
+// 弹窗状态
+const diagModal = reactive({ visible: false, groupLabel: '', commands: [], cached: false })
+const aiModal   = reactive({ visible: false, groupLabel: '', dedup: false,
+                              root_cause: '', impact: '', action_type: '', command: '',
+                              command_description: '', risk_level: '', recommended_workflow_id: null,
+                              recommended_workflow_name: '' })
+
+function openDiagModal(key) {
+  const d = groupDiagData.value[key]
+  if (!d) return
+  Object.assign(diagModal, { visible: true, ...d })
+}
+function openAiModal(key) {
+  const d = groupAiData.value[key]
+  if (!d) return
+  Object.assign(aiModal, { visible: true, ...d })
+}
 
 function severityClass(s) {
   if (!s) return 'info'
@@ -371,8 +474,27 @@ async function loadTriggeredAlerts() {
   try {
     const data = await request.get('/remediation/api/triggered-alerts')
     triggeredAlerts.value = data.alerts || []
+    // 加载完成后异步恢复各分组的诊断报告状态（cached 立刻返回，不阻塞渲染）
+    await restoreDiagnosisState()
   } catch (e) { ElMessage.error('加载告警失败: ' + e.message) }
   finally { alertLoading.value = false }
+}
+
+// 恢复诊断状态：对每个分组的代表告警调一次诊断接口（no force，有缓存立刻返回）
+async function restoreDiagnosisState() {
+  const groups = groupedTriggeredAlerts.value
+  await Promise.allSettled(groups.map(async (g) => {
+    const rep = g.items[0]
+    if (!rep) return
+    try {
+      const data = await request.post(`/remediation/api/diagnose/${rep.id}`, {}, { timeout: 130000 })
+      if (data.ok && data.commands && data.commands.length) {
+        const label = `${g.metric_name || '未知指标'} · ${g.asset_name || '未知资产'}`
+        groupDiagData.value = { ...groupDiagData.value, [g.key]: { groupLabel: label, commands: data.commands, cached: true } }
+        groupDiagState.value = { ...groupDiagState.value, [g.key]: 'done' }
+      }
+    } catch (_) { /* 静默失败，不影响页面 */ }
+  }))
 }
 
 // 按 metric_name + asset_name 聚合告警，降噪
@@ -391,40 +513,86 @@ const groupedTriggeredAlerts = computed(() => {
   })
 })
 
-async function runDiagnose(alert) {
-  diagnosingId.value = alert.id
+// 以分组为粒度：取最新一条告警作为代表执行诊断/AI分析
+async function runDiagnoseGroup(group, force = false) {
+  const rep = group.items[0]
+  groupDiagState.value = { ...groupDiagState.value, [group.key]: 'loading' }
   try {
-    const data = await request.post(`/remediation/api/diagnose/${alert.id}`)
+    const data = await request.post(`/remediation/api/diagnose/${rep.id}?force=${force}`, {}, { timeout: 130000 })
     if (data.ok) {
-      const msg = data.cached ? '诊断完成（使用缓存）' : `诊断完成，执行了 ${data.commands?.length || 0} 条命令`
-      ElMessage.success(msg)
+      const cmds = data.commands || []
+      const label = `${group.metric_name || '未知指标'} · ${group.asset_name || '未知资产'}`
+      groupDiagData.value = { ...groupDiagData.value, [group.key]: { groupLabel: label, commands: cmds, cached: data.cached || false } }
+      groupDiagState.value = { ...groupDiagState.value, [group.key]: 'done' }
+      ElMessage.success(data.cached ? '使用缓存诊断结果，点击「诊断报告」查看' : `诊断完成 ${cmds.length} 条命令，点击「诊断报告」查看`)
       loadPendingActions()
     } else {
+      groupDiagState.value = { ...groupDiagState.value, [group.key]: 'idle' }
       ElMessage.error('诊断失败: ' + (data.error || '未知错误'))
     }
-  } catch (e) { ElMessage.error('诊断请求失败: ' + e.message) }
-  finally { diagnosingId.value = 0 }
+  } catch (e) {
+    groupDiagState.value = { ...groupDiagState.value, [group.key]: 'idle' }
+    ElMessage.error('诊断请求失败: ' + e.message)
+  }
 }
 
-async function aiAnalyze(alert) {
-  analyzingId.value = alert.id
-  analysisResult.value = null
-  actionResult.value = null
+async function aiAnalyzeGroup(group) {
+  const rep = group.items[0]
+  groupAiState.value = { ...groupAiState.value, [group.key]: 'loading' }
   try {
-    // 先跑诊断（如果还没跑过）
-    await request.post(`/remediation/api/diagnose/${alert.id}`)
-    // 再调 AI 分析
-    const data = await request.post(`/remediation/api/ai-analyze/${alert.id}`)
+    await request.post(`/remediation/api/diagnose/${rep.id}`, {}, { timeout: 130000 })
+    const data = await request.post(`/remediation/api/ai-analyze/${rep.id}`, {}, { timeout: 130000 })
     if (data.ok) {
-      analysisResult.value = data.analysis
-      pendingActionId.value = data.pending_action_id
-      ElMessage.success('AI 分析完成，请审核')
+      const a = data.analysis || {}
+      const label = `${group.metric_name || '未知指标'} · ${group.asset_name || '未知资产'}`
+      groupAiData.value = { ...groupAiData.value, [group.key]: {
+        groupLabel: label, dedup: data.dedup || false,
+        root_cause: a.root_cause || '', impact: a.impact || '',
+        action_type: a.action_type || '', command: a.command || '',
+        command_description: a.command_description || '',
+        risk_level: a.risk_level || 'medium',
+        recommended_workflow_id: a.recommended_workflow_id || null,
+        recommended_workflow_name: a.recommended_workflow_name || '',
+      }}
+      groupAiState.value = { ...groupAiState.value, [group.key]: 'done' }
+      ElMessage.success(data.dedup ? 'AI 方案已存在，点击「AI 方案」查看，在下方审批执行' : 'AI 分析完成，点击「AI 方案」查看，在下方审批执行')
       loadPendingActions()
     } else {
+      groupAiState.value = { ...groupAiState.value, [group.key]: 'idle' }
       ElMessage.error('AI 分析失败: ' + (data.error || '未知错误'))
     }
-  } catch (e) { ElMessage.error('AI 分析请求失败: ' + e.message) }
-  finally { analyzingId.value = 0 }
+  } catch (e) {
+    groupAiState.value = { ...groupAiState.value, [group.key]: 'idle' }
+    ElMessage.error('AI 分析请求失败: ' + e.message)
+  }
+}
+
+// 重新分析：取消旧 PA + 重新 AI 分析，始终可用（无 PA 时也可触发）
+async function reanalyzeGroup(group) {
+  const rep = group.items[0]
+  groupReanalyzing.value = group.key
+  try {
+    const data = await request.post(`/remediation/api/ai-reanalyze-alert/${rep.id}`, {}, { timeout: 130000 })
+    if (data.ok) {
+      const a = data.analysis || {}
+      const label = `${group.metric_name || '未知指标'} · ${group.asset_name || '未知资产'}`
+      groupAiData.value = { ...groupAiData.value, [group.key]: {
+        groupLabel: label, dedup: false,
+        root_cause: a.root_cause || '', impact: a.impact || '',
+        action_type: a.action_type || '', command: a.command || '',
+        command_description: a.command_description || '',
+        risk_level: a.risk_level || 'medium',
+        recommended_workflow_id: a.recommended_workflow_id || null,
+        recommended_workflow_name: a.recommended_workflow_name || '',
+      }}
+      groupAiState.value = { ...groupAiState.value, [group.key]: 'done' }
+      ElMessage.success('AI 已重新分析，请审核新方案')
+      loadPendingActions()
+    } else {
+      ElMessage.error('重新分析失败: ' + (data.error || '未知错误'))
+    }
+  } catch (e) { ElMessage.error('重新分析请求失败: ' + e.message) }
+  finally { groupReanalyzing.value = '' }
 }
 
 async function loadPendingActions() {
@@ -435,6 +603,41 @@ async function loadPendingActions() {
     actionTotal.value = data.total || 0
   } catch (e) { ElMessage.error('加载待审批动作失败: ' + e.message) }
   finally { pendingLoading.value = false }
+}
+
+// 恢复 AI 方案状态：独立加载全状态 pending actions 与告警分组匹配，不受当前筛选影响
+async function restoreAiState() {
+  if (!triggeredAlerts.value.length) return
+  // 构建 alert_id -> groupKey 映射
+  const alertToGroup = new Map()
+  for (const a of triggeredAlerts.value) {
+    const key = `${a.metric_name || ''}|${a.asset_name || ''}`
+    alertToGroup.set(a.id, key)
+  }
+  // 独立请求全状态 PA，避免被 pendingFilter 过滤掉已执行/已取消的方案
+  try {
+    const allPa = await request.get('/remediation/api/ai-pending', { params: { status: 'all', limit: 100 } })
+    for (const pa of (allPa.items || [])) {
+      if (pa.source !== 'ai') continue
+      const groupKey = alertToGroup.get(pa.alert_id)
+      if (!groupKey) continue
+      if (groupAiState.value[groupKey] === 'done') continue
+      const parts = groupKey.split('|')
+      const label = `${parts[0] || '未知指标'} · ${parts[1] || '未知资产'}`
+      groupAiData.value = { ...groupAiData.value, [groupKey]: {
+        groupLabel: label, dedup: true,
+        root_cause: pa.root_cause || '',
+        impact: pa.impact || '',
+        action_type: pa.action_type || '',
+        command: pa.command || '',
+        command_description: pa.reason || '',
+        risk_level: pa.risk_level || 'medium',
+        recommended_workflow_id: pa.workflow_id || null,
+        recommended_workflow_name: pa.workflow_name || '',
+      }}
+      groupAiState.value = { ...groupAiState.value, [groupKey]: 'done' }
+    }
+  } catch (_) { /* 静默失败 */ }
 }
 
 // 按 alert_id 分组：同告警下并排展示规则方案与 AI 方案，供人工择优
@@ -452,17 +655,36 @@ const groupedPendingActions = computed(() => {
 function sourceLabel(s) { return s === 'rule' ? '规则方案' : 'AI 方案' }
 function sourceClass(s) { return s === 'rule' ? 'src-rule' : 'src-ai' }
 
+// 转交智能助手深度分析：注入告警+诊断+AI方案上下文，创建 Agent 会话
+async function transferToAgent(pa) {
+  try {
+    const data = await request.post('/agent/transfer-from-remediation', {
+      alert_id: pa.alert_id,
+      pending_action_id: pa.id,
+    }, { timeout: 30000 })
+    if (data.session_id) {
+      // 设置待打开会话 ID，AgentChatView onMounted 会读取并自动打开
+      window._pendingAgentSessionId = data.session_id
+      window._navigateTo && window._navigateTo('agent-chat')
+      ElMessage.success('已转交智能助手，正在跳转...')
+    } else {
+      ElMessage.error('转交失败: ' + (data.error || '未知错误'))
+    }
+  } catch (e) { ElMessage.error('转交请求失败: ' + e.message) }
+}
+
 async function confirmAction(id) {
-  actionBusy.value = true
-  actionResult.value = null
   try {
     const data = await request.post(`/remediation/api/ai-pending/${id}/confirm`)
-    actionResult.value = data
+    if (data.success) {
+      ElMessage.success('✅ 执行成功: ' + (data.output || ''))
+    } else {
+      ElMessage.error('❌ 执行失败: ' + (data.output || data.error || '未知错误'))
+    }
     pendingFilter.value = 'all'
     loadPendingActions()
     loadTriggeredAlerts()
   } catch (e) { ElMessage.error('确认失败: ' + e.message) }
-  finally { actionBusy.value = false }
 }
 
 async function cancelAction(id) {
@@ -478,9 +700,24 @@ async function cancelAction(id) {
 async function reanalyze(pa) {
   reanalyzingId.value = pa.id
   try {
-    const data = await request.post(`/remediation/api/ai-reanalyze/${pa.id}`)
+    const data = await request.post(`/remediation/api/ai-reanalyze/${pa.id}`, {}, { timeout: 130000 })
     if (data.ok) {
       ElMessage.success('AI 换了新思路，请审核新方案')
+      pendingFilter.value = 'all'
+      loadPendingActions()
+    } else {
+      ElMessage.error('重新分析失败: ' + (data.error || '未知错误'))
+    }
+  } catch (e) { ElMessage.error('重新分析请求失败: ' + e.message) }
+  finally { reanalyzingId.value = 0 }
+}
+
+async function reanalyzeAlert(pa) {
+  reanalyzingId.value = pa.id
+  try {
+    const data = await request.post(`/remediation/api/ai-reanalyze-alert/${pa.alert_id}`, {}, { timeout: 130000 })
+    if (data.ok) {
+      ElMessage.success('AI 已重新分析，请审核新方案')
       pendingFilter.value = 'all'
       loadPendingActions()
     } else {
@@ -498,6 +735,27 @@ function diagnosisDuration(commands) {
   if (!commands || !commands.length) return ''
   const total = commands.reduce((sum, c) => sum + (c.duration_ms || 0), 0)
   return total >= 1000 ? `共 ${(total / 1000).toFixed(1)}s` : `共 ${total}ms`
+}
+
+function diagnosisRounds(commands) {
+  if (!commands || !commands.length) return 1
+  const rounds = new Set(commands.map(c => c.round_num ?? 0))
+  return rounds.size
+}
+
+function groupedByRound(commands) {
+  if (!commands || !commands.length) return []
+  const map = new Map()
+  for (const c of commands) {
+    const rn = c.round_num ?? 0
+    if (!map.has(rn)) map.set(rn, [])
+    map.get(rn).push(c)
+  }
+  return Array.from(map.entries()).map(([rn, cmds]) => ({
+    round: rn,
+    label: rn === 0 ? '静态初诊' : `第${rn}轮 AI 补诊`,
+    commands: cmds,
+  }))
 }
 
 // ── 简单规则 ──
@@ -561,6 +819,7 @@ async function deleteRule(r) {
 
 // ── 执行记录 ──
 const logs = ref([])
+const logDetail = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const logTotal = ref(0)
@@ -589,9 +848,16 @@ async function loadLogs() {
     logs.value = data.items || []; logTotal.value = data.total || 0; totalPages.value = data.total_pages || 1
   } catch (e) { ElMessage.error('加载执行记录失败: ' + e.message) }
 }
+function openLogDetail(lg) { logDetail.value = lg }
 function formatTime(s) { return s ? s.substring(0, 19) : '-' }
 
-onMounted(() => { loadTriggeredAlerts(); loadPendingActions(); loadData(); loadLogs() })
+onMounted(async () => {
+  await loadTriggeredAlerts()   // 先加载告警（内部会恢复诊断状态）
+  await loadPendingActions()    // 加载待审批列表（按筛选）
+  restoreAiState()              // 独立恢复 AI 方案按钮状态（全状态 PA）
+  loadData()
+  loadLogs()
+})
 </script>
 
 <style scoped>
@@ -619,6 +885,12 @@ onMounted(() => { loadTriggeredAlerts(); loadPendingActions(); loadData(); loadL
 .btn-warning { color: #d97706; border-color: rgba(217,119,6,0.3); background: rgba(217,119,6,0.06); }
 .btn-warning:hover { background: rgba(217,119,6,0.12); }
 .btn-warning:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-transfer { color: #8b5cf6; border-color: rgba(139,92,246,0.3); background: rgba(139,92,246,0.06); }
+.btn-transfer:hover { background: rgba(139,92,246,0.14); }
+.btn-reanalyze { color: #f59e0b; border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.06); }
+.btn-reanalyze:hover { background: rgba(245,158,11,0.14); }
+.btn-rediagnose { color: #0ea5e9; border-color: rgba(14,165,233,0.3); background: rgba(14,165,233,0.06); }
+.btn-rediagnose:hover { background: rgba(14,165,233,0.14); }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 16px; }
 .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
 .panel-header h3 { margin: 0; font-size: 0.95rem; }
@@ -732,6 +1004,12 @@ onMounted(() => { loadTriggeredAlerts(); loadPendingActions(); loadData(); loadL
   margin-top: 6px; display: flex; flex-direction: column; gap: 6px;
   max-height: 400px; overflow-y: auto; padding-right: 4px;
 }
+.diag-round-label {
+  font-size: 0.7rem; font-weight: 600; color: var(--text-secondary, #64748b);
+  padding: 4px 0 2px; border-bottom: 1px dashed var(--border, rgba(0,0,0,0.06));
+  margin-top: 4px;
+}
+.diag-round-label:first-child { margin-top: 0; }
 .diag-cmd-item {
   background: var(--bg-hover, rgba(0,0,0,0.02));
   border: 1px solid var(--border, rgba(0,0,0,0.06));
@@ -789,15 +1067,67 @@ onMounted(() => { loadTriggeredAlerts(); loadPendingActions(); loadData(); loadL
   transition: background 0.15s;
 }
 .alert-group-header:hover { background: rgba(99,102,241,0.04); }
+.group-actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ── 诊断/AI 按钮完成态 ── */
+.btn-done {
+  background: rgba(16,185,129,0.1); color: #10b981;
+  border-color: rgba(16,185,129,0.3); font-weight: 600;
+}
+.btn-done:hover { background: rgba(16,185,129,0.18); }
+.btn-done-ai {
+  background: rgba(139,92,246,0.1); color: #8b5cf6;
+  border-color: rgba(139,92,246,0.3); font-weight: 600;
+}
+.btn-done-ai:hover { background: rgba(139,92,246,0.18); }
+
+/* ── 弹窗宽版（诊断报告 / AI方案）── */
+.modal-wide { max-width: 720px; width: 95%; }
+.diag-modal-body {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 65vh; overflow-y: auto;
+  padding: 20px;
+}
+.diag-result-item {
+  background: var(--bg-hover, rgba(0,0,0,0.02));
+  border: 1px solid var(--border, rgba(0,0,0,0.07));
+  border-radius: 8px; padding: 10px 12px;
+}
+.diag-result-header {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;
+}
+.diag-cache-tip {
+  font-size: 0.78rem; color: #f59e0b;
+  background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2);
+  border-radius: 6px; padding: 6px 10px; margin-bottom: 8px;
+}
+.modal-tip {
+  margin-top: 16px; text-align: center;
+  font-size: 0.78rem; color: var(--text-secondary, #64748b);
+  background: var(--bg-hover, rgba(0,0,0,0.02));
+  border-radius: 6px; padding: 8px 12px;
+}
+
 .group-expand-icon { font-size: 0.6rem; color: var(--text-secondary, #64748b); min-width: 14px; }
 .group-metric { font-size: 0.85rem; font-weight: 600; color: var(--text, #1e293b); }
 .group-asset { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
 .group-count {
-  margin-left: auto; font-size: 0.7rem; padding: 2px 8px;
+  font-size: 0.7rem; padding: 2px 8px;
   background: rgba(99,102,241,0.08); color: var(--accent, #6366f1);
   border-radius: 8px; font-weight: 500;
 }
 .alert-group-body { border-top: 1px solid var(--border, rgba(0,0,0,0.08)); }
 .table-compact th { padding: 6px 10px; font-size: 0.7rem; }
 .table-compact td { padding: 6px 10px; font-size: 0.8rem; }
+.log-row { cursor: pointer; }
+.log-row:hover { background: var(--bg-hover, rgba(0,0,0,0.02)); }
+.log-detail-modal { max-width: 700px; }
+.log-detail-modal .detail-row { display: flex; gap: 12px; margin-bottom: 10px; align-items: flex-start; }
+.log-detail-modal .detail-row label { width: 80px; flex-shrink: 0; font-size: 0.82rem; color: var(--text-secondary, #64748b); padding-top: 2px; }
+.log-detail-modal .detail-row span { font-size: 0.85rem; color: var(--text, #1e293b); }
+.log-output-full {
+  background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px;
+  font-size: 0.8rem; line-height: 1.5; max-height: 400px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all; font-family: 'JetBrains Mono', monospace;
+}
 </style>

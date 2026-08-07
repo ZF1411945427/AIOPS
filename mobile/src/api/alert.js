@@ -51,6 +51,30 @@ export function silence(id, payload) {
   return request({ url: `/alerts/api/${id}/silence`, method: 'POST', data: payload || {} })
 }
 
+export function aiAnalyze(id) {
+  return request({ url: `/remediation/api/ai-analyze/${id}`, method: 'POST', data: {}, timeout: 130000 })
+}
+
+export function diagnose(id) {
+  return request({ url: `/remediation/api/diagnose/${id}`, method: 'POST', data: {}, timeout: 130000 })
+}
+
+export function listRemediationPending(status) {
+  return request({ url: `/remediation/api/ai-pending?status=${status || 'pending'}`, method: 'GET' })
+}
+
+export function confirmRemediationAction(id) {
+  return request({ url: `/remediation/api/ai-pending/${id}/confirm`, method: 'POST' })
+}
+
+export function cancelRemediationAction(id) {
+  return request({ url: `/remediation/api/ai-pending/${id}/cancel`, method: 'POST' })
+}
+
+export function reanalyzeAlert(id) {
+  return request({ url: `/remediation/api/ai-reanalyze-alert/${id}`, method: 'POST', data: {}, timeout: 130000 })
+}
+
 export function batchAcknowledge(ids) {
   return request({ url: '/alerts/api/batch-acknowledge', method: 'POST', data: { ids } })
 }

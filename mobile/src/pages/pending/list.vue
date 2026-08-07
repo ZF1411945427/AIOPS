@@ -1,5 +1,9 @@
 <template>
     <view class="page-wrap">
+        <view class="tab-bar">
+            <text class="tab-item" :class="{ active: tab === 'agent' }" @tap="switchTab('agent')">AI 助手</text>
+            <text class="tab-item" :class="{ active: tab === 'remediation' }" @tap="switchTab('remediation')">自愈方案</text>
+        </view>
         <view v-if="list.length === 0 && !loading" class="empty-state">
             <text class="empty-icon">✅</text>
             <text class="empty-text">暂无待确认操作</text>
@@ -42,10 +46,12 @@
 import { ref, onUnmounted } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
 import { listPending, confirmPending, cancelPending } from '@/api/agent.js'
+import { listRemediationPending, confirmRemediationAction, cancelRemediationAction } from '@/api/alert.js'
 import RiskBadge from '@/components/RiskBadge.vue'
 
 const list = ref([])
 const loading = ref(false)
+const tab = ref('agent') // 'agent' | 'remediation'
 const showCountdownMask = ref(false)
 const countdown = ref(3)
 const currentAction = ref(null)
@@ -64,14 +70,24 @@ function formatPayload(p) {
 async function fetchList() {
     loading.value = true
     try {
-        const data = await listPending()
-        list.value = data.actions || data || []
+        if (tab.value === 'agent') {
+            const data = await listPending()
+            list.value = data.actions || data || []
+        } else {
+            const data = await listRemediationPending('pending')
+            list.value = data.items || data || []
+        }
         if (!Array.isArray(list.value)) list.value = []
     } catch (e) {
         uni.showToast({ title: '加载失败', icon: 'none' })
     } finally {
         loading.value = false
     }
+}
+
+function switchTab(t) {
+    tab.value = t
+    fetchList()
 }
 
 function isHighRisk(action) {
@@ -120,7 +136,11 @@ function cancelCountdown() {
 
 async function doConfirm(action) {
     try {
-        await confirmPending(action.id)
+        if (tab.value === 'agent') {
+            await confirmPending(action.id)
+        } else {
+            await confirmRemediationAction(action.id)
+        }
         uni.showToast({ title: '已确认', icon: 'success' })
         list.value = list.value.filter((a) => a.id !== action.id)
     } catch (e) {}
@@ -137,7 +157,11 @@ async function handleReject(action) {
         success: async (r) => {
             if (r.confirm) {
                 try {
-                    await cancelPending(action.id)
+                    if (tab.value === 'agent') {
+                        await cancelPending(action.id)
+                    } else {
+                        await cancelRemediationAction(action.id)
+                    }
                     uni.showToast({ title: '已拒绝', icon: 'none' })
                     list.value = list.value.filter((a) => a.id !== action.id)
                 } catch (e) {}
@@ -162,6 +186,29 @@ fetchList()
 </script>
 
 <style lang="scss" scoped>
+
+.tab-bar {
+    display: flex;
+    background: $bg-card;
+    border-radius: $card-radius;
+    padding: 8rpx;
+    margin-bottom: 24rpx;
+}
+
+.tab-item {
+    flex: 1;
+    text-align: center;
+    padding: 16rpx 0;
+    font-size: $font-sm;
+    color: $text-muted;
+    border-radius: 12rpx;
+    font-weight: 500;
+}
+.tab-item.active {
+    background: $primary;
+    color: #fff;
+    font-weight: 600;
+}
 
 .action-title {
     font-size: $font-lg;

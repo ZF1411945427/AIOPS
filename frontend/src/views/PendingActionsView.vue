@@ -57,7 +57,7 @@ import request from '@/api/request'
 const loading = ref(false)
 const actions = ref([])
 const busy = ref(0)
-const statusFilter = ref('pending')
+const statusFilter = ref('all')
 
 const pendingCount = computed(() => actions.value.filter(a => a.status === 'pending').length)
 const executedCount = computed(() => actions.value.filter(a => ['executed', 'failed', 'canceled'].includes(a.status)).length)
@@ -82,8 +82,8 @@ function statusClass(s) {
 async function loadActions() {
   loading.value = true
   try {
-    const data = await request.get('/agent/api/pending', { params: { status: statusFilter.value } })
-    actions.value = data.actions || []
+    const data = await request.get('/remediation/api/ai-pending', { params: { status: statusFilter.value, limit: 200 } })
+    actions.value = data.items || []
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
   } finally {

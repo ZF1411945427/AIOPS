@@ -237,6 +237,10 @@
                   <optgroup label="分布式事务">
                     <option value="seata">Seata</option>
                   </optgroup>
+                  <optgroup label="缓存">
+                    <option value="memcached">Memcached</option>
+                    <option value="redis">Redis</option>
+                  </optgroup>
                   <optgroup label="对象存储 / 其他">
                     <option value="minio">MinIO</option>
                   </optgroup>
@@ -457,7 +461,7 @@ const mwPortPlaceholder = computed(() => ({
   kafka: '9092', rabbitmq: '15672', rocketmq: '9876', activemq: '8161', pulsar: '8080',
   nacos: '8848', zookeeper: '2181', apollo: '8080', consul: '8500', eureka: '8761', etcd: '2379',
   sentinel: '8080', apisix: '9180', kong: '8001', spring_cloud_gateway: '8080', haproxy: '80',
-  seata: '8091', minio: '9000',
+  seata: '8091', minio: '9000', memcached: '11211', redis: '6379',
 })[form.value.mw_subtype] || '80')
 
 function onDbTypeChange() {

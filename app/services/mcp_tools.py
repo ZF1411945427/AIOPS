@@ -971,6 +971,107 @@ def query_correlation_analysis(db: Optional[Session] = None, user_id: Optional[i
             db.close()
 
 
+@register_mcp_tool(
+    name="run_preset_diagnosis",
+    description="按告警指标类型自动执行预置诊断命令包（只读、免审批）。根据 metric_name 匹配诊断包（cpu_usage→top/ps/vmstat，memory_usage→free/ps，disk_usage→df/du，k8s_pod_crash→kubectl describe/logs 等），自动在目标资产上执行并返回命令输出。比 AI 手动逐条选命令更完整、更快速。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "alert_id": {"type": "integer", "description": "告警 ID（优先使用，自动读取 metric_name 和 asset_id）"},
+            "asset_id": {"type": "integer", "description": "目标资产 ID（alert_id 缺失时必填）"},
+            "metric_name": {"type": "string", "description": "指标名（alert_id 缺失时用于匹配诊断包，如 cpu_usage、memory_usage、disk_usage）"},
+        },
+    },
+    risk_level="read_only",
+    display_name="预置诊断命令包",
+    location="edge",
+    category="rca",
+)
+def run_preset_diagnosis(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    """复用自愈 DIAGNOSIS_COMMAND_PACKS + run_diagnosis，按指标类型自动跑完整诊断命令包."""
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        alert_id = kwargs.get("alert_id")
+        asset_id = kwargs.get("asset_id")
+        metric_name = kwargs.get("metric_name", "")
+
+        # 优先从告警读取 metric_name + asset_id
+        if alert_id:
+            alert = db.query(Alert).filter(Alert.id == int(alert_id)).first()
+            if not alert:
+                return {"error": f"告警 id={alert_id} 不存在"}
+            metric_name = metric_name or alert.metric_name or ""
+            asset_id = asset_id or alert.asset_id
+
+        if not asset_id:
+            return {"error": "缺少 asset_id（需提供 alert_id 或 asset_id）"}
+
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            return {"error": f"资产 id={asset_id} 不存在"}
+
+        # 有 alert_id：走 run_diagnosis（会存 DiagnosisReport，支持缓存）
+        if alert_id:
+            result = remediation_service.run_diagnosis(
+                db,
+                alert_id=int(alert_id),
+                asset_id=int(asset_id),
+                metric_name=metric_name,
+            )
+            if result.get("ok"):
+                commands = result.get("commands", [])
+                return {
+                    "status": "success",
+                    "cached": result.get("cached", False),
+                    "report_id": result.get("report_id"),
+                    "command_count": len(commands),
+                    "commands": [
+                        {"cmd": c.get("cmd", ""), "desc": c.get("desc", ""),
+                         "exit_code": c.get("exit_code", -1),
+                         "duration_ms": c.get("duration_ms", 0),
+                         "output": c.get("output", "")}
+                        for c in commands
+                ],
+                "summary": f"执行了 {len(commands)} 条诊断命令，"
+                           + ("全部成功" if all(c.get("exit_code") == 0 for c in commands) else "部分失败"),
+            }
+            return {"error": result.get("error", "诊断执行失败")}
+
+        # 无 alert_id：直接用 DIAGNOSIS_COMMAND_PACKS + _remote_exec 执行（不存报告）
+        pack_key = remediation_service._match_diagnosis_pack(metric_name)
+        pack = remediation_service.DIAGNOSIS_COMMAND_PACKS.get(pack_key,
+                    remediation_service.DIAGNOSIS_COMMAND_PACKS["_default"])
+        channel = remediation_service._ci_channel(asset)
+        results = []
+        for cmd_spec in pack:
+            raw_cmd = cmd_spec["cmd"]
+            cmd = remediation_service._fill_template(raw_cmd, asset, channel)
+            desc = cmd_spec.get("desc", "")
+            timeout = cmd_spec.get("timeout", 10)
+            success, output = remediation_service._remote_exec(asset, cmd, timeout=timeout)
+            results.append({
+                "cmd": cmd, "desc": desc,
+                "exit_code": 0 if success else 1,
+                "duration_ms": 0,
+                "output": output[:1000] if output else "",
+            })
+        return {
+            "status": "success",
+            "cached": False,
+            "report_id": None,
+            "command_count": len(results),
+            "commands": results,
+            "summary": f"执行了 {len(results)} 条诊断命令，"
+                       + ("全部成功" if all(r["exit_code"] == 0 for r in results) else "部分失败"),
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
 # ─── Execute Tools (待确认动作执行链路, expose_to_llm=False) ───
 # 以下 execute_* 工具供 confirm_pending_action 通过 call_mcp_tool 调用,
 # 不暴露给 LLM (expose_to_llm=False), 防止绕过人工确认直接执行高危操作.
@@ -1018,8 +1119,6 @@ def execute_restart_service(db: Optional[Session] = None, user_id: Optional[int]
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
-        if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
         # 异步路径：有 pending_action_id（来自 propose → confirm 链路）则走 BackgroundJob
         if pending_action_id:
             from app.services.background_task import submit_restart_job
@@ -1030,8 +1129,8 @@ def execute_restart_service(db: Optional[Session] = None, user_id: Optional[int]
                 "message": f"重启任务已提交，job_id={job_id}",
                 "data": {"job_id": job_id, "service": service, "asset_id": asset_id, "ip": asset.ip},
             }
-        # 同步路径：兼容其他调用方
-        success, message = remediation_service.execute_action("restart", {"service": service}, asset)
+        # 同步路径：复用自愈 CI-Type-Aware 执行通道（SSH/K8s/Docker 自动分派）
+        success, message = remediation_service.execute_action("restart", {"service": service}, asset, db=db)
         if not success:
             raise RuntimeError(message)
         return {"status": "success", "message": message, "data": {"service": service, "asset_id": asset.id, "ip": asset.ip}}
@@ -1074,9 +1173,7 @@ def execute_clean_disk(db: Optional[Session] = None, user_id: Optional[int] = No
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
-        if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
-        success, message = remediation_service.execute_action("clean", {"path": path}, asset)
+        success, message = remediation_service.execute_action("clean", {"path": path}, asset, db=db)
         if not success:
             raise RuntimeError(message)
         return {"status": "success", "message": message, "data": {"path": path, "asset_id": asset.id, "ip": asset.ip}}
@@ -1120,8 +1217,6 @@ def execute_run_script(db: Optional[Session] = None, user_id: Optional[int] = No
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
-        if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
         # 异步路径
         if pending_action_id:
             from app.services.background_task import submit_script_job
@@ -1132,8 +1227,8 @@ def execute_run_script(db: Optional[Session] = None, user_id: Optional[int] = No
                 "message": f"脚本执行任务已提交，job_id={job_id}",
                 "data": {"job_id": job_id, "script": script, "asset_id": asset_id, "ip": asset.ip},
             }
-        # 同步路径
-        success, output = remediation_service.execute_action("script", {"script": script}, asset)
+        # 同步路径：复用自愈 CI-Type-Aware 执行通道
+        success, output = remediation_service.execute_action("script", {"script": script}, asset, db=db)
         if not success:
             raise RuntimeError(output)
         return {"status": "success", "message": output, "data": {"script": script, "asset_id": asset.id, "ip": asset.ip}}
@@ -1176,9 +1271,7 @@ def execute_run_command(db: Optional[Session] = None, user_id: Optional[int] = N
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
-        if asset.connection_type != "ssh":
-            raise ValueError(f"资产 {asset.name} 连接类型为 {asset.connection_type}，仅 ssh 类型支持远程执行。对于数据库(database)类型资产，请使用 mysql action_type 通过 SQL 操作。")
-        success, output = remediation_service.execute_action("run_command", {"command": command}, asset)
+        success, output = remediation_service.execute_action("run_command", {"command": command}, asset, db=db)
         if not success:
             raise RuntimeError(output)
         return {"status": "success", "message": output, "data": {"command": command, "asset_id": asset.id, "ip": asset.ip}}
@@ -1766,6 +1859,19 @@ def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, 
         risk_level = user_risk  # LLM 想升级, 允许 (升级无害, 用户会更谨慎)
     else:
         risk_level = registered_risk  # 用登记值 (防止降级)
+
+    # ── 确定性风险分类器覆盖（复用自愈 _classify_command_risk，不依赖 LLM 自评）──
+    # 对 run_command 类型，用自愈的确定性分类器按命令语义硬判定风险等级，
+    # 取分类器结果与当前 risk_level 中更高者，确保变更命令不会被标为低危
+    if action_type == "run_command":
+        _cmd = payload.get("command", "")
+        try:
+            _cls_risk, _cls_auto = remediation_service._classify_command_risk("run_command", _cmd)
+            _RISK_MAP = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+            if _RISK_MAP.get(_cls_risk, 2) > _RISK_MAP.get(risk_level, 2):
+                risk_level = _cls_risk
+        except Exception:
+            pass
 
     # 字段别名兼容: LLM 常把 "service" 误写成 "service_name" 等
     _FIELD_ALIASES = {

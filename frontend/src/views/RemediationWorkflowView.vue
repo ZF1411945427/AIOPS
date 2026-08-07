@@ -24,22 +24,29 @@
             <div class="wf-head">
               <span class="wf-name">{{ w.name }}</span>
               <span class="badge" :class="w.enabled ? 'resolved' : 'info'">{{ w.enabled ? '启用' : '禁用' }}</span>
+              <span v-if="w.rule_id" class="badge rule-id">规则 #{{ w.rule_id }}</span>
             </div>
             <div class="wf-steps">
               <span class="steps-label">步骤：</span>
               <span v-for="(s, i) in w.steps" :key="i" class="step-chip">
-                {{ typeof s === 'object' ? s.action || s.step : s }}
+                {{ s.action || s }}
+                <span v-if="s.action === 'scale' && s.deployment" class="step-param">:{{ s.deployment }}</span>
+                <span v-if="s.action === 'run_command' && s.command" class="step-param">:{{ truncate(s.command, 20) }}</span>
+                <span v-if="s.action === 'notify' && s.message" class="step-param">:{{ truncate(s.message, 16) }}</span>
+                <span v-if="s.action === 'restart' && s.service" class="step-param">:{{ s.service }}</span>
                 <span v-if="i < w.steps.length - 1" class="step-arrow">→</span>
               </span>
             </div>
             <div class="wf-actions">
               <button class="btn btn-sm btn-primary" @click="runWorkflow(w)" :disabled="running === w.id">{{ running === w.id ? '运行中...' : '运行' }}</button>
+              <button class="btn btn-sm" @click="dryRunWorkflow(w)" :disabled="dryRunning === w.id">{{ dryRunning === w.id ? '模拟中...' : '🔍 模拟' }}</button>
+              <button class="btn btn-sm" @click="openEdit(w)">编辑</button>
               <button class="btn btn-sm" @click="toggleWorkflow(w)">{{ w.enabled ? '禁用' : '启用' }}</button>
               <button class="btn btn-sm btn-danger" @click="deleteWorkflow(w)">删除</button>
             </div>
           </div>
         </div>
-        <div v-else class="empty-state"><div style="font-size:32px;margin-bottom:8px;">⚙️</div><div>暂无工作流</div></div>
+        <div v-else class="empty-state"><div style="font-size:32px;margin-bottom:8px;">⚙️</div><div>暂无工作流，点击「新建工作流」创建</div></div>
       </div>
     </div>
 
@@ -51,10 +58,10 @@
           <tbody>
             <tr v-for="lg in logs" :key="lg.id">
               <td class="text-sm">{{ formatTime(lg.created_at) }}</td>
-              <td>#{{ lg.remediation_id }}</td>
+              <td>#{{ lg.remediation_id }} <span class="badge" :class="lg.remediation_type === 'workflow' ? 'info' : 'rule-id'">{{ lg.remediation_type === 'workflow' ? '工作流' : '规则' }}</span></td>
               <td>{{ lg.action_type }}</td>
               <td class="text-sm">{{ lg.target }}</td>
-              <td><span class="badge" :class="lg.success ? 'resolved' : 'critical'">{{ lg.success ? '成功' : '失败' }}</span></td>
+              <td><span class="badge" :class="lg.is_success ? 'resolved' : 'critical'">{{ lg.is_success ? '成功' : '失败' }}</span></td>
             </tr>
           </tbody>
         </table>
@@ -71,30 +78,36 @@
       </div>
     </div>
 
-    <div v-if="createVisible" class="modal-overlay" @click.self="createVisible = false">
+    <!-- 创建/编辑弹窗 -->
+    <div v-if="modalVisible" class="modal-overlay" @click.self="modalVisible = false">
       <div class="modal-box" style="max-width:700px">
-        <div class="modal-header"><h3>新建自愈工作流</h3><button class="modal-close" @click="createVisible = false">×</button></div>
+        <div class="modal-header"><h3>{{ isEditing ? '编辑' : '新建' }}自愈工作流</h3><button class="modal-close" @click="modalVisible = false">×</button></div>
         <div class="modal-body">
-          <div class="form-group"><label>名称</label><input v-model="form.name" placeholder="如：CPU 高自愈流程" /></div>
-          <div class="form-group"><label>关联告警规则 ID（可选）</label><input v-model.number="form.rule_id" type="number" placeholder="留空匹配所有" /></div>
+          <div class="form-group"><label>名称</label><input v-model="form.name" :placeholder="isEditing ? form.name : '如：CPU 高自愈流程'" /></div>
+          <div class="form-group"><label>关联告警规则 ID（可选，留空则 AI 推荐或手动触发）</label><input v-model.number="form.rule_id" type="number" placeholder="关联的 alert_rule.id" /></div>
           <div class="form-group">
             <label>步骤编排（可视化）</label>
             <div class="step-builder">
               <div v-for="(step, idx) in form.steps" :key="idx" class="step-card">
                 <div class="step-num">{{ idx + 1 }}</div>
                 <div class="step-fields">
-                  <select v-model="step.action" class="step-action-select">
-                    <option value="">选择动作...</option>
-                    <option value="healthcheck">healthcheck 健康检查</option>
-                    <option value="restart">restart 重启服务</option>
-                    <option value="clean">clean 清理文件</option>
-                    <option value="scale">scale 扩缩容</option>
-                    <option value="notify">notify 通知</option>
-                    <option value="run_command">run_command 执行命令</option>
-                  </select>
+                  <div class="step-action-row">
+                    <select v-model="step.action" class="step-action-select">
+                      <option value="">选择动作...</option>
+                      <option value="healthcheck">healthcheck 健康检查</option>
+                      <option value="restart">restart 重启服务</option>
+                      <option value="clean">clean 清理文件</option>
+                      <option value="scale">scale 扩缩容</option>
+                      <option value="notify">notify 通知</option>
+                      <option value="run_command">run_command 执行命令</option>
+                    </select>
+                    <span class="step-desc">{{ stepDescriptions[step.action] || '' }}</span>
+                  </div>
                   <input v-if="step.action === 'scale'" v-model="step.deployment" placeholder="Deployment 名称" class="step-param-input" />
-                  <input v-if="step.action === 'run_command'" v-model="step.command" placeholder="完整命令" class="step-param-input" />
-                  <input v-if="step.action === 'notify'" v-model="step.message" placeholder="通知内容" class="step-param-input" />
+                  <input v-if="step.action === 'run_command'" v-model="step.command" placeholder="完整命令，如 systemctl restart nginx" class="step-param-input" />
+                  <input v-if="step.action === 'notify'" v-model="step.message" placeholder="通知内容，如 CPU 自愈完成" class="step-param-input" />
+                  <input v-if="step.action === 'restart'" v-model="step.service" placeholder="服务名，如 nginx（可选）" class="step-param-input" />
+                  <input v-if="step.action === 'clean'" v-model="step.path" placeholder="清理路径，如 /tmp（可选）" class="step-param-input" />
                 </div>
                 <div class="step-controls">
                   <button class="btn-icon" @click="moveStep(idx, -1)" :disabled="idx === 0" title="上移">↑</button>
@@ -109,9 +122,29 @@
                 <button class="btn btn-sm" @click="addStep('notify')">+ 通知</button>
               </div>
             </div>
-            <p class="form-tip">可用动作：restart / clean / scale / notify / healthcheck / run_command</p>
+            <p class="form-tip">可用动作：healthcheck / restart / clean / scale / notify / run_command</p>
           </div>
-          <div class="form-actions"><button class="btn" @click="createVisible = false">取消</button><button class="btn btn-primary" @click="createWorkflow" :disabled="creating">{{ creating ? '创建中...' : '创建' }}</button></div>
+          <div class="form-actions">
+            <button class="btn" @click="modalVisible = false">取消</button>
+            <button class="btn btn-primary" @click="saveWorkflow" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模拟结果弹窗 -->
+    <div v-if="dryRunResult" class="modal-overlay" @click.self="dryRunResult = null">
+      <div class="modal-box" style="max-width:800px">
+        <div class="modal-header"><h3>🔍 模拟运行结果</h3><button class="modal-close" @click="dryRunResult = null">×</button></div>
+        <div class="modal-body">
+          <div v-for="r in dryRunResult" :key="r.alert_id + '-' + r.step" class="dry-run-row">
+            <div class="dry-run-header">
+              <span class="badge" :class="r.success ? 'resolved' : 'critical'">{{ r.success ? '通过' : '失败' }}</span>
+              <span class="dry-run-label">告警 #{{ r.alert_id }} · 步骤 {{ r.step }}: {{ r.action }}</span>
+              <span class="dry-run-target">{{ r.target }}</span>
+            </div>
+            <div class="dry-run-output">{{ r.output }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -124,25 +157,38 @@
       <section class="guide-section">
         <h4>2. 可用步骤动作</h4>
         <div class="key-value-list">
-          <div class="kv-row"><span class="kv-key">healthcheck</span><span class="kv-val">健康检查，确认目标服务状态是否正常</span></div>
-          <div class="kv-row"><span class="kv-key">restart</span><span class="kv-val">重启目标服务（通过资产 connection_config SSH 执行 systemctl restart）</span></div>
-          <div class="kv-row"><span class="kv-key">clean</span><span class="kv-val">清理临时文件或日志，释放磁盘空间</span></div>
-          <div class="kv-row"><span class="kv-key">scale</span><span class="kv-val">扩缩容 K8s Deployment（需在目标字段指定 Deployment 名）</span></div>
-          <div class="kv-row"><span class="kv-key">notify</span><span class="kv-val">发送通知（自愈成功后通知相关人员）</span></div>
+          <div class="kv-row"><span class="kv-key">healthcheck</span><span class="kv-val">健康检查，确认服务/主机状态。SSH: systemctl is-active / uptime；K8s: kubectl rollout status；Docker: docker exec echo</span></div>
+          <div class="kv-row"><span class="kv-key">restart</span><span class="kv-val">重启服务/资源。SSH: systemctl restart；K8s: rollout restart/delete pod；Docker: docker restart</span></div>
+          <div class="kv-row"><span class="kv-key">clean</span><span class="kv-val">清理临时文件/日志。仅 SSH 通道，限制路径 /tmp /var/log /var/cache /opt /home</span></div>
+          <div class="kv-row"><span class="kv-key">scale</span><span class="kv-val">扩缩容 K8s Deployment。仅 K8s 通道，需填 Deployment 名称</span></div>
+          <div class="kv-row"><span class="kv-key">notify</span><span class="kv-val">发送通知（记录日志，实际通知链路待集成）</span></div>
+          <div class="kv-row"><span class="kv-key">run_command</span><span class="kv-val">执行任意命令。SSH 全量；K8s/Docker 仅放行只读命令（自动分类器判定）</span></div>
         </div>
       </section>
       <section class="guide-section">
-        <h4>3. 操作步骤</h4>
+        <h4>3. 触发方式</h4>
         <ul>
-          <li><strong>点击「新建工作流」</strong> — 填写工作流名称，可选关联告警规则 ID（留空则匹配所有告警）</li>
-          <li><strong>定义步骤</strong> — 在 JSON 数组中填写步骤动作序列，如 <code>["healthcheck","restart","notify"]</code></li>
-          <li><strong>启用工作流</strong> — 创建后点击「启用」按钮激活工作流，此后匹配告警自动触发</li>
-          <li><strong>手动运行测试</strong> — 可随时点击「运行」按钮手动触发工作流，测试自愈流程是否正常</li>
+          <li><strong>自动触发（推荐）</strong> — 创建告警规则时填写 rule_id，工作流关联该 rule_id。告警触发时后台自动匹配工作流，生成 PendingAction 待审批，审批后自动执行</li>
+          <li><strong>AI 推荐</strong> — 自愈 AI 分析时看到所有启用的工作流，若匹配则推荐，人工审批后执行</li>
+          <li><strong>手动运行</strong> — 点击「运行」按钮，手动对当前触发告警执行工作流</li>
         </ul>
       </section>
       <section class="guide-section">
-        <h4>4. 实现了什么</h4>
-        <p>当告警触发时，系统自动查找匹配的自愈工作流并执行完整步骤序列，实现<strong>多步骤自动处置</strong>。例如：CPU 高→healthcheck 确认→restart 重启→healthcheck 确认→notify 通知。全程无需人工介入。</p>
+        <h4>4. 推荐流程模板</h4>
+        <ul>
+          <li><strong>CPU 高自愈</strong>: healthcheck → restart → healthcheck → notify</li>
+          <li><strong>磁盘满自愈</strong>: healthcheck → clean → healthcheck → notify</li>
+          <li><strong>K8s Pod 异常</strong>: healthcheck → restart → healthcheck → notify</li>
+        </ul>
+      </section>
+      <section class="guide-section">
+        <h4>5. 安全机制</h4>
+        <ul>
+          <li>所有变更操作（restart/clean/scale) 必须经过人工审批，只读操作（healthcheck/run_command 只读）自动执行</li>
+          <li>危险命令黑名单拦截（rm -rf /、mkfs、dd 等）</li>
+          <li>K8s/Docker 通道的 run_command 仅放行只读命令</li>
+          <li>建议先点「模拟」再点「运行」，确认步骤无误后再执行</li>
+        </ul>
       </section>
     </GuideDrawer>
   </div>
@@ -159,18 +205,50 @@ const showGuide = ref(false)
 const workflows = ref([])
 const logs = ref([])
 const total = ref(0)
-const createVisible = ref(false)
-const creating = ref(false)
+const modalVisible = ref(false)
+const isEditing = ref(false)
+const editingId = ref(null)
+const saving = ref(false)
 const running = ref(null)
+const dryRunning = ref(null)
+const dryRunResult = ref(null)
+
 const form = reactive({ name: '', rule_id: 0, steps: [] })
 
+const stepDescriptions = {
+  healthcheck: '健康检查服务状态',
+  restart: '重启服务/容器',
+  clean: '清理磁盘空间',
+  scale: 'K8s 扩缩容',
+  notify: '发送通知',
+  run_command: '执行自定义命令',
+}
+
 function makeStep(action = 'healthcheck') {
-  return { action, deployment: '', command: '', message: '' }
+  return { action, deployment: '', command: '', message: '', service: '', path: '' }
 }
 
 function openCreate() {
+  isEditing.value = false
+  editingId.value = null
   Object.assign(form, { name: '', rule_id: 0, steps: [makeStep('healthcheck'), makeStep('restart'), makeStep('notify')] })
-  createVisible.value = true
+  modalVisible.value = true
+}
+
+function openEdit(w) {
+  isEditing.value = true
+  editingId.value = w.id
+  form.name = w.name
+  form.rule_id = w.rule_id || 0
+  form.steps = (w.steps || []).map(s => ({
+    action: s.action || s,
+    deployment: s.deployment || '',
+    command: s.command || '',
+    message: s.message || '',
+    service: s.service || '',
+    path: s.path || '',
+  }))
+  modalVisible.value = true
 }
 
 function addStep(action) {
@@ -188,25 +266,38 @@ function moveStep(idx, dir) {
   const tmp = arr[idx]; arr[idx] = arr[newIdx]; arr[newIdx] = tmp
 }
 
-async function createWorkflow() {
+function truncate(s, max) {
+  if (!s) return ''
+  return s.length > max ? s.substring(0, max) + '...' : s
+}
+
+async function saveWorkflow() {
   if (!form.name) { ElMessage.warning('请填写名称'); return }
-  creating.value = true
+  saving.value = true
   try {
     const fd = new FormData()
     fd.append('name', form.name)
     fd.append('rule_id', form.rule_id)
     const stepsJson = JSON.stringify(form.steps.map(s => {
-      if (s.action === 'scale') return { action: s.action, deployment: s.deployment }
-      if (s.action === 'run_command') return { action: s.action, command: s.command }
-      if (s.action === 'notify') return { action: s.action, message: s.message }
-      return { action: s.action }
+      const base = { action: s.action }
+      if (s.action === 'scale' && s.deployment) base.deployment = s.deployment
+      if (s.action === 'run_command' && s.command) base.command = s.command
+      if (s.action === 'notify' && s.message) base.message = s.message
+      if (s.action === 'restart' && s.service) base.service = s.service
+      if (s.action === 'clean' && s.path) base.path = s.path
+      return base
     }))
     fd.append('steps', stepsJson)
-    await request.post('/remediation-workflows/api/create', fd)
-    ElMessage.success('创建成功')
-    createVisible.value = false
+    if (isEditing.value && editingId.value) {
+      await request.post(`/remediation-workflows/api/${editingId.value}/update`, fd)
+      ElMessage.success('更新成功')
+    } else {
+      await request.post('/remediation-workflows/api/create', fd)
+      ElMessage.success('创建成功')
+    }
+    modalVisible.value = false
     loadData()
-  } catch (e) { ElMessage.error('创建失败: ' + e.message) } finally { creating.value = false }
+  } catch (e) { ElMessage.error('保存失败: ' + e.message) } finally { saving.value = false }
 }
 
 const currentPage = ref(1)
@@ -279,12 +370,25 @@ async function runWorkflow(w) {
   try {
     await ElMessageBox.confirm(`确认运行工作流"${w.name}"？将处理最近的触发告警`, '运行确认')
     running.value = w.id
-    const data = await request.post(`/remediation-workflows/api/${w.id}/run`)
+    const data = await request.post(`/remediation-workflows/api/${w.id}/run`, { dry_run: false }, { timeout: 120000 })
     ElMessage.success(`运行完成，处理 ${data.ran} 条告警`)
     loadData()
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('运行失败: ' + (e.message || e))
   } finally { running.value = null }
+}
+
+async function dryRunWorkflow(w) {
+  try {
+    dryRunning.value = w.id
+    const data = await request.post(`/remediation-workflows/api/${w.id}/run`, { dry_run: true }, { timeout: 120000 })
+    dryRunResult.value = data.results || []
+    const totalSteps = dryRunResult.value.length
+    const okSteps = dryRunResult.value.filter(r => r.success).length
+    ElMessage.success(`模拟完成：${totalSteps} 步，${okSteps} 步通过`)
+  } catch (e) {
+    ElMessage.error('模拟失败: ' + (e.message || e))
+  } finally { dryRunning.value = null }
 }
 
 function formatTime(s) { return s ? s.substring(0, 19) : '-' }
@@ -311,15 +415,16 @@ onMounted(loadData)
 .panel-header { padding: 12px 18px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
 .panel-header h3 { margin: 0; font-size: 0.95rem; }
 .panel-body { padding: 16px 18px; }
-.wf-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.wf-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 12px; }
 .wf-card { border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; padding: 14px; }
-.wf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.wf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .wf-name { font-weight: 600; font-size: 0.95rem; }
-.wf-steps { margin-bottom: 10px; font-size: 0.8rem; }
+.wf-steps { margin-bottom: 10px; font-size: 0.8rem; line-height: 1.8; }
 .steps-label { color: var(--text-secondary, #64748b); margin-right: 4px; }
 .step-chip { display: inline-block; background: rgba(99,102,241,0.1); color: #6366f1; padding: 2px 8px; border-radius: 6px; margin-right: 4px; font-size: 0.75rem; }
+.step-param { color: #8b5cf6; font-weight: 500; }
 .step-arrow { color: var(--text-tertiary, #94a3b8); margin-left: 4px; }
-.wf-actions { display: flex; gap: 6px; }
+.wf-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .table { width: 100%; border-collapse: collapse; }
 .table th { text-align: left; padding: 10px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary, #64748b); border-bottom: 1px solid var(--border-strong, rgba(0,0,0,0.12)); text-transform: uppercase; letter-spacing: 0.3px; }
 .table td { padding: 10px 12px; font-size: 0.85rem; color: var(--text, #1e293b); border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
@@ -329,6 +434,7 @@ onMounted(loadData)
 .badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.critical { background: rgba(239,68,68,0.1); color: #ef4444; }
 .badge.info { background: rgba(100,116,139,0.1); color: #64748b; }
+.badge.rule-id { background: rgba(251,191,36,0.1); color: #d97706; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
 .page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
@@ -353,7 +459,9 @@ onMounted(loadData)
 .step-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-hover, rgba(0,0,0,0.03)); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; }
 .step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--accent, #6366f1); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
 .step-fields { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.step-action-select { padding: 5px 8px; border: 1px solid var(--border, rgba(0,0,0,0.12)); border-radius: 6px; font-size: 0.82rem; background: var(--bg-card-solid, #fff); }
+.step-action-row { display: flex; align-items: center; gap: 8px; }
+.step-action-select { padding: 5px 8px; border: 1px solid var(--border, rgba(0,0,0,0.12)); border-radius: 6px; font-size: 0.82rem; background: var(--bg-card-solid, #fff); flex: 1; }
+.step-desc { font-size: 0.72rem; color: var(--text-tertiary, #94a3b8); white-space: nowrap; }
 .step-param-input { padding: 5px 8px; border: 1px solid var(--border, rgba(0,0,0,0.12)); border-radius: 6px; font-size: 0.8rem; background: var(--bg-card-solid, #fff); }
 .step-controls { display: flex; flex-direction: column; gap: 4px; }
 .btn-icon { background: none; border: 1px solid var(--border, rgba(0,0,0,0.12)); border-radius: 4px; cursor: pointer; font-size: 12px; padding: 2px 6px; line-height: 1; }
@@ -361,4 +469,9 @@ onMounted(loadData)
 .btn-icon.danger { color: #ef4444; border-color: rgba(239,68,68,0.3); }
 .btn-icon.danger:hover { background: rgba(239,68,68,0.08); }
 .step-add-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.dry-run-row { padding: 10px; border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; margin-bottom: 8px; }
+.dry-run-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.dry-run-label { font-weight: 500; font-size: 0.85rem; }
+.dry-run-target { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
+.dry-run-output { font-size: 0.78rem; color: var(--text-secondary, #64748b); background: var(--bg-hover, rgba(0,0,0,0.03)); padding: 6px 8px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; }
 </style>
