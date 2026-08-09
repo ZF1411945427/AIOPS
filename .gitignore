@@ -24,7 +24,9 @@ pnpm-debug.log*
 .pnpm-store/
 
 # ===== 数据库 =====
-# db/aiops.db 和 db/aiops_real.db 纳入版本控制备份，不忽略
+# db/aiops.db 超 GitHub 100MB 限制，改为运行时生成不入库
+db/aiops.db
+db/aiops_real.db
 # 根目录误创建的同名空库仍忽略
 /aiops.db
 /aiops_real.db

@@ -86,6 +86,66 @@ def get_host_info() -> dict:
     }
 
 
+# ─── 指标采集 ─────────────────────────────────────────────
+
+async def collect_metrics() -> dict:
+    """采集主机 CPU/内存/磁盘/负载等指标。"""
+    metrics = {}
+    try:
+        is_windows = platform.system().lower().startswith("win")
+        if is_windows:
+            try:
+                import psutil
+                metrics["cpu_usage"] = psutil.cpu_percent(interval=1)
+                mem = psutil.virtual_memory()
+                metrics["memory_usage"] = mem.percent
+                metrics["memory_total_gb"] = round(mem.total / (1024**3), 1)
+                metrics["memory_used_gb"] = round(mem.used / (1024**3), 1)
+                disk = psutil.disk_usage("/")
+                metrics["disk_usage"] = disk.percent
+                metrics["disk_total_gb"] = round(disk.total / (1024**3), 1)
+                metrics["disk_used_gb"] = round(disk.used / (1024**3), 1)
+                load1, load5, load15 = psutil.getloadavg()
+                metrics["load_1m"] = load1
+                metrics["load_5m"] = load5
+                metrics["load_15m"] = load15
+            except ImportError:
+                pass
+        else:
+            # Linux: 用 /proc 读取
+            out = await execute_command("cat /proc/loadavg | awk '{print $1,$2,$3}'", 5)
+            if out["exit_code"] == 0:
+                parts = out["stdout"].strip().split()
+                if len(parts) >= 3:
+                    metrics["load_1m"] = float(parts[0])
+                    metrics["load_5m"] = float(parts[1])
+                    metrics["load_15m"] = float(parts[2])
+            out = await execute_command("free -m | awk '/Mem:/ {print $3,$2}'", 5)
+            if out["exit_code"] == 0:
+                parts = out["stdout"].strip().split()
+                if len(parts) >= 2:
+                    metrics["memory_used_mb"] = float(parts[0])
+                    metrics["memory_total_mb"] = float(parts[1])
+                    metrics["memory_usage"] = round(float(parts[0]) / float(parts[1]) * 100, 1) if float(parts[1]) > 0 else 0
+            out = await execute_command("df -h / | awk 'NR==2 {print $5,$2,$3}'", 5)
+            if out["exit_code"] == 0:
+                parts = out["stdout"].strip().split()
+                if len(parts) >= 3:
+                    metrics["disk_usage"] = float(parts[0].replace("%", ""))
+                    metrics["disk_total"] = parts[1]
+                    metrics["disk_used"] = parts[2]
+            out = await execute_command("top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1", 5)
+            if out["exit_code"] == 0 and out["stdout"].strip():
+                metrics["cpu_usage"] = float(out["stdout"].strip())
+            out = await execute_command("uptime -p", 5)
+            if out["exit_code"] == 0:
+                metrics["uptime"] = out["stdout"].strip()
+    except Exception:
+        pass
+    metrics["ts"] = datetime.now().isoformat()
+    return metrics
+
+
 # ─── 命令执行 ─────────────────────────────────────────────
 
 async def execute_command(command: str, timeout: int = 30) -> dict:
@@ -255,6 +315,16 @@ async def connect_to_cloud(cloud_url: str, token: str, agent_id: str):
                     except Exception:
                         break
 
+            # 指标采集上报任务
+            async def report_metrics():
+                while True:
+                    try:
+                        await asyncio.sleep(60)
+                        metrics = await collect_metrics()
+                        await ws.send(json.dumps({"type": "metric_report", "metrics": metrics}))
+                    except Exception:
+                        break
+
             # HTTP 轮询任务：定期获取待执行命令
             async def poll_commands():
                 while True:
@@ -272,6 +342,7 @@ async def connect_to_cloud(cloud_url: str, token: str, agent_id: str):
                         pass  # 轮询失败静默重试
 
             hb_task = asyncio.create_task(heartbeat())
+            metric_task = asyncio.create_task(report_metrics())
             poll_task = asyncio.create_task(poll_commands())
 
             # 消息处理循环（主要处理 exec_result 和 pty 消息）
@@ -320,6 +391,7 @@ async def connect_to_cloud(cloud_url: str, token: str, agent_id: str):
                     pass
 
             hb_task.cancel()
+            metric_task.cancel()
             poll_task.cancel()
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] ❌ 连接异常: {e}")

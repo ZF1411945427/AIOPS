@@ -743,13 +743,33 @@
   },
   {
     "key": "sandbox",
-    "label": "AI 运维沙盒",
-    "icon": "Lock",
-    "description": "控制 AI Agent 下发到节点后的作用范围：资产白名单、工具白名单、命令黑名单、风险等级、执行配额（独立模块，测试闭环后融入主流程）",
+    "label": "AI Agent 管控",
+    "icon": "Cpu",
+    "description": "AI Agent 全生命周期管控：一键下发到节点、在线监控、远程命令隧道、沙盒安全策略（自主执行作用范围控制）",
     "items": [
       {
+        "key": "agent-management",
+        "label": "Agent 管理",
+        "items": [
+          {
+            "key": "agent-deploy",
+            "label": "Agent 下发与监控",
+            "type": "vue",
+            "icon": "Promotion",
+            "path": "/agent-manage"
+          },
+          {
+            "key": "agent-autonomous",
+            "label": "Agent 自主巡检",
+            "type": "vue",
+            "icon": "Odometer",
+            "path": "/agent-autonomous"
+          }
+        ]
+      },
+      {
         "key": "sandbox-management",
-        "label": "沙盒管理",
+        "label": "沙盒策略",
         "items": [
           {
             "key": "sandbox-overview",

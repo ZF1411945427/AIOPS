@@ -1273,10 +1273,27 @@ def execute_run_command(db: Optional[Session] = None, user_id: Optional[int] = N
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
-        success, output = remediation_service.execute_action("run_command", {"command": command}, asset, db=db)
-        if not success:
-            raise RuntimeError(output)
-        return {"status": "success", "message": output, "data": {"command": command, "asset_id": asset.id, "ip": asset.ip}}
+
+        # 统一命令路由：优先走 edge agent 隧道，无在线 agent 时回退 SSH
+        from app.routers.agent_deploy import route_exec
+        result = route_exec(
+            asset.id, command,
+            user_id=user_id or 0,
+            username=kwargs.get("username", ""),
+            timeout=int(kwargs.get("timeout", 30)),
+        )
+        if result.get("exit_code", -1) != 0:
+            raise RuntimeError(result.get("stderr") or result.get("stdout") or "命令执行失败")
+        return {
+            "status": "success",
+            "message": result.get("stdout", ""),
+            "data": {
+                "command": command,
+                "asset_id": asset.id,
+                "ip": asset.ip,
+                "channel": result.get("channel", "ssh"),
+            },
+        }
     finally:
         if close_db:
             db.close()

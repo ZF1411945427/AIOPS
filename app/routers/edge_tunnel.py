@@ -26,6 +26,7 @@ from app.services.edge_tunnel_service import (
     register_or_update_session, update_heartbeat, mark_offline, list_sessions,
     execute_command_via_tunnel, resolve_exec_future, start_heartbeat_monitor,
     get_outgoing_queue, send_to_agent, get_pending_commands,
+    save_latest_metrics, get_latest_metrics,
 )
 from app.logger import logger
 
@@ -142,6 +143,11 @@ async def edge_tunnel_connect(websocket: WebSocket):
                     "stdout": msg.get("stdout", ""),
                     "stderr": msg.get("stderr", ""),
                 })
+
+            elif msg_type == "metric_report":
+                # agent 上报主机指标，更新内存缓存
+                if agent_id:
+                    save_latest_metrics(agent_id, msg.get("metrics", {}))
 
             elif msg_type == "pty_output":
                 pty_id = msg.get("pty_id")
@@ -403,3 +409,9 @@ def delete_session(session_id: int, request: Request, db: Session = Depends(get_
     db.delete(session)
     db.commit()
     return {"status": "ok"}
+
+
+@router.get("/metrics/{agent_id}")
+def get_agent_metrics(agent_id: str, request: Request):
+    """获取 edge agent 最新上报的指标。"""
+    return {"agent_id": agent_id, "metrics": get_latest_metrics(agent_id)}
