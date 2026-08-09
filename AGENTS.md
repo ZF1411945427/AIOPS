@@ -34,6 +34,28 @@
 | 部署脚本项目根目录 | `os.path.dirname(os.path.abspath(__file__))` |
 | e2e 测试引用项目数据库 | `os.path.dirname(os.path.dirname(os.path.dirname(__file__))) / "db"` |
 
+## ⚠️ 日志文件位置规范(重要!)
+
+**所有 `.log` 日志文件必须统一放在项目根目录的 `logs/` 文件夹下,禁止散落在根目录或子目录(如 `frontend/`、`mobile/`)。**
+
+| 日志来源 | 规范位置 |
+|---------|---------|
+| 后端日志(结构化日志,按天轮转) | `logs/aiops_{YYYY-MM-DD}.log`(由 `app/logger.py` 自动生成) |
+| 后端启动重定向(手动重定向) | `logs/backend.log` |
+| 前端 dev server 输出 | `logs/frontend_dev.log` |
+| 移动端 dev/build 输出 | `logs/mobile_dev.log` |
+| 临时排查日志 | `logs/_xxx.log`(用完即删) |
+
+**规范写法:**
+- Python 引用日志目录:`os.environ.get("AIOPS_LOG_DIR", str(Path(__file__).resolve().parent.parent / "logs"))`(见 `app/logger.py:36`)
+- 手动重定向启动后端:`python run.py > logs/backend.log 2>&1`
+- 前端日志:`npm run dev --prefix frontend > logs/frontend_dev.log 2>&1`
+- 移动端日志:`npm run dev:h5 --prefix mobile > logs/mobile_dev.log 2>&1`
+
+**禁止:** 在项目根目录生成 `*.log`(如 `_run_stdout.log`、`_err.log`、`mobile_dev.log`、`frontend.log`);把日志写到 `frontend/`、`mobile/` 等子目录。
+
+**违反会导致:** 日志分散难排查,且 `*.log` 已被 `.gitignore` 忽略但散落文件易被误提交或遗漏清理。
+
 **禁止:** 在 `.py` 写 `sys.path.insert(0, 'D:/AIOPS/project08')` 或 `os.chdir('...')`;在 `.bat` 写 `cd /d D:\AIOPS\project08` 或硬编码 `python.exe` 绝对路径;在测试脚本硬编码外机路径;硬编码 `C:\Windows\Fonts\`(用项目 `fonts/` 目录)。
 
 **违反会导致:** 项目换机器/目录后全部路径失效 → 后端拒绝启动 → 所有功能不可用,且排查极其困难。

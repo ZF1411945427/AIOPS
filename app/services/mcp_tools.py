@@ -685,6 +685,7 @@ def query_knowledge(db: Optional[Session] = None, user_id: Optional[int] = None,
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "检索问题或故障描述，如'磁盘空间不足告警如何处理'、'nginx 服务无响应'"},
+            "asset_id": {"type": "integer", "description": "资产ID过滤（可选）。当用户提到某具体资产/主机/服务时，传入该资产ID，只检索该资产关联的部署文档、运维知识，如 query_knowledge_rag(query='部署方式', asset_id=5)"},
             "asset_type": {"type": "string", "description": "资产类型过滤（可选），如 server、pod、service"},
             "severity": {"type": "string", "description": "严重级别过滤（可选）：warning / critical / info"},
             "tags": {"type": "string", "description": "标签过滤（可选），如 disk、network"},
@@ -711,6 +712,7 @@ def query_knowledge_rag(db: Optional[Session] = None, user_id: Optional[int] = N
             db,
             query=query,
             top_k=min(int(top_k), 20),
+            asset_id=kwargs.get("asset_id") or None,
             asset_type=kwargs.get("asset_type") or None,
             severity=kwargs.get("severity") or None,
             tags=kwargs.get("tags") or None,
@@ -2308,6 +2310,7 @@ def execute_install_package(db: Optional[Session] = None, user_id: Optional[int]
             "time_range": {"type": "string", "description": "时间范围: 15m / 1h / 6h / 24h / 7d，默认 1h"},
             "level": {"type": "string", "description": "日志级别过滤: error / warning / info（可选）"},
             "host": {"type": "string", "description": "主机名过滤（如 web-server-01）"},
+            "service": {"type": "string", "description": "服务过滤（Loki 源对应 job，如 kubernetes-pods / docker-containers / mall-bare）"},
             "limit": {"type": "integer", "description": "返回条数，默认 20，最大 200"},
         },
         "required": ["source_id"],
@@ -2325,6 +2328,7 @@ def query_logs(db: Optional[Session] = None, user_id: Optional[int] = None, **kw
     time_range = kwargs.get("time_range", "1h")
     level = kwargs.get("level", "")
     host = kwargs.get("host", "")
+    service = kwargs.get("service", "")
     limit = kwargs.get("limit", 20)
 
     if not source_id:
@@ -2338,6 +2342,7 @@ def query_logs(db: Optional[Session] = None, user_id: Optional[int] = None, **kw
             level=level,
             host=host,
             limit=limit,
+            service=service,
         )
     except Exception as e:
         raise ValueError(f"日志数据源 {source_id} 查询失败: {str(e)}（请检查数据源配置/网络连通性）")
@@ -2356,6 +2361,7 @@ def query_logs(db: Optional[Session] = None, user_id: Optional[int] = None, **kw
         "time_range": time_range,
         "level": level,
         "host": host,
+        "service": service,
     }
 
 
@@ -2380,7 +2386,7 @@ def query_log_sources(db: Optional[Session] = None, user_id: Optional[int] = Non
         close_db = True
     try:
         sources = db.query(DataSource).filter(
-            DataSource.type.in_(["elasticsearch"])
+            DataSource.type.in_(["elasticsearch", "loki"])
         ).all()
         return {
             "sources": [

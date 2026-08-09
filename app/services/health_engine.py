@@ -239,7 +239,7 @@ def _compute_microservice_health(asset: Asset, db_session) -> str:
     if asset.status == "offline":
         return HEALTH_GRAY
     if asset.last_checked_at is None:
-        return HEALTH_GRAY
+        return HEALTH_GREEN
     cutoff = datetime.now() - timedelta(minutes=HEALTH_WINDOW_MINUTES)
     if asset.last_checked_at < cutoff:
         return HEALTH_GRAY
@@ -264,7 +264,7 @@ def _compute_middleware_health(asset: Asset, db_session) -> str:
     if asset.status == "offline":
         return HEALTH_GRAY
     if asset.last_checked_at is None:
-        return HEALTH_GRAY
+        return HEALTH_GREEN
     cutoff = datetime.now() - timedelta(minutes=HEALTH_WINDOW_MINUTES)
     if asset.last_checked_at < cutoff:
         return HEALTH_GRAY
@@ -288,7 +288,7 @@ def _compute_infra_health(asset: Asset, db_session) -> str:
     if asset.status == "offline":
         return HEALTH_GRAY
     if asset.last_checked_at is None:
-        return HEALTH_GRAY
+        return HEALTH_GREEN
     cutoff = datetime.now() - timedelta(minutes=HEALTH_WINDOW_MINUTES)
     if asset.last_checked_at < cutoff:
         return HEALTH_GRAY
@@ -353,7 +353,7 @@ def _compute_middleware_fallback(asset: Asset) -> str:
     if asset.status == "offline":
         return HEALTH_GRAY
     if asset.last_checked_at is None:
-        return HEALTH_GRAY
+        return HEALTH_GREEN
     cutoff = datetime.now() - timedelta(minutes=HEALTH_WINDOW_MINUTES)
     if asset.last_checked_at < cutoff:
         return HEALTH_GRAY

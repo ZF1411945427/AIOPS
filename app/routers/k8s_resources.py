@@ -169,7 +169,7 @@ def api_deployment_list(cluster: str = "", namespace: str = "", db: Session = De
         if ds:
             try:
                 _, apps_v1, _ = _get_k8s_client(ds)
-                raw = apps_v1.list_namespaced_deployment(namespace) if namespace else apps_v1.list_deployment_for_all_namespaces().items
+                raw = apps_v1.list_namespaced_deployment(namespace).items if namespace else apps_v1.list_deployment_for_all_namespaces().items
                 for d in raw:
                     available = d.status.available_replicas or 0
                     total = d.spec.replicas or 0
@@ -1371,23 +1371,22 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
 
 
 @router.get("/api/hpa/recommend")
-def api_hpa_recommend(cluster: str = "", namespace: str = "", db: Session = Depends(get_db)):
+def api_hpa_recommend(cluster: str = "", namespace: str = "", target_cpu: int = 50, target_mem: int = 50, window: str = "5m", db: Session = Depends(get_db)):
     """基于当前资源用量推荐 HPA 配置"""
     try:
         clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
         ds = _get_k8s_ds(db, cluster) if cluster else (clusters[0] if clusters else None)
         if not ds:
-            return JSONResponse({"items": [], "total": 0, "cluster": "", "cluster_count": len(clusters), "warning": "未配置任何 K8s 集群，请先在「数据源管理」中添加集群"})
+            return JSONResponse({"items": [], "total": 0, "cluster": "", "cluster_count": len(clusters), "clusters": [{"name": c.name, "endpoint": c.endpoint} for c in clusters], "warning": "未配置任何 K8s 集群，请先在「数据源管理」中添加集群"})
 
-        # 集群被禁用或连不通时返回空数据 + 友好提示，不抛 500
         if ds.enabled is False:
-            return JSONResponse({"items": [], "total": 0, "cluster": ds.name, "cluster_count": len(clusters), "warning": f"K8s 集群 [{ds.name}] 已被禁用，请在「数据源管理」中启用"})
+            return JSONResponse({"items": [], "total": 0, "cluster": ds.name, "cluster_count": len(clusters), "clusters": [{"name": c.name, "endpoint": c.endpoint} for c in clusters], "warning": f"K8s 集群 [{ds.name}] 已被禁用，请在「数据源管理」中启用"})
         try:
             _, apps_v1, _ = _get_k8s_client(ds)
         except Exception as ce:
-            return JSONResponse({"items": [], "total": 0, "cluster": ds.name, "cluster_count": len(clusters), "warning": f"K8s 集群 [{ds.name}] 连接失败: {ce}"})
+            return JSONResponse({"items": [], "total": 0, "cluster": ds.name, "cluster_count": len(clusters), "clusters": [{"name": c.name, "endpoint": c.endpoint} for c in clusters], "warning": f"K8s 集群 [{ds.name}] 连接失败: {ce}"})
 
-        raw = apps_v1.list_namespaced_deployment(namespace) if namespace else apps_v1.list_deployment_for_all_namespaces().items
+        raw = apps_v1.list_namespaced_deployment(namespace).items if namespace else apps_v1.list_deployment_for_all_namespaces().items
 
         v1, _, _ = _get_k8s_client(ds)
 
@@ -1406,7 +1405,6 @@ def api_hpa_recommend(cluster: str = "", namespace: str = "", db: Session = Depe
                     cpu_request += _parse_k8s_resource(c.resources.requests.get("cpu", "0"))
                     mem_request += _parse_k8s_resource(c.resources.requests.get("memory", "0"), is_memory=True)
 
-            # 从 metrics 获取实际使用率（若无 metrics server 则基于 replicas 估算）
             actual_cpu_usage = 0
             actual_mem_usage = 0
             try:
@@ -1436,8 +1434,6 @@ def api_hpa_recommend(cluster: str = "", namespace: str = "", db: Session = Depe
                 cpu_util_pct = 0
                 mem_util_pct = 0
 
-            target_cpu = 50
-            target_mem = 50
             if cpu_util_pct > 0:
                 suggested_cpu_replicas = max(1, round(replicas * cpu_util_pct / target_cpu))
             else:
@@ -1469,14 +1465,80 @@ def api_hpa_recommend(cluster: str = "", namespace: str = "", db: Session = Depe
             })
 
         recommendations.sort(key=lambda x: x["needs_hpa"], reverse=True)
+        has_any_metrics = any(d["has_metrics"] for d in recommendations)
+        if not has_any_metrics and recommendations:
+            return JSONResponse({
+                "items": [],
+                "total": 0,
+                "cluster": ds.name,
+                "cluster_count": len(clusters),
+                "clusters": [{"name": c.name, "endpoint": c.endpoint} for c in clusters],
+                "warning": "集群未安装 Metrics Server，无法获取真实 CPU/内存使用率，无法生成推荐。请先安装 Metrics Server 后重试。",
+            })
         return JSONResponse({
             "items": recommendations,
             "total": len(recommendations),
             "cluster": ds.name,
             "cluster_count": len(clusters),
+            "clusters": [{"name": c.name, "endpoint": c.endpoint} for c in clusters],
         })
     except Exception as e:
-        return JSONResponse({"warning": str(e)}, status_code=200)
+        return JSONResponse({"warning": str(e), "items": [], "total": 0}, status_code=200)
+
+
+@router.post("/api/hpa/recommend/apply")
+def api_hpa_recommend_apply(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """根据推荐配置生成 HPA YAML 并可选创建"""
+    try:
+        cluster = payload.get("cluster", "")
+        namespace = payload.get("namespace", "default")
+        name = payload.get("name", "")
+        min_replicas = int(payload.get("min_replicas", 1))
+        max_replicas = int(payload.get("max_replicas", 3))
+        target_cpu = int(payload.get("target_cpu", 50))
+        target_mem = int(payload.get("target_mem", 50))
+        dry_run = payload.get("dry_run", True)
+
+        if not name:
+            return JSONResponse({"ok": False, "message": "Deployment 名称不能为空"})
+
+        ds = _get_k8s_ds(db, cluster)
+        if not ds:
+            return JSONResponse({"ok": False, "message": "集群未找到"}, status_code=404)
+
+        _, _, _ = _get_k8s_client(ds)
+
+        yaml_body = {
+            "apiVersion": "autoscaling/v2",
+            "kind": "HorizontalPodAutoscaler",
+            "metadata": {"name": f"{name}-hpa", "namespace": namespace},
+            "spec": {
+                "scaleTargetRef": {
+                    "apiVersion": "apps/v1",
+                    "kind": "Deployment",
+                    "name": name,
+                },
+                "minReplicas": min_replicas,
+                "maxReplicas": max_replicas,
+                "metrics": [
+                    {"type": "Resource", "resource": {"name": "cpu", "target": {"type": "Utilization", "averageUtilization": target_cpu}}},
+                    {"type": "Resource", "resource": {"name": "memory", "target": {"type": "Utilization", "averageUtilization": target_mem}}},
+                ],
+            },
+        }
+
+        import yaml
+        yaml_str = yaml.dump(yaml_body, default_flow_style=False, allow_unicode=True)
+
+        if not dry_run:
+            from kubernetes import client
+            autoscaling_v2 = client.AutoscalingV2Api()
+            autoscaling_v2.create_namespaced_horizontal_pod_autoscaler(namespace, yaml_body)
+            return JSONResponse({"ok": True, "yaml": yaml_str, "created": True, "cluster": cluster, "namespace": namespace, "name": f"{name}-hpa"})
+
+        return JSONResponse({"ok": True, "yaml": yaml_str, "created": False, "cluster": cluster, "namespace": namespace, "name": f"{name}-hpa"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
 
 
 @router.get("/api/resource-optimization")

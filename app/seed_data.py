@@ -19,13 +19,131 @@ from app.models import (
     KafkaPipeline, FeatureStoreItem, PredictionModel,
     DashboardCardConfig, ReportSchedule, ApiToken,
     AIProvider, AgentConfig, ServiceMeshConfig, NetFlowCollector,
-    TagCategory, Tag,
+    TagCategory, Tag, SecurityBaselineTemplate,
 )
 from app.services import config_service
 
 
+def seed_baseline_templates(db):
+    """安全基线模板播种（幂等，独立于 marker：已部署环境也会补种）。
+
+    模板对齐 business-demos/部署文档.md 三靶场(131 K8s / 132 mall-swarm / 裸机 mall)。
+    ci_type 取值: all(兜底) / server / database / middleware / kubernetes_cluster。
+    _normalize_ci 会把 virtual_machine 归一到 server，故 virtual_machine 资产命中 server+all。
+    """
+    entries = [
+        # ── all: 通用基线(所有资产可查, 保底) ──
+        ("all", "no_blank_passwd", "系统无空密码用户", "access", "critical",
+         "检查 /etc/shadow 是否存在密码为空的用户", "ssh",
+         "awk -F: '($2==\"\"){print $1}' /etc/shadow 2>/dev/null | head -5",
+         r"^\s*$", "为空密码用户设置强密码(usermod -p / passwd)", 10),
+        ("all", "shadow_permission", "/etc/shadow 文件权限", "config", "high",
+         "shadow 文件应仅 root 可读写(600/640)", "ssh",
+         "stat -c '%a' /etc/shadow 2>/dev/null",
+         r"^(600|640)$", "chmod 600 /etc/shadow", 20),
+        ("all", "docker_alive", "Docker 服务存活", "stability", "medium",
+         "容器运行时 Docker 服务应处于 active/running", "ssh",
+         "systemctl is-active docker 2>/dev/null || service docker status 2>/dev/null",
+         r"active|running", "systemctl start docker", 30),
+        ("all", "danger_ports_closed", "无高危端口暴露", "network", "high",
+         "telnet(23)/RDP(3389)/VNC(5900)/memcache(11211) 不应监听公网", "ssh",
+         "ss -tln 2>/dev/null | grep -cE ':(23|3389|5900|11211)\\b'",
+         r"^0$", "关闭高危端口对应服务或加防火墙白名单", 40),
+        ("all", "kernel_patch_level", "系统补丁/内核版本人工复核", "update", "medium",
+         "人工确认系统补丁与内核版本是否为厂商支持版本", "manual",
+         "", "", "按安全公告升级内核/系统补丁", 50),
+        # ── server: 主机安全基线(virtual_machine → server) ──
+        ("server", "ssh_no_password_auth", "SSH 禁用密码登录", "access", "high",
+         "sshd 应禁用 PasswordAuthentication 改用密钥", "ssh",
+         "grep -E '^\\s*PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null | tail -1",
+         r"PasswordAuthentication\s+no", "配置 PasswordAuthentication no 并重启 sshd", 10),
+        ("server", "ssh_no_root_login", "SSH 禁止 Root 直接登录", "access", "high",
+         "PermitRootLogin 应为 no / prohibit-password", "ssh",
+         "grep -E '^\\s*PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null | tail -1",
+         r"PermitRootLogin\s+(no|prohibit-password)", "设置 PermitRootLogin no", 20),
+        ("server", "disk_usage_ok", "磁盘使用率合规(<80%)", "config", "high",
+         "根分区磁盘使用率应低于 80%", "ssh",
+         "df -h / | awk 'NR==2{print $5}'",
+         r"^([0-7][0-9]|80)%$", "清理大文件/docker system prune -af 释放空间", 30),
+        ("server", "firewall_enabled", "防火墙已启用", "network", "medium",
+         "firewalld 应处于 active 状态", "ssh",
+         "systemctl is-active firewalld 2>/dev/null",
+         r"active", "systemctl enable --now firewalld", 40),
+        # ── database: 数据库安全基线 ──
+        ("database", "mysql_no_blank_passwd", "MySQL 无空密码用户", "access", "critical",
+         "不允许存在密码为空的数据库账号", "sql",
+         "SELECT COUNT(*) FROM mysql.user WHERE authentication_string='' AND plugin NOT IN ('auth_socket','unix_socket')",
+         r"^0$", "为空密码账号设置强密码", 10),
+        ("database", "mysql_no_anonymous", "MySQL 无匿名用户", "access", "high",
+         "不允许存在 user 为空的匿名账号", "sql",
+         "SELECT COUNT(*) FROM mysql.user WHERE user=''",
+         r"^0$", "DROP USER ''@'localhost';", 20),
+        ("database", "mysql_no_root_remote", "MySQL Root 禁止远程登录", "access", "high",
+         "root 账号 host 不应为 %(可远程登录)", "sql",
+         "SELECT COUNT(*) FROM mysql.user WHERE user='root' AND host='%'",
+         r"^0$", "删除 root@% 账号, 仅保留 localhost", 30),
+        ("database", "mysql_pwd_strength", "MySQL 密码强度策略", "config", "medium",
+         "validate_password 组件应已启用", "sql",
+         "SHOW VARIABLES LIKE 'validate_password%'",
+         r"ON|YES", "INSTALL PLUGIN validate_password", 40),
+        # ── middleware: 中间件安全基线 ──
+        ("middleware", "redis_requirepass", "Redis 已设置访问密码", "access", "high",
+         "Redis 不应免密对外暴露(部署文档: 132 Redis 当前无密码=不合规)", "redis",
+         "CONFIG GET requirepass",
+         r"requirepass\r?\n\S+", "CONFIG SET requirepass <强密码> 并重启", 10),
+        ("middleware", "rabbitmq_default_guest", "RabbitMQ 默认账号管控", "access", "medium",
+         "人工确认生产环境已停用/修改默认 guest 账号", "manual",
+         "", "", "禁用 guest 或修改默认密码", 20),
+        ("middleware", "middleware_version_check", "中间件版本人工复核", "update", "low",
+         "人工确认中间件版本无已知 CVE", "manual",
+         "", "", "升级到厂商支持版本", 30),
+        # ── kubernetes_cluster: K8s 集群安全基线(131 靶场) ──
+        ("kubernetes_cluster", "k8s_apiserver_ready", "APIServer 就绪检查", "stability", "critical",
+         "kube-apiserver /readyz 应返回 ok", "ssh",
+         "kubectl get --raw='/readyz' 2>/dev/null",
+         r"ok", "排查 kube-apiserver 服务与证书状态", 10),
+        ("kubernetes_cluster", "k8s_no_anonymous_binding", "K8s 无匿名绑定", "access", "high",
+         "clusterrolebinding 不应存在 anonymous 主体", "ssh",
+         "kubectl get clusterrolebindings 2>/dev/null | grep -c anonymous",
+         r"^0$", "删除 anonymous 绑定的 ClusterRoleBinding", 20),
+        ("kubernetes_cluster", "k8s_no_bad_pods", "K8s 无异常 Pod", "stability", "high",
+         "不存在 CrashLoopBackOff/Error/ImagePullBackOff 的 Pod", "ssh",
+         "kubectl get pods -A 2>/dev/null | grep -cE 'CrashLoopBackOff|Error|ImagePullBackOff'",
+         r"^0$", "kubectl describe pod <name> -n <ns> 定位并修复", 30),
+        ("kubernetes_cluster", "k8s_nodes_ready", "K8s 节点全部 Ready", "stability", "critical",
+         "集群节点不应存在 NotReady", "ssh",
+         "kubectl get nodes 2>/dev/null | grep -c NotReady",
+         r"^0$", "排查 NotReady 节点 kubelet 状态", 40),
+    ]
+    added = 0
+    for ci_type, check_key, check_name, category, severity, desc, method, cmd, expect, remed, sort_order in entries:
+        exists = (
+            db.query(SecurityBaselineTemplate)
+            .filter(
+                SecurityBaselineTemplate.ci_type == ci_type,
+                SecurityBaselineTemplate.check_key == check_key,
+            )
+            .first()
+        )
+        if exists:
+            continue
+        db.add(SecurityBaselineTemplate(
+            ci_type=ci_type, check_key=check_key, check_name=check_name,
+            category=category, severity=severity, description=desc,
+            check_method=method, check_command=cmd, expect_match=expect,
+            remediation=remed, sort_order=sort_order, enabled=True,
+        ))
+        added += 1
+    if added:
+        db.commit()
+    return added
+
+
 def seed_all():
     db = get_session_for(get_db_mode())()
+
+    # 安全基线模板播种（幂等，独立于 marker 版本，确保已部署环境也能生效）
+    seed_baseline_templates(db)
 
     # AgentConfig 播种（独立于 marker 版本，确保已部署环境也能生效）
     if not db.query(AgentConfig).first():
@@ -195,6 +313,7 @@ def seed_all():
             name=name, ci_type=ci_type,
             ip=ip, status=status, tags=json.dumps(tags),
             ci_attributes=json.dumps(attrs),
+            last_checked_at=datetime.now(),
             created_at=days_ago(random.randint(30, 180)),
         )
         db.add(a); db.flush()

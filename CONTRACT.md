@@ -277,6 +277,10 @@
 | **`last_scrape`** | DateTime | **`last_scraped_at`** | ❌ 缺 _at |
 | created_at | DateTime | — | ✅ |
 
+> **type 枚举**(由后端 `DS_TYPES` 驱动,前端下拉自动同步):`prometheus` / `custom_api` / `log_file` / `ssh` / `kubernetes` / `docker` / `elasticsearch` / `loki` / `jaeger` / `otel`
+>
+> **loki**: endpoint 填 Loki HTTP 地址(如 `http://10.0.9.12:3100`),auth_config 支持 `username`/`password`(Basic)与 `org_id`(X-Scope-OrgID 多租户)。日志查询走 `log_query_service.LokiAdapter`(LogQL `/loki/api/v1/query_range`),`logs.py` 的 `/logs/api/sources` 与 `/logs/api/search` 已按 type 分发;日志中心与 MCP `query_log_sources` 均自动包含 loki。
+
 ### `change_requests` — 变更请求
 
 | 字段名 | 当前 | 修正 | 说明 |
@@ -312,6 +316,22 @@
 | status | String(32) | — | ✅ |
 | tags | Text | — | |
 | created_at | DateTime | — | ✅ |
+
+### OTLP/HTTP 链路接入契约（SDK ↔ 平台）
+
+> 涉及 OTel Agent / SDK 接入、`trace_ingest` 路由、接入指引页（`TraceAgentGuide.vue`）开发时**必须**遵守，否则 Agent 接入会失败或数据丢失。
+
+| 项 | 契约值 | 说明 |
+|----|--------|------|
+| 标准采集端点 | `POST /v1/traces` | OTel SDK exporter 请求 URL = `OTEL_EXPORTER_OTLP_ENDPOINT` + `/v1/traces`。SDK/Agent 配 **base 地址**（如 `http://<AIOps-IP>:8000`），不要带 `/v1/traces` 后缀 |
+| 协议 | `http/protobuf` | **禁用 `http/json`**：OTel Java Agent ≥ 2.x 已移除 json 协议；仅 protobuf/grpc 被现代 SDK 支持 |
+| Content-Type 分发 | `application/json` → OTLP JSON；其余 → OTLP protobuf | 端点按请求头分发，兼容手动 JSON 推送与 SDK protobuf 上报 |
+| 关闭信号 | `OTEL_METRICS_EXPORTER=none`、`OTEL_LOGS_EXPORTER=none` | 平台只收 traces；不关会造成 metrics/logs 协议解析失败 |
+| 手动 SDK endpoint | 必须带完整路径 `http://<AIOps-IP>:8000/v1/traces` | `OTLPSpanExporter(endpoint=...)` 等手动构造不追加 `/v1/traces`，需自行补齐 |
+| 旧端点（保留） | `POST /api/v1/traces/otlp` | 兼容旧 Collector/JSON 推送；接入指引已不再推荐 |
+| License 白名单 | `license_service.py:_LICENSE_PUBLIC_PREFIXES` 含 `/v1/traces` | 非 `/api/` 前缀路径必须加白名单，否则被 License 中间件拦截 |
+| 应用服务名 | `OTEL_SERVICE_NAME`（Java: `-Dotel.service.name`） | 入库为 `spans.service_name`，前端拓扑/服务列表依赖它 |
+| DB/Cache 子 Span | 由上游服务 Agent 自动拦截生成 | MySQL/Redis/Kafka 等中间件无需单独装 Agent |
 
 ### `netflow_records` — 网络流量
 
@@ -725,7 +745,8 @@
 - `POST /knowledge/api/auto-gen/drafts/{id}/reject` body: `{"reason":"xxx"}`
 - `GET /knowledge/api/auto-gen/drafts/stats` 返回 `{pending, approved, rejected, total}`（后端 GROUP BY）
 - `DELETE /knowledge/api/auto-gen/drafts/{id}` 仅允许删除非 approved 状态
-- 审批通过后：写入 knowledge_base，并根据 alert_id 或 source_data.incident_id（回查 IncidentAlert）建立 alert_kb_links 关联
+- **审批通过后同步 RAG（2026-08-08 修复）**：除写入 `knowledge_base` + 建立 `alert_kb_links` 外，必须同步创建 `kb_documents` 条目（`kb_id` 关联本知识、`source_type="auto"`、`content` = `title + 症状 + 根因 + 解决方案 + 标签` 拼接文本）并调用 `rag_service.index_document` 完成切片/向量索引，确保 AI 助手 `query_knowledge_rag`（走 `rag_service.vector_search`，只查 `kb_chunks`）能检索到新入库知识。索引失败则整体回滚。
+- 若审批接口未同步 RAG，将导致：knowledge_base 有数据但 RAG 检索不到（静默缺口）
 
 ### `knowledge_base` — 知识库（审批通过后入库）
 
@@ -739,7 +760,7 @@
 | tags | String(256) | "" | - |
 | severity | String(32) | "warning" | - |
 | asset_type | String(32) | "" | - |
-| source_type | String(32) | "manual" | manual / auto |
+| source_type | String(32) | "manual" | manual / auto（自动沉淀；approve_draft 同步 RAG 时用 auto） |
 | sop_steps | Text | "[]" | - |
 | version_number | Integer | 1 | - |
 | change_log | Text | "" | - |
@@ -753,6 +774,58 @@
 | id | Integer PK | - | - |
 | alert_id | Integer FK(alerts.id) | NOT NULL | - |
 | kb_id | Integer FK(knowledge_base.id) | NOT NULL | - |
+
+### `kb_documents` — RAG 文档（knowledge_base 的检索索引载体）
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| kb_id | Integer FK(knowledge_base.id) | nullable | 关联知识库条目（auto 沉淀时有值；上传文档为 NULL） |
+| title | String(256) | NOT NULL | 文档标题 |
+| source_type | String(32) | "manual" | manual / upload / alert_case / incident_case / **auto**（approve_draft 同步 RAG） |
+| file_path | String(512) | "" | 上传文件原始存储路径 |
+| file_ext | String(16) | "" | 文件扩展名 md/txt/pdf/docx |
+| content | Text | "" | 全文内容（auto 沉淀时 = 标题+症状+根因+解决方案+标签 拼接） |
+| chunk_count | Integer | 0 | 切片数量 |
+| status | String(32) | "pending" | pending / indexed / failed |
+| tags | String(256) | "" | - |
+| asset_type | String(32) | "" | - |
+| asset_id | Integer FK(assets.id) | nullable | 关联具体资产 |
+| severity | String(32) | "warning" | - |
+| index_engine | String(16) | "v1" | v1 / v2 / both（索引归属引擎；v1=TF-IDF 存 kb_chunks，v2=Milvus） |
+| created_by | Integer FK(users.id) | nullable | - |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+### `kb_chunks` — RAG 切片（向量检索实际命中单元）
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | - | - |
+| document_id | Integer FK(kb_documents.id) | NOT NULL | - |
+| chunk_index | Integer | NOT NULL | 切片序号 |
+| content | Text | NOT NULL | 切片文本 |
+| embedding | Text | "" | 向量 JSON 字符串（TF-IDF 稀疏向量） |
+| embedding_mode | String(32) | "tfidf" | tfidf / provider |
+| token_count | Integer | 0 | - |
+| tags | String(256) | "" | - |
+| asset_type | String(32) | "" | - |
+| severity | String(32) | "warning" | - |
+| created_at | DateTime | now() | - |
+
+> **RAG 检索链路约定**：AI 助手 `query_knowledge_rag` 只查 `kb_chunks`（经 `kb_documents` 关联标题）。因此所有需要被 RAG 检索到的知识（含 auto 审批沉淀）**必须**同步创建 `kb_documents` 并执行 `index_document`。
+> **asset_id 过滤（2026-08-08 补强）**：`query_knowledge_rag` 新增 `asset_id` 参数 → `rag_service.vector_search` 经 `kb_chunks.document_id JOIN kb_documents.id` 过滤 `kb_documents.asset_id`，实现"查某资产时只检索该资产关联的部署文档/知识"。`kb_chunks` 表**不新增** asset_id 列，资产归属一律走 `kb_documents.asset_id`（部署文档上传时在 `knowledge_documents.py` 写入）。
+
+### `runbooks` — 标准操作流程(Runbook) API 契约（2026-08-08 补充）
+
+> 表格字段见 models.py `Runbook`。本节约定 **API 层**行为，前端 `RunbooksView.vue` 与后端 `app/routers/runbooks.py` 必须一致。
+
+| 约定项 | 规则 |
+|--------|------|
+| `content` 别名 | 前端表单字段为 `content`，后端模型无此列。create/update 收到 `content` 时**写入 `symptom`**；`_rb_to_dict` 返回 `content`(= `symptom`)，保证前端内容字段保存与回显一致（2026-08-08 修复，此前静默丢弃） |
+| `tags` 归一化 | 契约类型 String(256)（JSON 字符串）。create/update 必须经 `_norm_tags()` 归一化：list/tuple → `json.dumps` 字符串，字符串原样保留（2026-08-08 修复，此前传数组直接 500） |
+| `query_runbook` 检索 | MCP 工具（`mcp_tools.py:749`）按 `search`(title/symptom/diagnosis/steps/tags 模糊)、`category`、`asset_type` 过滤，AI 助手在"问怎么操作/处理步骤"时优先调用 |
+| 告警联动推荐 | `smart_recommend.py:_score_runbook`：metric 命中 tag +5、标题含 metric +3、asset_type 匹配 +3、症状文本重叠 +4、severity 对齐 +1 |
 
 ---
 

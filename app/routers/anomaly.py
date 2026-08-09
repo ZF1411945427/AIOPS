@@ -96,6 +96,30 @@ def api_config_toggle(config_id: int, db: Session = Depends(get_db)):
     return JSONResponse({"ok": True, "enabled": bool(cfg.enabled)})
 
 
+@router.post("/api/configs/{config_id}/update")
+def api_config_update(
+    config_id: int,
+    name: str = Form(...),
+    metric_name: str = Form(...),
+    asset_id: int = Form(0),
+    algorithm: str = Form("sigma"),
+    sensitivity: float = Form(3.0),
+    window_size: int = Form(20),
+    period: int = Form(12),
+    db: Session = Depends(get_db)):
+    """更新异常检测配置 JSON API."""
+    cfg = anomaly_service.update_config(db, config_id, {
+        "name": name, "metric_name": metric_name,
+        "asset_id": asset_id if asset_id > 0 else None,
+        "algorithm": algorithm,
+        "sensitivity": sensitivity, "window_size": window_size,
+        "period": period,
+    })
+    if not cfg:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
 @router.post("/api/configs/{config_id}/delete")
 def api_config_delete(config_id: int, db: Session = Depends(get_db)):
     """删除异常检测配置 JSON API."""

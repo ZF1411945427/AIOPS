@@ -21,6 +21,12 @@
     <div class="workbench-card filter-card">
       <div class="filter-row">
         <div class="filter-item">
+          <label>业务域</label>
+          <el-select v-model="filters.domain" clearable placeholder="全部" size="small" style="width:140px" @change="onDomainChange">
+            <el-option v-for="d in domainList" :key="d" :value="d" :label="d" />
+          </el-select>
+        </div>
+        <div class="filter-item">
           <label>服务</label>
           <el-select v-model="filters.service" clearable placeholder="全部" size="small" style="width:160px">
             <el-option v-for="s in serviceList" :key="s" :value="s" :label="s" />
@@ -238,6 +244,7 @@ const loading = ref(false)
 const traces = ref([])
 const totalCount = ref(0)
 const serviceList = ref([])
+const domainList = ref([])
 const selectedTrace = ref(null)
 const selectedSpanId = ref('')
 const detailData = ref({ spans: [], services: [], root_duration_ms: 0, topology: { services: [], edges: [] } })
@@ -247,7 +254,7 @@ const topoSvg = ref(null)
 const listRef = ref(null)
 
 const filters = reactive({
-  service: '', keyword: '', status: '', min_dur: 0, limit: 50,
+  domain: '', service: '', keyword: '', status: '', min_dur: 0, limit: 50,
 })
 
 const SERVICE_COLORS = [
@@ -368,6 +375,7 @@ async function loadTraces() {
   loading.value = true
   try {
     const params = {}
+    if (filters.domain) params.domain = filters.domain
     if (filters.service) params.service = filters.service
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.status) params.status = filters.status
@@ -379,6 +387,24 @@ async function loadTraces() {
     serviceList.value = res.services || []
   } catch (e) { console.error(e) }
   finally { loading.value = false }
+}
+
+async function loadDomains() {
+  try {
+    const res = await request.get('/api/traces/domains')
+    domainList.value = res || []
+  } catch (e) { console.error(e) }
+}
+
+async function onDomainChange() {
+  filters.service = ''
+  try {
+    const params = {}
+    if (filters.domain) params.domain = filters.domain
+    const res = await request.get('/api/traces/services', { params })
+    serviceList.value = res || []
+  } catch (e) { console.error(e) }
+  loadTraces()
 }
 
 async function showDetail(tr) {
@@ -394,7 +420,10 @@ async function showDetail(tr) {
   } catch (e) { console.error(e) }
 }
 
-onMounted(loadTraces)
+onMounted(() => {
+  loadDomains()
+  loadTraces()
+})
 </script>
 
 <style scoped>

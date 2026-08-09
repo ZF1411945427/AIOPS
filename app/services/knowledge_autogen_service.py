@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models import (
-    Alert, Asset, KnowledgeBase, KnowledgeDraft, AlertKbLink,
+    Alert, Asset, KnowledgeBase, KnowledgeDraft, AlertKbLink, KbDocument,
     AIProvider, Incident, IncidentAlert,
 )
 
@@ -171,6 +171,11 @@ def approve_draft(draft_id: int, db: Session) -> dict:
     - 若草稿直接有 alert_id（来源告警）：直接建 link
     - 若草稿来自故障单（无 alert_id 但 source_data 含 incident_id）：
       查 IncidentAlert 找到该故障单关联的告警，逐一建 link
+
+    RAG 同步（2026-08-08 修复）：
+    - 写入 knowledge_base 后，同步创建 kb_documents（source_type=auto，kb_id 关联本知识），
+      并调用 rag_service.index_document 完成切片/TF-IDF 索引，使 AI 助手 query_knowledge_rag
+      能够检索到新入库知识。任一环节失败则整体回滚。
     """
     draft = db.query(KnowledgeDraft).filter(KnowledgeDraft.id == draft_id).first()
     if not draft:
@@ -225,6 +230,42 @@ def approve_draft(draft_id: int, db: Session) -> dict:
         if aid:
             link = AlertKbLink(alert_id=aid, kb_id=kb.id)
             db.add(link)
+
+    # ── RAG 同步：创建 kb_documents 并索引，保证 AI 助手能检索到新知识 ──
+    try:
+        from app.services import rag_service
+
+        doc_content = "\n\n".join(filter(None, [
+            draft.title,
+            draft.symptom,
+            draft.root_cause,
+            draft.solution,
+            (f"标签: {draft.tags}" if draft.tags else ""),
+        ]))
+        doc = KbDocument(
+            kb_id=kb.id,
+            title=draft.title,
+            source_type="auto",
+            content=doc_content,
+            tags=draft.tags or "",
+            asset_type=draft.asset_type or "",
+            severity=draft.severity or "warning",
+            status="pending",
+        )
+        db.add(doc)
+        db.flush()
+        if not doc.id:
+            db.rollback()
+            return {"ok": False, "error": "RAG 文档写入失败：未获得 doc_id"}
+        ok, msg = rag_service.index_document(db, doc.id)
+        if not ok:
+            db.rollback()
+            logger.error("approve_draft RAG index failed: %s", msg)
+            return {"ok": False, "error": f"RAG 索引失败，已回滚审批: {msg}"}
+    except Exception as e:
+        db.rollback()
+        logger.exception("approve_draft RAG sync failed")
+        return {"ok": False, "error": f"RAG 同步失败，已回滚审批: {e}"}
 
     draft.status = "approved"
     try:

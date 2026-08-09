@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -7,6 +9,15 @@ from app.models import Runbook
 router = APIRouter(prefix="/runbooks", tags=["runbooks"])
 
 
+def _norm_tags(tags):
+    """tags 归一化: list -> JSON 字符串(契约 tags=String(256)), 字符串原样保留"""
+    if tags is None:
+        return ""
+    if isinstance(tags, (list, tuple)):
+        return json.dumps([str(t) for t in tags], ensure_ascii=False)
+    return tags
+
+
 def _rb_to_dict(rb):
     return {
         "id": rb.id,
@@ -14,6 +25,8 @@ def _rb_to_dict(rb):
         "category": rb.category or "general",
         "symptom": rb.symptom or "",
         "diagnosis": rb.diagnosis or "",
+        # content 为前端表单字段别名, 与 symptom 互通(避免静默丢弃)
+        "content": rb.symptom or "",
         "steps": rb.steps or "",
         "tags": rb.tags or "",
         "severity": rb.severity or "warning",
@@ -55,13 +68,14 @@ def api_runbook_detail(rb_id: int, db: Session = Depends(get_db)):
 @router.post("/api/create")
 def api_create_runbook(payload: dict = Body(...), db: Session = Depends(get_db)):
     try:
+        symptom = payload.get("content") or payload.get("symptom", "")
         rb = Runbook(
             title=payload.get("title", ""),
             category=payload.get("category", "general"),
-            symptom=payload.get("symptom", ""),
+            symptom=symptom,
             diagnosis=payload.get("diagnosis", ""),
             steps=payload.get("steps", ""),
-            tags=payload.get("tags", ""),
+            tags=_norm_tags(payload.get("tags", "")),
             severity=payload.get("severity", "warning"),
             asset_type=payload.get("asset_type", ""))
         db.add(rb)
@@ -80,10 +94,10 @@ def api_update_runbook(rb_id: int, payload: dict = Body(...), db: Session = Depe
             return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
         rb.title = payload.get("title", rb.title)
         rb.category = payload.get("category", rb.category)
-        rb.symptom = payload.get("symptom", rb.symptom)
+        rb.symptom = payload.get("content", payload.get("symptom", rb.symptom))
         rb.diagnosis = payload.get("diagnosis", rb.diagnosis)
         rb.steps = payload.get("steps", rb.steps)
-        rb.tags = payload.get("tags", rb.tags)
+        rb.tags = _norm_tags(payload.get("tags", rb.tags))
         rb.severity = payload.get("severity", rb.severity)
         rb.asset_type = payload.get("asset_type", rb.asset_type)
         db.commit()

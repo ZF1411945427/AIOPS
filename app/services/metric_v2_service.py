@@ -108,6 +108,119 @@ def query_metric_names() -> List[str]:
     return []
 
 
+def query_latest_aggregated(aggregate: str = "avg") -> dict:
+    """查询各指标跨所有资产的聚合最新值(Grafana 风格).
+
+    aggregate: avg / sum / max / min
+    返回 {name: {value, count, unit, aggregate}},count 为参与聚合的资产数
+    """
+    agg_fn = aggregate if aggregate in ("avg", "sum", "max", "min") else "avg"
+    try:
+        result = query_promql(f'{agg_fn} by (__name__) ({{__name__=~".+"}})')
+        if result.get("status") != "success":
+            return {}
+        out = {}
+        for item in result.get("data", {}).get("result", []):
+            metric = item.get("metric", {})
+            name = metric.get("__name__", "")
+            value = item.get("value")
+            if value is not None and name:
+                ts = value[0]
+                out[name] = {
+                    "value": float(value[1]),
+                    "unit": metric.get("unit", ""),
+                    "count": 0,
+                    "aggregate": agg_fn,
+                    "timestamp": datetime.fromtimestamp(ts).isoformat() if ts else "",
+                }
+        # 补充每个指标的资产数
+        try:
+            cnt_result = query_promql(f'count by (__name__) ({{__name__=~".+"}})')
+            if cnt_result.get("status") == "success":
+                for item in cnt_result.get("data", {}).get("result", []):
+                    name = item.get("metric", {}).get("__name__", "")
+                    val = item.get("value")
+                    if name in out and val is not None:
+                        out[name]["count"] = int(float(val[1]))
+        except Exception:
+            pass
+        return out
+    except Exception:
+        return {}
+
+
+def query_range_aggregated(name: str, aggregate: str = "avg", hours: int = 24) -> dict:
+    """查询指标跨所有资产的聚合范围数据 + 各资产明细序列(用于叠加).
+
+    aggregate: avg / sum / max / min
+    返回 { "avg": [{time, value}], "series": [{asset_id, name, values: [{time, value}]}] }
+    """
+    now_s = int(datetime.now().timestamp())
+    start_s = now_s - hours * 3600
+    agg_fn = aggregate if aggregate in ("avg", "sum", "max", "min") else "avg"
+    result = {"avg": [], "series": []}
+    try:
+        # 聚合线: avg by (__name__)
+        agg_result = query_promql_range(
+            f"{agg_fn} by (__name__) ({name})", start_s, now_s, step="300s")
+        if agg_result.get("status") == "success":
+            for item in agg_result.get("data", {}).get("result", []):
+                values = item.get("values", [])
+                for ts, val in values:
+                    result["avg"].append({
+                        "time": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
+                        "value": float(val),
+                    })
+        # 明细线: 各资产独立序列
+        raw_result = query_promql_range(name, start_s, now_s, step="300s")
+        if raw_result.get("status") == "success":
+            for item in raw_result.get("data", {}).get("result", []):
+                metric = item.get("metric", {})
+                aid = int(metric.get("asset_id", 0))
+                values = item.get("values", [])
+                result["series"].append({
+                    "asset_id": aid,
+                    "name": metric.get("asset_id", str(aid)),
+                    "values": [{
+                        "time": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
+                        "value": float(val),
+                    } for ts, val in values],
+                })
+    except Exception:
+        pass
+    result["avg"].sort(key=lambda x: x["time"])
+    return result
+
+
+def query_custom_promql(promql: str, hours: int = 24) -> dict:
+    """执行自定义 PromQL range 查询，返回 {series: [{name, labels, values: [{time, value}]}]}.
+
+    promql 需为可直接用于 query_range 的 PromQL 表达式.
+    """
+    now_s = int(datetime.now().timestamp())
+    start_s = now_s - hours * 3600
+    out = {"series": [], "error": ""}
+    try:
+        result = query_promql_range(promql, start_s, now_s, step="300s")
+        if result.get("status") == "success":
+            for item in result.get("data", {}).get("result", []):
+                metric = item.get("metric", {})
+                label_parts = [f"{k}={v}" for k, v in metric.items() if k != "__name__"]
+                out["series"].append({
+                    "name": " / ".join(label_parts) if label_parts else metric.get("__name__", "series"),
+                    "labels": metric,
+                    "values": [{
+                        "time": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
+                        "value": float(val),
+                    } for ts, val in item.get("values", [])],
+                })
+        else:
+            out["error"] = result.get("error", "查询失败")
+    except Exception as e:
+        out["error"] = str(e)
+    return out
+
+
 def query_latest_values(asset_id: Optional[int] = None) -> dict:
     """查询最新指标值，返回格式兼容现有 SQLite 查询格式 {name: {value, unit, asset_id, timestamp}}."""
     try:

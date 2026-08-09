@@ -21,6 +21,12 @@ def test_provider(provider_id: int, db: Session = Depends(get_db)):
     if not provider:
         return {"status": "error", "message": "Provider not found"}
 
+    # 测试连接应绕过熔断器：熔断态下用户无法通过测试得知真实连接状态，
+    # 必须先手动重置才能验证。若服务实际已恢复，测试成功时顺便重置熔断器。
+    from app.services.ai_provider_health import get_breaker
+    breaker = get_breaker(provider.id)
+    breaker.reset()
+
     test_messages = [{"role": "user", "content": "ping"}]
     result = call_llm(provider, test_messages, timeout_override=10, max_tokens_override=10)
 

@@ -1,4 +1,4 @@
-import { buildUrl, commonHeaders } from './config.js'
+import { request } from './request.js'
 
 let pendingPreset = ''
 
@@ -13,155 +13,48 @@ export function takePendingPreset() {
 }
 
 export function listSessions() {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl('/agent/sessions'),
-      method: 'GET',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data || {})
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: '/agent/sessions', hideError: true })
 }
 
 export function getHistory(sessionId) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl(`/agent/history/${sessionId}`),
-      method: 'GET',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data || {})
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: `/agent/history/${sessionId}`, hideError: true })
 }
 
 export function sendMessage({ sessionId, message }) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl('/agent/chat/send'),
-      method: 'POST',
-      timeout: 120000,
-      header: commonHeaders(),
-      data: { session_id: sessionId || null, message },
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
-        else reject(res)
-      },
-      fail: reject,
-    })
+  return request({
+    url: '/agent/chat/send',
+    method: 'POST',
+    timeout: 120000,
+    data: { session_id: sessionId || null, message },
   })
 }
 
 export function confirmPending(actionId) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl(`/agent/pending/${actionId}/confirm`),
-      method: 'POST',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: `/agent/pending/${actionId}/confirm`, method: 'POST' })
 }
 
 export function cancelPending(actionId) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl(`/agent/pending/${actionId}/cancel`),
-      method: 'POST',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: `/agent/pending/${actionId}/cancel`, method: 'POST' })
 }
 
 export function listPending() {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl('/agent/api/pending'),
-      method: 'GET',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data || { actions: [] })
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: '/agent/api/pending', hideError: true })
 }
 
 export function pendingStatus(actionId) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl(`/agent/pending/${actionId}/status`),
-      method: 'GET',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data || {})
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: `/agent/pending/${actionId}/status`, hideError: true })
 }
 
 export function deleteSession(sessionId) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl(`/agent/session/${sessionId}/delete`),
-      method: 'POST',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: `/agent/session/${sessionId}/delete`, method: 'POST' })
 }
 
 export function openAlertAssistant(alertId) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl(`/alerts/api/${alertId}/open-assistant`),
-      method: 'POST',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: `/alerts/api/${alertId}/open-assistant`, method: 'POST' })
 }
 
 export function openAssetAssistant(assetId) {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: buildUrl(`/assets/api/${assetId}/open-assistant`),
-      method: 'POST',
-      header: commonHeaders(),
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
-        else reject(res)
-      },
-      fail: reject,
-    })
-  })
+  return request({ url: `/assets/api/${assetId}/open-assistant`, method: 'POST' })
 }
 
 let pendingSessionId = ''

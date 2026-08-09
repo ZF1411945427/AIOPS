@@ -31,9 +31,9 @@ def api_report_detail(report_id: int, db: Session = Depends(get_db)):
     if not report:
         return {"status": "error", "message": "报表不存在"}
     data = {}
-    if report.data:
+    if report.report_data:
         try:
-            data = json.loads(report.data)
+            data = json.loads(report.report_data)
         except (json.JSONDecodeError, TypeError):
             data = {}
     return {

@@ -248,8 +248,12 @@ def vector_search(
     asset_type: Optional[str] = None,
     severity: Optional[str] = None,
     tags: Optional[str] = None,
+    asset_id: Optional[int] = None,
 ) -> List[dict]:
     """语义检索：query 向量化 → 余弦相似度 Top-K → 返回结果.
+
+    asset_id 过滤：按文档所属资产过滤（经 kb_documents.asset_id 关联），
+    用于"查看某资产时只检索该资产的部署文档/关联知识"。
 
     返回结构: [{document_id, document_title, content, similarity, tags, asset_type, severity}, ...]
     """
@@ -263,6 +267,8 @@ def vector_search(
         return []
     # 加载切片（带过滤）
     q = db.query(KbChunk).filter(KbChunk.embedding_mode == "tfidf")
+    if asset_id is not None:
+        q = q.join(KbDocument, KbChunk.document_id == KbDocument.id).filter(KbDocument.asset_id == asset_id)
     if asset_type:
         q = q.filter(KbChunk.asset_type == asset_type)
     if severity:

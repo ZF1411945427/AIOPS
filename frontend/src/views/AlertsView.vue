@@ -49,11 +49,9 @@
       <button class="btn" @click="checkK8sEvents">K8S 事件检测</button>
       <div class="batch-actions" v-if="selected.size">
         <span class="batch-tip">已选 {{ selected.size }} 条</span>
-        <button class="btn" @click="batchAckSelected">批量确认</button>
         <button class="btn btn-primary" @click="batchResolveSelected">批量解决</button>
         <button class="btn" @click="selected.clear(); selected = selected">取消</button>
       </div>
-      <button v-else class="btn" @click="batchAck">全部确认</button>
       <button v-if="!selected.size" class="btn btn-primary" @click="batchResolve">全部解决</button>
     </div>
 
@@ -80,8 +78,7 @@
               <td><span class="badge" :class="a.status">{{ a.status }}</span></td>
               <td class="text-sm msg-cell">{{ a.message }}</td>
               <td>
-                <button v-if="a.status === 'triggered'" class="btn btn-sm" @click="ackAlert(a.id)">确认</button>
-                <button v-else-if="a.status === 'acknowledged'" class="btn btn-sm btn-primary" @click="resolveAlert(a.id)">解决</button>
+                <button v-if="a.status !== 'resolved'" class="btn btn-sm btn-primary" @click="resolveAlert(a.id)">解决</button>
                 <button class="btn btn-sm btn-rca" @click="openRca(a.id)">根因分析</button>
                 <button class="btn btn-sm btn-ai" @click="openAiRca(a.id)">AI 深度分析</button>
                 <button class="btn btn-sm btn-primary" @click="openAssistant(a.id)">💬 智能助手</button>
@@ -223,20 +220,6 @@ function toggleAll() {
   }
 }
 
-async function batchAckSelected() {
-  if (!selected.value.size) return
-  try {
-    await ElMessageBox.confirm(`确认将选中的 ${selected.value.size} 条告警标记为已确认？`, '批量确认')
-    const ids = [...selected.value]
-    await request.post('/alerts/api/batch-acknowledge', { ids })
-    ElMessage.success(`已确认 ${ids.length} 条告警`)
-    selected.value = new Set()
-    loadAlerts()
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error('批量确认失败: ' + (e.message || e))
-  }
-}
-
 async function batchResolveSelected() {
   if (!selected.value.size) return
   try {
@@ -332,35 +315,14 @@ async function checkK8sEvents() {
   }
 }
 
-async function batchAck() {
-  try {
-    await ElMessageBox.confirm('确认将所有已触发告警标记为已确认？', '批量确认')
-    const data = await request.post('/alerts/api/batch-acknowledge')
-    ElMessage.success(`已确认 ${data.acknowledged} 条告警`)
-    loadAlerts()
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error('批量确认失败: ' + (e.message || e))
-  }
-}
-
 async function batchResolve() {
   try {
-    await ElMessageBox.confirm('确认将所有已确认告警标记为已解决？', '批量解决')
+    await ElMessageBox.confirm('确认将所有未解决告警标记为已解决？', '批量解决')
     const data = await request.post('/alerts/api/batch-resolve')
     ElMessage.success(`已解决 ${data.resolved} 条告警`)
     loadAlerts()
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('批量解决失败: ' + (e.message || e))
-  }
-}
-
-async function ackAlert(id) {
-  try {
-    await request.post(`/alerts/api/${id}/acknowledge`)
-    ElMessage.success('已确认')
-    loadAlerts()
-  } catch (e) {
-    ElMessage.error('确认失败: ' + e.message)
   }
 }
 

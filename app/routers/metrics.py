@@ -112,16 +112,49 @@ def metrics_v2_query(q: str = "", asset_id: int = 0):
 
 
 @router.get("/api/v2/latest")
-def metrics_v2_latest(asset_id: int = 0):
-    """查询最新指标值（走 VM），返回格式兼容旧 /metrics/latest."""
-    latest = metric_v2_service.query_latest_values(asset_id=asset_id if asset_id else None)
+def metrics_v2_latest(asset_id: int = 0, aggregate: str = ""):
+    """查询最新指标值（走 VM）。
+
+    - asset_id=0 + aggregate=avg|sum|max|min: 跨资产聚合值
+    - asset_id>0: 返回该资产的最新值
+    - asset_id=0 且无 aggregate: 兼容旧行为(返回最后一条)
+    """
+    if asset_id == 0 and aggregate:
+        latest = metric_v2_service.query_latest_aggregated(aggregate=aggregate)
+    else:
+        latest = metric_v2_service.query_latest_values(asset_id=asset_id if asset_id else None)
     return JSONResponse(latest)
 
 
 @router.get("/api/v2/range")
-def metrics_v2_range(asset_id: int = 0, name: str = "", hours: int = 24):
-    """查询指标历史范围数据（走 VM），返回格式兼容旧 /metrics/data.
-    不传 name 时返回所有指标的历史数据."""
+def metrics_v2_range(asset_id: int = 0, name: str = "", hours: int = 24, aggregate: str = ""):
+    """查询指标历史范围数据（走 VM）。
+
+    - asset_id=0 + aggregate=avg|sum|max|min: 返回 {avg, series} 聚合+明细叠加
+    - asset_id>0: 返回该资产的时间序列
+    - asset_id=0 且无 aggregate: 返回所有资产数据
+    """
+    if asset_id == 0 and aggregate:
+        if name:
+            return JSONResponse(metric_v2_service.query_range_aggregated(name, aggregate=aggregate, hours=hours))
+        names = metric_v2_service.query_metric_names()
+        merged = {"avg": [], "series": []}
+        seen_avg = set()
+        seen_series = {}
+        for n in names:
+            r = metric_v2_service.query_range_aggregated(n, aggregate=aggregate, hours=hours)
+            for pt in r.get("avg", []):
+                k = pt["time"]
+                if k not in seen_avg:
+                    merged["avg"].append(pt)
+                    seen_avg.add(k)
+            for s in r.get("series", []):
+                sk = s["asset_id"]
+                if sk not in seen_series:
+                    seen_series[sk] = s
+                    merged["series"].append(s)
+        merged["avg"].sort(key=lambda x: x["time"])
+        return JSONResponse(merged)
     if name:
         data = metric_v2_service.query_range_data(asset_id=asset_id, name=name, hours=hours)
         return JSONResponse(data)
@@ -130,6 +163,20 @@ def metrics_v2_range(asset_id: int = 0, name: str = "", hours: int = 24):
     for n in names:
         all_data.extend(metric_v2_service.query_range_data(asset_id=asset_id, name=n, hours=hours))
     return JSONResponse(all_data)
+
+
+@router.post("/api/v2/custom-query")
+def metrics_v2_custom_query(body: dict):
+    """执行自定义 PromQL 查询.
+
+    body: {"promql": "...", "hours": 24}
+    """
+    promql = body.get("promql", "").strip()
+    if not promql:
+        return JSONResponse({"error": "promql 必填", "series": []}, status_code=400)
+    hours = int(body.get("hours", 24))
+    result = metric_v2_service.query_custom_promql(promql, hours=hours)
+    return JSONResponse(result)
 
 
 @router.get("/api/v2/names")

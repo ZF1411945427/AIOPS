@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from app.template_utils import get_templates
 
 from app.database import get_db
-from app.services import datasource_service
+from app.services import datasource_service, config_service
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/datasources", tags=["datasources"])
@@ -36,6 +36,26 @@ def api_datasource_list(db: Session = Depends(get_db)):
         "ds_types": datasource_service.DS_TYPES,
         "auth_types": datasource_service.AUTH_TYPES,
     })
+
+
+@router.get("/api/log-default")
+def api_log_default(db: Session = Depends(get_db)):
+    """返回日志中心默认数据源 id."""
+    val = config_service.get_config(db, "default_log_source_id", "")
+    try:
+        sid = int(val)
+    except (TypeError, ValueError):
+        sid = 0
+    return JSONResponse({"source_id": sid})
+
+
+@router.post("/api/log-default")
+async def api_log_default_set(request: Request, db: Session = Depends(get_db)):
+    """设置日志中心默认数据源 id."""
+    body = await request.json()
+    source_id = body.get("source_id", 0)
+    config_service.update_config(db, "default_log_source_id", str(source_id))
+    return JSONResponse({"ok": True, "source_id": source_id})
 
 
 @router.get("/api/{source_id}")

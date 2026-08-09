@@ -132,6 +132,14 @@
         <svg class="search-icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
           <circle cx="8.5" cy="8.5" r="5.5"/><path d="M12.5 12.5L17 17"/>
         </svg>
+        <span class="fm-search-label">业务域</span>
+        <el-select v-model="currentDomain.name" size="small" style="width:180px" @change="onDomainSwitch">
+          <el-option v-for="d in allDomains" :key="d.name" :value="d.name" :label="d.name" />
+        </el-select>
+        <span class="fm-search-divider"></span>
+        <svg class="search-icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="8.5" cy="8.5" r="5.5"/><path d="M12.5 12.5L17 17"/>
+        </svg>
         <input v-model="entityQuery" class="search-input" placeholder="搜索实体名称 / ci_type..." />
       </div>
 
@@ -413,6 +421,11 @@ async function enterDomain(d) {
   await loadDomainDetail()
 }
 
+async function onDomainSwitch(domainName) {
+  const d = allDomains.value.find(x => x.name === domainName)
+  if (d) await enterDomain(d)
+}
+
 function exitDomain() {
   mode.value = 'overview'
 }
@@ -617,10 +630,24 @@ html[data-theme="dark"] .fm-search-bar:focus-within {
 .search-input {
   flex: 1;
   border: none;
-  outline: none;
   background: transparent;
-  font-size: 13px;
-  color: var(--text-primary, #1e293b);
+  outline: none;
+  font-size: 14px;
+  color: inherit;
+}
+.search-input::placeholder {
+  color: var(--text-muted, #94a3b8);
+}
+.fm-search-label {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+}
+.fm-search-divider {
+  width: 1px;
+  height: 20px;
+  background: color-mix(in srgb, var(--text-muted, #94a3b8) 20%, transparent);
+  flex-shrink: 0;
 }
 html[data-theme="dark"] .search-input {
   color: #e2e8f0;

@@ -248,7 +248,6 @@
           <DockerListView v-else-if="activeView === 'docker-list'" />
           <KnowledgeView v-else-if="activeView === 'kb-list'" />
           <KnowledgeDocumentsView v-else-if="activeView === 'kb-documents'" />
-          <KnowledgeGraphView v-else-if="activeView === 'kb-graph'" />
           <GraphInferenceView v-else-if="activeView === 'graph-inference'" />
           <SmartRecommendView v-else-if="activeView === 'smart-recommend'" />
           <RunbooksView v-else-if="activeView === 'runbooks'" />
@@ -268,7 +267,6 @@
           <KnowledgeDraftView v-else-if="activeView === 'knowledge-draft'" />
           <RemediationEffectView v-else-if="activeView === 'remediation-effect'" />
           <AgentEvalView v-else-if="activeView === 'agent-eval'" />
-          <ABTestView v-else-if="activeView === 'ab-test'" />
           <RAGRerankView v-else-if="activeView === 'rag-rerank'" />
           <AnomalyBenchmarkView v-else-if="activeView === 'anomaly-benchmark'" />
           <AssetDiscoveryView v-else-if="activeView === 'asset-discovery'" />
@@ -279,13 +277,11 @@
           <RolesView v-else-if="activeView === 'roles-manage'" />
           <ObservabilityCorrelationView v-else-if="activeView === 'observability-correlation'" />
           <TraceAnomalyConfigView v-else-if="activeView === 'trace-anomaly-config'" />
-          <AgentGroundTruthView v-else-if="activeView === 'agent-ground-truth'" />
           <K8sHpaRecommendView v-else-if="activeView === 'k8s-hpa-recommend'" />
           <K8sResourceOptimizeView v-else-if="activeView === 'k8s-resource-optimize'" />
           <NetworkTestView v-else-if="activeView === 'network-test'" />
           <BackgroundTasksView v-else-if="activeView === 'background-tasks'" />
           <ContractCheckView v-else-if="activeView === 'contract-check'" />
-          <AlertCorrelationView v-else-if="activeView === 'alert-correlation'" />
           <RagEvalView v-else-if="activeView === 'rag-eval'" />
           <AuditMatrixView v-else-if="activeView === 'audit-matrix'" />
           <SecurityAuditView v-else-if="activeView === 'security-audit'" />
@@ -374,7 +370,6 @@ const DockerOverviewView = defineAsyncComponent(() => import('@/views/DockerOver
 const DockerListView = defineAsyncComponent(() => import('@/views/DockerListView.vue'))
 const KnowledgeView = defineAsyncComponent(() => import('@/views/KnowledgeView.vue'))
 const KnowledgeDocumentsView = defineAsyncComponent(() => import('@/views/KnowledgeDocumentsView.vue'))
-const KnowledgeGraphView = defineAsyncComponent(() => import('@/views/KnowledgeGraphView.vue'))
 const GraphInferenceView = defineAsyncComponent(() => import('@/views/GraphInferenceView.vue'))
 const SmartRecommendView = defineAsyncComponent(() => import('@/views/SmartRecommendView.vue'))
 const RunbooksView = defineAsyncComponent(() => import('@/views/RunbooksView.vue'))
@@ -394,7 +389,6 @@ const InspectionView = defineAsyncComponent(() => import('@/views/InspectionView
 const KnowledgeDraftView = defineAsyncComponent(() => import('@/views/KnowledgeDraftView.vue'))
 const RemediationEffectView = defineAsyncComponent(() => import('@/views/RemediationEffectView.vue'))
 const AgentEvalView = defineAsyncComponent(() => import('@/views/AgentEvalView.vue'))
-const ABTestView = defineAsyncComponent(() => import('@/views/ABTestView.vue'))
 const RAGRerankView = defineAsyncComponent(() => import('@/views/RAGRerankView.vue'))
 const AnomalyBenchmarkView = defineAsyncComponent(() => import('@/views/AnomalyBenchmarkView.vue'))
 const AssetDiscoveryView = defineAsyncComponent(() => import('@/views/AssetDiscoveryView.vue'))
@@ -409,13 +403,11 @@ const EdgeTunnelView = defineAsyncComponent(() => import('@/views/EdgeTunnelView
 const RolesView = defineAsyncComponent(() => import('@/views/RolesView.vue'))
 const ObservabilityCorrelationView = defineAsyncComponent(() => import('@/views/ObservabilityCorrelationView.vue'))
 const TraceAnomalyConfigView = defineAsyncComponent(() => import('@/views/TraceAnomalyConfigView.vue'))
-const AgentGroundTruthView = defineAsyncComponent(() => import('@/views/AgentGroundTruthView.vue'))
 const K8sHpaRecommendView = defineAsyncComponent(() => import('@/views/K8sHpaRecommendView.vue'))
 const K8sResourceOptimizeView = defineAsyncComponent(() => import('@/views/K8sResourceOptimizeView.vue'))
 const NetworkTestView = defineAsyncComponent(() => import('@/views/NetworkTestView.vue'))
 const BackgroundTasksView = defineAsyncComponent(() => import('@/views/BackgroundTasksView.vue'))
 const ContractCheckView = defineAsyncComponent(() => import('@/views/ContractCheckView.vue'))
-const AlertCorrelationView = defineAsyncComponent(() => import('@/views/AlertCorrelationView.vue'))
 const RagEvalView = defineAsyncComponent(() => import('@/views/RagEvalView.vue'))
 const AuditMatrixView = defineAsyncComponent(() => import('@/views/AuditMatrixView.vue'))
 const SecurityAuditView = defineAsyncComponent(() => import('@/views/SecurityAuditView.vue'))
@@ -513,7 +505,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'alert-correlation', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'kb-graph', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'ab-test', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'agent-ground-truth', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
+const VUE_PAGES = new Set(['roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
 
 function _flattenItems(items) {
   const result = []

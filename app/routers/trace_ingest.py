@@ -11,9 +11,33 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Span, DataSource
-from app.services.trace_ingest_service import ingest_otlp_json, fetch_from_jaeger
+from app.services.trace_ingest_service import ingest_otlp_json, ingest_otlp_protobuf, fetch_from_jaeger
 
 router = APIRouter(prefix="/api/v1/traces", tags=["trace_ingest"])
+
+standard_router = APIRouter(tags=["trace_ingest"])
+
+
+@standard_router.post("/v1/traces")
+async def receive_otlp_standard(request: Request, db: Session = Depends(get_db)):
+    """标准 OTLP/HTTP 端点。
+
+    OTel SDK exporter endpoint 语义: 请求 URL = OTEL_EXPORTER_OTLP_ENDPOINT + /v1/traces。
+    body 按 Content-Type 分发: application/json → OTLP JSON;application/x-protobuf → OTLP protobuf。
+    """
+    try:
+        body = await request.body()
+        content_type = request.headers.get("content-type", "")
+        if "json" in content_type.lower():
+            otlp_data = json.loads(body)
+            result = ingest_otlp_json(db, otlp_data)
+        else:
+            result = ingest_otlp_protobuf(db, body)
+        return JSONResponse(result)
+    except json.JSONDecodeError:
+        return JSONResponse({"is_success": False, "message": "Invalid JSON format"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"is_success": False, "message": str(e)}, status_code=200)
 
 
 @router.post("/otlp")
@@ -71,7 +95,8 @@ def ingest_status(db: Session = Depends(get_db)):
         "jaeger_sources": [{"id": s.id, "name": s.name, "endpoint": s.endpoint, "enabled": s.enabled} for s in jaeger_sources],
         "otel_sources": [{"id": s.id, "name": s.name, "endpoint": s.endpoint, "enabled": s.enabled} for s in otel_sources],
         "latest_span_time": latest_time,
-        "otlp_endpoint": "/api/v1/traces/otlp",
+        "otlp_endpoint": "/v1/traces",
+        "otlp_base": "http://<AIOPS-IP>:8000",
     })
 
 
@@ -79,15 +104,16 @@ def ingest_status(db: Session = Depends(get_db)):
 def agent_guide():
     """获取各语言/环境的 Agent 安装指引（供前端展示）"""
     return JSONResponse({
-        "otlp_endpoint": "/api/v1/traces/otlp",
+        "otlp_endpoint": "/v1/traces",
+        "otlp_base": "http://<AIOps-IP>:8000",
         "guides": {
             "java": {
                 "title": "Java (Spring Boot / JAR)",
                 "type": "javaagent 自动注入",
                 "steps": [
                     "1. 下载 OpenTelemetry Java Agent:\n   curl -L -o opentelemetry-javaagent.jar https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar",
-                    "2. 启动服务时挂载 Agent:\n   java -javaagent:./opentelemetry-javaagent.jar \\\n        -Dotel.service.name=your-service-name \\\n        -Dotel.exporter.otlp.endpoint=http://<AIOps-IP>:8000/api/v1/traces/otlp \\\n        -Dotel.exporter.otlp.protocol=http/json \\\n        -jar your-app.jar",
-                    "3. 或在 Dockerfile 中内置:\n   ENV JAVA_TOOL_OPTIONS=-javaagent:/otel/opentelemetry-javaagent.jar\n   ENV OTEL_SERVICE_NAME=your-service-name\n   ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000/api/v1/traces/otlp\n   ENV OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
+                    "2. 启动服务时挂载 Agent（endpoint 填 base 地址，SDK 会自动请求 /v1/traces）:\n   java -javaagent:./opentelemetry-javaagent.jar \\\n        -Dotel.service.name=your-service-name \\\n        -Dotel.exporter.otlp.endpoint=http://<AIOps-IP>:8000 \\\n        -Dotel.exporter.otlp.protocol=http/protobuf \\\n        -Dotel.metrics.exporter=none \\\n        -Dotel.logs.exporter=none \\\n        -jar your-app.jar",
+                    "3. 或在 Dockerfile 中内置:\n   ENV JAVA_TOOL_OPTIONS=-javaagent:/otel/opentelemetry-javaagent.jar\n   ENV OTEL_SERVICE_NAME=your-service-name\n   ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000\n   ENV OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf\n   ENV OTEL_METRICS_EXPORTER=none\n   ENV OTEL_LOGS_EXPORTER=none",
                 ],
             },
             "python": {
@@ -95,8 +121,8 @@ def agent_guide():
                 "type": "自动注入 + 手动 SDK",
                 "steps": [
                     "1. 安装 OpenTelemetry 包:\n   pip install opentelemetry-distro opentelemetry-exporter-otlp\n   opentelemetry-bootstrap -a install",
-                    "2. 自动注入启动:\n   opentelemetry-instrument \\\n        --service_name your-service-name \\\n        --exporter_otlp_endpoint http://<AIOps-IP>:8000/api/v1/traces/otlp \\\n        --exporter_otlp_protocol http/json \\\n        python app.py",
-                    "3. 或在代码中手动配置:\n   from opentelemetry import trace\n   from opentelemetry.sdk.trace import TracerProvider\n   from opentelemetry.sdk.trace.export import BatchSpanProcessor\n   from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter\n\n   provider = TracerProvider()\n   exporter = OTLPSpanExporter(endpoint='http://<AIOps-IP>:8000/api/v1/traces/otlp')\n   provider.add_span_processor(BatchSpanProcessor(exporter))\n   trace.set_tracer_provider(provider)",
+                    "2. 自动注入启动:\n   opentelemetry-instrument \\\n        --service_name your-service-name \\\n        --exporter_otlp_endpoint http://<AIOps-IP>:8000 \\\n        --exporter_otlp_protocol http/protobuf \\\n        python app.py",
+                    "3. 或在代码中手动配置（endpoint 需带 /v1/traces）:\n   from opentelemetry import trace\n   from opentelemetry.sdk.trace import TracerProvider\n   from opentelemetry.sdk.trace.export import BatchSpanProcessor\n   from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter\n\n   provider = TracerProvider()\n   exporter = OTLPSpanExporter(endpoint='http://<AIOps-IP>:8000/v1/traces')\n   provider.add_span_processor(BatchSpanProcessor(exporter))\n   trace.set_tracer_provider(provider)",
                 ],
             },
             "go": {
@@ -104,7 +130,7 @@ def agent_guide():
                 "type": "SDK 手动埋点",
                 "steps": [
                     "1. 安装 OpenTelemetry Go SDK:\n   go get go.opentelemetry.io/otel \\\n        go.opentelemetry.io/otel/sdk \\\n        go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp",
-                    "2. 代码初始化:\n   import (\n     \"go.opentelemetry.io/otel\"\n     \"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp\"\n     \"go.opentelemetry.io/otel/sdk/trace\"\n   )\n\n   exporter, _ := otlptracehttp.New(ctx,\n     otlptracehttp.WithEndpoint(\"<AIOps-IP>:8000\"),\n     otlptracehttp.WithURLPath(\"/api/v1/traces/otlp\"),\n     otlptracehttp.WithInsecure(),\n   )\n   tp := trace.NewTracerProvider(\n     trace.WithBatcher(exporter),\n   )\n   otel.SetTracerProvider(tp)",
+                    "2. 代码初始化:\n   import (\n     \"go.opentelemetry.io/otel\"\n     \"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp\"\n     \"go.opentelemetry.io/otel/sdk/trace\"\n   )\n\n   exporter, _ := otlptracehttp.New(ctx,\n     otlptracehttp.WithEndpoint(\"<AIOps-IP>:8000\"),\n     otlptracehttp.WithURLPath(\"/v1/traces\"),\n     otlptracehttp.WithInsecure(),\n   )\n   tp := trace.NewTracerProvider(\n     trace.WithBatcher(exporter),\n   )\n   otel.SetTracerProvider(tp)",
                 ],
             },
             "nodejs": {
@@ -112,7 +138,7 @@ def agent_guide():
                 "type": "自动注入",
                 "steps": [
                     "1. 安装包:\n   npm install @opentelemetry/auto-instrumentations-node @opentelemetry/exporter-trace-otlp-http",
-                    "2. 启动时加载:\n   node --require @opentelemetry/auto-instrumentations-node/register app.js\n\n   环境变量:\n   export OTEL_SERVICE_NAME=your-service-name\n   export OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000/api/v1/traces/otlp\n   export OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
+                    "2. 启动时加载:\n   node --require @opentelemetry/auto-instrumentations-node/register app.js\n\n   环境变量:\n   export OTEL_SERVICE_NAME=your-service-name\n   export OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000\n   export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
                 ],
             },
             "k8s": {
@@ -120,7 +146,7 @@ def agent_guide():
                 "type": "OpenTelemetry Operator + Sidecar",
                 "steps": [
                     "1. 安装 OTel Operator:\n   kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/latest/download/opentelemetry-operator.yaml",
-                    "2. 创建 Instrumentation 实例 (指向本系统):\n   apiVersion: opentelemetry.io/v1alpha1\n   kind: Instrumentation\n   metadata:\n     name: aiops-tracing\n   spec:\n     exporter:\n       endpoint: http://<AIOps-IP>:8000/api/v1/traces/otlp\n     propagators: [\"tracecontext\", \"baggage\"]\n     sampler:\n       type: parentbased_traceidratio\n       argument: \"0.25\"",
+                    "2. 创建 Instrumentation 实例 (指向本系统):\n   apiVersion: opentelemetry.io/v1alpha1\n   kind: Instrumentation\n   metadata:\n     name: aiops-tracing\n   spec:\n     exporter:\n       endpoint: http://<AIOps-IP>:8000\n       tls:\n         insecure: true\n     propagators: [\"tracecontext\", \"baggage\"]\n     sampler:\n       type: parentbased_traceidratio\n       argument: \"0.25\"",
                     "3. 给 namespace 打标签启用自动注入:\n   kubectl label namespace production opentelemetry-injection=enabled\n\n   之后该 namespace 下所有 Pod 自动注入 Agent，无需改代码！",
                 ],
             },
@@ -128,8 +154,8 @@ def agent_guide():
                 "title": "Docker (单机容器)",
                 "type": "环境变量 + Volume 挂载",
                 "steps": [
-                    "1. Java 容器示例:\n   docker run -d \\\n     -e JAVA_TOOL_OPTIONS=-javaagent:/otel/opentelemetry-javaagent.jar \\\n     -e OTEL_SERVICE_NAME=your-service \\\n     -e OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000/api/v1/traces/otlp \\\n     -e OTEL_EXPORTER_OTLP_PROTOCOL=http/json \\\n     -v /path/to/opentelemetry-javaagent.jar:/otel/opentelemetry-javaagent.jar \\\n     your-image:latest",
-                    "2. Python 容器示例:\n   docker run -d \\\n     -e OTEL_SERVICE_NAME=your-service \\\n     -e OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000/api/v1/traces/otlp \\\n     -e OTEL_EXPORTER_OTLP_PROTOCOL=http/json \\\n     your-image:latest\n     opentelemetry-instrument python app.py",
+                    "1. Java 容器示例:\n   docker run -d \\\n     -e JAVA_TOOL_OPTIONS=-javaagent:/otel/opentelemetry-javaagent.jar \\\n     -e OTEL_SERVICE_NAME=your-service \\\n     -e OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000 \\\n     -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \\\n     -e OTEL_METRICS_EXPORTER=none \\\n     -e OTEL_LOGS_EXPORTER=none \\\n     -v /path/to/opentelemetry-javaagent.jar:/otel/opentelemetry-javaagent.jar \\\n     your-image:latest",
+                    "2. Python 容器示例:\n   docker run -d \\\n     -e OTEL_SERVICE_NAME=your-service \\\n     -e OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000 \\\n     -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \\\n     your-image:latest\n     opentelemetry-instrument python app.py",
                 ],
             },
             "middleware": {
@@ -143,8 +169,8 @@ def agent_guide():
                 "title": "传统服务 (物理机 / 虚拟机)",
                 "type": "Agent + 环境变量",
                 "steps": [
-                    "1. 下载对应语言的 OTel Agent 到服务器:\n   Java: curl -L -o /opt/otel/opentelemetry-javaagent.jar <url>\n   Python: pip install opentelemetry-distro && opentelemetry-bootstrap -a install\n   Node: npm install -g @opentelemetry/auto-instrumentations-node",
-                    "2. 修改启动脚本加环境变量:\n   export OTEL_SERVICE_NAME=your-service\n   export OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000/api/v1/traces/otlp\n   export OTEL_EXPORTER_OTLP_PROTOCOL=http/json\n\n   Java: java -javaagent:/opt/otel/opentelemetry-javaagent.jar -jar app.jar\n   Python: opentelemetry-instrument python app.py\n   Node: node --require @opentelemetry/auto-instrumentations-node/register app.js",
+                    "1. 下载对应语言的 OTel Agent 到服务器:\n   Java: curl -L -o /opt/otel/opentelemetry-javaagent.jar https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar\n   Python: pip install opentelemetry-distro && opentelemetry-bootstrap -a install\n   Node: npm install -g @opentelemetry/auto-instrumentations-node",
+                    "2. 修改启动脚本加环境变量（endpoint 填 base 地址，SDK 自动请求 /v1/traces）:\n   export OTEL_SERVICE_NAME=your-service\n   export OTEL_EXPORTER_OTLP_ENDPOINT=http://<AIOps-IP>:8000\n   export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf\n   export OTEL_METRICS_EXPORTER=none\n   export OTEL_LOGS_EXPORTER=none\n\n   Java: java -javaagent:/opt/otel/opentelemetry-javaagent.jar -jar app.jar\n   Python: opentelemetry-instrument python app.py\n   Node: node --require @opentelemetry/auto-instrumentations-node/register app.js",
                 ],
             },
         }
