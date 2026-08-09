@@ -945,3 +945,75 @@
 - `db_port` 字段类型 Integer，默认值 3306
 - `db_user` / `db_password` / `db_name` 字段沿用 CONTRACT.md 第五章敏感字段掩码规则
 
+
+---
+
+## 第九章：AI 运维沙盒（AIOps Sandbox）字段契约
+
+> 本模块为独立功能，暂不侵入现有 Agent/Edge 执行链。用于控制 AI Agent 下发到节点后的作用范围。
+> 三张表：**sandbox_configs**（全局配置）、**sandbox_policies**（细粒度策略）、**sandbox_execution_logs**（沙盒执行日志）。
+
+### 9.1 sandbox_configs（全局沙盒配置，单行）
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | |
+| 
+ame | String(64) | "default" | 配置名 |
+| is_enabled | Boolean | false | 沙盒总开关（默认关闭，不影响现有功能） |
+| dry_run_mode | Boolean | false | 干运行模式：记录"将执行"但不真正执行 |
+| max_actions_per_session | Integer | 10 | 单会话最大执行次数 |
+| max_actions_per_day | Integer | 50 | 单日最大执行次数 |
+| max_risk_level | String(16) | "critical" | 允许的最大风险等级（read_only/advisory/medium/high/critical，默认不限制） |
+| execution_window_start | String(5) | "" | 写操作允许开始时间 "HH:MM"，空=不限制 |
+| execution_window_end | String(5) | "" | 写操作允许结束时间 "HH:MM"，空=不限制 |
+| created_at | DateTime | now | |
+| updated_at | DateTime | now/onupdate | |
+
+### 9.2 sandbox_policies（细粒度沙箱策略）
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | |
+| 
+ame | String(64) | - | 策略名 |
+| description | Text | "" | 描述 |
+| scope_type | String(16) | "global" | 作用范围类型：global / role / user / session |
+| scope_id | Integer | 0 | 作用范围 ID（role_id/user_id/session_id） |
+| llowed_asset_ids | Text | "[]" | 允许操作的资产白名单（JSON 数组） |
+| locked_asset_ids | Text | "[]" | 禁止操作的资产黑名单（JSON 数组） |
+| llowed_tools | Text | "[]" | 允许调用的工具白名单（JSON 数组，空=继承全部） |
+| locked_tools | Text | "[]" | 禁止调用的工具黑名单（JSON 数组） |
+| llowed_commands | Text | "[]" | 允许的命令前缀白名单（JSON 数组，如 ["systemctl restart","df"]） |
+| locked_commands | Text | "[]" | 禁止的命令黑名单（JSON 数组，支持正则） |
+| max_risk_level | String(16) | "critical" | 本策略允许的最大风险等级 |
+| max_actions_per_day | Integer | 0 | 本策略单日最大执行次数（0=继承全局） |
+| equire_second_approval | Boolean | false | 高危操作是否需要二级审批 |
+| is_enabled | Boolean | true | 策略是否启用 |
+| created_at | DateTime | now | |
+| updated_at | DateTime | now/onupdate | |
+
+### 9.3 sandbox_execution_logs（沙盒执行日志）
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | |
+| session_id | Integer | 0 | 关联会话 ID |
+| ction_type | String(32) | "" | 动作类型（restart/clean/scale/script/run_command） |
+| 	ool_name | String(64) | "" | 调用的 MCP 工具名 |
+| sset_id | Integer | 0 | 目标资产 ID |
+| isk_level | String(16) | "medium" | 动作风险等级 |
+| mode | String(8) | "live" | 执行模式：dry_run / live |
+| payload | Text | "{}" | 动作参数（JSON） |
+| decision | String(16) | "allowed" | 决策：allowed / rejected / dry_run |
+| eject_reason | String(255) | "" | 拒绝原因 |
+| pproved_by | Integer | 0 | 审批人 ID |
+| created_at | DateTime | now | |
+
+### 9.4 约定
+
+- 所有 JSON 字段用 Text 列存 JSON 字符串，后端提供 get_xxx() 解析方法
+- 风险等级枚举：ead_only < dvisory < medium < high < critical（只升不降）
+- 决策顺序：先查黑名单（blocked）→ 再查白名单（allowed）→ 再查风险等级 → 再查执行配额
+- 黑名单优先级高于白名单
+- 本模块独立，不修改 gent_service.py / emediation_service.py / edge_tunnel_service.py 现有执行链

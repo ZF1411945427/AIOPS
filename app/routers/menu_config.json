@@ -740,5 +740,26 @@
         ]
       }
     ]
+  },
+  {
+    "key": "sandbox",
+    "label": "AI 运维沙盒",
+    "icon": "Lock",
+    "description": "控制 AI Agent 下发到节点后的作用范围：资产白名单、工具白名单、命令黑名单、风险等级、执行配额（独立模块，测试闭环后融入主流程）",
+    "items": [
+      {
+        "key": "sandbox-management",
+        "label": "沙盒管理",
+        "items": [
+          {
+            "key": "sandbox-overview",
+            "label": "沙盒管理",
+            "type": "vue",
+            "icon": "Setting",
+            "path": "/sandbox"
+          }
+        ]
+      }
+    ]
   }
 ]

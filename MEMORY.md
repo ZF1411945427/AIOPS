@@ -2,6 +2,37 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-09: AI 运维沙盒(Sandbox)独立模块落地
+
+- **目标**: 控制 AI Agent 下发到节点后的作用范围。独立菜单，暂不侵入 agent_service/remediation_service/edge_tunnel_service 现有执行链，测试闭环后再融入
+- **新增表**: `sandbox_configs`(全局配置,单行) / `sandbox_policies`(细粒度策略) / `sandbox_execution_logs`(执行日志)
+- **策略字段**: scope_type(global/role/user/session)、资产/工具/命令黑白名单、max_risk_level、每日配额、require_second_approval、执行窗口
+- **决策顺序**: 黑名单→白名单→风险等级→执行窗口(高危写操作)
+- **文件**:
+  - `app/models.py` 末尾 3 个模型
+  - `app/services/sandbox_service.py` 策略引擎(evaluate_request/log_execution)
+  - `app/routers/sandbox.py` API(prefix=/sandbox): config/policies/evaluate/logs/risk-levels/scope-types
+  - `frontend/src/views/SandboxView.vue` 4 个 Tab(全局配置/策略管理/决策测试/执行日志)
+  - `menu_config.json` 新增 `sandbox` 分组 → `sandbox-management` → `sandbox-overview`(path=/sandbox, key 已授权 admin)
+- **坑**: 新 API 必须加入 `main.py` PUBLIC_PATHS 的 `/sandbox`,否则 AuthMiddleware 未认证重定向到 /login 返回 SPA HTML 而非 JSON
+- **已验证**: config/policies/evaluate/logs 全部正常;沙盒关闭时 evaluate 返回 allowed,开启 dry_run 后返回 dry_run
+- **CONTRACT.md 第九章** 已记录字段契约
+
+### 2026-08-09: 清理所有演示数据，准备接入靶场
+
+- **动作**: 编写 `_clear_data.py` 清空 demo 和 real 两个库共 120 张表(PRAGMA foreign_keys=OFF 全表 DELETE FROM)
+- **保留**: admin 用户 + 3 个预设角色 + 菜单权限 + 通知渠道 + seed marker(`seed_data_applied=v2`)
+- **效果**: 重启后端后 seed 被跳过(日志无 seed 记录),`/assets/api/list` 返回 0 条;胚芽模板/AgentConfig/TagCategory 因独立于 marker 会在启动时重新播种(参考数据,非展示数据)
+- **注意**: 清理脚本已删除,如需再次清理可重新生成;种子标记在 SystemConfig 表中,若删除 DB 文件需重新标记
+
+### 2026-08-09: License 公钥不匹配修复 + gRPC opentelemetry 依赖补装
+
+- **问题1**: gRPC OTLP TraceService 启动失败 `No module named 'opentelemetry'`。根因: `app/grpc_server.py` 模块顶层 import opentelemetry,main.py import grpc_server 时即失败。修复: 改为懒加载(import 移到函数内),并补装 `opentelemetry-proto`(注意!后端跑在 `C:\Users\zhuming\AppData\Local\hermes\hermes-agent\venv` 的 Python 3.11,不是系统 Python 3.13,必须用该 venv 的 python -m pip install)
+- **问题2**: 全站 403 `授权签名验证失败`。根因: commit `988e252` 重导了 License 公钥(代码硬编码 + tools/public_key.pem),但本地 `tools/private_key.pem` 是旧私钥,与线上公钥不匹配 → 旧 license.lic 验不过。修复(经用户确认): 用本地私钥推导公钥,同步更新 `app/services/license_service.py` 的 PUBLIC_KEY_PEM 和 `tools/public_key.pem`,再用 `tools/generate_license.py` 重签 `license.lic`(客户"开发测试"、旗舰版、2099-12-31、指纹 329b1dfdc67bddc68de64d03a1581a44、max_nodes 9999)
+- **已验证**: `/license/api/status` 返回 `{"status":"active","valid":true,"remaining_days":26807}`;gRPC TraceService listening on 0.0.0.0:4317
+- **坑**: `tools/public_key.pem` 虽已在 .gitignore,但加入前已被 git 追踪,需 `git rm --cached tools/public_key.pem` 才生效
+- **注意**: 现本地私钥即授权私钥,必须妥善保管(已 gitignore);公钥文件路径: `app/services/license_service.py:19`
+
 ### 2026-08-09: 日志搜索修复——level 排除法保留堆栈行
 
 - **根因**: 正向 `level=~"(?i)^error$"` 标签过滤会排除无 level 标签的堆栈行,导致多行合并失效
