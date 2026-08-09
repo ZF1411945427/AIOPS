@@ -2248,3 +2248,31 @@ class SandboxExecutionLog(Base):
     approved_by = Column(Integer, default=0)                                 # 审批人 ID
     created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
 
+
+class AutonomousCycle(Base):
+    """自主 AI Agent 巡检闭环记录。"""
+    __tablename__ = "autonomous_cycles"
+
+    STATUS_RUNNING = "running"
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_PARTIAL = "partial"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cycle_id = Column(String(36), default=lambda: str(uuid.uuid4()), index=True)
+    status = Column(String(16), default=STATUS_RUNNING)
+    phase = Column(String(16), default="perceive")  # perceive / analyze / act / verify
+    summary = Column(String(500), default="")
+    detail = Column(Text, default="")
+    issues_found = Column(Text, default="[]")        # JSON: [{asset_id, metric, severity, description}]
+    actions_taken = Column(Text, default="[]")        # JSON: [{action_type, asset_id, command, result, success}]
+    llm_analysis = Column(Text, default="")           # LLM 原始分析输出
+    error_message = Column(String(500), default="")
+    asset_count = Column(Integer, default=0)
+    issue_count = Column(Integer, default=0)
+    action_count = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    duration_ms = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
+    finished_at = Column(DateTime, nullable=True)
+

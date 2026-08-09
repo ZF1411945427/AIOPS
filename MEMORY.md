@@ -2,6 +2,54 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-10: AI Agent 自主运维闭环落地
+
+- **补齐差距**: edge agent 只是执行工具，真正 AI Agent 需要云端 LLM 大脑决策。新增自主巡检闭环
+- **新增 `app/services/agent_autonomous.py`**: 感知→分析→执行→验证 闭环，默认每 5 分钟由 main.py background_loop 触发
+  - 感知: 遍历资产查最新指标（CPU/内存/磁盘 > 阈值分级）+ 活跃告警
+  - 分析: 规则引擎生成修复计划（CPU critical → ps aux 排查 top 进程 等）
+  - 执行: 通过 route_exec() 下发（有 agent 走隧道，无则 SSH 回退）
+  - 验证: 记录执行结果到 AutonomousCycle 表
+- **新增 `app/routers/agent_autonomous.py`**: GET /history + POST /trigger
+- **前端 `AgentAutonomousView.vue`**: 巡检历史看板 + 手动触发 + 统计
+- **菜单**: AI Agent 管控 → Agent 自主巡检
+- **场景验证**: 注入 vm-132-master2 CPU=95.5% critical → 闭环发现→生成 ps aux→route_exec 下发（SSH 通道，因无 agent 且 SSH 不通而失败，闭环逻辑完整）
+- **文档**: `docs/AI_Agent_自主运维闭环技术白皮书.md`
+
+### 2026-08-09: Agent 全生命周期管控体系 — 下发/监控/命令/沙盒四合一
+
+- **菜单改造**: "AI 运维沙盒" → "AI Agent 管控"，包含 Agent 管理（下发与监控）+ 沙盒策略（沙盒管理）
+- **新增 `app/services/agent_deploy_service.py`**: 一键下发 agent 到目标节点，流程：SSH 检测 OS → 安装 python3 → 推送 edge_agent.py → 写入 config → 创建 systemd → 启动 → 等待注册（后台异步任务）
+- **新增 `app/routers/agent_deploy.py`**: 下发 API + 统一命令路由 `route_exec()`（隧道优先，SSH 回退）+ Agent 清单/命令日志/可部署资产清单
+- **新增 `frontend/src/views/AgentManageView.vue`**: 四 tab 页面（下发/监控/命令/日志），含部署进度条、实时指标看板、命令执行终端
+- **增强 `edge_agent/edge_agent.py`**: 新增 `collect_metrics()` 采集 CPU/内存/磁盘/负载，每 60s 通过 WebSocket 上报
+- **增强 `app/services/edge_tunnel_service.py`**: 新增 `save_latest_metrics()` / `get_latest_metrics()` 指标缓存
+- **增强 `app/routers/edge_tunnel.py`**: 新增 `metric_report` 消息处理 + `GET /edge/metrics/{agent_id}` 暴露指标
+- **注册路由** `app/main.py` + **权限** `role_menus` 添加 `agent-deploy`、`agent-management`
+- **License 白名单** `license_service.py` 添加 `/agent`、`/edge/metrics`、`/sandbox`
+
+### 2026-08-09: 架构巡检图性能优化 (N+1 → 批量预取)
+
+- `/health-map/api/domains` 响应从 10s+ 优化至 ~300ms
+- **根因**: `fetch_domains()` 全表查所有资产后，对每个资产循环执行 `compute_health()`，每个资产触发 2~4 次 SQL（Alert/MetricRecord/Span ILIKE 全表扫描），总查询数 ≈ 1 + 4N
+- **优化方案**:
+  1. 新增 `_prefetch_spans_by_service` — 一次性查出窗口内所有 span 按 service_name 分组
+  2. 新增 `_match_service_names_in_memory` — 内存匹配替代逐资产 ILIKE 前导通配符查询
+  3. 新增 `_prefetch_*_bulk` 系列函数 — 批量预取 Alert/MetricRecord 按 asset_id 分组，内存计算健康状态
+  4. 新增 `_compute_health_bulk` — 零 SQL 的健康计算入口
+  5. 保持原 `compute_health` 函数不变（供 fetch_overview/fetch_entity_detail 使用）
+- **修复索引 BUG**: `main.py:216` 的 `idx_spans_service_time` 索引列名 `start_time` → `started_at`（实际列名不匹配，索引从未生效）
+- 当前查询数: 原 1+4N → 现约 5 次 SQL（assets + alerts + metrics + distinct service_names + spans window）
+
+### 2026-08-09: 拉取最新 hub 代码
+
+- 拉取 main 分支: 1512350 → 01c54b0 (Fast-forward)
+- 新增: Sandbox 前后端 (sandbox.py/sandbox_service.py/SandboxView.vue)
+- 新增: MEMORY.md 记录项、menu_config.json 新菜单、TraceAgentGuide 调整
+- 更新: CONTRACT.md 大幅重构、grpc_server.py/main.py 微调
+- 删除: tools/public_key.pem
+- 本地 `.gitignore` 修改已 stash/pop 自动合并
+
 ### 2026-08-09: AI 运维沙盒(Sandbox)独立模块落地
 
 - **目标**: 控制 AI Agent 下发到节点后的作用范围。独立菜单，暂不侵入 agent_service/remediation_service/edge_tunnel_service 现有执行链，测试闭环后再融入

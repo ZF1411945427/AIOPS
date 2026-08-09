@@ -59,6 +59,22 @@ def get_pending_commands(agent_id: str) -> list:
 _ONLINE_AGENTS: Dict[str, dict] = {}
 _ONLINE_LOCK = threading.Lock()
 
+# agent 最新指标缓存（agent_id -> metrics dict）
+_AGENT_METRICS: Dict[str, dict] = {}
+_METRICS_LOCK = threading.Lock()
+
+
+def save_latest_metrics(agent_id: str, metrics: dict):
+    """保存 agent 上报的最新指标。"""
+    with _METRICS_LOCK:
+        _AGENT_METRICS[agent_id] = metrics
+
+
+def get_latest_metrics(agent_id: str) -> dict:
+    """获取 agent 最新指标。"""
+    with _METRICS_LOCK:
+        return _AGENT_METRICS.get(agent_id, {})
+
 
 def register_online(agent_id: str, ws: WebSocket, session_id: int):
     """注册 edge agent 上线，创建 outgoing 消息队列。"""
@@ -164,17 +180,19 @@ def register_or_update_session(
 
 
 def _bind_to_asset(db: Session, session: EdgeSession):
-    """把 EdgeSession 绑定到 Asset（按 hostname 优先，其次 IP）。"""
+    """把 EdgeSession 绑定到 Asset（按 IP 优先，其次 hostname）。"""
     if session.asset_id:
-        return  # 已绑定
+        return
     asset = None
-    if session.hostname:
-        asset = db.query(Asset).filter(Asset.name == session.hostname).first()
-    if not asset:
-        for ip in session.get_ip_addresses():
+    # 先按 IP 匹配（更精确）
+    for ip in session.get_ip_addresses():
+        if ip:
             asset = db.query(Asset).filter(Asset.ip == ip).first()
             if asset:
                 break
+    # 再按 hostname 匹配
+    if not asset and session.hostname:
+        asset = db.query(Asset).filter(Asset.name == session.hostname).first()
     if asset:
         session.asset_id = asset.id
         asset.edge_agent_id = session.agent_id

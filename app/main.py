@@ -64,7 +64,7 @@ from app.routers import incidents, dashboard, dashboard_config, ops_analytics, r
 # tracing 链路追踪域
 from app.routers import traces, traces_api, trace_anomaly, trace_ingest, trace_rca, trace_view, dtw, pagerank_rca, log_rca, log_anomaly, logs
 # platform 平台与集成域
-from app.routers import auth, users, roles, settings, system, system_posture, audit, menu, license, tenant_management, tokens, ws, api_v1, mobile, health_map, network_test, datasources, es_integration, event_sources, events, kafka_pipeline, netflow, feature_store, ci_models, drain, granger, idice, trend_prediction, prediction_models, predictions, predictions_enhanced, pcadr, metrics, notifications, notification_templates, correlation, observability_correlation, script_exec, ansible, change_workflow, workflow, chatops, discovery, diagnostic_tools
+from app.routers import auth, users, roles, settings, system, system_posture, audit, menu, license, tenant_management, tokens, ws, api_v1, mobile, health_map, network_test, datasources, es_integration, event_sources, events, kafka_pipeline, netflow, feature_store, ci_models, drain, granger, idice, trend_prediction, prediction_models, predictions, predictions_enhanced, pcadr, metrics, notifications, notification_templates, correlation, observability_correlation, script_exec, ansible, change_workflow, workflow, chatops, discovery, diagnostic_tools, agent_deploy, agent_autonomous
 # admin 系统管理路由（领域清单 + 背景任务看板，P1 任务#4/#6）
 from app.routers import admin
 from app.routers import sandbox
@@ -213,7 +213,7 @@ for _eng in get_all_engines().values():
             "CREATE INDEX IF NOT EXISTS idx_alerts_asset_id ON alerts (asset_id)",
             "CREATE INDEX IF NOT EXISTS idx_k8s_events_cluster_ns ON k8s_events (cluster, namespace, last_seen_at)",
             "CREATE INDEX IF NOT EXISTS idx_notif_logs_alert_id ON notification_logs (alert_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_spans_service_time ON spans (service_name, start_time)",
+            "CREATE INDEX IF NOT EXISTS idx_spans_service_time ON spans (service_name, started_at)",
             "CREATE INDEX IF NOT EXISTS idx_asset_changes_asset_ts ON asset_change_logs (asset_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents (status, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_tool_inv_session ON tool_invocations (session_id, created_at)",
@@ -259,7 +259,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
     # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500
     return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0}, status_code=200)
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox", "/agent", "/edge/metrics"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -579,6 +579,10 @@ app.include_router(webssh.router)
 
 # ── sandbox AI 运维沙盒域（独立模块，暂不侵入现有执行链）──
 app.include_router(sandbox.router)
+# ── agent 下发/统一执行路由 ──
+app.include_router(agent_deploy.router)
+# ── agent 自主巡检闭环 ──
+app.include_router(agent_autonomous.router)
 
 # ── sre 可靠性工程域 ──
 app.include_router(sre.router)
@@ -801,6 +805,7 @@ _last_probe_time = 0
 _last_collect_time = 0.0
 _last_archive_time = 0.0
 _last_scrape_time = 0.0
+_last_autonomous_time = 0.0
 METRIC_RETENTION_DAYS = int(_os.environ.get("AIOPS_METRIC_RETENTION_DAYS", "90"))
 
 
@@ -900,7 +905,7 @@ def background_loop():
         try:
             db = get_session_for(_mode)()
             try:
-                global _last_probe_time, _last_collect_time, _last_archive_time, _last_scrape_time
+                global _last_probe_time, _last_collect_time, _last_archive_time, _last_scrape_time, _last_autonomous_time
                 _now = time.time()
                 # 资产健康探测
                 try:
@@ -987,6 +992,17 @@ def background_loop():
                         logger.warning(f"数据源采集异常: {se}")
                 elif not task_monitor.is_enabled("datasource_scrape"):
                     task_monitor.record_skip("datasource_scrape", "paused")
+                # ── 自主 AI Agent 巡检闭环（独立执行）──
+                _AUTONOMOUS_INTERVAL = 300
+                if task_monitor.is_enabled("autonomous_cycle") and _now - _last_autonomous_time >= _AUTONOMOUS_INTERVAL:
+                    _last_autonomous_time = _now
+                    logger.info("触发自主 AI Agent 巡检闭环...")
+                    try:
+                        from app.services.agent_autonomous import run_autonomous_cycle
+                        run_autonomous_cycle()
+                        logger.info("自主 AI Agent 巡检闭环完成")
+                    except Exception as ae:
+                        logger.warning(f"自主巡检异常: {ae}")
                 # 报表调度
                 if task_monitor.is_enabled("report_schedule"):
                     now = datetime.now()

@@ -362,18 +362,96 @@ def _compute_middleware_fallback(asset: Asset) -> str:
 
 # ── 业务域总览 ──
 
+def _prefetch_spans_by_service(db_session, all_service_names: list[str], cutoff) -> dict:
+    """一次性查出窗口内 span，按 service_name 分组，返回 {name: {durations, error_count}}"""
+    from app.models import Span
+    if not all_service_names:
+        return {}
+    rows = (
+        db_session.query(Span.service_name, Span.status, Span.duration_ms)
+        .filter(Span.service_name.in_(all_service_names), Span.started_at >= cutoff)
+        .all()
+    )
+    grouped = {}
+    for sn, status, dur in rows:
+        g = grouped.setdefault(sn, {"durations": [], "error_count": 0})
+        if dur is not None and dur > 0:
+            g["durations"].append(dur)
+        if status and status.upper() == "ERROR":
+            g["error_count"] += 1
+    return grouped
+
+
+def _match_service_names_in_memory(asset_name: str, all_service_names: list[str]) -> list[str]:
+    """内存匹配 asset.name → service_name，替代逐条 ILIKE"""
+    normalized = _normalize_service_name(asset_name)
+    if not normalized:
+        return []
+    matched = [s for s in all_service_names if normalized in s.lower()]
+    if not matched:
+        name_lower = asset_name.lower()
+        matched = [s for s in all_service_names if name_lower in s.lower()]
+    return matched
+
+
 def fetch_domains(db_session=None):
     close_db = False
     if db_session is None:
         db_session = get_session_for(get_db_mode())()
         close_db = True
     try:
+        from app.models import MetricRecord, Span
+        all_service_names = [r[0] for r in db_session.query(Span.service_name).distinct().all() if r[0]]
         assets = db_session.query(Asset).all()
+        asset_ids = [a.id for a in assets]
+        cutoff = datetime.now() - timedelta(minutes=HEALTH_WINDOW_MINUTES)
+
+        # 一次性预取活跃告警
+        alerts_by_asset = {}
+        if asset_ids:
+            for a in db_session.query(Alert).filter(
+                Alert.asset_id.in_(asset_ids),
+                Alert.status.in_(["triggered", "acknowledged", "firing"]),
+            ).all():
+                alerts_by_asset.setdefault(a.asset_id, []).append(a)
+
+        # 一次性预取指标（每个 asset 取最新值）
+        check_metrics = ["cpu_usage", "memory_usage", "disk_usage"]
+        metrics_by_asset = {}
+        if asset_ids:
+            rows = db_session.query(MetricRecord.asset_id, MetricRecord.name, MetricRecord.value).filter(
+                MetricRecord.asset_id.in_(asset_ids),
+                MetricRecord.name.in_(check_metrics),
+            ).order_by(MetricRecord.timestamp.desc()).all()
+            for aid, name, value in rows:
+                m = metrics_by_asset.setdefault(aid, {})
+                if name not in m:
+                    m[name] = value
+
+        # 预计算所有资产的 layer（避免重复计算）
+        asset_layers = {a.id: get_layer(a) for a in assets}
+
+        # 收集 layer=1 的资产，批量匹配 service_name 并预取 span 统计
+        api_asset_ids = [a.id for a in assets if asset_layers.get(a.id) == "1"]
+        service_names_by_asset = {}
+        spans_by_service = {}
+        if api_asset_ids:
+            all_svc = all_service_names
+            for a in assets:
+                if a.id in api_asset_ids:
+                    matched = _match_service_names_in_memory(a.name, all_svc)
+                    if matched:
+                        service_names_by_asset[a.id] = matched
+            all_matched = list(set(s for svcs in service_names_by_asset.values() for svcs in svcs))
+            if all_matched:
+                spans_by_service = _prefetch_spans_by_service(db_session, all_matched, cutoff)
 
         domain_map = {}
         for asset in assets:
             domains = _extract_domains(asset)
-            status = compute_health(asset, [], db_session=db_session)
+            layer = asset_layers.get(asset.id, "4")
+            status = _compute_health_bulk(asset, layer, alerts_by_asset, metrics_by_asset,
+                                          service_names_by_asset, spans_by_service)
             entity = {
                 "id": asset.id,
                 "name": asset.name,
@@ -381,7 +459,6 @@ def fetch_domains(db_session=None):
                 "health_status": status,
                 "alert_count": 0,
             }
-            # 一个资产可属于多个业务域(如共享中间件),在每个域里都计入
             for domain in domains:
                 if domain not in domain_map:
                     domain_map[domain] = {"total": 0, HEALTH_GREEN: 0, HEALTH_GRAY: 0, HEALTH_RED: 0, "entities": []}
@@ -391,9 +468,6 @@ def fetch_domains(db_session=None):
 
         result = []
         for name, d in sorted(domain_map.items(), key=lambda x: -x[1]["total"]):
-            alert_count = sum(
-                1 for e in d["entities"] if e["health_status"] == HEALTH_RED
-            )
             result.append({
                 "name": name,
                 "total": d["total"],
@@ -405,6 +479,81 @@ def fetch_domains(db_session=None):
     finally:
         if close_db:
             db_session.close()
+
+
+def _compute_health_bulk(asset, layer, alerts_by_asset, metrics_by_asset,
+                         service_names_by_asset, spans_by_service) -> str:
+    """批量预取版健康计算，不执行任何 SQL"""
+    if layer == "1":
+        return _compute_api_health_bulk(asset, service_names_by_asset, spans_by_service)
+    if layer == "2":
+        return _compute_generic_health_bulk(asset, alerts_by_asset, "microservice")
+    if layer in ("3-db", "3-mq"):
+        return _compute_generic_health_bulk(asset, alerts_by_asset, "middleware")
+    if layer == "4":
+        return _compute_infra_health_bulk(asset, alerts_by_asset, metrics_by_asset)
+    return _compute_middleware_fallback(asset)
+
+
+def _compute_api_health_bulk(asset, service_names_by_asset, spans_by_service) -> str:
+    matched = service_names_by_asset.get(asset.id, [])
+    if not matched:
+        return HEALTH_GREEN
+    total_error = 0
+    total_span = 0
+    all_durations = []
+    for sn in matched:
+        g = spans_by_service.get(sn)
+        if not g:
+            continue
+        total_span += g["total"]
+        total_error += g["error_count"]
+        if g["durations"]:
+            all_durations.extend(g["durations"])
+    if total_span == 0:
+        return HEALTH_GREEN
+    error_rate = total_error / total_span
+    sorted_durs = sorted(all_durations)
+    p99 = sorted_durs[int(len(sorted_durs) * 0.99)] if len(sorted_durs) > 1 else (sorted_durs[0] if sorted_durs else 0)
+    if error_rate > API_ERROR_RATE_THRESHOLD or p99 > API_LATENCY_THRESHOLD_MS:
+        return HEALTH_RED
+    return HEALTH_GREEN
+
+
+def _compute_generic_health_bulk(asset, alerts_by_asset, layer_name) -> str:
+    if asset.status == "offline":
+        return HEALTH_GRAY
+    if asset.last_checked_at is None:
+        return HEALTH_GREEN
+    cutoff = datetime.now() - timedelta(minutes=HEALTH_WINDOW_MINUTES)
+    if asset.last_checked_at < cutoff:
+        return HEALTH_GRAY
+    active = alerts_by_asset.get(asset.id, [])
+    for a in active:
+        if _is_alert_for_layer(a.metric_name, layer_name):
+            return HEALTH_RED
+    return HEALTH_GREEN
+
+
+def _compute_infra_health_bulk(asset, alerts_by_asset, metrics_by_asset) -> str:
+    if asset.status == "offline":
+        return HEALTH_GRAY
+    if asset.last_checked_at is None:
+        return HEALTH_GREEN
+    cutoff = datetime.now() - timedelta(minutes=HEALTH_WINDOW_MINUTES)
+    if asset.last_checked_at < cutoff:
+        return HEALTH_GRAY
+    m = metrics_by_asset.get(asset.id, {})
+    if m.get("cpu_usage", 0) > INFRA_CPU_THRESHOLD:
+        return HEALTH_RED
+    if m.get("memory_usage", 0) > INFRA_MEMORY_THRESHOLD:
+        return HEALTH_RED
+    if m.get("disk_usage", 0) > INFRA_DISK_THRESHOLD:
+        return HEALTH_RED
+    active = alerts_by_asset.get(asset.id, [])
+    if active:
+        return HEALTH_RED
+    return HEALTH_GREEN
 
 
 # ── 分层概览 ──
