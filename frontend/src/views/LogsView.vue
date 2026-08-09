@@ -20,6 +20,10 @@
         <option value="24h">最近24小时</option>
         <option value="7d">最近7天</option>
       </select>
+      <label class="dedup-toggle" title="默认折叠相邻相同日志，勾选后显示原始日志">
+        <input type="checkbox" v-model="showOriginal" @change="searchLogs">
+        显示原日志<span v-if="!showOriginal" class="dedup-badge">降噪中</span>
+      </label>
       <button class="btn btn-primary" @click="searchLogs">搜索</button>
       <button class="btn" @click="showFilters = !showFilters">{{ showFilters ? '收起' : '展开' }}过滤</button>
       <button class="btn" @click="showRules = !showRules">{{ showRules ? '收起' : '告警规则' }}</button>
@@ -27,7 +31,14 @@
 
     <!-- 高级过滤 -->
     <div v-if="showFilters" class="filter-bar">
-      <label>索引: <input v-model="filterIndex" placeholder="如 aiops-logs" class="filter-input"></label>
+      <label>业务域: <select v-model="filterDomain" class="filter-select" @change="onDomainChange">
+        <option value="">全部</option>
+        <option v-for="d in domainList" :key="d" :value="d">{{ d }}</option>
+      </select></label>
+      <label v-if="!isLokiSource">索引: <select v-model="filterIndex" class="filter-select">
+        <option value="">全部</option>
+        <option v-for="ix in indices" :key="ix.name" :value="ix.name">{{ ix.name }} ({{ ix.docs }} 条)</option>
+      </select></label>
       <label>级别: <select v-model="filterLevel" class="filter-select">
         <option value="">全部</option>
         <option value="error">error</option>
@@ -36,7 +47,13 @@
         <option value="debug">debug</option>
       </select></label>
       <label>主机: <input v-model="filterHost" placeholder="主机名" class="filter-input"></label>
-      <label>服务: <input v-model="filterService" placeholder="服务名" class="filter-input"></label>
+      <label>服务:
+        <select v-if="isLokiSource" v-model="filterService" class="filter-select">
+          <option value="">全部</option>
+          <option v-for="s in services" :key="s" :value="s">{{ s }}</option>
+        </select>
+        <input v-else v-model="filterService" placeholder="服务名" class="filter-input">
+      </label>
       <button class="btn btn-sm btn-primary" @click="searchLogs">应用</button>
     </div>
 
@@ -76,15 +93,14 @@
       <div class="panel-body">
         <div v-if="loading" class="loading-state">查询中...</div>
         <div v-else-if="logs.length" class="log-list">
-          <div v-for="log in logs" :key="log.id" class="log-item">
-            <div class="log-head">
-              <span class="log-time">{{ formatTime(log.timestamp) }}</span>
-              <span class="log-level" :class="(log.level || 'info').toLowerCase()">{{ log.level || 'info' }}</span>
-              <span v-if="log.host" class="log-host">{{ log.host }}</span>
-              <span v-if="log.service" class="log-svc">{{ log.service }}</span>
-              <span class="log-index">{{ log.index }}</span>
-            </div>
-            <div class="log-msg">{{ log.message }}</div>
+          <div v-for="(log, idx) in logs" :key="log.id || idx" class="log-row" :class="{ expanded: expandedSet.has(idx) }" @click="toggleExpand(idx)">
+            <span class="log-time">{{ formatTime(log.timestamp) }}</span>
+            <span v-if="log.repeat > 1 && log.time_end" class="log-time-range">~{{ formatTimeShort(log.time_end) }}</span>
+            <span class="log-lvl" :class="(log.level || 'info').toLowerCase()">{{ (log.level || 'info').charAt(0).toUpperCase() }}</span>
+            <span v-if="log.host" class="log-host">{{ log.host }}</span>
+            <span v-if="log.service" class="log-svc">{{ log.service }}</span>
+            <span class="log-msg" :class="{ collapsed: !expandedSet.has(idx) }" :title="log.message">{{ log.message }}</span>
+            <span v-if="log.repeat > 1" class="log-repeat">×{{ log.repeat }}</span>
           </div>
         </div>
         <div v-else-if="sourceId > 0" class="empty-state"><div>未查询到日志</div></div>
@@ -101,12 +117,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
 const loading = ref(false)
 const sources = ref([])
+const services = ref([])
+const indices = ref([])
 const logs = ref([])
 const total = ref(0)
 const totalPages = ref(1)
@@ -118,18 +136,53 @@ const page = ref(1)
 const size = 50
 const showFilters = ref(false)
 const showRules = ref(false)
+const filterDomain = ref('')
+const domainList = ref([])
 const filterIndex = ref('')
 const filterLevel = ref('')
 const filterHost = ref('')
 const filterService = ref('')
 const currentIndex = ref('')
+const showOriginal = ref(false)
+const expandedSet = ref(new Set())
+
+function toggleExpand(idx) {
+  const s = new Set(expandedSet.value)
+  if (s.has(idx)) s.delete(idx)
+  else s.add(idx)
+  expandedSet.value = s
+}
 
 const rules = ref([])
 const showNewRule = ref(false)
 const newRule = ref({ name: '', keyword: '', log_level: 'error', threshold: 1, window_minutes: 5, severity: 'warning' })
 
+const isLokiSource = computed(() => {
+  const s = sources.value.find(x => x.id === sourceId.value)
+  return s && s.type === 'loki'
+})
+
 async function loadSources() {
   try { sources.value = await request.get('/logs/api/sources') } catch (e) { ElMessage.error('加载数据源失败') }
+}
+
+async function loadJobs() {
+  services.value = []
+  if (!isLokiSource.value) return
+  try {
+    const list = await request.get('/logs/api/services', { params: { source_id: sourceId.value } })
+    services.value = Array.isArray(list) ? list : []
+  } catch (e) { services.value = [] }
+}
+
+async function loadIndices() {
+  indices.value = []
+  if (isLokiSource.value) return
+  if (sourceId.value <= 0) return
+  try {
+    const list = await request.get('/logs/api/indices', { params: { source_id: sourceId.value } })
+    indices.value = Array.isArray(list) ? list : []
+  } catch (e) { indices.value = [] }
 }
 
 async function loadRules() {
@@ -142,12 +195,32 @@ async function loadRules() {
 async function onSourceChange() {
   currentIndex.value = ''
   filterIndex.value = ''
+  filterService.value = ''
+  filterDomain.value = ''
+  await loadJobs()
+  await loadIndices()
   await searchLogs()
+}
+
+async function loadDomains() {
+  try {
+    const res = await request.get('/api/traces/domains')
+    domainList.value = res || []
+  } catch (e) { /* ignore */ }
+}
+
+async function onDomainChange() {
+  filterService.value = ''
+  if (!isLokiSource.value || !filterDomain.value) return
+  try {
+    const res = await request.get('/api/traces/services', { params: { domain: filterDomain.value } })
+    services.value = res || []
+  } catch (e) { /* ignore */ }
 }
 
 async function searchLogs() {
   if (sourceId.value <= 0) { logs.value = []; total.value = 0; return }
-  loading.value = true; error.value = null
+  loading.value = true; error.value = null; expandedSet.value = new Set()
   try {
     const data = await request.get('/logs/api/search', {
       params: {
@@ -155,6 +228,7 @@ async function searchLogs() {
         page: page.value, size,
         index: filterIndex.value, level: filterLevel.value,
         host: filterHost.value, service: filterService.value,
+        dedup: showOriginal.value ? 0 : 1,
       }
     })
     logs.value = data.logs || []
@@ -169,6 +243,7 @@ async function searchLogs() {
 function goPage(p) { page.value = p; searchLogs() }
 
 function formatTime(s) { if (!s) return '-'; return s.replace('T', ' ').substring(0, 19) }
+function formatTimeShort(s) { if (!s) return ''; return s.replace('T', ' ').substring(11, 19) }
 
 async function createRule() {
   if (!newRule.value.name) { ElMessage.warning('请输入规则名称'); return }
@@ -210,7 +285,23 @@ async function deleteRule(id) {
   } catch (e) { if (e !== 'cancel') ElMessage.error('删除失败') }
 }
 
-onMounted(() => { loadSources(); loadRules() })
+async function loadDefaultSource() {
+  try {
+    const data = await request.get('/datasources/api/log-default')
+    const sid = data.source_id || 0
+    if (sid > 0 && sources.value.some(s => s.id === sid)) {
+      sourceId.value = sid
+      await onSourceChange()
+    }
+  } catch (e) { /* ignore */ }
+}
+
+onMounted(async () => {
+  await loadSources()
+  loadRules()
+  loadDomains()
+  await loadDefaultSource()
+})
 </script>
 
 <style scoped>
@@ -250,17 +341,25 @@ onMounted(() => { loadSources(); loadRules() })
 .rule-sev { font-size: 0.72rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(245,158,11,0.1); color: #f59e0b; }
 .sev-critical { background: rgba(239,68,68,0.1); color: #ef4444; }
 .empty-hint { color: var(--text-tertiary, #94a3b8); font-size: 0.82rem; text-align: center; padding: 12px; }
-.log-list { display: flex; flex-direction: column; gap: 8px; max-height: 600px; overflow-y: auto; }
-.log-item { background: var(--bg-secondary, #f8fafc); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-left: 3px solid var(--accent, #6366f1); border-radius: 6px; padding: 10px 12px; }
-.log-head { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
-.log-time { font-size: 0.72rem; color: var(--text-secondary, #64748b); font-family: monospace; }
-.log-level { font-size: 0.68rem; padding: 1px 7px; border-radius: 6px; font-weight: 600; }
-.log-level.info, .log-level.debug { background: rgba(59,130,246,0.1); color: #3b82f6; }
-.log-level.warn, .log-level.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
-.log-level.error, .log-level.fatal, .log-level.critical { background: rgba(239,68,68,0.1); color: #ef4444; }
-.log-host, .log-svc { font-size: 0.7rem; color: var(--text-secondary, #64748b); background: rgba(99,102,241,0.08); padding: 1px 6px; border-radius: 4px; }
-.log-index { font-size: 0.65rem; color: var(--text-tertiary, #94a3b8); margin-left: auto; }
-.log-msg { font-size: 0.82rem; color: var(--text, #1e293b); line-height: 1.6; word-break: break-word; font-family: 'JetBrains Mono', monospace; white-space: pre-wrap; }
+.log-list { max-height: 600px; overflow-y: auto; border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 6px; }
+.log-row { display: flex; gap: 8px; align-items: baseline; padding: 3px 10px; font-size: 0.8rem; cursor: pointer; line-height: 1.5; }
+.log-row:nth-child(odd) { background: var(--bg-hover, rgba(0,0,0,0.02)); }
+.log-row:hover { background: rgba(99,102,241,0.06); }
+.log-row.expanded { background: rgba(99,102,241,0.08); }
+.log-time { flex-shrink: 0; font-size: 0.72rem; color: var(--text-secondary, #64748b); font-family: monospace; }
+.log-time-range { flex-shrink: 0; font-size: 0.72rem; color: var(--accent, #6366f1); font-family: monospace; }
+.log-lvl { flex-shrink: 0; width: 14px; text-align: center; font-size: 0.7rem; font-weight: 700; }
+.log-lvl.info, .log-lvl.debug { color: #3b82f6; }
+.log-lvl.warn, .log-lvl.warning { color: #f59e0b; }
+.log-lvl.error, .log-lvl.fatal, .log-lvl.critical { color: #ef4444; }
+.log-host, .log-svc { flex-shrink: 0; font-size: 0.7rem; color: var(--text-secondary, #64748b); }
+.log-svc::before { content: '· '; }
+.log-msg { flex: 1; min-width: 0; color: var(--text, #1e293b); font-family: 'JetBrains Mono', monospace; word-break: break-all; white-space: pre-wrap; }
+.log-msg.collapsed { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-repeat { flex-shrink: 0; font-size: 0.68rem; font-weight: 700; color: #6366f1; }
+.dedup-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 0.82rem; color: var(--text-secondary, #64748b); cursor: pointer; white-space: nowrap; user-select: none; }
+.dedup-toggle input { cursor: pointer; }
+.dedup-badge { display: inline-block; margin-left: 2px; padding: 0 5px; font-size: 0.65rem; font-weight: 700; color: #6366f1; background: rgba(99,102,241,0.1); border-radius: 4px; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 .pagination { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 16px; }
 .page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }

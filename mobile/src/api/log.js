@@ -13,6 +13,17 @@ function request({ url, method, data, cancelKey }) {
       data: data,
       header: commonHeaders(),
       success: (res) => {
+        if (res.statusCode === 401) {
+          try {
+            uni.removeStorageSync('auth_token')
+            uni.removeStorageSync('user_info')
+            uni.removeStorageSync('biometric_token')
+            uni.removeStorageSync('session_cookie')
+          } catch (e) {}
+          uni.reLaunch({ url: '/pages/login/index' })
+          reject(res)
+          return
+        }
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data)
         else reject(res)
       },

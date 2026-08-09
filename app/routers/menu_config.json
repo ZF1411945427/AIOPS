@@ -65,13 +65,6 @@
             "path": "/alert-rules"
           },
           {
-            "key": "alert-correlation",
-            "label": "告警收敛闭环",
-            "type": "vue",
-            "icon": "Connection",
-            "path": "/alert-correlation"
-          },
-          {
             "key": "anomaly",
             "label": "异常检测",
             "type": "vue",
@@ -80,7 +73,7 @@
           },
           {
             "key": "event-stats",
-            "label": "事件统计",
+            "label": "统计收敛",
             "type": "vue",
             "icon": "TrendCharts",
             "path": "/events/stats"
@@ -207,6 +200,13 @@
             "type": "vue",
             "icon": "Cpu",
             "path": "/ansible"
+          },
+          {
+            "key": "reports",
+            "label": "运维报表",
+            "type": "vue",
+            "icon": "DataAnalysis",
+            "path": "/reports"
           }
         ]
       }
@@ -538,13 +538,6 @@
             "path": "/knowledge/documents"
           },
           {
-            "key": "kb-graph",
-            "label": "运维知识图谱",
-            "type": "vue",
-            "icon": "Connection",
-            "path": "/knowledge/graph"
-          },
-          {
             "key": "graph-inference",
             "label": "知识图谱推理",
             "type": "vue",
@@ -636,24 +629,10 @@
           },
           {
             "key": "agent-eval",
-            "label": "Agent 评估",
+            "label": "Agent 评测中心",
             "type": "vue",
             "icon": "Finished",
             "path": "/agent-eval"
-          },
-          {
-            "key": "ab-test",
-            "label": "A/B 测试",
-            "type": "vue",
-            "icon": "Operation",
-            "path": "/ab-test"
-          },
-          {
-            "key": "agent-ground-truth",
-            "label": "GroundTruth 测试",
-            "type": "vue",
-            "icon": "Check",
-            "path": "/agent/ground-truth"
           }
         ]
       }

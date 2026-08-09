@@ -230,21 +230,37 @@ def vision_diagnose(body: VisionDiagnoseBody, user_id: int = Depends(require_use
 
 @router.get("/dashboard")
 def dashboard(user_id: int = Depends(require_user), db: Session = Depends(get_db)):
-    from app.routers.system_posture import _build_systems, _process_system
+    from app.routers.system_posture import (
+        _build_systems, _collect_asset_ids, _batch_alert_incident_counts, _sla_result,
+    )
     now = datetime.now()
     start = now - timedelta(days=30)
     systems = _build_systems(db)
+    sys_asset_map = _collect_asset_ids(db, systems)
+    all_ids = list(set(aid for aids in sys_asset_map.values() for aid in aids))
+    alert_batch, incident_batch = _batch_alert_incident_counts(db, all_ids, start, now)
+    online_set = set()
+    if all_ids:
+        online_set = set(r[0] for r in db.query(Asset.id).filter(
+            Asset.id.in_(all_ids), Asset.status == "online").all())
+
     h = w = c = u = 0
     total_health = 0.0
     cnt = 0
     for sys in systems:
-        r = _process_system(sys, db, start, now)
-        if r:
+        sk = sys["system_key"]
+        asset_ids = sys_asset_map.get(sk, [])
+        total = len(asset_ids)
+        if total == 0:
+            st = "unknown"
+        else:
+            online = sum(1 for aid in asset_ids if aid in online_set)
+            total_alerts = sum(v for (d, aid), v in alert_batch.items() if aid in asset_ids)
+            total_incidents = sum(v for (d, aid), v in incident_batch.items() if aid in asset_ids)
+            r = _sla_result(online, total, total_alerts, total_incidents)
             st = r.get("status", "unknown")
             total_health += float(r.get("sla_value", 0) or 0)
             cnt += 1
-        else:
-            st = "unknown"
         if st == "healthy":
             h += 1
         elif st == "warning":

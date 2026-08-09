@@ -17,7 +17,7 @@
           <thead>
             <tr>
               <th>ID</th><th>名称</th><th>类型</th><th>地址</th><th>认证</th>
-              <th>状态</th><th>采集间隔</th><th>最后采集</th><th>采集状态</th><th>操作</th>
+              <th>状态</th><th>采集间隔</th><th>最后采集</th><th>采集状态</th><th>日志默认</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -31,6 +31,10 @@
               <td class="text-sm">{{ s.scrape_interval }}s</td>
               <td class="text-sm">{{ s.last_scraped_at || '-' }}</td>
               <td><span v-if="s.last_status" class="badge" :class="s.last_status === 'success' ? 'on' : 'off'">{{ s.last_status }}</span><span v-else class="text-sm">-</span></td>
+              <td>
+                <span v-if="defaultLogSourceId === s.id" class="badge default-badge">默认</span>
+                <button v-else class="btn btn-sm btn-default" @click="setDefaultSource(s.id)">设为默认</button>
+              </td>
               <td>
                 <button class="btn btn-sm" @click="openEdit(s)">编辑</button>
                 <button class="btn btn-sm" @click="toggleSource(s)">{{ s.enabled ? '停用' : '启用' }}</button>
@@ -120,6 +124,7 @@ import request from '@/api/request'
 const loading = ref(false)
 const saving = ref(false)
 const sources = ref([])
+const defaultLogSourceId = ref(0)
 const showDialog = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
@@ -166,10 +171,28 @@ async function loadSources() {
     sources.value = data.sources || []
     dsTypes.value = data.ds_types || {}
     authTypes.value = data.auth_types || {}
+    await loadDefaultSource()
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadDefaultSource() {
+  try {
+    const data = await request.get('/datasources/api/log-default')
+    defaultLogSourceId.value = data.source_id || 0
+  } catch (e) { /* ignore */ }
+}
+
+async function setDefaultSource(id) {
+  try {
+    await request.post('/datasources/api/log-default', { source_id: id })
+    defaultLogSourceId.value = id
+    ElMessage.success('已设为日志中心默认数据源')
+  } catch (e) {
+    ElMessage.error('设置失败: ' + e.message)
   }
 }
 
@@ -307,4 +330,7 @@ onMounted(loadSources)
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .required { color: #ef4444; }
 .auth-section { background: var(--bg-hover, rgba(0,0,0,0.03)); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+.default-badge { background: rgba(99,102,241,0.15); color: #6366f1; font-weight: 700; }
+.btn-default { color: #6366f1; border-color: rgba(99,102,241,0.3); font-size: 0.7rem; }
+.btn-default:hover { background: rgba(99,102,241,0.08); }
 </style>

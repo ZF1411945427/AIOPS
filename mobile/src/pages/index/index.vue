@@ -131,6 +131,7 @@ async function loadData() {
     try {
         dashboard.value = await getDashboard()
     } catch (e) {
+        userStore.loadFromStorage()
         if (!userStore.token) {
             loading.value = false
             return

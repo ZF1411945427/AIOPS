@@ -258,7 +258,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
     # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500
     return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0}, status_code=200)
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -607,6 +607,7 @@ app.include_router(traces.router)
 app.include_router(traces_api.router)
 app.include_router(trace_anomaly.router)
 app.include_router(trace_ingest.router)
+app.include_router(trace_ingest.standard_router)
 app.include_router(trace_rca.router)
 app.include_router(trace_view.router)
 app.include_router(dtw.router)
@@ -1117,4 +1118,14 @@ async def readyz():
         checks["milvus"] = f"fail: {e}"
     all_ok = all(v == "ok" for v in checks.values())
     return JSONResponse(checks, status_code=200 if all_ok else 503)
+
+
+# ── gRPC OTLP TraceService 服务器（接收微服务 gRPC OTLP 流量）──
+try:
+    from app.grpc_server import start_grpc_server, stop_grpc_server
+    import atexit
+    start_grpc_server()
+    atexit.register(stop_grpc_server)
+except Exception as _grpc_err:
+    logger.warning(f"[gRPC] OTLP TraceService 启动失败: {_grpc_err}")
 

@@ -27,6 +27,8 @@
                   <td class="text-sm">{{ c.created_at || '-' }}</td>
                   <td>
                     <el-switch :model-value="c.enabled" size="small" @change="toggleChannel(c)" style="margin-right:8px" />
+                    <button class="btn btn-sm" @click="openEdit(c)" style="margin-right:4px">编辑</button>
+                    <button class="btn btn-sm" style="margin-right:4px" @click="testChannel(c)">测试</button>
                     <button class="btn btn-sm btn-danger" @click="deleteChannel(c)">删除</button>
                   </td>
                 </tr>
@@ -51,7 +53,7 @@
                   <td>{{ l.alert_id || '-' }}</td>
                   <td class="text-sm">{{ l.title || '-' }}</td>
                   <td class="text-sm">{{ l.recipient || '-' }}</td>
-                  <td><span class="badge" :class="l.success ? 'on' : 'err'">{{ l.success ? '成功' : '失败' }}</span></td>
+                  <td><span class="badge" :class="l.is_success ? 'on' : 'err'">{{ l.is_success ? '成功' : '失败' }}</span></td>
                 </tr>
               </tbody>
             </table>
@@ -90,13 +92,13 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 新增通知渠道对话框 -->
-    <div v-if="showDialog" class="modal-overlay" @click.self="showDialog = false">
+    <!-- 新增/编辑通知渠道对话框 -->
+    <div v-if="showDialog" class="modal-overlay">
       <div class="modal-box">
-        <h3>新增通知渠道</h3>
+        <h3>{{ isEditing ? '编辑通知渠道' : '新增通知渠道' }}</h3>
         <div class="form-row"><label>名称</label><input v-model="form.name" class="input"></div>
         <div class="form-row"><label>类型</label>
-          <select v-model="form.type" class="input">
+          <select v-model="form.type" class="input" :disabled="isEditing">
             <option value="email">邮件</option><option value="webhook">Webhook</option>
             <option value="dingtalk">钉钉</option><option value="wecom">企业微信</option>
             <option value="feishu">飞书</option><option value="log">日志</option>
@@ -106,7 +108,7 @@
           <div class="form-row"><label>SMTP 主机</label><input v-model="form.config.host" class="input"></div>
           <div class="form-row"><label>端口</label><input v-model.number="form.config.port" type="number" class="input"></div>
           <div class="form-row"><label>用户</label><input v-model="form.config.user" class="input"></div>
-          <div class="form-row"><label>密码</label><input v-model="form.config.password" type="password" class="input"></div>
+          <div class="form-row"><label>密码</label><input v-model="form.config.password" type="password" class="input" :placeholder="isEditing ? '不填则不修改' : ''"></div>
           <div class="form-row"><label>收件人(逗号分隔)</label><input v-model="form.config.recipients" class="input"></div>
         </template>
         <template v-else-if="form.type === 'webhook'">
@@ -117,7 +119,7 @@
         </template>
         <div class="modal-actions">
           <button class="btn" @click="showDialog = false">取消</button>
-          <button class="btn btn-primary" @click="createChannel">创建</button>
+          <button class="btn btn-primary" @click="isEditing ? updateChannel() : createChannel()">{{ isEditing ? '保存' : '创建' }}</button>
         </div>
       </div>
     </div>
@@ -208,6 +210,8 @@ const loading = ref(false)
 const channels = ref([])
 const logs = ref([])
 const showDialog = ref(false)
+const isEditing = ref(false)
+const editingId = ref(null)
 const form = ref({ name: '', type: 'email', config: { host: '', port: 587, user: '', password: '', recipients: '', url: '', webhook: '' } })
 
 function typeLabel(t) {
@@ -235,6 +239,8 @@ async function loadAll() {
 }
 
 function openCreate() {
+  isEditing.value = false
+  editingId.value = null
   form.value = { name: '', type: 'email', config: { host: '', port: 587, user: '', password: '', recipients: '', url: '', webhook: '' } }
   showDialog.value = true
 }
@@ -248,6 +254,54 @@ async function createChannel() {
     loadAll()
   } catch (e) {
     ElMessage.error('创建失败: ' + (e.message || e))
+  }
+}
+
+function openEdit(c) {
+  isEditing.value = true
+  editingId.value = c.id
+  form.value = {
+    name: c.name,
+    type: c.type,
+    config: {
+      host: c.config?.host || '',
+      port: c.config?.port ?? 587,
+      user: c.config?.user || '',
+      password: '',
+      recipients: c.config?.recipients || '',
+      url: c.config?.url || '',
+      webhook: c.config?.webhook || '',
+    },
+  }
+  showDialog.value = true
+}
+
+async function updateChannel() {
+  if (!form.value.name) { ElMessage.warning('名称不能为空'); return }
+  try {
+    await request.post(`/notifications/api/channels/${editingId.value}/update`, {
+      name: form.value.name,
+      type: form.value.type,
+      config: form.value.config,
+    })
+    ElMessage.success('保存成功')
+    showDialog.value = false
+    loadAll()
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e.message || e))
+  }
+}
+
+async function testChannel(c) {
+  try {
+    const data = await request.post(`/notifications/api/channels/${c.id}/test`)
+    if (data.status === 'ok') {
+      ElMessage.success('测试发送成功')
+    } else {
+      ElMessage.error('测试失败: ' + (data.detail || '未知错误'))
+    }
+  } catch (e) {
+    ElMessage.error('测试失败: ' + (e.message || e))
   }
 }
 

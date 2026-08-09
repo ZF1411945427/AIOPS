@@ -1,106 +1,127 @@
 <template>
   <div class="eval-page">
     <div class="page-header">
-      <h1>Agent 评估看板</h1>
-      <p>AI 智能体质量追踪 · 工具成功率 / 任务完成率 / 幻觉率 / 轮次效率</p>
+      <h1>Agent 评测中心</h1>
+      <p>质量看板 · 基准测试集 · 模型对比，一页三视图</p>
     </div>
 
-    <div class="toolbar">
-      <label style="font-size:0.82rem;color:var(--text-secondary);">统计周期:</label>
-      <select v-model.number="days" class="input" style="width:100px;" @change="loadStats">
-        <option :value="7">近7天</option>
-        <option :value="14">近14天</option>
-        <option :value="30">近30天</option>
-        <option :value="90">近90天</option>
-      </select>
-      <button class="btn" @click="loadStats">刷新</button>
+    <div class="tab-bar">
+      <button :class="['tab-btn', { active: tab === 'overview' }]" @click="tab = 'overview'">
+        <span class="tab-icon">📊</span><span class="tab-label">质量看板</span>
+      </button>
+      <button :class="['tab-btn', { active: tab === 'ground-truth' }]" @click="tab = 'ground-truth'">
+        <span class="tab-icon">🎯</span><span class="tab-label">基准测试集</span>
+      </button>
+      <button :class="['tab-btn', { active: tab === 'ab-test' }]" @click="tab = 'ab-test'">
+        <span class="tab-icon">🧪</span><span class="tab-label">模型对比</span>
+      </button>
     </div>
 
-    <div v-if="stats" class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-value" style="color:#6366f1;">{{ stats.total_evals }}</div>
-        <div class="stat-label">评估总数</div>
+    <!-- ════════ Tab 1: 质量看板 ════════ -->
+    <template v-if="tab === 'overview'">
+      <div class="toolbar">
+        <label style="font-size:0.82rem;color:var(--text-secondary);">统计周期:</label>
+        <select v-model.number="days" class="input" style="width:100px;" @change="loadStats">
+          <option :value="7">近7天</option>
+          <option :value="14">近14天</option>
+          <option :value="30">近30天</option>
+          <option :value="90">近90天</option>
+        </select>
+        <button class="btn" @click="loadStats">刷新</button>
       </div>
-      <div class="stat-card">
-        <div class="stat-value" style="color:#22c55e;">{{ stats.success_rate }}%</div>
-        <div class="stat-label">任务成功率</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="color:#ef4444;">{{ stats.hallucination_rate }}%</div>
-        <div class="stat-label">幻觉率</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="color:#14b8a6;">{{ stats.avg_latency_ms }}ms</div>
-        <div class="stat-label">平均延迟</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="color:#f59e0b;">{{ stats.avg_round_count }}</div>
-        <div class="stat-label">平均轮次</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="color:#8b5cf6;">{{ stats.total_sessions }}</div>
-        <div class="stat-label">会话总数</div>
-      </div>
-    </div>
 
-    <div v-if="stats" class="panel">
-      <div class="panel-head">工具调用排行</div>
-      <div class="panel-body">
-        <div v-if="stats.tools.length" class="tool-table-wrap">
-          <table class="gap-table">
-            <thead><tr><th>中文名</th><th>工具名</th><th>调用次数</th><th>成功</th><th>成功率</th><th>平均延迟</th></tr></thead>
-            <tbody>
-              <tr v-for="t in stats.tools" :key="t.tool_name">
-                <td><span class="tool-display-name">{{ t.display_name || t.tool_name }}</span></td>
-                <td><span class="tool-name">{{ t.tool_name }}</span></td>
-                <td>{{ t.count }}</td>
-                <td>{{ t.is_success }}</td>
-                <td><span class="rate-badge" :class="rateClass(t.success_rate)">{{ t.success_rate }}%</span></td>
-                <td>{{ t.avg_latency_ms }}ms</td>
-              </tr>
-            </tbody>
-          </table>
+      <div v-if="stats" class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" style="color:#6366f1;">{{ stats.total_evals }}</div>
+          <div class="stat-label">评估总数</div>
         </div>
-        <div v-else class="empty-state">暂无工具调用数据</div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:#22c55e;">{{ stats.success_rate }}%</div>
+          <div class="stat-label">任务成功率</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:#ef4444;">{{ stats.hallucination_rate }}%</div>
+          <div class="stat-label">幻觉率</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:#14b8a6;">{{ stats.avg_latency_ms }}ms</div>
+          <div class="stat-label">平均延迟</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:#f59e0b;">{{ stats.avg_round_count }}</div>
+          <div class="stat-label">平均轮次</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:#8b5cf6;">{{ stats.total_sessions }}</div>
+          <div class="stat-label">会话总数</div>
+        </div>
       </div>
-    </div>
 
-    <div v-if="stats && stats.daily_trend.length" class="panel">
-      <div class="panel-head">每日趋势</div>
-      <div class="panel-body">
-        <div class="trend-chart">
-          <div v-for="d in stats.daily_trend" :key="d.date" class="trend-bar-wrap">
-            <div class="trend-bar" :style="{height: Math.max(4, d.count * 3) + 'px', background: '#6366f1'}"></div>
-            <div class="trend-label">{{ d.date.slice(5) }}</div>
-            <div class="trend-rate">{{ d.success_rate }}%</div>
+      <div v-if="stats" class="panel">
+        <div class="panel-head">工具调用排行</div>
+        <div class="panel-body">
+          <div v-if="stats.tools.length" class="tool-table-wrap">
+            <table class="gap-table">
+              <thead><tr><th>中文名</th><th>工具名</th><th>调用次数</th><th>成功</th><th>成功率</th><th>平均延迟</th></tr></thead>
+              <tbody>
+                <tr v-for="t in stats.tools" :key="t.tool_name">
+                  <td><span class="tool-display-name">{{ t.display_name || t.tool_name }}</span></td>
+                  <td><span class="tool-name">{{ t.tool_name }}</span></td>
+                  <td>{{ t.count }}</td>
+                  <td>{{ t.is_success }}</td>
+                  <td><span class="rate-badge" :class="rateClass(t.success_rate)">{{ t.success_rate }}%</span></td>
+                  <td>{{ t.avg_latency_ms }}ms</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty-state">暂无工具调用数据</div>
+        </div>
+      </div>
+
+      <div v-if="stats && stats.daily_trend.length" class="panel">
+        <div class="panel-head">每日趋势</div>
+        <div class="panel-body">
+          <div class="trend-chart">
+            <div v-for="d in stats.daily_trend" :key="d.date" class="trend-bar-wrap">
+              <div class="trend-bar" :style="{height: Math.max(4, d.count * 3) + 'px', background: '#6366f1'}"></div>
+              <div class="trend-label">{{ d.date.slice(5) }}</div>
+              <div class="trend-rate">{{ d.success_rate }}%</div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="panel">
-      <div class="panel-head">评估历史</div>
-      <div class="panel-body">
-        <div v-if="loading" class="loading-state">加载中...</div>
-        <div v-else-if="!history.length" class="empty-state">暂无评估记录</div>
-        <div v-else class="gap-table-wrap">
-          <table class="gap-table">
-            <thead><tr><th>时间</th><th>模型</th><th>延迟</th><th>轮次</th><th>工具</th><th>成功率</th><th>幻觉</th></tr></thead>
-            <tbody>
-              <tr v-for="e in history" :key="e.id">
-                <td class="text-sm">{{ e.created_at }}</td>
-                <td>{{ e.model_name || '-' }}</td>
-                <td>{{ e.latency_ms }}ms</td>
-                <td>{{ e.round_count }}</td>
-                <td>{{ e.tool_call_count }}</td>
-                <td><span class="rate-badge" :class="e.is_success ? 'rate-high' : 'rate-low'">{{ e.is_success ? '成功' : '失败' }}</span></td>
-                <td><span v-if="e.has_hallucination" class="rate-badge rate-low">幻觉</span><span v-else class="text-muted">-</span></td>
-              </tr>
-            </tbody>
-          </table>
+      <div class="panel">
+        <div class="panel-head">评估历史</div>
+        <div class="panel-body">
+          <div v-if="loading" class="loading-state">加载中...</div>
+          <div v-else-if="!history.length" class="empty-state">暂无评估记录</div>
+          <div v-else class="gap-table-wrap">
+            <table class="gap-table">
+              <thead><tr><th>时间</th><th>模型</th><th>延迟</th><th>轮次</th><th>工具</th><th>成功率</th><th>幻觉</th></tr></thead>
+              <tbody>
+                <tr v-for="e in history" :key="e.id">
+                  <td class="text-sm">{{ e.created_at }}</td>
+                  <td>{{ e.model_name || '-' }}</td>
+                  <td>{{ e.latency_ms }}ms</td>
+                  <td>{{ e.round_count }}</td>
+                  <td>{{ e.tool_call_count }}</td>
+                  <td><span class="rate-badge" :class="e.is_success ? 'rate-high' : 'rate-low'">{{ e.is_success ? '成功' : '失败' }}</span></td>
+                  <td><span v-if="e.has_hallucination" class="rate-badge rate-low">幻觉</span><span v-else class="text-muted">-</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-    </div>
+    </template>
+
+    <!-- ════════ Tab 2: 基准测试集 ════════ -->
+    <AgentGroundTruthView v-else-if="tab === 'ground-truth'" />
+
+    <!-- ════════ Tab 3: 模型对比 ════════ -->
+    <ABTestView v-else-if="tab === 'ab-test'" />
   </div>
 </template>
 
@@ -108,7 +129,10 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
+import AgentGroundTruthView from '@/views/AgentGroundTruthView.vue'
+import ABTestView from '@/views/ABTestView.vue'
 
+const tab = ref('overview')
 const days = ref(30)
 const stats = ref(null)
 const history = ref([])
@@ -149,6 +173,11 @@ onMounted(() => { loadStats(); loadHistory() })
 .page-header { margin-bottom: 12px; }
 .page-header h1 { font-size: 1.4rem; font-weight: 600; color: var(--text); margin: 0 0 4px; }
 .page-header p { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
+.tab-bar { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); padding-bottom: 8px; }
+.tab-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 16px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 8px; background: var(--bg-card-solid, #fff); color: var(--text-secondary, #64748b); cursor: pointer; font-size: 0.85rem; }
+.tab-btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
+.tab-btn.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+.tab-icon { font-size: 1rem; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid,#fff); color: var(--text); cursor: pointer; font-size: 0.82rem; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }

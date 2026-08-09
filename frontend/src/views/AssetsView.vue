@@ -321,6 +321,7 @@
           <button class="btn btn-primary" :disabled="saving" @click="saveAsset">{{ saving ? '保存中...' : (formMode === 'create' ? '创建' : '保存') }}</button>
         </div>
       </div>
+      </div>
     </div>
 
     <!-- P2: WebSSH 终端模态框 -->
@@ -336,11 +337,11 @@
     </div>
 
     <!-- 部署报告抽屉 -->
-    <div v-if="deployDocAsset" class="modal-overlay" @click.self="deployDocAsset = null">
+    <div v-if="deployDocVisible" class="modal-overlay" @click.self="deployDocVisible = false; deployDocAsset = null">
       <div class="modal-box wide">
         <div class="modal-header">
-          <h3>📄 部署报告 — {{ deployDocAsset.name }}</h3>
-          <button class="modal-close-btn" @click="deployDocAsset = null">✕</button>
+          <h3>📄 部署报告 — {{ deployDocAsset?.name }}</h3>
+          <button class="modal-close-btn" @click="deployDocVisible = false; deployDocAsset = null">✕</button>
         </div>
         <div class="deploy-docs-body">
           <div class="deploy-upload-area">
@@ -364,7 +365,6 @@
         </div>
     </div>
   </div>
-</div>
 </div>
 </template>
 
@@ -846,12 +846,14 @@ async function openAssistant(assetId) {
 }
 
 // ─── 部署报告（关联资产的知识库文档）──
+const deployDocVisible = ref(false)
 const deployDocAsset = ref(null)
 const deployDocs = ref([])
 const deployDocsLoading = ref(false)
 
 async function openDeployDocs(asset) {
   deployDocAsset.value = asset
+  deployDocVisible.value = true
   deployDocsLoading.value = true
   try {
     const data = await request.get('/knowledge/documents/api/list', { params: { asset_id: asset.id } })

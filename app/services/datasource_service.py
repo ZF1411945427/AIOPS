@@ -51,6 +51,11 @@ DS_TYPES = {
         "fields": ["endpoint", "es_auth"],
         "description": "对接 Elasticsearch 搜索日志和事件数据",
     },
+    "loki": {
+        "label": "Grafana Loki",
+        "fields": ["endpoint", "basic_auth"],
+        "description": "对接 Grafana Loki 查询日志数据（LogQL）",
+    },
     "jaeger": {
         "label": "Jaeger 链路追踪",
         "fields": ["endpoint"],
@@ -140,6 +145,8 @@ def test_source(db: Session, source_id: int) -> tuple:
         success, msg = _test_docker(source)
     elif source.type == "elasticsearch":
         success, msg = _test_elasticsearch(source)
+    elif source.type == "loki":
+        success, msg = _test_loki(source)
     elif source.type == "jaeger":
         success, msg = _test_jaeger(source)
     elif source.type == "otel":
@@ -240,6 +247,32 @@ def _test_elasticsearch(source: DataSource) -> tuple:
         return (True, f"ES ok, version={version}, cluster={cluster_name}, indices={len(indices)}")
     except Exception as e:
         return (False, f"ES 连接失败: {str(e)}")
+
+
+def _test_loki(source: DataSource) -> tuple:
+    try:
+        import requests
+    except ImportError:
+        return (False, "missing requests package")
+    try:
+        cfg = parse_json_config(source.auth_config)
+        base = (source.endpoint or "").rstrip("/")
+        if not base:
+            return (False, "Loki endpoint 未配置")
+        headers = {}
+        if cfg.get("org_id"):
+            headers["X-Scope-OrgID"] = str(cfg["org_id"])
+        auth = None
+        if cfg.get("username") and cfg.get("password"):
+            auth = (cfg["username"], cfg["password"])
+        resp = requests.get(f"{base}/loki/api/v1/labels", headers=headers, auth=auth, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            labels = data.get("data", [])
+            return (True, f"Loki ok, labels={len(labels)}")
+        return (False, f"Loki 连接失败（HTTP {resp.status_code}）: {resp.text[:200]}")
+    except Exception as e:
+        return (False, f"Loki 连接失败: {str(e)}")
 
 
 def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
@@ -445,6 +478,13 @@ def scrape_source(db: Session, source: DataSource) -> tuple:
             return (True, "日志文件 tail 成功, 解析 12 条新记录")
         elif source.type == "elasticsearch":
             return _scrape_elasticsearch(db, source)
+        elif source.type == "loki":
+            success, msg = _test_loki(source)
+            source.last_status = "online" if success else "error"
+            source.last_error = "" if success else msg
+            source.last_scraped_at = datetime.now()
+            db.commit()
+            return (success, msg)
         elif source.type == "jaeger":
             return _scrape_jaeger(db, source)
         elif source.type == "otel":
@@ -714,7 +754,7 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
     created = 0
 
     # 1. Cluster asset
-    cluster_asset = _sync_k8s_asset(db, "kubernetes_cluster", cluster_name, 0, cluster_name, {"endpoint": source.endpoint})
+    cluster_asset = _sync_k8s_asset(db, "kubernetes_cluster", cluster_name, 0, cluster_name, {"endpoint": source.endpoint, "status": "Active"})
     created += 1
 
     # 2. Nodes
@@ -748,7 +788,7 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
     namespaces = v1.list_namespace().items
     ns_map = {}
     for ns in namespaces:
-        ns_asset = _sync_k8s_asset(db, "namespace", ns.metadata.name, cluster_asset.id, cluster_name, {"phase": ns.status.phase})
+        ns_asset = _sync_k8s_asset(db, "namespace", ns.metadata.name, cluster_asset.id, cluster_name, {"phase": ns.status.phase, "status": ns.status.phase})
         ns_map[ns.metadata.name] = ns_asset.id
         created += 1
 
@@ -756,11 +796,14 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
     deps = apps_v1.list_deployment_for_all_namespaces().items
     for dep in deps:
         parent = ns_map.get(dep.metadata.namespace, cluster_asset.id)
+        dep_available = dep.status.available_replicas or 0
+        dep_replicas = dep.spec.replicas or 0
         attrs = {
-            "replicas": dep.spec.replicas,
-            "available_replicas": dep.status.available_replicas or 0,
+            "replicas": dep_replicas,
+            "available_replicas": dep_available,
             "strategy": str(dep.spec.strategy.type) if dep.spec.strategy else "RollingUpdate",
             "image": dep.spec.template.spec.containers[0].image if dep.spec.template.spec.containers else "",
+            "status": "Ready" if dep_available >= dep_replicas else "NotReady",
         }
         dep_asset = _sync_k8s_asset(db, "deployment", f"{dep.metadata.namespace}/{dep.metadata.name}", parent, cluster_name, attrs)
         created += 1
@@ -775,6 +818,7 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
         restarts = sum(cs.restart_count for cs in (pod.status.container_statuses or []))
         attrs = {
             "phase": pod.status.phase,
+            "status": pod.status.phase,
             "node": pod.spec.node_name or "",
             "pod_ip": pod.status.pod_ip or "",
             "restarts": restarts,
@@ -834,6 +878,7 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
             "type": svc.spec.type,
             "cluster_ip": svc.spec.cluster_ip or "",
             "ports": [f"{p.port}/{p.protocol}" for p in (svc.spec.ports or [])],
+            "status": "Active",
         }
         _sync_k8s_asset(db, "service", f"{svc.metadata.namespace}/{svc.metadata.name}", parent, cluster_name, attrs)
         created += 1

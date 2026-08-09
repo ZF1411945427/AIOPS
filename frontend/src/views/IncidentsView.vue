@@ -9,12 +9,10 @@
       <select v-model="filters.status" @change="onStatusChange">
         <option value="">全部状态</option>
         <option value="open">进行中</option>
-        <option value="pending_approval">待审批</option>
         <option value="resolved">已解决</option>
       </select>
       <button class="btn" @click="loadIncidents">刷新</button>
-      <button v-if="currentUser?.role === 'admin'" class="btn btn-guide" @click="openApprovalSettings">⚙ 审批设置</button>
-      <span v-if="approvalConfig.enabled" class="approval-mode-tag">角色校验已启用 · 审批人 {{ approvalConfig.approverIds.length }} 人</span>
+      
     </div>
 
     <div class="panel">
@@ -48,9 +46,6 @@
               <td class="text-sm">{{ formatTime(inc.created_at) }}</td>
               <td class="actions-cell">
                 <button v-if="inc.status === 'open'" class="btn btn-sm btn-primary" @click="resolveIncident(inc.id)">解决</button>
-                <button v-if="inc.status === 'open'" class="btn btn-sm btn-approve" @click="submitApprovalFromList(inc.id)">提交审批</button>
-                <button v-if="inc.status === 'pending_approval' && canApprove" class="btn btn-sm btn-approve" @click="approveFromList(inc.id)">审批通过</button>
-                <button v-if="inc.status === 'pending_approval' && canApprove" class="btn btn-sm btn-reject" @click="rejectFromList(inc.id)">驳回</button>
                 <button class="btn btn-sm" @click="quickRca(inc.id)">根因分析</button>
                 <button class="btn btn-sm btn-ai" :disabled="!!aiRcaLoading[inc.id]" @click="quickAiRca(inc.id)">{{ aiRcaLoading[inc.id] ? 'AI 分析中...' : 'AI 深度分析' }}</button>
                 <button class="btn btn-sm btn-sop" :disabled="!!sopGenerating[inc.id]" @click="quickSop(inc.id)">{{ sopGenerating[inc.id] ? '生成中...' : '生成 SOP' }}</button>
@@ -94,10 +89,6 @@
           </div>
           <div class="detail-actions">
             <button v-if="detail.incident.status === 'open'" class="btn btn-primary" @click="resolveFromDetail">解决故障单</button>
-            <button v-if="detail.incident.status === 'open'" class="btn btn-approve" @click="submitApprovalFromDetail">提交审批</button>
-            <button v-if="detail.incident.status === 'pending_approval' && canApprove" class="btn btn-approve" @click="showApprovalPanel = true">审批通过</button>
-            <button v-if="detail.incident.status === 'pending_approval' && canApprove" class="btn btn-reject" @click="showRejectPanel = true">驳回</button>
-            <span v-if="detail.incident.status === 'pending_approval' && !canApprove" class="no-perm-hint">⚠ 您不在审批人列表中，无审批权限</span>
             <button class="btn" @click="doRca">根因分析</button>
             <button class="btn btn-ai" :disabled="!!aiRcaLoading[detail.incident.id]" @click="doAiRca()">{{ aiRcaLoading[detail.incident.id] ? 'AI 分析中...' : (aiRcaResult ? 'AI 深度分析' : 'AI 深度分析') }}</button>
             <button v-if="aiRcaResult && !aiRcaLoading[detail.incident.id]" class="btn btn-ai" style="opacity:0.75" @click="reAnalyze">重新分析</button>
@@ -127,78 +118,7 @@
             <div class="ai-rca-content" v-html="aiRcaResult"></div>
           </div>
 
-          <div v-if="detail.incident.status === 'pending_approval' && showApprovalPanel" class="approval-panel">
-            <h4>审批通过</h4>
-            <textarea v-model="approvalComment" class="approval-input" placeholder="审批意见（可选）" rows="2"></textarea>
-            <div class="approval-actions">
-              <button class="btn btn-approve" @click="doApprove">确认通过</button>
-              <button class="btn" @click="showApprovalPanel = false">取消</button>
-            </div>
           </div>
-
-          <div v-if="detail.incident.status === 'pending_approval' && showRejectPanel" class="approval-panel reject-panel">
-            <h4>驳回</h4>
-            <textarea v-model="rejectComment" class="approval-input" placeholder="驳回理由（必填）" rows="2"></textarea>
-            <div class="approval-actions">
-              <button class="btn btn-reject" @click="doReject">确认驳回</button>
-              <button class="btn" @click="showRejectPanel = false">取消</button>
-            </div>
-          </div>
-
-          <div v-if="approvalHistory.length" class="approval-history">
-            <h4>审批记录</h4>
-            <div v-for="a in approvalHistory" :key="a.id" class="approval-record">
-              <span class="approval-action" :class="a.action">{{ actionLabel(a.action) }}</span>
-              <span class="approval-user">{{ a.approver_name }}</span>
-              <span v-if="a.comment" class="approval-comment">{{ a.comment }}</span>
-              <span class="approval-time">{{ a.created_at }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 审批设置对话框 -->
-    <div v-if="approvalSettingsVisible" class="modal-overlay" @click.self="approvalSettingsVisible = false">
-      <div class="modal-box approval-settings-box">
-        <div class="modal-header">
-          <h3>⚙ 故障单审批设置</h3>
-          <button class="modal-close" @click="approvalSettingsVisible = false">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="setting-section">
-            <div class="setting-row">
-              <div class="setting-label">
-                <div class="setting-title">启用审批角色校验</div>
-                <div class="setting-desc">开启后，只有下方勾选的"审批人"才能审批通过/驳回故障单；关闭则任何登录用户都可审批（保持现状）</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" v-model="approvalConfig.enabled" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-
-          <div class="setting-section">
-            <div class="setting-title">审批人列表</div>
-            <div class="setting-desc">勾选哪些用户拥有故障单审批权限（仅当上方开关开启时生效）</div>
-            <div class="user-list">
-              <label v-for="u in allUsers" :key="u.id" class="user-item" :class="{ selected: approvalConfig.approverIds.includes(u.id) }">
-                <input type="checkbox" :value="u.id" v-model="approvalConfig.approverIds" />
-                <div class="user-info">
-                  <div class="user-name">{{ u.username }}</div>
-                  <div class="user-role">{{ u.role || 'admin' }}</div>
-                </div>
-              </label>
-              <div v-if="!allUsers.length" class="empty-users">暂无用户</div>
-            </div>
-          </div>
-
-          <div class="setting-actions">
-            <button class="btn" @click="approvalSettingsVisible = false">取消</button>
-            <button class="btn btn-primary" @click="saveApprovalSettings">保存设置</button>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -224,27 +144,6 @@ const rcaResult = ref('')
 const aiRcaResult = ref('')
 const aiRcaLoading = ref({})   // 按 incident id 跟踪，避免全局联动
 const sopGenerating = ref({})  // 按 incident id 跟踪
-const showApprovalPanel = ref(false)
-const showRejectPanel = ref(false)
-const approvalComment = ref('')
-const rejectComment = ref('')
-const approvalHistory = ref([])
-
-// ── 审批设置 ──
-const approvalSettingsVisible = ref(false)
-const allUsers = ref([])
-const approvalConfig = reactive({
-  enabled: false,
-  approverIds: [],
-})
-const currentUser = ref(null)
-
-// 是否有审批权限：开关关闭=任何人可审；开关开启=当前用户必须在审批人列表中
-const canApprove = computed(() => {
-  if (!approvalConfig.enabled) return true
-  if (!currentUser.value) return false
-  return approvalConfig.approverIds.includes(currentUser.value.id)
-})
 
 const pageNumbers = computed(() => {
   const pages = []
@@ -292,11 +191,6 @@ async function loadIncidents() {
 async function showDetail(id) {
   rcaResult.value = ''
   aiRcaResult.value = ''
-  showApprovalPanel.value = false
-  showRejectPanel.value = false
-  approvalComment.value = ''
-  rejectComment.value = ''
-  approvalHistory.value = []
   try {
     const data = await request.get(`/incidents/api/${id}`)
     detail.value = data
@@ -307,17 +201,9 @@ async function showDetail(id) {
     } else {
       aiRcaResult.value = ''
     }
-    loadApprovalHistory(id)
   } catch (e) {
     ElMessage.error('加载详情失败: ' + e.message)
   }
-}
-
-async function loadApprovalHistory(id) {
-  try {
-    const data = await request.get(`/incidents/api/${id}/approvals`)
-    approvalHistory.value = data.approvals || []
-  } catch (e) { /* ignore */ }
 }
 
 async function resolveIncident(id) {
@@ -398,18 +284,6 @@ async function generateSop(incidentId) {
   }
 }
 
-async function submitApprovalFromList(id) {
-  try {
-    await ElMessageBox.confirm('确认提交此故障单进行审批？', '提交审批')
-    const data = await request.post(`/incidents/api/${id}/submit-approval`)
-    if (data.ok === false) { ElMessage.error(data.error || '提交失败'); return }
-    ElMessage.success('已提交审批')
-    loadIncidents()
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error('提交失败: ' + (e.message || e))
-  }
-}
-
 // 列表行快捷操作：打开详情弹窗并自动触发分析（结果在弹窗内展示）
 async function quickRca(id) {
   await showDetail(id)
@@ -423,48 +297,7 @@ function quickSop(id) {
   generateSop(id)
 }
 
-async function submitApprovalFromDetail() {
-  if (!detail.value) return
-  try {
-    await ElMessageBox.confirm('确认提交此故障单进行审批？', '提交审批')
-    const data = await request.post(`/incidents/api/${detail.value.incident.id}/submit-approval`)
-    if (data.ok === false) { ElMessage.error(data.error || '提交失败'); return }
-    ElMessage.success('已提交审批')
-    showDetail(detail.value.incident.id)
-    loadIncidents()
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error('提交失败: ' + (e.message || e))
-  }
-}
 
-async function doApprove() {
-  if (!detail.value) return
-  try {
-    const data = await request.post(`/incidents/api/${detail.value.incident.id}/approve`, null, { params: { comment: approvalComment.value } })
-    if (data.ok === false) { ElMessage.error(data.error || '审批失败'); return }
-    ElMessage.success('审批通过，故障单已解决')
-    showApprovalPanel.value = false
-    showDetail(detail.value.incident.id)
-    loadIncidents()
-  } catch (e) {
-    ElMessage.error('审批失败: ' + (e.message || e))
-  }
-}
-
-async function doReject() {
-  if (!detail.value) return
-  if (!rejectComment.value.trim()) { ElMessage.warning('请填写驳回理由'); return }
-  try {
-    const data = await request.post(`/incidents/api/${detail.value.incident.id}/reject`, null, { params: { comment: rejectComment.value } })
-    if (data.ok === false) { ElMessage.error(data.error || '驳回失败'); return }
-    ElMessage.success('已驳回，故障单恢复为进行中')
-    showRejectPanel.value = false
-    showDetail(detail.value.incident.id)
-    loadIncidents()
-  } catch (e) {
-    ElMessage.error('驳回失败: ' + (e.message || e))
-  }
-}
 
 function formatTime(s) {
   if (!s) return '-'
@@ -476,93 +309,11 @@ function severityCn(s) {
 }
 
 function statusCn(s) {
-  return { open: '进行中', pending_approval: '待审批', resolved: '已解决', closed: '已关闭' }[s] || s
-}
-
-function actionLabel(a) {
-  return { submit: '提交审批', approve: '审批通过', reject: '审批驳回' }[a] || a
-}
-
-// ── 审批设置相关 ──
-async function loadApprovalConfig() {
-  try {
-    const [cfgRes, meRes] = await Promise.all([
-      request.get('/incidents/api/approval-settings'),
-      request.get('/me').catch(() => null),
-    ])
-    approvalConfig.enabled = !!cfgRes.enabled
-    approvalConfig.approverIds = cfgRes.approver_ids || []
-    if (meRes && meRes.ok && meRes.user) {
-      currentUser.value = meRes.user
-    }
-  } catch (e) {
-    console.error('加载审批设置失败:', e)
-  }
-}
-
-async function openApprovalSettings() {
-  approvalSettingsVisible.value = true
-  // 拉取用户列表
-  try {
-    const data = await request.get('/users/api/list')
-    allUsers.value = data.users || data || []
-  } catch (e) {
-    ElMessage.error('加载用户列表失败: ' + e.message)
-  }
-}
-
-async function saveApprovalSettings() {
-  try {
-    await request.put('/incidents/api/approval-settings', {
-      enabled: approvalConfig.enabled,
-      approver_ids: approvalConfig.approverIds,
-    })
-    ElMessage.success('审批设置已保存')
-    approvalSettingsVisible.value = false
-  } catch (e) {
-    ElMessage.error('保存失败: ' + (e.message || e))
-  }
-}
-
-async function approveFromList(id) {
-  try {
-    await ElMessageBox.confirm('确认审批通过此故障单？', '审批通过')
-    const data = await request.post(`/incidents/api/${id}/approve`, null, { params: { comment: '' } })
-    if (data.ok === false) { ElMessage.error(data.error || '审批失败'); return }
-    ElMessage.success('审批通过')
-    loadIncidents()
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error('审批失败: ' + (e.message || e))
-  }
-}
-
-async function rejectFromList(id) {
-  let comment = ''
-  try {
-    const ret = await ElMessageBox.prompt('请填写驳回理由', '驳回故障单', {
-      confirmButtonText: '确认驳回',
-      cancelButtonText: '取消',
-      inputType: 'textarea',
-      inputPlaceholder: '驳回理由（必填）',
-      inputValidator: v => (v && v.trim()) ? true : '请填写驳回理由',
-    })
-    comment = ret.value
-  } catch (e) {
-    return  // 用户取消
-  }
-  try {
-    const data = await request.post(`/incidents/api/${id}/reject`, null, { params: { comment } })
-    if (data.ok === false) { ElMessage.error(data.error || '驳回失败'); return }
-    ElMessage.success('已驳回')
-    loadIncidents()
-  } catch (e) {
-    ElMessage.error('驳回失败: ' + (e.message || e))
-  }
+  return { open: '进行中', resolved: '已解决' }[s] || s
 }
 
 onMounted(() => {
   loadIncidents()
-  loadApprovalConfig()
 })
 </script>
 
@@ -579,7 +330,7 @@ onMounted(() => {
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary:disabled, .btn-ai:disabled, .btn-sop:disabled, .btn-approve:disabled, .btn-reject:disabled { opacity: 0.6; }
+.btn-primary:disabled, .btn-ai:disabled, .btn-sop:disabled { opacity: 0.6; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .panel-body { padding: 16px 18px; }
 .table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -650,51 +401,4 @@ onMounted(() => {
 .ai-rca-content :deep(li) { margin-bottom: 4px; }
 .ai-rca-content :deep(strong) { color: #6366f1; }
 .ai-rca-content :deep(code) { background: rgba(99,102,241,0.1); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; }
-.ai-rca-content :deep(blockquote) { border-left: 3px solid #6366f1; padding-left: 12px; margin: 8px 0; color: var(--text-secondary, #64748b); }
-.btn-approve { background: rgba(34,197,94,0.1); color: #22c55e; border-color: rgba(34,197,94,0.3); font-weight: 600; }
-.btn-approve:hover { background: rgba(34,197,94,0.2); }
-.btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); font-weight: 600; }
-.btn-reject:hover { background: rgba(239,68,68,0.2); }
-.approval-panel { margin-top: 16px; padding: 14px; background: rgba(34,197,94,0.04); border: 1px solid rgba(34,197,94,0.15); border-radius: 8px; }
-.approval-panel.reject-panel { background: rgba(239,68,68,0.04); border-color: rgba(239,68,68,0.15); }
-.approval-panel h4 { margin: 0 0 8px; font-size: 0.9rem; color: var(--text, #1e293b); }
-.approval-input { width: 100%; padding: 8px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; font-size: 0.82rem; resize: vertical; font-family: inherit; }
-.approval-actions { display: flex; gap: 8px; margin-top: 8px; }
-.approval-history { margin-top: 16px; }
-.approval-history h4 { margin: 0 0 8px; font-size: 0.9rem; color: var(--text, #1e293b); }
-.approval-record { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); font-size: 0.82rem; }
-.approval-action { padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; }
-.approval-action.submit { background: rgba(245,158,11,0.1); color: #f59e0b; }
-.approval-action.approve { background: rgba(34,197,94,0.1); color: #22c55e; }
-.approval-action.reject { background: rgba(239,68,68,0.1); color: #ef4444; }
-.approval-user { font-weight: 600; color: var(--text, #1e293b); }
-.approval-comment { color: var(--text-secondary, #64748b); flex: 1; }
-.approval-time { color: var(--text-tertiary, #94a3b8); font-size: 0.75rem; white-space: nowrap; }
-
-/* ── 审批设置 ── */
-.approval-mode-tag { font-size: 0.75rem; color: #6366f1; background: rgba(99,102,241,0.1); padding: 3px 10px; border-radius: 12px; font-weight: 600; margin-left: 4px; }
-.no-perm-hint { font-size: 0.78rem; color: #ef4444; padding: 4px 10px; background: rgba(239,68,68,0.06); border-radius: 6px; }
-.approval-settings-box { max-width: 560px; }
-.setting-section { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); }
-.setting-section:last-of-type { border-bottom: none; }
-.setting-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.setting-label { flex: 1; }
-.setting-title { font-size: 0.92rem; font-weight: 600; color: var(--text, #1e293b); margin-bottom: 4px; }
-.setting-desc { font-size: 0.78rem; color: var(--text-secondary, #64748b); line-height: 1.5; }
-.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; margin-top: 4px; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; inset: 0; background: #cbd5e1; border-radius: 24px; transition: 0.2s; }
-.slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
-.switch input:checked + .slider { background: #6366f1; }
-.switch input:checked + .slider::before { transform: translateX(20px); }
-.user-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-top: 12px; }
-.user-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; cursor: pointer; transition: all 0.15s; background: var(--bg-card-solid, #fff); }
-.user-item:hover { border-color: rgba(99,102,241,0.3); }
-.user-item.selected { border-color: #6366f1; background: rgba(99,102,241,0.06); }
-.user-item input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #6366f1; }
-.user-info { flex: 1; min-width: 0; }
-.user-name { font-size: 0.85rem; font-weight: 600; color: var(--text, #1e293b); }
-.user-role { font-size: 0.72rem; color: var(--text-secondary, #64748b); margin-top: 2px; }
-.empty-users { grid-column: 1 / -1; text-align: center; padding: 20px; color: var(--text-tertiary, #94a3b8); font-size: 0.85rem; }
-.setting-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 </style>

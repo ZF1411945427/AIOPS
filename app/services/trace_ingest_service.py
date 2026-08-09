@@ -197,6 +197,145 @@ def ingest_otlp_json(db: Session, otlp_data: dict) -> dict:
     }
 
 
+def _pb_value_to_str(value) -> str:
+    """把 OTLP AnyValue protobuf 转字符串"""
+    if value is None:
+        return ""
+    kind = value.WhichOneof("value")
+    if kind is None:
+        return ""
+    if kind == "string_value":
+        return value.string_value
+    if kind == "int_value":
+        return str(value.int_value)
+    if kind == "double_value":
+        return str(value.double_value)
+    if kind == "bool_value":
+        return str(value.bool_value)
+    if kind == "bytes_value":
+        try:
+            return value.bytes_value.decode("utf-8", "replace")
+        except Exception:
+            return ""
+    if kind == "array_value":
+        return json.dumps([_pb_value_to_str(v) for v in value.array_value.values], ensure_ascii=False)
+    if kind == "kvlist_value":
+        return json.dumps(
+            {kv.key: _pb_value_to_str(kv.value) for kv in value.kvlist_value.values},
+            ensure_ascii=False,
+        )
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _pb_attrs_to_dict(attrs) -> dict:
+    """解析 OTLP KeyValueList protobuf 为 dict"""
+    result = {}
+    for a in attrs:
+        if a.key:
+            result[a.key] = _pb_value_to_str(a.value)
+    return result
+
+
+def ingest_otlp_protobuf(db: Session, body: bytes) -> dict:
+    """解析 OTLP/HTTP protobuf 二进制 trace 数据并写入 Span 表。
+
+    OTel SDK / Collector 的 OTLP exporter 默认协议为 http/protobuf(现代版本不再支持 http/json),
+    请求 POST 到标准端点 /v1/traces,body 为 ExportTraceServiceRequest 的 protobuf 编码。
+    """
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+    from opentelemetry.proto.trace.v1.trace_pb2 import Span as _PbSpan
+    from opentelemetry.proto.trace.v1.trace_pb2 import Status as _PbStatus
+
+    _SPAN_KIND_MAP = {
+        _PbSpan.SPAN_KIND_UNSPECIFIED: "unspecified",
+        _PbSpan.SPAN_KIND_INTERNAL: "internal",
+        _PbSpan.SPAN_KIND_SERVER: "server",
+        _PbSpan.SPAN_KIND_CLIENT: "client",
+        _PbSpan.SPAN_KIND_PRODUCER: "producer",
+        _PbSpan.SPAN_KIND_CONSUMER: "consumer",
+    }
+    _STATUS_CODE_MAP = {
+        _PbStatus.STATUS_CODE_UNSET: "OK",
+        _PbStatus.STATUS_CODE_OK: "OK",
+        _PbStatus.STATUS_CODE_ERROR: "ERROR",
+    }
+
+    req = ExportTraceServiceRequest()
+    req.ParseFromString(body)
+
+    total = 0
+    errors = 0
+    services_seen = set()
+
+    for rs in req.resource_spans:
+        res_attrs = _pb_attrs_to_dict(rs.resource.attributes)
+        service_name = res_attrs.get("service.name", "unknown")
+        services_seen.add(service_name)
+
+        for ss in rs.scope_spans:
+            for sp in ss.spans:
+                try:
+                    trace_id = sp.trace_id.hex()
+                    span_id = sp.span_id.hex()
+                    if not trace_id or not span_id:
+                        errors += 1
+                        continue
+                    parent_span_id = sp.parent_span_id.hex()
+
+                    start_time = _nano_to_datetime(str(sp.start_time_unix_nano))
+                    end_time = _nano_to_datetime(str(sp.end_time_unix_nano))
+                    duration_ms = 0.0
+                    if end_time > start_time:
+                        duration_ms = (end_time - start_time).total_seconds() * 1000
+
+                    tags = _pb_attrs_to_dict(sp.attributes)
+                    for k, v in res_attrs.items():
+                        if k not in tags:
+                            tags[k] = v
+                    tags["otel.kind"] = _SPAN_KIND_MAP.get(sp.kind, "unspecified")
+                    status = _STATUS_CODE_MAP.get(sp.status.code, "OK")
+                    if sp.status.message:
+                        tags["otel.status_message"] = sp.status.message
+
+                    existing = db.query(Span).filter(
+                        Span.trace_id == trace_id,
+                        Span.span_id == span_id,
+                    ).first()
+                    if existing:
+                        existing.service_name = service_name
+                        existing.operation_name = sp.name
+                        existing.started_at = start_time
+                        existing.ended_at = end_time
+                        existing.duration_ms = duration_ms
+                        existing.status = status
+                        existing.tags = json.dumps(tags, ensure_ascii=False)
+                    else:
+                        db.add(Span(
+                            trace_id=trace_id,
+                            span_id=span_id,
+                            parent_span_id=parent_span_id,
+                            service_name=service_name,
+                            operation_name=sp.name,
+                            started_at=start_time,
+                            ended_at=end_time,
+                            duration_ms=round(duration_ms, 1),
+                            status=status,
+                            tags=json.dumps(tags, ensure_ascii=False),
+                        ))
+                    total += 1
+                except Exception:
+                    errors += 1
+
+    db.commit()
+    return {
+        "is_success": True,
+        "message": f"Ingested {total} spans from {len(services_seen)} services (protobuf)",
+        "ingested": total,
+        "errors": errors,
+        "services": list(services_seen),
+    }
+
+
 def fetch_from_jaeger(db: Session, jaeger_url: str, service: str = "", limit: int = 20) -> dict:
     """
     从 Jaeger 后端 API 拉取 trace 数据并写入 Span 表。

@@ -167,6 +167,20 @@ def api_channel_delete(channel_id: int, db: Session = Depends(get_db)):
     return {"status": "ok"}
 
 
+@router.post("/api/channels/{channel_id}/update")
+def api_channel_update(channel_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    ch = notification_service.update_channel(db, channel_id, payload)
+    if not ch:
+        return {"status": "error", "detail": "渠道不存在"}, 404
+    return {"status": "ok"}
+
+
+@router.post("/api/channels/{channel_id}/test")
+def api_channel_test(channel_id: int, db: Session = Depends(get_db)):
+    success, error = notification_service.test_channel(db, channel_id)
+    return {"status": "ok" if success else "error", "detail": error}
+
+
 @router.post("/api/channels/{channel_id}/toggle")
 def api_channel_toggle(channel_id: int, payload: dict = Body(default=None), db: Session = Depends(get_db)):
     enabled = (payload or {}).get("enabled")

@@ -16,12 +16,54 @@ templates = get_templates()
 
 @router.get("/api/sources")
 def api_log_sources(db: Session = Depends(get_db)):
-    """返回 ES 类型数据源列表."""
-    sources = db.query(DataSource).filter(DataSource.type == "elasticsearch").all()
+    """返回日志类数据源列表 (elasticsearch / loki)."""
+    sources = db.query(DataSource).filter(
+        DataSource.type.in_(["elasticsearch", "loki"])
+    ).all()
     return JSONResponse([{
         "id": s.id, "name": s.name, "endpoint": s.endpoint or "",
-        "enabled": bool(s.enabled),
+        "type": s.type, "enabled": bool(s.enabled),
     } for s in sources])
+
+
+import re
+
+_DEDUP_TS_HEADER = re.compile(
+    r'^\[[^\]]*?(?:\d{4}[-/]\d{2}[-/]\d{2}[\sT]\d{2}:\d{2}:\d{2}[^\]]*)\]\s*'
+)
+
+
+def _dedup_logs(logs: list) -> list:
+    """降噪: 折叠相邻的相同日志(同服务+同消息),合并为一条并记录重复次数.
+
+    比较前会归一化消息:去掉首段 `[xxx]` 中的时间戳部分,避免嵌入时间使相同日志无法折叠.
+    折叠后记录 `time_start`(最新)和 `time_end`(最旧),前端可显示 `T1 ~ T2` 时间范围.
+    日志已按时间倒序排列.
+    """
+    if not logs:
+        return logs
+
+    def _norm(msg: str) -> str:
+        return _DEDUP_TS_HEADER.sub("", msg, count=1).strip()
+
+    result = []
+    prev_key = None
+    for lg in logs:
+        norm = _norm(lg.get("message", ""))
+        key = (lg.get("service", ""), norm)
+        ts = lg.get("timestamp", "")
+        if key and key == prev_key and result:
+            r = result[-1]
+            r["repeat"] = r.get("repeat", 1) + 1
+            r["time_end"] = ts  # 最早时间(倒序,后出现的更早)
+        else:
+            item = dict(lg)
+            item["repeat"] = 1
+            item["time_start"] = ts  # 最晚时间(倒序,先出现的更新)
+            item["time_end"] = ""
+            result.append(item)
+            prev_key = key
+    return result
 
 
 @router.get("/api/search")
@@ -35,17 +77,28 @@ def api_log_search(
     level: str = "",
     host: str = "",
     service: str = "",
+    dedup: int = 1,
     db: Session = Depends(get_db)):
-    """日志搜索 JSON API，支持高级过滤."""
+    """日志搜索 JSON API，支持高级过滤，按数据源类型分发 (ES / Loki).
+
+    dedup=1 (默认): 折叠相邻相同日志(降噪); dedup=0: 显示原始日志.
+    """
     if source_id <= 0:
         return JSONResponse({"logs": [], "total": 0, "page": page, "size": size, "error": None, "total_pages": 1})
     source = db.query(DataSource).filter(DataSource.id == source_id).first()
     if not source:
         return JSONResponse({"logs": [], "total": 0, "page": page, "size": size, "error": "数据源不存在", "total_pages": 1})
     try:
-        logs, total, error = _query_elasticsearch(source, query, time_range, page, size, index, level, host, service)
+        if source.type == "elasticsearch":
+            logs, total, error = _query_elasticsearch(source, query, time_range, page, size, index, level, host, service)
+        elif source.type == "loki":
+            logs, total, error = _query_loki(source, query, time_range, page, size, level, host, service)
+        else:
+            return JSONResponse({"logs": [], "total": 0, "page": page, "size": size, "error": f"不支持的数据源类型: {source.type}", "total_pages": 1})
     except Exception as e:
         logs, total, error = [], 0, str(e)
+    if dedup:
+        logs = _dedup_logs(logs)
     total_pages = (total + size - 1) // size if total > 0 else 1
     return JSONResponse({
         "logs": logs, "total": total, "page": page, "size": size,
@@ -84,6 +137,78 @@ def api_log_indices(source_id: int = 0, db: Session = Depends(get_db)):
         return JSONResponse([{"name": i["index"], "docs": int(i.get("docs.count", 0))} for i in indices])
     except Exception as e:
         return JSONResponse({"warning": str(e)}, status_code=200)
+
+
+@router.get("/api/jobs")
+def api_log_jobs(source_id: int = 0, db: Session = Depends(get_db)):
+    """返回 Loki 数据源的 job 标签值列表（供前端服务过滤下拉使用）."""
+    if source_id <= 0:
+        return JSONResponse([])
+    source = db.query(DataSource).filter(DataSource.id == source_id).first()
+    if not source or source.type != "loki" or not source.endpoint:
+        return JSONResponse([])
+    try:
+        import requests
+        base = source.endpoint.rstrip("/")
+        auth_config = {}
+        if source.auth_config:
+            try:
+                auth_config = json.loads(source.auth_config) if isinstance(source.auth_config, str) else (source.auth_config or {})
+            except Exception:
+                pass
+        auth = None
+        if auth_config.get("username") and auth_config.get("password"):
+            auth = (auth_config["username"], auth_config["password"])
+        headers = {}
+        if auth_config.get("org_id"):
+            headers["X-Scope-OrgID"] = str(auth_config["org_id"])
+        resp = requests.get(f"{base}/loki/api/v1/label/job/values", headers=headers, auth=auth, timeout=8)
+        if resp.status_code != 200:
+            return JSONResponse([])
+        return JSONResponse(resp.json().get("data", []))
+    except Exception:
+        return JSONResponse([])
+
+
+@router.get("/api/services")
+def api_log_services(source_id: int = 0, db: Session = Depends(get_db)):
+    """返回 Loki 数据源的真实服务名列表.
+
+    服务名从 filename 标签解析:k8s pod 路径→deployment 名、
+    docker 容器路径→容器名(经 132 docker ps 映射)、裸机日志文件→文件名。
+    """
+    if source_id <= 0:
+        return JSONResponse([])
+    source = db.query(DataSource).filter(DataSource.id == source_id).first()
+    if not source or source.type != "loki" or not source.endpoint:
+        return JSONResponse([])
+    try:
+        import requests
+        from app.services.log_query_service import parse_loki_service_name
+        base = source.endpoint.rstrip("/")
+        auth_config = {}
+        if source.auth_config:
+            try:
+                auth_config = json.loads(source.auth_config) if isinstance(source.auth_config, str) else (source.auth_config or {})
+            except Exception:
+                pass
+        auth = None
+        if auth_config.get("username") and auth_config.get("password"):
+            auth = (auth_config["username"], auth_config["password"])
+        headers = {}
+        if auth_config.get("org_id"):
+            headers["X-Scope-OrgID"] = str(auth_config["org_id"])
+        resp = requests.get(f"{base}/loki/api/v1/label/filename/values", headers=headers, auth=auth, timeout=8)
+        if resp.status_code != 200:
+            return JSONResponse([])
+        services = set()
+        for f in resp.json().get("data", []):
+            svc = parse_loki_service_name(f)
+            if svc:
+                services.add(svc)
+        return JSONResponse(sorted(services))
+    except Exception:
+        return JSONResponse([])
 
 
 def _query_elasticsearch(source, query_str, time_range, page, size, index="", level="", host="", service=""):
@@ -198,4 +323,32 @@ def _query_elasticsearch(source, query_str, time_range, page, size, index="", le
         except Exception:
             pass
         return [], 0, f"ES 查询失败: {e}"
+
+
+def _query_loki(source, query_str, time_range, page, size, level="", host="", service=""):
+    """调用 Loki 适配器查询日志，支持分页切片."""
+    from app.services.log_query_service import query_logs as _service_query_logs
+
+    # Loki query_range 的 limit 是"每个 stream"条数。为保证翻页切片数据充足
+    # (尤其单 stream 场景),limit 取当前页所需条数,并预留下一页余量。
+    limit = min(max(page * size, 200), 500)
+    raw_logs, total, error = _service_query_logs(
+        source_id=source.id,
+        query=query_str,
+        time_range=time_range,
+        level=level,
+        host=host,
+        limit=limit,
+        service=service,
+    )
+    if error:
+        return [], 0, error
+
+    start_idx = (page - 1) * size
+    page_logs = raw_logs[start_idx:start_idx + size]
+    for lg in page_logs:
+        lg["id"] = ""
+        lg["index"] = "loki"
+        lg["source"] = lg.get("source", "loki")
+    return page_logs, total, None
 

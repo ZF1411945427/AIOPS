@@ -7,6 +7,25 @@ from app.models import AnomalyConfig, MetricRecord, Alert
 from app.services import notification_service
 
 
+# 采集中断判定阈值：超过该间隔认为数据有缺口（机器关机/停采/Agent 断开）
+# 采集周期约 60s，取 3 倍（180s），启动恢复后首批数据不判异常，让基线重新学习
+GAP_THRESHOLD_SECONDS = 180
+
+
+def _has_recent_gap(records: list) -> bool:
+    """最新记录与前一条是否出现明显时间缺口。
+
+    机器关机/重启时采集中断，重启瞬间的 CPU 尖峰对比关机前基线
+    会被 3σ 误判为异常。检测到缺口则跳过本次判定。
+    """
+    if len(records) < 2:
+        return False
+    latest, prev = records[0], records[1]
+    if latest.timestamp is None or prev.timestamp is None:
+        return False
+    return (latest.timestamp - prev.timestamp).total_seconds() > GAP_THRESHOLD_SECONDS
+
+
 def list_configs(db: Session):
     return db.query(AnomalyConfig).order_by(AnomalyConfig.id.desc()).all()
 
@@ -366,6 +385,11 @@ def detect_anomalies(db: Session):
         records = q.order_by(MetricRecord.timestamp.desc()).limit(config.window_size + 5).all()
 
         if len(records) < config.window_size:
+            continue
+
+        # 机器启动/重启抑制：最新记录与前一条间隔过大（采集中断）→ 跳过本次判定，
+        # 避免启动瞬态尖峰被 3σ 等算法误判为异常
+        if _has_recent_gap(records):
             continue
 
         if cfg_alg == 'ewma':

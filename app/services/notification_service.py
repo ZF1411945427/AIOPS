@@ -31,6 +31,72 @@ def delete_channel(db: Session, channel_id: int):
     db.commit()
 
 
+def update_channel(db: Session, channel_id: int, data: dict):
+    ch = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
+    if not ch:
+        return None
+    if "name" in data:
+        ch.name = data["name"]
+    if "type" in data:
+        ch.type = data["type"]
+    if "config" in data:
+        existing = json.loads(ch.channel_config) if ch.channel_config else {}
+        merged = dict(existing)
+        for k, v in data["config"].items():
+            if v == "" and k in ("password", "secret", "token", "webhook_secret"):
+                continue
+            merged[k] = v
+        ch.channel_config = json.dumps(merged, ensure_ascii=False)
+    db.commit()
+    db.refresh(ch)
+    return ch
+
+
+def test_channel(db: Session, channel_id: int) -> tuple[bool, str]:
+    ch = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
+    if not ch:
+        return False, "渠道不存在"
+    config = json.loads(ch.channel_config) if ch.channel_config else {}
+    title = "[AIOPS] 测试通知"
+    content = "这是一条测试消息，您的通知渠道配置正确。"
+
+    if ch.type == "email":
+        return send_email(config, title, content)
+    elif ch.type == "webhook":
+        url = config.get("url", "")
+        ok, reason = validate_url_scheme(url)
+        if not ok:
+            return False, f"URL 校验失败: {reason}"
+        try:
+            import urllib.request
+            data = json.dumps({"title": title, "content": content}).encode()
+            req = urllib.request.Request(url, data, {"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+    elif ch.type in ("dingtalk", "wecom", "feishu"):
+        webhook = config.get("webhook", "")
+        ok, reason = validate_url_scheme(webhook)
+        if not ok:
+            return False, f"URL 校验失败: {reason}"
+        try:
+            import urllib.request
+            if ch.type == "feishu":
+                payload = {"msg_type": "text", "content": {"text": f"{title}\n{content}"}}
+            else:
+                payload = {"msgtype": "text", "text": {"content": f"{title}\n{content}"}}
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(webhook, data, {"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+    elif ch.type == "log":
+        return True, ""
+    return False, "不支持测试的渠道类型"
+
+
 def set_channel_enabled(db: Session, channel_id: int, enabled: bool):
     ch = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
     if not ch:

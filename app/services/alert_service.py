@@ -316,7 +316,26 @@ def resolve_alert(db: Session, alert_id: int):
     alert.resolved_at = datetime.now()
     db.commit()
     db.refresh(alert)
+    _auto_resolve_incident_for_alert(db, alert_id)
     return alert
+
+
+def _auto_resolve_incident_for_alert(db: Session, alert_id: int):
+    from app.models import IncidentAlert, Incident
+    link = db.query(IncidentAlert).filter(IncidentAlert.alert_id == alert_id).first()
+    if not link:
+        return
+    inc = db.query(Incident).filter(Incident.id == link.incident_id, Incident.status == "open").first()
+    if not inc:
+        return
+    linked_alert_ids = [la.alert_id for la in db.query(IncidentAlert).filter(IncidentAlert.incident_id == inc.id).all()]
+    if not linked_alert_ids:
+        return
+    unresolved = db.query(Alert).filter(Alert.id.in_(linked_alert_ids), Alert.status.in_(["triggered", "acknowledged"])).count()
+    if unresolved == 0:
+        inc.status = "resolved"
+        inc.resolved_at = datetime.now()
+        db.commit()
 
 
 def get_alert_stats(db: Session):
@@ -365,6 +384,8 @@ def batch_resolve(db: Session):
         a.status = "resolved"
         a.resolved_at = now
     db.commit()
+    for a in alerts:
+        _auto_resolve_incident_for_alert(db, a.id)
     return len(alerts)
 
 
