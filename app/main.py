@@ -67,6 +67,7 @@ from app.routers import traces, traces_api, trace_anomaly, trace_ingest, trace_r
 from app.routers import auth, users, roles, settings, system, system_posture, audit, menu, license, tenant_management, tokens, ws, api_v1, mobile, health_map, network_test, datasources, es_integration, event_sources, events, kafka_pipeline, netflow, feature_store, ci_models, drain, granger, idice, trend_prediction, prediction_models, predictions, predictions_enhanced, pcadr, metrics, notifications, notification_templates, correlation, observability_correlation, script_exec, ansible, change_workflow, workflow, chatops, discovery, diagnostic_tools
 # admin 系统管理路由（领域清单 + 背景任务看板，P1 任务#4/#6）
 from app.routers import admin
+from app.routers import sandbox
 # P2 任务#9 告警收敛闭环 / P2 任务#10 RAG 检索质量评估
 from app.routers import alert_correlation, rag_eval
 # 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线，打磨期 P0）
@@ -258,7 +259,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
     # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500
     return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0}, status_code=200)
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -575,6 +576,9 @@ app.include_router(sub_agents.router)
 app.include_router(im_chatops.router)
 app.include_router(edge_tunnel.router)
 app.include_router(webssh.router)
+
+# ── sandbox AI 运维沙盒域（独立模块，暂不侵入现有执行链）──
+app.include_router(sandbox.router)
 
 # ── sre 可靠性工程域 ──
 app.include_router(sre.router)

@@ -285,6 +285,7 @@
           <RagEvalView v-else-if="activeView === 'rag-eval'" />
           <AuditMatrixView v-else-if="activeView === 'audit-matrix'" />
           <SecurityAuditView v-else-if="activeView === 'security-audit'" />
+          <SandboxView v-else-if="activeView === 'sandbox-overview'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -411,6 +412,7 @@ const ContractCheckView = defineAsyncComponent(() => import('@/views/ContractChe
 const RagEvalView = defineAsyncComponent(() => import('@/views/RagEvalView.vue'))
 const AuditMatrixView = defineAsyncComponent(() => import('@/views/AuditMatrixView.vue'))
 const SecurityAuditView = defineAsyncComponent(() => import('@/views/SecurityAuditView.vue'))
+const SandboxView = defineAsyncComponent(() => import('@/views/SandboxView.vue'))
 const MonitorView = defineAsyncComponent(() => import('@/views/MonitorView.vue'))
 import request from '@/api/request'
 

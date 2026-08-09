@@ -30,6 +30,12 @@
       </div>
     </div>
 
+    <!-- 协议警告 -->
+    <div class="warning-banner" v-if="warning">
+      <span class="warning-icon">⚠️</span>
+      <span class="warning-text">{{ warning }}</span>
+    </div>
+
     <!-- OTLP 端点信息 -->
     <div class="endpoint-banner">
       <div class="endpoint-icon">📡</div>
@@ -104,6 +110,7 @@ const activeType = ref('java')
 const status = ref({})
 const guides = ref({})
 const otlpEndpoint = ref('')
+const warning = ref('')
 
 const typeIcons = {
   java: '☕',
@@ -121,6 +128,7 @@ async function loadGuide() {
     const res = await request.get('/api/v1/traces/agent-guide')
     guides.value = res.guides || {}
     otlpEndpoint.value = res.otlp_endpoint || ''
+    warning.value = res.warning || ''
   } catch (e) {
     ElMessage.error('加载指引失败: ' + (e.message || e))
   }
@@ -159,6 +167,13 @@ onMounted(() => {
 
 <style scoped>
 .status-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.warning-banner {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;
+  background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);
+}
+.warning-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.warning-text { font-size: 12px; line-height: 1.6; color: var(--text-primary); }
 .status-card {
   flex: 1; border-radius: 10px; padding: 14px; text-align: center;
   border: 1px solid rgba(148,163,184,0.12); background: var(--card-bg);
