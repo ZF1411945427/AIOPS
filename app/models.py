@@ -2405,6 +2405,55 @@ class OfflinePackageSource(Base):
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
+# ==================== K8S 离线集群部署模型 ====================
+# 契约见 CONTRACT.md 第十三章。对标 Pixiu 一键建集群：离线仓库 + kubeadm 编排 + 自动接入监控
+
+class K8sClusterPlan(Base):
+    """K8S 离线集群部署计划"""
+    __tablename__ = "k8s_cluster_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    kubernetes_version = Column(String(64), default="")
+    runtime = Column(String(32), default="containerd")
+    cni = Column(String(32), default="calico")
+    pod_cidr = Column(String(32), default="10.244.0.0/16")
+    service_cidr = Column(String(32), default="10.96.0.0/12")
+    image_repository = Column(String(256), default="")
+    bundle_id = Column(Integer, ForeignKey("offline_repo_bundles.id"), nullable=True)
+    registry_id = Column(Integer, ForeignKey("offline_registries.id"), nullable=True)
+    nodes_json = Column(Text, default="[]")  # 节点定义（见 CONTRACT 13.3）
+    status = Column(String(32), default="draft")
+    current_step = Column(Integer, default=0)
+    logs_json = Column(Text, default="[]")  # 执行日志事件列表
+    kubeconfig = Column(Text, default="")  # 敏感：产出 kubeconfig
+    join_token = Column(Text, default="")  # 敏感：worker 加入 token（临时）
+    report_json = Column(Text, default="{}")  # 部署报告
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class K8sClusterNode(Base):
+    """K8S 集群节点"""
+    __tablename__ = "k8s_cluster_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("k8s_cluster_plans.id"), nullable=False)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True)
+    host_role = Column(String(16), default="worker")
+    ip = Column(String(64), default="")
+    hostname = Column(String(64), default="")
+    username = Column(String(64), default="")
+    password = Column(String(128), default="")  # 敏感
+    has_password = Column(Boolean, default=False)
+    ssh_port = Column(Integer, default=22)
+    status = Column(String(32), default="pending")
+    init_roles = Column(String(255), default="")  # control-plane,etcd
+    joined_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
 class AIInsightRecord(Base):
     """AI 分析历史记录沉淀 - 跨指标/日志/链路三页"""
     __tablename__ = "ai_insight_records"

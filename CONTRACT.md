@@ -1296,3 +1296,98 @@ draft → planned → running → succeeded → (post-verify → report)
 - `offline_registries.password`：后端详情/列表返回 `***`，同时返回 `has_password` 布尔标记
 - 前端编辑时密码输入框置空；提交时空值=不更新（保留旧密码）
 - `storage_path`（内嵌仓库本地路径）属于服务器侧字段，不回传、前端不可编辑
+
+---
+
+## 第十三章：K8S 离线集群部署（K8S Offline Cluster Deploy）字段契约
+
+> 适用：`k8s_cluster_plans` / `k8s_cluster_nodes` 两张表，
+> `app/services/k8s_offline_deploy_service.py`，`app/routers/k8s_offline_deploy.py`。
+> 前端 `K8sOfflineDeployView.vue` 消费。
+> 功能定位：在离线环境下，复用「第十二章」离线仓库（私有 Registry + 包源），
+> 通过 SSH 在目标主机上执行 kubeadm 编排，一键创建 K8S 集群，产出 kubeconfig 并自动接入平台 K8S 监控。
+> 新增/修改字段必须先改本节，再同步前后端代码。
+
+### 13.1 k8s_cluster_plans — K8S 集群部署计划
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | 主键 |
+| name | String(128) | NOT NULL | 集群名称（作为 k8s_cluster 标识 / DataSource 名称） |
+| kubernetes_version | String(64) | "" | K8S 版本，如 `v1.31.6` |
+| runtime | String(32) | "containerd" | 容器运行时：containerd/docker |
+| cni | String(32) | "calico" | 网络插件：calico/cilium/flannel |
+| pod_cidr | String(32) | "10.244.0.0/16" | Pod CIDR |
+| service_cidr | String(32) | "10.96.0.0/12" | Service CIDR |
+| image_repository | String(256) | "" | 控制面镜像仓库（默认用离线默认 Registry） |
+| bundle_id | Integer FK(offline_repo_bundles.id) | nullable | 关联离线包（可空，联调/在线模式不要求） |
+| registry_id | Integer FK(offline_registries.id) | nullable | 关联私有 Registry（加载镜像用） |
+| nodes_json | Text | "[]" | 节点定义 JSON（见 13.3 节点对象结构） |
+| status | String(32) | "draft" | draft/planned/running/succeeded/failed/rolled_back |
+| current_step | Integer | 0 | 当前执行步骤序号（编排阶段） |
+| logs_json | Text | "[]" | 执行日志事件列表（{ts,type,node,step,message}） |
+| kubeconfig | Text | "" | **敏感：产出 kubeconfig 内容（后端列表不返回，详情按需返回）** |
+| join_token | Text | "" | **敏感：worker 加入 token（临时，仅执行期写入）** |
+| report_json | Text | "{}" | 部署报告（node 状态矩阵 + 关键信息） |
+| created_by | Integer FK(users.id) | nullable | 创建人 |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+### 13.2 k8s_cluster_nodes — 集群节点
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | 主键 |
+| plan_id | Integer FK(k8s_cluster_plans.id) | NOT NULL | 关联计划 |
+| asset_id | Integer FK(assets.id) | nullable | 关联平台资产（可空=手填 IP+SSH 凭据） |
+| host_role | String(16) | "worker" | master/worker |
+| ip | String(64) | "" | 节点 IP |
+| hostname | String(64) | "" | 节点主机名（空=部署时探测） |
+| username | String(64) | "" | SSH 用户 |
+| password | String(128) | "" | **敏感：SSH 密码（详情返回 `***` + `has_password`）** |
+| has_password | Boolean | False | 是否已设置 SSH 密码 |
+| ssh_port | Integer | 22 | SSH 端口 |
+| status | String(32) | "pending" | pending/running/succeeded/failed |
+| init_roles | Text | "" | 控制面额外角色：control-plane/etcd（多 master 用） |
+| joined_at | DateTime | nullable | 加入时间 |
+| created_at | DateTime | now() | - |
+
+### 13.3 节点对象结构（nodes_json 元素 / 前端提交体）
+
+```json
+{
+  "asset_id": 12,            // 可选，关联资产时自动取连接配置
+  "host_role": "master",     // master/worker
+  "ip": "192.168.1.10",
+  "hostname": "k8s-master01",// 可选
+  "username": "root",
+  "password": "",            // 敏感：提交即写入，回显保持空
+  "ssh_port": 22,
+  "init_roles": "control-plane,etcd"   // 仅 mult-master：首 master 可空
+}
+```
+
+### 13.4 部署执行流程（kubeadm 编排，7 阶段）
+
+```
+阶段0 预检:    各节点 SSH 连通/root/OS/swap/内核模块
+阶段1 环境准备: 各节点 关 swap + 加载 overlay/br_netfilter + sysctl + 配 hostname/hosts
+阶段2 运行时:   各节点 装 containerd + 配置 + 导入离线镜像(或配置私有 Registry insecure)
+阶段3 引导:     首 master 生成 kubeadm-config.yaml + 预拉镜像
+阶段4 初始化:   首 master kubeadm init（imageRepository 指私有仓库）→ 写 kubeconfig
+阶段5 CNI:     首 master kubectl apply -f <cni>.yaml（从离线包或内置模板）
+阶段6 加入:     首 master 生成 join token/hash → 各 worker kubeadm join（多 master 追加 control-plane join）
+阶段7 验证+接入: kubectl get nodes/pods -A 全 Ready → 采集 kubeconfig → 自动创建 DataSource(type=kubernetes)
+```
+
+### 13.5 敏感字段掩码规则（沿用第五章）
+
+- `k8s_cluster_nodes.password`：后端详情返回 `***` + `has_password`，前端编辑置空、保存空值=不更新
+- `k8s_cluster_plans.kubeconfig`：列表页不返回；详情/成功后按需返回，前端下载/复制时再请求
+- `join_token`：仅执行期临时写入，成功后清空
+
+### 13.6 平台接入约定
+
+- 部署成功自动在 `data_sources` 表创建一行 `type='kubernetes'` 记录，`name` = 集群名称，
+  `auth_config['kubeconfig']` = 采集到的 kubeconfig，`enabled=true`，`endpoint` = 首 master `https://<ip>:6443`
+- 该 DataSource 立即被 `k8s_monitor` / `k8s_resources` 消费（集群资源自动纳管）

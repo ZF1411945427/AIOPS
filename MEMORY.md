@@ -2,6 +2,21 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-12: 「K8S 离线集群部署」功能完成（一键建集群 + 自动接入监控）
+- **交付**: 在阶段 A 离线仓库基础上,补齐 Pixiu 一键建 K8S 集群能力。方案选型 **kubeadm 编排**(非容器化 runner),复用 `ssh_helper.connect_ssh` + 离线仓库(`offline_repo_service`)的私有 Registry/包源/离线包(binaries+cni+images)。
+- **新增后端**: `app/models.py` 加 `K8sClusterPlan`+`K8sClusterNode`(两表,create_all 自动建,双库均验证);`app/services/k8s_offline_deploy_service.py`(约1000行,7阶段编排生成器,run_deploy emits status/phase/log/error/complete 事件供 WS);`app/routers/k8s_offline_deploy.py`(prefix `/k8s-offline/api`,11路由 + `/ws/plans/{id}/deploy` 实时推送)。main.py 注册在 offline_repo 之后。
+- **新增前端**: `K8sOfflineDeployView.vue`(列表+新建/编辑弹窗+详情部署终端 WS+预检/SSH校验/停止/下载kubeconfig),菜单在「资源管理>离线仓库」组下加叶子 `k8s-cluster-deploy`;AppLayout 模板+defineAsyncComponent 注册;vite 加 `/k8s-offline` proxy(ws:true)。构建成功(chunk `K8sOfflineDeployView-*.js`)。
+- **字段契约**: CONTRACT.md 新增第十三章(13.1-13.6),含 k8s_cluster_plans/k8s_cluster_nodes 字段 + nodes_json 结构 + 7阶段流程 + 敏感字段掩码 + 平台接入约定。
+- **7 阶段编排**: 0 预检(SSH/root/swap/内核) → 1 环境准备(swapoff/modprobe/sysctl/hostname/hosts) → 2 运行时+二进制(containerd+kubeadm/kubelet/kubectl,优先 SFTP 离线包 binaries/,退化包源;containerd 信任私有 insecure Registry;离线 images ctr 导入) → 3 首master生成 kubeadm-config.yaml(可 imageRepository 指私有仓库)+预拉 → 4 kubeadm init → 5 CNI(优先离线包 cni/,退化在线下载) → 6 生成 join token+CA hash,worker kubeadm join(多master带 control-plane+cert) → 7 验证 nodes Ready + 采集 admin.conf + 自动创建 DataSource(type=kubernetes, auth_config['kubeconfig']),集群立即进 k8s_monitor。
+- **验证闭环(全过)**: 双库建表 ✓;service CRUD+precheck+list ✓;路由导入 11 条 ✓;run_deploy 对不可达节点湿润滑失败(status→failed/节点failed/锁释放/日志写入)✓;菜单 JSON 合法 + admin role_menus 自动补 `k8s-cluster-deploy` ✓;前端构建 19.6s ✓;后端重启端口 8000 就绪、meta 路由已注册(未登录 302→SPA)✓。
+- **注意**: admin 登录密码非默认 123456(此前安全加固已改,无需再动);真实集群创建需目标机 + 真实离线工件,本环境仅验证到 SSH 失败路径。后端当前进程已含全部代码+菜单改动。
+
+### 2026-08-12: 启动「K8S 离线部署」功能开发（对标 Pixiu builder 一键建集群）
+- **任务**: 继阶段 A(离线仓库)完成后,补齐 Pixiu 真正的一键 K8S 集群部署能力。用户授权自行决定方案、不需询问决策,要求学习 Pixiu 实现方式
+- **本会话压缩**: 上轮已完成阶段 A「离线仓库」——`OfflineRepoBundle`/`OfflineRegistry`/`OfflinePackageSource` 三模型 + `offline_repo_service.py`(677行,上传/解压/镜像 load-tag-push/包源索引/HTTP静态源 18080/Registry CRUD/健康/plan离线配置)+ `offline_repo.py` router + `OfflineRepoView.vue`(4 Tab)+ 菜单已放「资源管理>TTP 离线仓库」`offline-management` 分组。4 个 bug 已修(.tar.gz 后缀/dpkg 源 404 等)。上次后端进程已带全部改动。
+- **关键约束**: 离线包结构 `images/` + `packages/`;`storage/offline/{bundles,sources}` 基于 `__file__` 动态计算禁硬编码;`_serve_source_dir()` HTTP 静态服务 0.0.0.0:18080(AIOPS_OFFLINE_SOURCE_PORT 可覆盖);镜像 load/tag/push 用宿主机 docker;包源 deb( dpkg-scanpackages)/rpm( createrepo)。
+- **设计参考**: 阶段 D(容器化执行 runner:RSSH docker pull/image + docker run)与 Pixiu `pkg/deployagent/runner.go`;但 K8S 集群真正一键部署需 kubez-ansible(openEuler)/KubeKey(kubesphere)/kubeadm 三种路径。本功能方向:选型 KubeKey 或 kubez-ansible 作为"创建集群"执行器,承接离线仓库的镜像+包源,生成配置文件(hosts.yml/config-sample),SSH 到目标机执行,最终产出 kubeconfig + 集群接入现有 k8s_monitor。
+
 ### 2026-08-12: 部署报告"预检/验证""误显示 ❌"补强（兼容 checks/results 结构 + 前端自动刷新）
 - **现象**: 用户重新点预检后,已生成报告里"预检"仍显示 X
 - **根因补充**:

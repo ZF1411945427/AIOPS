@@ -331,6 +331,13 @@
             "type": "vue",
             "icon": "Box",
             "path": "/offline-repo"
+          },
+          {
+            "key": "k8s-cluster-deploy",
+            "label": "K8s 集群部署",
+            "type": "vue",
+            "icon": "Promotion",
+            "path": "/k8s-cluster-deploy"
           }
         ]
       }

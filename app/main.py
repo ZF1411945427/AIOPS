@@ -71,6 +71,8 @@ from app.routers import sandbox
 from app.routers import deploy
 # 离线部署(Offline Repo) — 对标 Pixiu builder serve
 from app.routers import offline_repo
+# K8S 离线集群部署 — 对标 Pixiu 一键建集群
+from app.routers import k8s_offline_deploy
 # P2 任务#9 告警收敛闭环 / P2 任务#10 RAG 检索质量评估
 from app.routers import alert_correlation, rag_eval
 # 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线，打磨期 P0）
@@ -621,6 +623,8 @@ app.include_router(agent_autonomous.router)
 app.include_router(deploy.router)
 # 离线部署(Offline Repo)
 app.include_router(offline_repo.router)
+# K8S 离线集群部署
+app.include_router(k8s_offline_deploy.router)
 
 # ── sre 可靠性工程域 ──
 app.include_router(sre.router)

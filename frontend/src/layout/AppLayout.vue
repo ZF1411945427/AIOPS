@@ -383,6 +383,7 @@
           <AgentAutonomousView v-else-if="activeView === 'agent-autonomous'" />
           <DeployView v-else-if="activeView === 'ai-deploy'" />
           <OfflineRepoView v-else-if="activeView === 'offline-repo'" />
+          <K8sOfflineDeployView v-else-if="activeView === 'k8s-cluster-deploy'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -515,6 +516,7 @@ const AgentManageView = defineAsyncComponent(() => import('@/views/AgentManageVi
 const AgentAutonomousView = defineAsyncComponent(() => import('@/views/AgentAutonomousView.vue'))
 const DeployView = defineAsyncComponent(() => import('@/views/DeployView.vue'))
 const OfflineRepoView = defineAsyncComponent(() => import('@/views/OfflineRepoView.vue'))
+const K8sOfflineDeployView = defineAsyncComponent(() => import('@/views/K8sOfflineDeployView.vue'))
 const MonitorView = defineAsyncComponent(() => import('@/views/MonitorView.vue'))
 import request from '@/api/request'
 
