@@ -182,3 +182,7 @@ storage/
 data/license_state.json
 data/victoriametrics/
 
+
+# ===== Milvus 向量库运行时数据（不入库） =====
+db/milvus/
+
