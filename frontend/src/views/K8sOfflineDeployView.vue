@@ -202,6 +202,7 @@
           <button class="btn" :disabled="deploying" @click="validateSsh">SSH 校验</button>
           <button class="btn danger" v-if="deploying" @click="stopDeploy">停止</button>
           <button class="btn primary" v-else @click="startDeploy">▶ 开始部署</button>
+          <button class="btn primary" v-if="detail.status === 'succeeded' && !deploying" @click="addToAssets">＋ 添加到 K8s 资产</button>
           <button class="btn" v-if="detail.status === 'succeeded'" @click="downloadKubeconfig">下载 kubeconfig</button>
         </div>
       </div>
@@ -383,6 +384,16 @@ async function downloadKubeconfig() {
     a.download = `${detail.value.name}-kubeconfig.yaml`
     a.click()
     URL.revokeObjectURL(a.href)
+  } catch (e) { ElMessage.error(e.message) }
+}
+
+async function addToAssets() {
+  try {
+    const res = await request.post(`/k8s-offline/api/plans/${detail.value.id}/to-assets`)
+    if (!res.ok) { ElMessage.warning(res.message || '操作失败'); return }
+    const ds = res.datasource || {}
+    ElMessage.success(`${res.message}：${ds.name} (${ds.endpoint || '-'})`)
+    refreshDetail(detail.value.id)
   } catch (e) { ElMessage.error(e.message) }
 }
 

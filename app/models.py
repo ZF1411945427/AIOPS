@@ -2297,6 +2297,8 @@ class DeployPlan(Base):
     name = Column(String(128), nullable=False)
     description = Column(Text, default="")
     artifact_path = Column(String(512), default="")
+    artifact_download_path = Column(String(512), default="")
+    artifact_auto_download = Column(Boolean, default=True)
     doc_raw = Column(Text, default="")
     doc_file_name = Column(String(256), default="")
     asset_ids = Column(Text, default="[]")

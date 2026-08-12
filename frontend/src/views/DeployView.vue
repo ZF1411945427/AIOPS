@@ -56,7 +56,13 @@
             <el-option v-for="a in allAssets" :key="a.id" :label="`${a.name} (${a.ip})`" :value="a.id" />
           </el-select>
         </div>
-        <div class="form-row"><label>代码包路径 (artifact_path)</label><input v-model="form.artifact_path" class="input" placeholder="http://artifacts.local/release/v1.0.tar.gz" /></div>
+        <div class="form-row"><label>代码包路径 (artifact_path)</label><input v-model="form.artifact_path" class="input" placeholder="支持 Git 仓库(GitHub/Gitee)或 HTTP 下载地址，如 https://github.com/xxx/yyy 或 /opt/app" />
+          <div class="hint">Git/HTTP 地址会在探查前自动下载到目标机；留空或填本地路径则不下载。离线部署填 <code>offline://</code> 前缀。</div>
+        </div>
+        <div class="form-row"><label>源码下载目标路径 (可选)</label><input v-model="form.artifact_download_path" class="input" placeholder="留空默认 /data/aiops-deploy/<计划名>" /></div>
+        <div class="form-row"><label class="row-label">探查前自动下载源码</label>
+          <el-switch v-model="form.artifact_auto_download" active-text="开启" inactive-text="关闭" />
+        </div>
         <div class="form-row"><label>部署手册</label>
           <div class="doc-upload-area">
             <input ref="fileInput" type="file" accept=".md,.txt,.yaml,.yml" style="display:none" @change="onFileSelect" />
@@ -79,6 +85,14 @@
           <span class="status-badge" :class="detailPlan.status">{{ statusLabel(detailPlan.status) }}</span>
           <button class="btn btn-sm btn-delete" @click="deletePlan(detailPlan.id, detailPlan.name)" style="margin-left:auto">删除</button>
           <button class="btn-close" @click="closeDetail">✕</button>
+        </div>
+
+        <div class="plan-info">
+          <div class="plan-info-row" v-if="detailPlan.artifact_path"><span class="info-label">源码地址</span><span class="info-value mono">{{ detailPlan.artifact_path }}</span></div>
+          <div class="plan-info-row" v-if="detailPlan.artifact_download_path"><span class="info-label">下载目标</span><span class="info-value mono">{{ detailPlan.artifact_download_path }}</span></div>
+          <div class="plan-info-row" v-if="'artifact_auto_download' in detailPlan"><span class="info-label">自动下载</span><span class="info-value">{{ detailPlan.artifact_auto_download ? '开启' : '关闭' }}</span></div>
+          <div class="plan-info-row" v-if="detailPlan._asset_names && detailPlan._asset_names.length"><span class="info-label">目标资产</span><span class="info-value">{{ detailPlan._asset_names.join('、') }}</span></div>
+          <div class="plan-info-row" v-if="detailPlan.created_at"><span class="info-label">创建时间</span><span class="info-value">{{ detailPlan.created_at }}</span></div>
         </div>
 
         <div class="detail-tabs">
@@ -130,6 +144,7 @@
 
           <div v-if="detailTab === 'env'">
             <div class="action-bar">
+              <button class="btn" :disabled="detailPlan.status === 'draft'" @click="downloadArtifact">📦 下载源码</button>
               <button class="btn" :disabled="detailPlan.status === 'draft'" @click="probeEnv">🔍 环境探查</button>
               <button class="btn btn-primary" :disabled="!detailPlan.environment_probe_json || Object.keys(detailPlan.environment_probe_json).length === 0" @click="autoEnv">⚙️ AI 自动分析</button>
               <button class="btn" :disabled="detailPlan.status === 'draft'" @click="resolveEnv">解析环境映射</button>
@@ -149,6 +164,18 @@
             <div v-if="envAnalysis && envAnalysis.service_topology" class="env-analysis">
               <h4>🧭 服务拓扑分析</h4>
               <pre class="topology">{{ envAnalysis.service_topology }}</pre>
+            </div>
+
+            <!-- 源码下载结果 -->
+            <div v-if="sourceLog" class="probe-result">
+              <h4>📦 源码下载结果</h4>
+              <div class="probe-item"><label>来源</label><code>{{ sourceLog.source || '—' }}</code></div>
+              <div class="probe-item"><label>方式</label><code>{{ sourceLog.method || sourceLog.note || '—' }}</code></div>
+              <div class="probe-item" v-if="sourceLog.dest"><label>目标路径</label><code>{{ sourceLog.dest }}</code></div>
+              <div class="probe-sub" v-if="sourceLog.log && sourceLog.log.length">
+                <label>下载日志</label><code>{{ sourceLog.log.join('\n') }}</code>
+              </div>
+              <div class="probe-sub" v-if="sourceLog.reason"><label>说明</label><code>{{ sourceLog.reason }}</code></div>
             </div>
 
             <!-- 环境探查结果 -->
@@ -463,7 +490,7 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import request from '@/api/request'
@@ -495,7 +522,7 @@ const showCreate = ref(false)
 const allAssets = ref([])
 const fileInput = ref(null)
 const detailFileInput = ref(null)
-const form = ref({ name: '', description: '', asset_ids: [], artifact_path: '', doc_raw: '', doc_file_name: '' })
+const form = ref({ name: '', description: '', asset_ids: [], artifact_path: '', artifact_download_path: '', artifact_auto_download: true, doc_raw: '', doc_file_name: '' })
 
 const detailPlan = ref(null)
 const detailTab = ref('sop')
@@ -517,6 +544,7 @@ const cleanTerm = ref(null)
 const probing = ref(false)
 const probeError = ref('')
 const environmentProbe = ref(null)
+const sourceLog = ref(null)
 const envAnalysis = ref(null)
 const needDecision = ref(false)
 const riskConfirmInfo = ref(null)
@@ -614,10 +642,20 @@ async function doCreate() {
   try {
     const res = await request.post('/deploy/api/plans/create', form.value)
     if (res.plan) {
-      ElMessage.success('创建成功')
+      const planObj = res.plan || {}
       showCreate.value = false
-      form.value = { name: '', description: '', asset_ids: [], artifact_path: '', doc_raw: '', doc_file_name: '' }
+      form.value = { name: '', description: '', asset_ids: [], artifact_path: '', artifact_download_path: '', artifact_auto_download: true, doc_raw: '', doc_file_name: '' }
       loadPlans()
+      const pw = planObj.path_warning || res.path_warning
+      if (pw) {
+        ElMessageBox.confirm(pw, '路径非空提示', {
+          confirmButtonText: '我知道，继续创建',
+          cancelButtonText: '知道了',
+          type: 'warning'
+        }).catch(() => {})
+      } else {
+        ElMessage.success('创建成功')
+      }
     }
   } catch (e) {
     ElMessage.error('创建失败')
@@ -630,6 +668,10 @@ async function openPlan(id) {
     res.env_mapping = typeof res.env_mapping === 'object' ? res.env_mapping : {}
     res.sop_json = typeof res.sop_json === 'object' ? res.sop_json : {}
     res.asset_ids = Array.isArray(res.asset_ids) ? res.asset_ids : []
+    res._asset_names = (res.asset_ids || []).map(id => {
+      const a = allAssets.value.find(x => x.id === id)
+      return a ? `${a.name} (${a.ip})` : String(id)
+    })
     detailPlan.value = res
     detailTab.value = 'sop'
     envVars.value = []
@@ -691,6 +733,26 @@ async function saveEnvMapping() {
     ElMessage.success('环境映射已保存')
   } catch (e) {
     ElMessage.error('保存失败')
+  }
+}
+
+async function downloadArtifact() {
+  if (!detailPlan.value) return
+  probing.value = true
+  probeError.value = ''
+  sourceLog.value = null
+  try {
+    const res = await request.post(`/deploy/api/plans/${detailPlan.value.id}/artifact-download`)
+    if (res.error) {
+      probeError.value = res.error
+    } else {
+      sourceLog.value = res
+      ElMessage.success(res.skipped ? '源码已存在，跳过下载' : '源码下载完成')
+    }
+  } catch (e) {
+    probeError.value = '源码下载请求失败'
+  } finally {
+    probing.value = false
   }
 }
 
@@ -935,13 +997,17 @@ function startDeployLive() {
 function stopDeployLive() {
   if (deployWs && deployWs.readyState === WebSocket.OPEN) {
     deployWs.close(); deployWs = null
-  } else {
-    request.post(`/deploy/api/plans/${detailPlan.value.id}/stop`, {})
-      .then(() => loadDetailPlan())
-      .catch(() => {})
   }
   wsConnected.value = false
   wsFinished.value = true
+  // 强制停止：断开前端连接 + 后端自动执行回滚清理(停容器/清产物/重置 planned)
+  request.post(`/deploy/api/plans/${detailPlan.value.id}/stop`, {})
+    .then((res) => {
+      if (res && res.error) ElMessage.warning(res.error)
+      else if (res && res.message) ElMessage.success(res.message)
+      loadDetailPlan()
+    })
+    .catch(() => { loadDetailPlan() })
 }
 
 function rollbackCleanup() {
@@ -1090,6 +1156,11 @@ onMounted(() => {
 .plan-name { font-weight: 600; font-size: 15px; }
 .card-body { font-size: 13px; color: #666; }
 .card-meta { margin-top: 4px; }
+.plan-info { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 10px 16px; margin: 0 16px 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 12px; }
+.plan-info-row { display: flex; align-items: center; gap: 6px; min-width: 200px; }
+.plan-info-row .info-label { color: #6b7280; white-space: nowrap; }
+.plan-info-row .info-value { color: #111827; word-break: break-all; }
+.plan-info-row .info-value.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
 .status-badge.draft { background: #f3f4f6; color: #6b7280; }
 .status-badge.planned { background: #dbeafe; color: #2563eb; }

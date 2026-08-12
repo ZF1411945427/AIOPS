@@ -33,10 +33,14 @@ def release_exec_lock(plan_id: int):
 
 
 def probe_environment(db: Session, plan_id: int) -> dict:
-    """SSH 探查目标机真实环境，返回探查结果 JSON。"""
+    """SSH 探查目标机真实环境，返回探查结果 JSON。探查前自动下载源码(在线/离线)。"""
     plan = db.query(DeployPlan).filter(DeployPlan.id == plan_id).first()
     if not plan:
         return {"error": "计划不存在"}
+    # 探查前自动下载源码（在线 git/HTTP + 离线），幂等
+    download = auto_download_artifact(db, plan_id)
+    if not download.get("ok"):
+        return {"error": f"源码准备失败: {download.get('error', '未知错误')}", "download": download}
     assets = _get_assets(db, plan)
     if not assets:
         return {"error": "计划未关联目标资产"}
@@ -122,7 +126,7 @@ def ai_auto_env_mapping(db: Session, plan_id: int) -> dict:
         "3. 自适应建议：基于当前环境推荐 SOP 调整（如：镜像已存在跳过 build、端口冲突换端口、目录已存在跳过创建）\n"
         "请严格按以下 JSON Schema 输出，不要额外内容：\n"
         "{\n"
-        '  "env_mapping": {"APP_DIR": "/data/test-project", "TARGET_PORT": "80"},\n'
+        '  "env_mapping": {"APP_DIR": "<真实部署目录>", "TARGET_PORT": "80"},\n'
         '  "service_topology": "服务拓扑分析文本",\n'
         '  "adaptations": [\n'
         '    {"step": 2, "type": "skip_build", "reason": "镜像 nginx:latest 已存在，跳过 build", "action": "建议跳过 docker compose build"},'
@@ -165,10 +169,25 @@ def ai_auto_env_mapping(db: Session, plan_id: int) -> dict:
         return {"error": "AI 未能生成有效的环境分析"}
     mapping = analysis.get("env_mapping", {})
     if mapping:
-        plan.env_mapping = json.dumps(mapping, ensure_ascii=False)
+        # 合并而非整体覆盖：已存在的非空值优先（用户手填 / resolve-env / 真实下载路径），
+        # AI 只补充缺失的 key，避免 AI 凭空推断的 APP_DIR 等覆盖正确值。
+        try:
+            cur = json.loads(plan.env_mapping) if isinstance(plan.env_mapping, str) and plan.env_mapping not in ("{}", "[]") else {}
+        except Exception:
+            cur = {}
+        merged = dict(cur)
+        for k, v in (mapping or {}).items():
+            if v in (None, ""):
+                continue
+            if merged.get(k) in (None, ""):
+                merged[k] = v
+        # APP_DIR 若缺失，用真实下载路径兜底
+        if merged.get("APP_DIR") in (None, ""):
+            merged["APP_DIR"] = resolve_download_path(plan)
+        plan.env_mapping = json.dumps(merged, ensure_ascii=False)
     plan.env_analysis_json = json.dumps(analysis, ensure_ascii=False)
     db.commit()
-    return {"ok": True, "analysis": analysis, "env_mapping": mapping}
+    return {"ok": True, "analysis": analysis, "env_mapping": analysis.get("env_mapping", {})}
 
 
 def _ai_diagnose_failure(db: Session, provider, step: DeployStep, step_output: str, env_context: dict) -> dict:
@@ -206,14 +225,15 @@ def _ai_diagnose_failure(db: Session, provider, step: DeployStep, step_output: s
     return {"ok": True, "root_cause": diag.get("root_cause", ""), "fix_commands": diag.get("fix_commands", []), "suggestion": diag.get("suggestion", "rollback")}
 
 
-def stop_execution(db: Session, plan_id: int) -> dict:
-    """停止正在执行的部署：关闭 SSH 连接 → 中断命令 → producer 异常退出 → 状态恢复。"""
+def stop_execution(db: Session, plan_id: int, rollback: bool = True) -> dict:
+    """停止正在执行的部署(强制)：关闭 SSH 连接 → 中断命令 → producer 异常退出 → 释放执行锁。
+    默认 rollback=True：停止后自动执行一次回滚清理（停容器 + 清理产物 + 重置为 planned），
+    避免卡死/中断后目标机残留容器或半成品。
+    rollback=False 时仅断连重置状态（兼容旧行为）。"""
     import paramiko
     plan = db.query(DeployPlan).filter(DeployPlan.id == plan_id).first()
     if not plan:
         return {"error": "计划不存在"}
-    if plan.status != "running":
-        return {"error": f"计划当前状态为 {plan.status}，无需停止"}
     client = _RUNNING_CLIENTS.pop(plan_id, None)
     if client:
         try:
@@ -228,10 +248,80 @@ def stop_execution(db: Session, plan_id: int) -> dict:
             _dq.put_nowait("rollback")
         except Exception:
             pass
-    plan.status = "planned"
     _release_exec(plan_id)
+    _STOPPED.pop(plan_id, None)
+    plan.status = "planned"
+    _record_execution_history(db, plan, "stopped", {"stopped_by": "stop_execution", "rollback": rollback})
     db.commit()
-    return {"ok": True, "message": "已停止执行"}
+
+    msg = "已停止执行"
+    if rollback:
+        try:
+            rb = _force_rollback_cleanup_sync(db, plan_id)
+            msg = "[已停止] " + (rb.get("message", "并已自动回滚清理"))
+        except Exception as e:
+            logger.warning(f"停止后自动回滚清理异常: plan_id={plan_id} {e}")
+            msg = f"已停止执行(回滚清理异常: {e})"
+    return {"ok": True, "message": msg}
+
+
+def _force_rollback_cleanup_sync(db: Session, plan_id: int) -> dict:
+    """强制同步回滚清理（停止时调用）：对每个资产 SSH 停容器 + 清理运行产物，重置步骤与计划为 planned。
+    可用于 running/卡死状态，不校验 status。返回 {"ok","message","assets"}。"""
+    plan = db.query(DeployPlan).filter(DeployPlan.id == plan_id).first()
+    if not plan:
+        return {"ok": False, "message": "计划不存在"}
+    assets = _get_assets(db, plan)
+    if not assets:
+        return {"ok": False, "message": "计划未关联目标资产"}
+    mapping = json.loads(plan.env_mapping or "{}")
+    steps = db.query(DeployStep).filter(DeployStep.plan_id == plan_id).order_by(DeployStep.step_order).all()
+    app_dir = mapping.get("APP_DIR", "")
+    records = []
+    for asset in assets:
+        _alines = []
+        try:
+            client, host = _ssh_connect(asset)
+        except Exception as e:
+            _alines.append(f"❌ {asset.name}({asset.ip}) SSH 连接失败: {e}")
+            records.append({"asset": asset.name, "ip": asset.ip, "lines": _alines, "status": "ssh_failed"})
+            continue
+        try:
+            if app_dir:
+                _down = f"cd {app_dir} && docker compose down -v 2>/dev/null || true"
+                try:
+                    _, _o, _e = client.exec_command(_down, timeout=30)
+                    _rc = _o.channel.recv_exit_status()
+                    _alines.append(f"🧹 清理容器: docker compose down -v (exit={_rc})")
+                except Exception as ex:
+                    _alines.append(f"⚠ 清理容器异常: {ex}")
+                try:
+                    _clean = (f"cd {app_dir} 2>/dev/null && "
+                              f"rm -rf node_modules .venv venv __pycache__ dist build */__pycache__ 2>/dev/null; "
+                              f"find . -name '*.pyc' -type f -delete 2>/dev/null; echo cleaned")
+                    _, _o, _e = client.exec_command(_clean, timeout=30)
+                    _rc = _o.channel.recv_exit_status()
+                    _alines.append(f"🧹 清理运行产物，保留源码目录: {app_dir}")
+                except Exception as ex:
+                    _alines.append(f"⚠ 清理运行产物异常: {ex}")
+            records.append({"asset": asset.name, "ip": asset.ip, "lines": _alines, "status": "cleaned"})
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+    for s in steps:
+        s.status = "pending"
+        s.output = ""
+        s.diagnosis = ""
+        s.fix_command = ""
+        s.retry_count = 0
+        s.started_at = None
+        s.finished_at = None
+    _record_cleanup_history(db, plan, records, app_dir)
+    plan.status = "planned"
+    db.commit()
+    return {"ok": True, "message": f"已回滚清理 {len(records)} 个资产，状态重置为 planned", "assets": len(records)}
 
 
 def _now():
@@ -297,6 +387,8 @@ def create_plan(db: Session, payload: dict, user_id: int) -> dict:
         name=name,
         description=(payload.get("description") or "").strip(),
         artifact_path=(payload.get("artifact_path") or "").strip(),
+        artifact_download_path=(payload.get("artifact_download_path") or "").strip(),
+        artifact_auto_download=bool(payload.get("artifact_auto_download", True)),
         doc_raw=(payload.get("doc_raw") or "").strip(),
         doc_file_name=(payload.get("doc_file_name") or "").strip(),
         asset_ids=json.dumps(payload.get("asset_ids", []) if isinstance(payload.get("asset_ids"), list) else []),
@@ -305,7 +397,44 @@ def create_plan(db: Session, payload: dict, user_id: int) -> dict:
     db.add(plan)
     db.commit()
     db.refresh(plan)
-    return _plan_to_dict(plan)
+    result = _plan_to_dict(plan)
+    # 创建前校验本地路径是否已存在非空内容(防止误部署到已有项目目录)，已有则警告提示但允许继续
+    warning = _check_artifact_path_warning(db, plan)
+    if warning:
+        result["path_warning"] = warning
+    return result
+
+
+def _check_artifact_path_warning(db: Session, plan) -> Optional[str]:
+    """创建计划时,SSH 到目标机校验本地源码/下载目标路径是否已存在非空内容。
+    若路径非空(已有别的文件/项目),返回警告文案(不拦截创建)。SSH/不可达/远程地址则返回 None。"""
+    checks = []
+    ap = (plan.artifact_path or "").strip()
+    dp = (plan.artifact_download_path or "").strip()
+    # artifact_path: 仅当是本地路径(非 git/http/offline)时校验
+    if ap:
+        src = detect_artifact_source(ap)
+        if src == "local":
+            checks.append(("代码包路径", ap))
+    # 下载目标路径: 永远本地,非空即校验
+    if dp:
+        checks.append(("源码下载目标路径", dp))
+    if not checks:
+        return None
+    assets = _get_assets(db, plan)
+    if not assets:
+        return None
+    asset = assets[0]
+    for label, path in checks:
+        try:
+            code, out = _run_ssh(asset, f"if [ -d {path} ]; then ls -A {path} 2>/dev/null | head -1; fi", timeout=30)
+        except Exception:
+            continue
+        if code == 0 and out.strip():
+            return (f"⚠️ {label}「{path}」在目标机 {asset.ip} 上已存在非空内容"
+                    f"（首个文件/目录: {out.strip().splitlines()[0]}），请确认路径是否正确，"
+                    f"避免误部署到已有项目目录。")
+    return None
 
 
 def update_plan(db: Session, plan_id: int, payload: dict) -> Optional[dict]:
@@ -318,6 +447,10 @@ def update_plan(db: Session, plan_id: int, payload: dict) -> Optional[dict]:
             if isinstance(val, (dict, list)):
                 val = json.dumps(val, ensure_ascii=False)
             setattr(plan, field, val)
+    if "artifact_download_path" in payload:
+        plan.artifact_download_path = (payload.get("artifact_download_path") or "").strip()
+    if "artifact_auto_download" in payload:
+        plan.artifact_auto_download = bool(payload.get("artifact_auto_download"))
     if "asset_ids" in payload and isinstance(payload["asset_ids"], list):
         plan.asset_ids = json.dumps(payload["asset_ids"])
     db.commit()
@@ -626,6 +759,7 @@ def resolve_env_mapping(db: Session, plan_id: int, user_mapping: dict) -> dict:
             mapping.setdefault("TARGET_HOSTNAME", asset.name or "")
 
     mapping.setdefault("ARTIFACT_URL", plan.artifact_path or "")
+    mapping.setdefault("ARTIFACT_DOWNLOAD_PATH", resolve_download_path(plan))
 
     # 兼容 ${ENV_xxx} 占位符：若命令里用了 ENV_ 前缀但用户只填了裸 key，则同步一份
     try:
@@ -645,6 +779,214 @@ def resolve_env_mapping(db: Session, plan_id: int, user_mapping: dict) -> dict:
     plan.status = "planned"
     db.commit()
     return {"ok": True, "env_mapping": mapping}
+
+
+_GIT_HOST_HINTS = ("github.com", "gitee.com", "gitlab.com", "gitcode.com", "jihulab.com", ".git")
+
+
+def _sanitize_dirname(name: str) -> str:
+    """把计划名转成安全目录名（去空白与路径分隔符）。"""
+    safe = re.sub(r"[\s/\\:*?\"<>|]+", "-", (name or "plan").strip())
+    return safe or "plan"
+
+
+def resolve_download_path(plan: DeployPlan) -> str:
+    """解析源码自动下载目标路径：
+    用户填了 artifact_download_path 则用它；否则返回 '/data/aiops-deploy/<计划名>'。"""
+    if plan.artifact_download_path and plan.artifact_download_path.strip():
+        return plan.artifact_download_path.strip()
+    return f"/data/aiops-deploy/{_sanitize_dirname(plan.name or 'plan')}"
+
+
+def detect_artifact_source(url: str) -> str:
+    """识别源码来源类型：
+    - 'git':  Git 仓库地址（github/gitee/gitlab 等）
+    - 'http': HTTP(S) 下载地址（tar.gz/zip 等压缩包）
+    - 'offline': 离线仓库获取（offline:// 前缀或离线包引用）
+    - 'local': 资产本地路径（/opt/app 等，无需下载）
+    - '': 无法识别
+    """
+    if not url:
+        return ""
+    u = url.strip()
+    if u.startswith("offline://") or u.startswith("offline:"):
+        return "offline"
+    if u.startswith("http://") or u.startswith("https://"):
+        if any(h in u.lower() for h in _GIT_HOST_HINTS):
+            return "git"
+        return "http"
+    if any(h in u.lower() for h in _GIT_HOST_HINTS):
+        return "git"
+    if u.startswith("/") or ":" in u.split("/")[0]:
+        return "local"
+    return ""
+
+
+def _run_ssh(asset, cmd: str, timeout: int = 300):
+    """在目标机上执行命令，返回 (exit_status, stdout_text)。"""
+    import paramiko
+    client = None
+    try:
+        client, host = _ssh_connect(asset)
+        stdin, stdout, stderr = client.exec_command(cmd, timeout=timeout)
+        out = stdout.read().decode("utf-8", "replace")
+        err = stderr.read().decode("utf-8", "replace")
+        code = stdout.channel.recv_exit_status()
+        return code, (out + err).strip()
+    finally:
+        if client:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+def _fetch_offline_bundle_path(plan) -> str:
+    """离线模式：返回离线包在资产侧可供下载的相对信息。
+    这里返回离线包文件路径；实际部署时由用户已加载的离线包承载。"""
+    try:
+        bundles = None
+        from app.models import OfflineRepoBundle
+        from app.database import get_db_session
+        with get_db_session() as db:
+            bundle = db.query(OfflineRepoBundle).filter(OfflineRepoBundle.status == "loaded").first()
+            return bundle.file_path if bundle else ""
+    except Exception:
+        return ""
+
+
+def auto_download_artifact(db: Session, plan_id: int, force: bool = False) -> dict:
+    """探查前自动下载源码到目标机（在线 git/HTTP + 离线仓库两套都支持）。
+
+    根据 artifact_path 识别来源：
+      - git: 优先 git clone（目标机有 git 时）；无 git 则 curl 下载 codeload/仓库 zip 并解压
+      - http: curl 下载压缩包并解压
+      - offline: 离线包方式（复用离线仓库，由手册步骤落地，此处探查离线包存在性）
+      - local: 资产本地路径，无需下载
+    幂等：目标路径已存在且含 compose/docker-compose 文件时跳过。”
+    """
+    plan = db.query(DeployPlan).filter(DeployPlan.id == plan_id).first()
+    if not plan:
+        return {"ok": False, "error": "计划不存在"}
+    if not plan.artifact_auto_download:
+        return {"ok": True, "skipped": True, "reason": "已关闭自动下载(artifact_auto_download=False)"}
+
+    url = (plan.artifact_path or "").strip()
+    source_type = detect_artifact_source(url)
+    if source_type == "local" or source_type == "":
+        return {"ok": True, "skipped": True, "source": source_type or "unknown", "reason": "本地路径或未填源码地址，无需自动下载"}
+
+    assets = _get_assets(db, plan)
+    if not assets:
+        return {"ok": False, "error": "计划未关联目标资产"}
+    if len(assets) > 1:
+        return {"ok": False, "error": "自动下载仅支持单资产计划，多资产请用本地路径或手册自行处理"}
+
+    asset = assets[0]
+    dest = resolve_download_path(plan)
+    log_lines = []
+
+    # 幂等检查：目标路径已有 compose 则跳过
+    code, out = _run_ssh(asset, f"ls {dest}/docker-compose.yml {dest}/docker-compose.yaml {dest}/compose.yaml 2>/dev/null | head -1")
+    if code == 0 and out.strip() and not force:
+        return {"ok": True, "skipped": True, "source": source_type, "dest": dest,
+                "reason": f"源码已存在于 {dest}(含 compose)，跳过下载(force=False 幂等)"}
+
+    try:
+        _run_ssh(asset, f"mkdir -p {dest}")
+    except Exception as e:
+        return {"ok": False, "error": f"创建目录失败: {e}"}
+
+    if source_type == "offline":
+        bundle_path = _fetch_offline_bundle_path(plan)
+        if not bundle_path:
+            return {"ok": False, "error": "离线模式下未找到已加载(loaded)的离线包，请先在离线仓库功能页加载离线包"}
+        code, out = _run_ssh(asset, f"ls {dest}", timeout=60)
+        log_lines.append(f"[offline] 目标目录: {dest}")
+        log_lines.append(f"[offline] 已检测到已加载离线包: {bundle_path} (镜像/包源由手册步骤对接私有 Registry)")
+        return {"ok": True, "source": "offline", "dest": dest, "log": log_lines,
+                "note": "离线模式：离线包已在仓库侧加载，请确保部署手册步骤通过私有 Registry/包源拉取镜像与软件包"}
+
+    # --- 在线: git / http ---
+    if source_type == "git":
+        # 目标机有 git → git clone，否则 curl 下载 zip
+        _, _has_git = _run_ssh(asset, "command -v git >/dev/null 2>&1 && echo YES || echo NO", timeout=30)
+        if _has_git.strip() == "YES":
+            code, out = _run_ssh(
+                asset,
+                f"if [ -d {dest} ] && [ -n \"$(ls -A {dest})\" ]; then echo EXISTS; fi",
+                timeout=60,
+            )
+            if "EXISTS" in out:
+                log_lines.append(f"[git] 目录 {dest} 非空，执行 git pull 增量更新")
+                pull_cmd = f"cd {dest} && (git pull --ff-only 2>/dev/null || echo PULL_FAILED)"
+                _run_ssh(asset, pull_cmd, timeout=300)
+                log_lines.append(f"[git] git pull 完成: {dest}")
+                return {"ok": True, "source": "git", "dest": dest, "method": "git-clone", "log": log_lines}
+            clone_cmd = f"cd {dest} && git clone --depth 1 {url} . 2>&1"
+            code, out = _run_ssh(asset, clone_cmd, timeout=600)
+            log_lines.append(f"[git] git clone --depth 1: exit={code}")
+            log_lines.append((out or "")[-1200:])
+            if code != 0:
+                return {"ok": False, "error": f"git clone 失败: {(out or '')[-500:]}", "log": log_lines}
+            _set_compose_perms(asset, dest, log_lines)
+            return {"ok": True, "source": "git", "dest": dest, "method": "git-clone", "log": log_lines}
+        # 无 git → curl 下载仓库 zip 并解压
+        zip_url = _git_zip_url(url)
+        code, out = _run_ssh(
+            asset,
+            f"curl -fsSL --max-time 300 -o /tmp/_aiops_src.zip \"{zip_url}\" && "
+            f"rm -rf {dest}/* && unzip -o -q /tmp/_aiops_src.zip -d /tmp/_aiops_src_x && "
+            f"mv /tmp/_aiops_src_x/*/* {dest}/ 2>/dev/null || mv /tmp/_aiops_src_x/* {dest}/ 2>/dev/null; "
+            f"rm -rf /tmp/_aiops_src.zip /tmp/_aiops_src_x",
+            timeout=400,
+        )
+        log_lines.append(f"[git->zip] 下载 {zip_url}")
+        log_lines.append(f"[git->zip] exit={code}")
+        log_lines.append((out or "")[-1200:])
+        if code != 0:
+            return {"ok": False, "error": f"curl 下载/解压失败: {(out or '')[-500:]}", "log": log_lines}
+        _set_compose_perms(asset, dest, log_lines)
+        return {"ok": True, "source": "git", "dest": dest, "method": "git-zip", "log": log_lines}
+
+    # http 下载压缩包
+    code, out = _run_ssh(
+        asset,
+        f"curl -fsSL --max-time 300 -o /tmp/_aiops_src.bin \"{url}\" && "
+        f"mkdir -p {dest} && rm -rf {dest}/* && "
+        f"(file /tmp/_aiops_src.bin | grep -qi zip && unzip -o -q /tmp/_aiops_src.bin -d /tmp/_aiops_src_x || tar -xzf /tmp/_aiops_src.bin -C /tmp/_aiops_src_x) && "
+        f"mv /tmp/_aiops_src_x/*/* {dest}/ 2>/dev/null || mv /tmp/_aiops_src_x/* {dest}/ 2>/dev/null; "
+        f"rm -rf /tmp/_aiops_src.bin /tmp/_aiops_src_x",
+        timeout=400,
+    )
+    log_lines.append(f"[http] 下载 {url}: exit={code}")
+    log_lines.append((out or "")[-1200:])
+    if code != 0:
+        return {"ok": False, "error": f"HTTP 下载/解压失败: {(out or '')[-500:]}", "log": log_lines}
+    _set_compose_perms(asset, dest, log_lines)
+    return {"ok": True, "source": "http", "dest": dest, "method": "http-download", "log": log_lines}
+
+
+def _git_zip_url(url: str) -> str:
+    """把 Git 仓库主页/zip 地址归一为可直接 curl 下载的 zip 地址（github/gitee 均支持 codeload/archive）。"""
+    u = url.rstrip("/")
+    if u.endswith(".zip"):
+        return u
+    if "github.com" in u:
+        m = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", u)
+        if m:
+            return f"https://codeload.github.com/{m.group(1)}/{m.group(2)}/zip/refs/heads/master"
+    if "gitee.com" in u:
+        m = re.match(r"https?://gitee\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", u)
+        if m:
+            return f"https://gitee.com/{m.group(1)}/{m.group(2)}/repository/archive/master.zip"
+    return u
+
+
+def _set_compose_perms(asset, dest: str, log_lines: list) -> None:
+    """下载后确保 compose 文件存在并赋可执行权限（幂等友好）。"""
+    code, out = _run_ssh(asset, f"chmod -R +x {dest} 2>/dev/null; ls {dest}/docker-compose.yml {dest}/compose.yaml {dest}/docker-compose.yaml 2>/dev/null | head -1", timeout=60)
+    log_lines.append(f"[perm] {out.strip() or '(未找到 compose 文件)'}")
 
 
 def _resolve_command(cmd: str, mapping: dict) -> str:
@@ -876,6 +1218,11 @@ def execute_plan(db: Session, plan_id: int, user_id: int = 0) -> dict:
 
         has_failed = False
         asset_executed_ok = 0
+        # 默认工作目录 = 源码下载路径(APP_DIR)，保证 docker compose 等依赖 cwd 的命令在正确目录执行
+        try:
+            _cwd = resolve_download_path(plan)
+        except Exception:
+            _cwd = ""
         try:
             for group in dag["groups"]:
                 if has_failed:
@@ -887,6 +1234,15 @@ def execute_plan(db: Session, plan_id: int, user_id: int = 0) -> dict:
 
                     cmd = _resolve_command(step.command, asset_map)
                     verify_cmd = _resolve_command(step.verify_command, asset_map) if step.verify_command else ""
+
+                    # 维护工作目录，给依赖 cwd 的命令补 cd 前缀(SSH 命令间不共享 cwd)
+                    _cd_m = re.match(r'^cd\s+([^\s;&|]+)', cmd.strip())
+                    if _cd_m:
+                        _cwd = _cd_m.group(1).strip('"\'')
+                    elif _cwd:
+                        cmd = f"cd {_cwd} && {cmd}"
+                    if verify_cmd and _cwd and not re.match(r'^cd\s', verify_cmd.strip()):
+                        verify_cmd = f"cd {_cwd} && {verify_cmd}"
 
                     step.status = "running"
                     step.started_at = _now()
@@ -1556,8 +1912,11 @@ def _ai_plan_step_autonomous(provider, step: DeployStep, plan: DeployPlan, probe
         "- 结合当前环境（OS/Docker 版本/端口/容器/磁盘/内存）调整命令\n"
         "- 如果手册命令在当前环境有问题（端口冲突、镜像不存在、目录已存在），自动调整\n"
         "- 如果上一步失败或告警，自动添加前置检查\n"
-        "- commands 中的命令必须是可直接执行的 shell 命令\n"
-        "- 如果手册命令涉及 cd，commands 中需要包含 cd 前缀\n"
+        "- commands 中的命令必须是可直接执行的 shell 命令，且必须真实、可落地\n"
+        "- 不要自行编造或添加 cd 前缀：工作目录由系统根据当前工作目录(cwd)自动处理；\n"
+        "  只有当命令确实需要切换到其它目录时，才使用该命令自身的 cd，且 cd 后的路径必须是真实存在的绝对路径\n"
+        "- 严禁使用占位示例路径（如 /path/to/project、/home/user/xxx 等）——不存在这样的目录，会导致命令失败\n"
+        "- 如果无法确定正确的目录或路径，直接使用原始命令，不要编造\n"
         "- 确保命令安全：不要 rm -rf 无验证、不要遗漏依赖\n"
         "- 如果无法确定，保守执行原命令，不要编造"
     )
@@ -1891,7 +2250,11 @@ def _ai_stream_execute(db: Session, plan_id: int, user_id: int = 0, decision_que
 
         yield {"type": "asset_start", "asset": asset.name, "ip": asset.ip}
         asset_failed = False
-        _cwd = ""
+        # 默认工作目录 = 源码下载路径(APP_DIR)，保证后续依赖 cwd 的命令(如 docker compose)即使 AI 命令不带 cd 也能在正确目录执行
+        try:
+            _cwd = resolve_download_path(plan)
+        except Exception:
+            _cwd = ""
         try:
             for group in dag["groups"]:
                 if asset_failed:
@@ -2292,6 +2655,13 @@ def _ai_stream_execute(db: Session, plan_id: int, user_id: int = 0, decision_que
         finally:
             _RUNNING_CLIENTS.pop(plan_id, None)
             client.close()
+
+        # 兜底：即使 asset_failed 因 fix/retry 被重置，只要该计划存在最终态为 failed 的步骤，仍判为失败
+        # （防止命令返回码为 0/被修复命令掩盖导致步骤 real 失败却误报 asset 成功）
+        _asset_steps = [s for s in steps if s.plan_id == plan_id]
+        _final_failed = any(s.status == "failed" for s in _asset_steps)
+        if _final_failed:
+            asset_failed = True
 
         if not asset_failed:
             succeeded_assets += 1
@@ -3541,6 +3911,8 @@ def _plan_to_dict(p: DeployPlan) -> dict:
         "name": p.name,
         "description": p.description or "",
         "artifact_path": p.artifact_path or "",
+        "artifact_download_path": p.artifact_download_path or "",
+        "artifact_auto_download": bool(p.artifact_auto_download),
         "doc_raw": p.doc_raw or "",
         "doc_file_name": p.doc_file_name or "",
         "asset_ids": _safe_json(p.asset_ids) if p.asset_ids else [],

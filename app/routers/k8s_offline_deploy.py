@@ -105,6 +105,33 @@ def api_get_kubeconfig(plan_id: int, db: Session = Depends(get_db)):
     return {"ok": True, "kubeconfig": p.kubeconfig or ""}
 
 
+@router.post("/api/plans/{plan_id}/to-assets")
+def api_plan_to_assets(plan_id: int, db: Session = Depends(get_db)):
+    """部署成功后，将集群注册为资产管理中的 K8s 资产（DataSource type=kubernetes）。
+    幂等：已存在同名数据源则更新其 endpoint/auth_config，否则新建。"""
+    from app.models import K8sClusterNode, DataSource
+    p = db.query(K8sClusterPlan).filter(K8sClusterPlan.id == plan_id).first()
+    if not p:
+        return {"ok": False, "message": "计划不存在"}
+    if p.status != "succeeded":
+        return {"ok": False, "message": "仅部署成功的集群可注册为 K8s 资产，当前状态: " + (p.status or "unknown")}
+    nodes = db.query(K8sClusterNode).filter(K8sClusterNode.plan_id == plan_id).all()
+    masters = [n for n in nodes if n.host_role == "master"]
+    if not masters:
+        return {"ok": False, "message": "未找到 master 节点，无法确定 API Server 地址"}
+    conn = svc._resolve_node_conn(db, masters[0])
+    api_ip = conn.get("ip")
+    ds = svc._create_platform_datasource(db, p, api_ip)
+    if not ds:
+        return {"ok": False, "message": "缺少 kubeconfig，无法注册 K8s 资产"}
+    return {
+        "ok": True,
+        "message": "已注册为 K8s 资产(数据源)",
+        "datasource": {"id": ds.id, "name": ds.name, "type": ds.type,
+                       "endpoint": ds.endpoint or "", "enabled": bool(ds.enabled)},
+    }
+
+
 # ─────────────────── WebSocket 流式部署 ───────────────────
 
 @router.websocket("/ws/plans/{plan_id}/deploy")

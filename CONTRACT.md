@@ -1093,7 +1093,9 @@ emediation_service.py / edge_tunnel_service.py 现有执行链
 | id | Integer PK | - | 主键 |
 | name | String(128) | NOT NULL | 计划名称 |
 | description | Text | "" | 描述 |
-| artifact_path | String(512) | "" | **代码包引用路径（资产服务器路径），平台不落本地** |
+| artifact_path | String(512) | "" | **代码包引用路径（资产服务器路径），平台不落本地**。支持三种来源：①资产服务器已有路径（如 `/opt/app`，平台不下载）②HTTP 下载地址（`http(s)://`，平台 curl 自动下载到资产）③Git 仓库地址（`github.com`/`gitee.com` 等，平台识别并自动 clone/下载 zip 到资产） |
+| artifact_download_path | String(512) | "" | **源码自动下载目标路径（资产服务器侧）**：识别到 HTTP/Git 地址时，源码下载到该目录（如 `/data/aiops-deploy/<计划名>`）。为空时后端默认 `auto`（由后端按计划名生成 `/data/aiops-deploy/<name>`） |
+| artifact_auto_download | Boolean | True | **是否在环境探查(probe)前自动下载源码**：True=探查看自动先下载（幂等，目录已存在且有 compose 则跳过）；False=不自动下载，需手册步骤自行处理（如手动 SFTP 上传） |
 | doc_raw | Text | "" | 部署手册原始内容（markdown） |
 | doc_file_name | String(256) | "" | 上传的部署手册文件名（.md/.txt/.docx 等） |
 | asset_ids | Text | "[]" | 目标环境资产 ID 列表（JSON 数组，支持多资产） |
@@ -1166,6 +1168,7 @@ emediation_service.py / edge_tunnel_service.py 现有执行链
 | `${APP_DIR}` | probe/用户输入 | /opt/myapp |
 | `${LOG_DIR}` | probe/用户输入 | /var/log/myapp |
 | `${ARTIFACT_URL}` | deploy_plans.artifact_path | http://artifacts.local/release/v1.0.tar.gz |
+| `${ARTIFACT_DOWNLOAD_PATH}` | deploy_plans.artifact_download_path | /data/aiops-deploy/myapp（git/http 源码自动下载目标路径，供手册引用） |
 | `${CHECKSUM}` | 用户输入 | a1b2c3d4... |
 | `${SERVICE_NAME}` | 用户输入 | myapp-backend |
 | `${ENV_xxx}` | env_mapping JSON | 自定义占位符，由 AI 识别手册后提出 |

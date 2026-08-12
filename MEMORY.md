@@ -2,6 +2,100 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-12: 「停止」增强为 强制停止 + 自动回滚清理（卡死兜底）
+- **背景**: 用户询问"部署卡死了怎么处理，能否 AI 强制停止并回滚"。原 `stop_execution` 只断连 + 重置 planned，**不清理容器**；且要求 status=running 才可停；`stream_rollback_cleanup` 又拒绝 running 状态清理 → 卡死时无解。
+- **后端改动** `app/services/deploy_service.py`:
+  - `stop_execution(db, plan_id, rollback=True)`: **移除 status 必须 running 的限制**(任意状态可强制停，卡死可用)；释放 `_RUNNING_CLIENTS`/`_DECISIONS`/`_EXEC_LOCK` 后，默认调用 `_force_rollback_cleanup_sync` 自动回滚清理；记录 execution history "stopped"。
+  - 新增 `_force_rollback_cleanup_sync(db, plan_id)`: 对每个资产**新开 SSH** → `cd APP_DIR && docker compose down -v` 停容器 → 清理运行产物(保留源码) → 记录 cleanup_history → 重置步骤为 pending、计划为 planned。
+- **前端改动** `DeployView.vue` `stopDeployLive`: 不再只在 WS 存在时仅 close；**总是调后端 `/stop`**(强制停+回滚) + 提示 message + loadDetailPlan 刷新。
+- **验证**: 计划1 succeeded 且三容器 Up 时调 `/stop` → 容器全被 down(flask-nginx (none))、plan=planned、步骤 pending。✅
+- **补充修复**: `deploy.py` stop 路由(234)原**硬编码返回 message="已停止执行"**,掩盖了 `stop_execution` 返回的真实回滚消息。已改为 `result.get("message", ...)`。重启后 `/stop` 现返回 `{"message":"[已停止] 已回滚清理 1 个资产，状态重置为 planned"}` ✅
+- **交互闭环**: 卡死时可点「停止」强制停+回滚；「🧹 回滚清理」按钮仍用于部署完成后的主动清理(running 时 disabled)。
+
+### 2026-08-12: 修复回滚清理「按钮卡清理中」bug（后端 WS 发完事件未 close 连接）
+- **现象**: 点「🧹 回滚清理」,终端显示"清理完成,状态已重置为 planned",但按钮/状态一直显示「清理中」不变。
+- **根因**: `app/routers/deploy.py` 的 `ws_rollback_cleanup`(176)在 `_queue` 收到 `_sentinel`(producer 清理完成)后 `break` 退出循环,**但没有显式 `await websocket.close()`** → 前端 `deployWs.onclose` 永不触发 → `cleaning.value` 卡在 true → 按钮一直"清理中"。
+- **修复**: 在 `if event is _sentinel:` 分支里先 `await websocket.close()`(try/except)再 break。前端 onclose(1046-1051)会设 `cleaning=false`、`cleanFinished=true` 并 `loadDetailPlan()` 刷新。
+- **验证**: websocket-client 连 `/deploy/ws/plans/1/rollback-cleanup`,事件序列 `status→asset_start→output×4→asset_end→complete` 后**服务器主动 close** 连接(front 端 onclose 可触发),修复确认生效。计划1 清理后状态 planned。
+- **注意**: `_ai_stream_execute` 的 WS 也可能有同类问题(发完 complete 后是否 close),但 execute 前端用 HTTP/WS 混合、onclose 逻辑不同;本次只修了 rollback-cleanup 确认的链路。
+
+### 2026-08-12: 部署引擎两大 bug 修复 + flask-nginx-redis 全链路部署成功（含 nginx seccomp 坑）
+- **修复① cd 目录丢失(两条路径)**: SSH 命令间不共享 cwd,`cd ${APP_DIR}`(步骤1)与 `docker compose up`(步骤2)是独立命令,原引擎在错误目录跑 → `no configuration file provided`。
+  - `_ai_stream_execute`(WS 主路径): 2165 附近 `_cwd` 默认初始化为 `resolve_download_path(plan)`(APPDIR),保证依赖 cwd 的命令自动补 `cd <cwd> &&`;已有 2255-2259/2302-2306 的 cd 前缀逻辑。
+  - `execute_plan`(HTTP 同步路径,1079): **原本完全没有 cd 前缀机制**,已补同样逻辑(`_cwd` 默认下载路径 + 每步 cd 处理 + verify 加 cd)。
+- **修复② AI 规划编造占位 cd**: `_ai_plan_step_autonomous`(1797)prompt 原是"如果手册命令涉及 cd,commands 需包含 cd 前缀",诱导 AI 编造 `/path/to/project` 这种不存在的占位路径(日志实证: `修复命令 cd /path/to/project && docker compose up -> exit=1 No such file`)。已改 prompt: **禁止自行编造 cd 前缀,工作目录由系统自动处理;严禁用 /path/to/project 等占位路径;不确定就用原命令**。
+- **修复③ 状态误报**: `_ai_stream_execute` 兜底——asset 结束时检查该 plan 是否有最终态 failed 步骤,有则强制 `asset_failed=True`(防命令返回码 0/修复掩盖真实失败)。注:HTTP `execute_plan` 用 `has_failed`,修①后 docker compose 真正执行、exit_code 真实,假成功路径基本消除。
+- **nginx seccomp 坑(记忆早已记录,本次复现)**: CentOS 7 老内核(3.10)Docker seccomp 限制 nginx `pwrite()` → `pwrite() "/run/nginx.pid" Operation not permitted` → nginx 容器 Restarting 崩溃循环。修复: compose 的 nginx 服务加 `security_opt: - seccomp:unconfined`(web/redis 不受影响,只有 nginx 崩)。
+- **部署环境适配**: 目标机 80/8000 被旧项目容器占用,本项目 compose 端口已改 web→8081:8000、nginx→8080:80(避开);临时改动脚本(base64 写回避 shell 转义)已删;compose 有 .bak 备份。redis 容器名冲突问题由 `docker compose down -v` 清理残留容器解决。
+- **最终验证(全过)**:
+  - `POST /deploy/api/plans/1/execute` status=succeeded,目标机 flask-nginx-redis 三容器 Up(nginx 8080:80 / web 8081:8000 / redis 6379),**nginx 稳定不崩溃**。
+  - nginx(8080) HTTP 200、web(8081) HTTP 200,页面 `Hello Container World!` + 计数正常(nginx→web→redis 链路通)。
+  - 报告 Tab: post-verify ✅(容器全 Up)、generate-report ✅(title「flask-nginx-redis 自动下载测试部署报告」, KPI total 2/succeeded 2/assets 1, executive_summary 正常)。
+- **计划1仍为测试数据**(demo 库, asset 192=39.106.16.32, artifact=GitHub xiaopeng163/docker-compose-flask),APP_DIR=`/data/aiops-deploy/flask-nginx-redis`。
+
+### 2026-08-12: 实测部署复现两个深层执行引擎 bug（cd 目录丢失 + 状态误报 succeeded）
+- **背景**: 继续验证 flask-nginx-redis 计划(id=1)执行/报告 Tab。发现目标机 80/8000 被旧项目容器占用(nginx-nodejs-redis 占 80、flask-redis 占 8000),手动改 compose 端口为 web→8081:8000、nginx→8080:80(脚本 base64 写回避 shell 转义;临时脚本已删;compose 已备份 .bak)。
+- **HTTP `/deploy/api/plans/1/execute` 返回 `status: succeeded` 但实为假成功**:
+  - 目标机**无任何 flask-nginx-redis 容器**(8080/8081 端口无新服务)
+  - steps 里步骤1 succeeded;步骤2 output=`no configuration file provided: not found`,diagnosis=「当前目录下未找到 docker-compose.yml」,**步骤2 实际失败但整体 status=succeeded**
+  - **复现遗留 bug**: 步骤 failed/running 但 plan 状态误报 succeeded(记忆早前有此记录,本次真机复现)
+- **步骤2 失败根因(cd 目录丢失)**: `cd ${APP_DIR}`(步骤1)与 `docker compose up`(步骤2)是独立 SSH 命令不共享工作目录;执行引擎 `_ai_stream_execute` 有 `_cwd` 前缀机制(约 2255-2259 行),但当配了 AI provider 时步骤2 走 `_ai_plan_step_autonomous`(L4 AI 自主规划,约 2287-2306 行),AI 重新生成的 commands **可能把正确的 `cd APP_DIR &&` 前缀弄丢/改偏** → docker compose 在错误目录跑 → 找不到 compose 文件。
+- **已复位**: 计划1 status=planned、步骤 pending、deploy_count=0;目标机已清理(无残留构建/容器)。
+- **待决策**: 是否深入修复① AI 自主规划破坏 cd 目录上下文 ② 步骤失败但 plan 误报 succeeded(均在 `_ai_stream_execute` / 状态判定处)。
+
+### 2026-08-12: 修复 auto-env(AI 环境分析)用错误 APP_DIR 覆盖正确路径的重 bug
+- **现象**: 用户用 flask-nginx-redis 计划(id=1)点「开始部署」卡在 `docker compose up --build`;排查发现执行的目录是 `/data/test-project`(昨天另一个可观测性 demo 项目的残留目录),根本不是本次下载的 `/data/aiops-deploy/flask-nginx-redis`。
+- **根因(严重)**: `deploy_service.py` 的 `ai_auto_env_mapping` AI 生成的 `env_mapping` **整体覆盖**了 `plan.env_mapping`;且 system prompt 的 JSON 示例里硬编码了 `APP_DIR: "/data/test-project"`,AI 照抄示例 → 把用户/系统正确填写的下载路径覆盖成错误目录 → 部署到错误源码构建。
+- **修复** `deploy_service.py` `ai_auto_env_mapping`:
+  1. prompt 示例的 `APP_DIR` 占位改为 `<真实部署目录>`,去掉 `/data/test-project` 误导示例。
+  2. **合并而非整体覆盖**: 读入既有 `plan.env_mapping`,已存在且非空的值(用户手填 / resolve-env / 真实下载路径)优先保留,AI 只补充缺失 key;若 APP_DIR 仍缺失则用 `resolve_download_path(plan)` 兜底。
+- **验证**: 计划1 修正 APP_DIR 为 `/data/aiops-deploy/flask-nginx-redis` 后重新触发 auto-env,APP_DIR 保持不变(不再被改),AI 仅补 `TARGET_PORT=80`。后端已重启。
+- **附带清理**: 目标机残留的 `cd /data/test-project && docker compose up` 构建进程(compose up / apk add / buildkit runc)已 pkill 清理;计划1 状态恢复 `planned`、步骤重置 pending、deploy_count=0。
+- **环境事实**: 目标机 39.106.16.32 上 80/8000/638X 端口均被旧项目容器占用,本 compose(nginx:80、web:8000)直接 up 会端口冲突,需依赖 AI 自适应改端口;`python:3.8.5-slim-buster` 已确认可拉取(35s 内成功),镜像拉取不是障碍。
+- **注意**: 之前卡住的 `apk add curl` 是 `/data/test-project` 那个旧项目的 Dockerfile(非本项目 flask-nginx-redis);本项目 web 用 `python:3.8.5-slim-buster` + pip install,nginx 用 `nginx:alpine`。
+
+### 2026-08-12: DeployView 详情弹窗新增「计划信息区」+ 部署卡片可用性确认
+- **背景**: 用户打开部署计划卡片(flask-nginx-redis 自动下载测试, id=1, status=draft)觉得"啥也不显示"。排查结论:**非 bug**——计划是 draft 且未解析 SOP,各 Tab 主体为空属正常;但弹窗内(标题+Tab)没有任何计划基础信息展示,体验差。
+- **改动** `frontend/src/views/DeployView.vue`:
+  - `openPlan` 里用 `allAssets`(已加载 `/assets/api/list`)把 `asset_ids` 映射为资产名 `_asset_names`(格式 `名称 (IP)`)。
+  - 弹窗 detail-header 与 detail-tabs 之间新增 `.plan-info` 区,展示: 源码地址(artifact_path)、下载目标(artifact_download_path)、自动下载开关(artifact_auto_download?开启:关闭)、目标资产(_asset_names)、创建时间。
+  - 新增 CSS: `.plan-info`(浅灰容器)/`.plan-info-row`/`.info-label`/`.info-value`(mono 等宽)。
+- **验证**: 构建 37.19s 通过,新 chunk `DeployView-DLdfAh_w.js`。后端 8000 正常。draft 未解析时弹窗也能看到源码地址/下载路径/资产等基础信息。
+- **部署卡片可用性确认**: `GET /deploy/api/plans` 正常返回(本项目:items/total),`GET /deploy/api/plans/1` 返回完整详情(含 artifact 三字段、steps=[])。卡片创建/编辑/显示/自动下载开关后台全链路正常,dist 已含之前 artifact 表单改动。
+
+### 2026-08-12: 部署源码自动下载改造收尾（bug 修复 + git zip 实测 + SSH git 识别加固）
+- **承接**: `docs/20260812_部署源码自动下载改造.md`，上轮已完成前端/后端/CONTRACT 改造，遗留 bug 未修。
+- **修复 bug**: `deploy_service.py:788` `_has_git, _ = _run_ssh(...)` 解包反了（`_run_ssh` 返回 `(exit_code, output_text)`，int 被解给 `_has_git` → `.strip()` 报 `'int' object has no attribute 'strip'`）。改为 `_, _has_git = _run_ssh(...)`。
+- **加固 `detect_artifact_source`**: SSH 格式 git 地址（`git@github.com:a/b.git`）原被误判为 local（首段含 `:`）。在 local 判断前加 `_GIT_HOST_HINTS`（github/gitee/gitlab/gitcode/jihulab/.git）命中检查 → 现正确识别为 git。
+- **实测（39.106.16.32, 资产192, 计划 id=1 `xiaopeng163/docker-compose-flask`）**:
+  - `POST /deploy/api/plans/1/artifact-download` → `git-zip` 方式（目标机无 git → codeload zip），`exit=0`，`/data/aiops-deploy/flask-nginx-redis/` 含 docker-compose.yml + nginx/ + web/（redis+web+nginx 三服务，映射 8000/80）。注意路由 prefix=`/deploy`，正确路径 `POST /deploy/api/plans/1/artifact-download`。
+  - 幂等: 不带 force 二次调用返回 `skipped=true`（含 compose 跳过）✅
+  - force 回归重下仍成功 ✅
+  - 离线模式: `detect_artifact_source('offline://x')='offline'`；force 触发 offline 分支，无 loaded 离线包返回明确错误"未找到已加载(loaded)离线包"✅（测完 artifact_path 已恢复）。
+- **来源识别单测全过**: git(http/SSH)/http/offline/local/空；`_git_zip_url` 归一 github→codeload、gitee→archive。
+- **已重启后端**（含 detect 改动）。文档验证进度已全部转 ✅。遗留: 含 loaded 离线包场景可后续实测。
+
+### 2026-08-12: K8S集群部署成功后「添加到 K8s 资产」手动按钮
+- **用户需求**: 节点是先加到资产管理(普通 server 资产)才能被选中做 K8S 部署节点;部署成功后需要把集群**注册为 K8s 资产**——即资产管理/数据源里那种"填 apiserver URL + Token"的 **DataSource(type=kubernetes)**。
+- **现状**: 部署成功时后端 `_run_deploy_generator` 本就会自动调 `_create_platform_datasource` 注册 K8s 数据源;此次按用户要求补一个**显式手动按钮**作为入口/补救。
+- **后端**: `k8s_offline_deploy.py` 新增 `POST /api/plans/{plan_id}/to-assets` — 校验状态==succeeded + 有 master + 有 kubeconfig,取 master `_resolve_node_conn` 的 ip 作 apiserver,调 `_create_platform_datasource`(**幂等**,已存在则更新 endpoint/auth,否则新建),返回 datasource{id/name/type/endpoint/enabled}。
+- **前端**: `K8sOfflineDeployView.vue` 详情弹窗 modal-foot 加「＋ 添加到 K8s 资产」按钮(`v-if="detail.status==='succeeded' && !deploying"`)+ `addToAssets()` 调新接口,ElMessage 反馈。
+- **验证**: 后端接口对不存在计划返回 `{"ok":false,"message":"计划不存在"}`;单元验证 `_create_platform_datasource` 建 DataSource(type=kubernetes, auth_type=kubeconfig, endpoint=https://{ip}:6443)且**幂等(重复调用仍 1 条)**。真实 succeeded 集群无(需真实部署),成功路径逻辑经单测覆盖。前端构建 45.5s 通过,后端已重启含新路由。
+
+### 2026-08-12: 菜单结构调整 —— 离线仓库移到资产管理、K8s集群部署移到K8s资源
+- **变更**: `app/routers/menu_config.json` 删除「资源管理」下独立的 `offline-management` 分组;`offline-repo`(离线仓库)移到 `asset-management`(资产管理)分组(asset-discovery 之后),`k8s-cluster-deploy`(K8s集群部署)移到 `k8s-resources`(K8s资源)分组(k8s-cert-inspect 之后)。
+- **注意**: 删分组时易留尾随逗号,须先用 `json.load` 校验;本次曾出现 line 338 尾逗号报错已修。
+- **权限无需改**: 两个叶子 key 在两个库 role_menus(role_id=1 即有)里已存在;菜单 key 未变,仅位置变化,前端 `AppLayout.vue` 的 activeView 分支按 key 匹配,无需改动。
+- **验证**: 重启后端后 `GET /api/menu` 返回 `offline-repo` 在「资源管理>资产管理」、`k8s-cluster-deploy` 在「资源管理>K8s资源」。(菜单在 menu.py 模块导入时缓存,改 JSON 须重启后端生效)
+
+### 2026-08-12: 修复「License 授权签名验证失败」→ 公钥回退旧公钥（系统可正常登录访问）
+- **现象**: 启动前后端后,`admin/admin123` 登录接口能返回 token 成功,但访问业务页面(/、/api/menu 等非白名单路径)返回 403 `{"detail":"授权签名验证失败（许可证可能被篡改或伪造）"}`,登录后整个系统无法用。
+- **根因**: 磁盘上的 `license.lic` 是本机有效授权(机器指纹 `745669fc51036a82a28a0cd9e7a61040` 匹配,SQLite 实测),但它是**重签前的旧私钥**签署的;而 commit `00a5644`「License 私钥重签」把代码里 `app/services/license_service.py` 的硬编码公钥换成了**新公钥**,导致新旧不匹配 → 签名验证失败。且 `tools/private_key.pem`/`tools/public_key.pem` 都被 .gitignore 忽略且磁盘已丢失,无法直接重新签发新 license。
+- **修复(用户确认)**: 回退公钥为旧公钥。把 `license_service.py:22` 的 `_PUBLIC_KEY_PEM_HARDCODED` 从新公钥改回旧公钥(旧公钥可从 commit `00a5644` 的 diff 中 `-` 段精确恢复:以 `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2rptRkj...` 开头)。`tools/public_key.pem` 不存在时 fallback 到该硬编码旧公钥,即可验证磁盘 license.lic。
+- **验证闭环(全过)**: 重启后端 → 登录 ok:True → `GET /` 返回 SPA HTML 200(不再 403)→ `/api/menu` 200 → `/vue-assets/assets/*.js` 全部 200。
+- **注意/遗留**: 私钥重签时同步生成的**新 license.lic、private_key.pem、public_key.pem 都是 .gitignore**,换机器/目录后带不过来,极易造成签名不匹配。若后续要恢复"重签"意图,需找回新私钥重新签发 license;当前以旧公钥验证本机 license.lic 可用为准。
+- **开发路径提醒**: vite `base='/vue-assets/'` 且 `/vue-assets` 被代理到后端 → dev server `:3000/` 根路径 404。实际访问走**生产路径 http://localhost:8000**(后端挂载 dist,完整 SPA 可用);dev 模式下业务 API 经 3000 代理到 8000 功能正常。
+
 ### 2026-08-12: 「K8S 离线集群部署」功能完成（一键建集群 + 自动接入监控）
 - **交付**: 在阶段 A 离线仓库基础上,补齐 Pixiu 一键建 K8S 集群能力。方案选型 **kubeadm 编排**(非容器化 runner),复用 `ssh_helper.connect_ssh` + 离线仓库(`offline_repo_service`)的私有 Registry/包源/离线包(binaries+cni+images)。
 - **新增后端**: `app/models.py` 加 `K8sClusterPlan`+`K8sClusterNode`(两表,create_all 自动建,双库均验证);`app/services/k8s_offline_deploy_service.py`(约1000行,7阶段编排生成器,run_deploy emits status/phase/log/error/complete 事件供 WS);`app/routers/k8s_offline_deploy.py`(prefix `/k8s-offline/api`,11路由 + `/ws/plans/{id}/deploy` 实时推送)。main.py 注册在 offline_repo 之后。

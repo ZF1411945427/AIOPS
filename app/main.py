@@ -182,6 +182,8 @@ _MIGRATIONS = {
         "risk_score INTEGER DEFAULT 0",
         "health_gate_json TEXT DEFAULT '[]'",
         "deployment_feature_json TEXT DEFAULT '{}'",
+        "artifact_download_path VARCHAR(512) DEFAULT ''",
+        "artifact_auto_download BOOLEAN DEFAULT 1",
     ],
     "deploy_steps": [
         "diagnosis TEXT DEFAULT ''",

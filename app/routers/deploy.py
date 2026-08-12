@@ -137,6 +137,18 @@ def probe_plan(plan_id: int, db: Session = Depends(get_db)):
         return JSONResponse({"warning": str(e)}, status_code=200)
 
 
+@router.post("/api/plans/{plan_id}/artifact-download")
+def artifact_download(plan_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """手动触发源码下载到目标机（在线 git/HTTP + 离线仓库）。force=true 强制重新下载。"""
+    try:
+        result = deploy_service.auto_download_artifact(db, plan_id, force=force)
+        if not result.get("ok"):
+            return JSONResponse({"error": result.get("error", "下载失败")}, status_code=200)
+        return {"ok": True, **result}
+    except Exception as e:
+        return JSONResponse({"warning": str(e)}, status_code=200)
+
+
 @router.post("/api/plans/{plan_id}/auto-env")
 def auto_env_mapping(plan_id: int, db: Session = Depends(get_db)):
     """基于探查结果，AI 自动生成环境映射 + SOP 适配建议（A+C 层）。"""
@@ -204,6 +216,10 @@ async def ws_rollback_cleanup(websocket: WebSocket, plan_id: int):
                 await asyncio.sleep(0.05)
                 continue
             if event is _sentinel:
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
                 break
             await websocket.send_text(json.dumps(event, ensure_ascii=False))
     except WebSocketDisconnect:
@@ -222,7 +238,7 @@ def stop_plan(plan_id: int, db: Session = Depends(get_db)):
         result = deploy_service.stop_execution(db, plan_id)
         if result.get("error"):
             return JSONResponse({"error": result["error"]}, status_code=200)
-        return {"ok": True, "message": "已停止执行"}
+        return {"ok": True, "message": result.get("message", "已停止执行")}
     except Exception as e:
         return JSONResponse({"warning": str(e)}, status_code=200)
 

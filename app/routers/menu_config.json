@@ -256,6 +256,13 @@
             "type": "vue",
             "icon": "MagicStick",
             "path": "/asset-discovery"
+          },
+          {
+            "key": "offline-repo",
+            "label": "离线仓库",
+            "type": "vue",
+            "icon": "Box",
+            "path": "/offline-repo"
           }
         ]
       },
@@ -318,19 +325,6 @@
             "type": "vue",
             "icon": "Lock",
             "path": "/k8s/cert-inspect"
-          }
-        ]
-      },
-      {
-        "key": "offline-management",
-        "label": "离线仓库",
-        "items": [
-          {
-            "key": "offline-repo",
-            "label": "离线仓库",
-            "type": "vue",
-            "icon": "Box",
-            "path": "/offline-repo"
           },
           {
             "key": "k8s-cluster-deploy",
