@@ -71,6 +71,16 @@
             <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }} ({{ t.category }})</option>
           </select>
         </div>
+        <div v-if="!createForm.template_id" class="form-row">
+          <label>自定义节点（远程命令）</label>
+          <div class="node-editor" v-for="(n, i) in createForm.nodes" :key="n.id">
+            <input v-model="n.name" class="input node-name-input" placeholder="节点名称">
+            <input v-model="n.command" class="input" placeholder="远程 shell 命令，如 df -h /">
+            <button class="btn btn-sm btn-danger" @click="removeNode(i)">删除</button>
+          </div>
+          <button class="btn btn-sm" @click="addNode">+ 添加节点</button>
+          <div class="node-hint">{{ nodeHint }}</div>
+        </div>
         <div class="form-row"><label>工作流标题</label><input v-model="createForm.title" class="input" placeholder="工作流标题"></div>
         <div class="form-row"><label>运行时上下文 (JSON)</label>
           <textarea v-model="createForm.contextStr" class="input textarea" rows="4" placeholder='{"asset_id": 1, "alert_id": 5, "service_name": "nginx"}'></textarea>
@@ -93,7 +103,18 @@
         </div>
         <div class="detail-block">
           <div class="detail-label">上下文</div>
-          <pre class="code-block">{{ JSON.stringify(detail.context || {}, null, 2) }}</pre>
+          <div class="ctx-group">
+            <div class="ctx-sub-label">用户输入</div>
+            <pre class="code-block">{{ JSON.stringify(detailCtx.user, null, 2) }}</pre>
+          </div>
+          <div class="ctx-group">
+            <div class="ctx-sub-label">环境探测 context.probe（自动注入）</div>
+            <pre class="code-block">{{ JSON.stringify((detail.context && detail.context.probe) || {}, null, 2) }}</pre>
+          </div>
+          <div class="ctx-group">
+            <div class="ctx-sub-label">内部变量（_ 前缀，平台保留）</div>
+            <pre class="code-block">{{ JSON.stringify(detailCtx.internal, null, 2) }}</pre>
+          </div>
         </div>
         <div class="detail-block">
           <div class="detail-label">节点执行状态</div>
@@ -169,9 +190,21 @@ const total = ref(0)
 const statusFilter = ref('')
 const templates = ref([])
 const showCreate = ref(false)
-const createForm = ref({ template_id: null, title: '', contextStr: '{}' })
+const nodeHint = 'asset_id 等与工具参数同名的上下文变量会自动注入；引用其他变量请用双大括号模板语法，如 {{ context.probe.disk_usage_pct }}。需人工确认的节点也会被拦截确认。'
+const createForm = ref({ template_id: null, title: '', contextStr: '{}', nodes: [{ id: 'n1', name: '节点1', command: '' }] })
 const showDetail = ref(false)
 const detail = ref({})
+const detailCtx = computed(() => {
+  const c = detail.value.context || {}
+  const user = {}
+  const internal = {}
+  for (const [k, v] of Object.entries(c)) {
+    if (k.startsWith('_')) internal[k] = v
+    else if (k === 'probe') continue
+    else user[k] = v
+  }
+  return { user, internal }
+})
 let pollTimer = null
 
 const currentPage = ref(1)
@@ -233,8 +266,17 @@ async function loadTemplates() {
 
 async function openCreate() {
   if (!templates.value.length) await loadTemplates()
-  createForm.value = { template_id: null, title: '', contextStr: '{}' }
+  createForm.value = { template_id: null, title: '', contextStr: '{}', nodes: [{ id: 'n1', name: '节点1', command: '' }] }
   showCreate.value = true
+}
+
+function addNode() {
+  const i = createForm.value.nodes.length
+  createForm.value.nodes.push({ id: 'n' + (i + 1), name: '节点' + (i + 1), command: '' })
+}
+
+function removeNode(i) {
+  createForm.value.nodes.splice(i, 1)
 }
 
 async function createRun() {
@@ -245,7 +287,23 @@ async function createRun() {
       return
     }
     const payload = { title: createForm.value.title, context }
-    if (createForm.value.template_id) payload.template_id = createForm.value.template_id
+    if (createForm.value.template_id) {
+      payload.template_id = createForm.value.template_id
+    } else {
+      const nodes = createForm.value.nodes
+        .filter(n => n.command && n.command.trim())
+        .map((n, i) => ({
+          id: n.id || ('n' + (i + 1)),
+          name: n.name || ('节点' + (i + 1)),
+          action_type: 'run_command',
+          payload_template: { command: n.command.trim() },
+        }))
+      if (!nodes.length) {
+        ElMessage.warning('请至少填写一个节点的远程命令')
+        return
+      }
+      payload.nodes = nodes
+    }
     const data = await request.post('/workflow/api/runs/create', payload)
     ElMessage.success(`工作流 #${data.id} 已创建`)
     showCreate.value = false
@@ -407,6 +465,9 @@ onBeforeUnmount(() => {
 .modal-box.xwide { min-width: 720px; }
 .modal-box h3 { margin: 0 0 16px; font-size: 1rem; color: var(--text, #1e293b); }
 .form-row { margin-bottom: 12px; }
+.node-editor { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+.node-name-input { width: 140px; flex: 0 0 140px; }
+.node-hint { margin-top: 6px; font-size: 12px; color: #8a8a8a; line-height: 1.6; }
 .form-row label { display: block; font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 4px; }
 .input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
 .textarea { resize: vertical; font-family: inherit; }
@@ -416,6 +477,8 @@ onBeforeUnmount(() => {
 .summary-label { color: var(--text-secondary, #64748b); font-size: 0.75rem; }
 .detail-block { margin: 10px 0; }
 .detail-label { font-size: 0.78rem; color: var(--text-secondary, #64748b); margin-bottom: 6px; font-weight: 600; }
+.ctx-group { margin-bottom: 10px; }
+.ctx-sub-label { font-size: 0.72rem; color: #94a3b8; margin-bottom: 4px; }
 .code-block { background: rgba(0,0,0,0.04); border-radius: 6px; padding: 8px 10px; font-size: 0.75rem; font-family: 'Consolas', monospace; white-space: pre-wrap; word-break: break-all; margin: 4px 0; max-height: 200px; overflow-y: auto; }
 .code-block.small { font-size: 0.7rem; max-height: 150px; }
 .node-flow { display: flex; flex-direction: column; gap: 10px; }

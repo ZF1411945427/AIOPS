@@ -325,6 +325,45 @@ def _query_elasticsearch(source, query_str, time_range, page, size, index="", le
         return [], 0, f"ES 查询失败: {e}"
 
 
+_LEVEL_RE = re.compile(
+    r'(?im)^\s*'
+    r'(?:\[[^\]]*\])?\s*'
+    r'(?:level[=:]\s*)?'
+    r'(?P<level>fatal|error|warn|warning|info|debug|trace)\b'
+)
+_LEVEL_INLINE_RE = re.compile(
+    r'(?i)\blevel[=:]\s*(?P<level>fatal|error|warn|warning|info|debug|trace)\b'
+)
+_LEVEL_BRACKET_RE = re.compile(
+    r'(?i)\[(?P<level>fatal|error|warn|warning|info|debug|trace)\]'
+)
+
+_LEVEL_NORMALIZE = {
+    "fatal": "error",
+    "warn": "warning",
+    "trace": "debug",
+}
+
+
+def _infer_log_level(message: str) -> str:
+    """从日志 message 内容推断真实级别.
+
+    依次尝试:
+    1. 行首级别(如 "2026-... ERROR xxx" / "level=info ts=...") — 首选
+    2. 行内 level=xxx(如 caller=... level=error ...)
+    3. 方括号级别(如 "[ERROR]" / "[WARN]")
+    返回标准级别(error/warning/info/debug)或空串。
+    """
+    if not message:
+        return ""
+    for pat in (_LEVEL_RE, _LEVEL_INLINE_RE, _LEVEL_BRACKET_RE):
+        m = pat.search(message)
+        if m:
+            lv = m.group("level").lower()
+            return _LEVEL_NORMALIZE.get(lv, lv)
+    return ""
+
+
 def _query_loki(source, query_str, time_range, page, size, level="", host="", service=""):
     """调用 Loki 适配器查询日志，支持分页切片."""
     from app.services.log_query_service import query_logs as _service_query_logs
@@ -344,6 +383,22 @@ def _query_loki(source, query_str, time_range, page, size, level="", host="", se
     if error:
         return [], 0, error
 
+    # 部分 Loki 数据源(如 129 promtail)的 level 标签不可靠:被提成内容里的随机单词
+    # (processing/offset/Aug...),LogQL 的 level 过滤对它们无效。
+    # 这里对返回的日志做内容级二次推断: 从 message 里的 level=xx / [xx] / 行首 xx
+    # 识别真实级别, 覆盖不可靠标签, 并按用户选择做最终过滤。
+    # total 也改为"本次取回范围内的实际匹配数"——因为标签 count_over_time 不可靠。
+    if level:
+        want = level.strip().lower()
+        filtered = []
+        for lg in raw_logs:
+            real = _infer_log_level(lg.get("message", ""))
+            if real and (real == want or (want == "error" and real == "fatal")):
+                lg["level"] = real
+                filtered.append(lg)
+        raw_logs = filtered
+        total = len(raw_logs)
+
     start_idx = (page - 1) * size
     page_logs = raw_logs[start_idx:start_idx + size]
     for lg in page_logs:
@@ -351,4 +406,87 @@ def _query_loki(source, query_str, time_range, page, size, level="", host="", se
         lg["index"] = "loki"
         lg["source"] = lg.get("source", "loki")
     return page_logs, total, None
+
+
+@router.post("/api/analyze")
+async def api_log_analyze(request: Request, db: Session = Depends(get_db)):
+    """AI 分析选中的日志：把勾选日志交给 LLM 做异常根因/关联分析。
+
+    body: {
+      "source_id": 1,
+      "logs": [{"timestamp": "...", "level": "error", "host": "...", "service": "...", "message": "..."}],
+      "question": "可选，自定义分析诉求"
+    }
+    返回: {ok, analysis, error}
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "请求体格式错误"}, status_code=400)
+
+    logs = body.get("logs") or []
+    question = (body.get("question") or "").strip()
+    if not logs:
+        return JSONResponse({"error": "请先勾选至少一条日志"}, status_code=400)
+    if len(logs) > 100:
+        return JSONResponse({"error": "单次最多分析 100 条日志"}, status_code=400)
+
+    source = db.query(DataSource).filter(DataSource.id == int(body.get("source_id", 0) or 0)).first()
+    source_name = source.name if source else f"数据源#{body.get('source_id')}"
+
+    # 取默认 AI Provider
+    from app.models import AgentConfig, AIProvider
+    from app.services.agent_service import call_llm
+    config = db.query(AgentConfig).filter(AgentConfig.is_enabled == True).order_by(AgentConfig.id.asc()).first()
+    provider = None
+    if config and config.default_provider_id:
+        provider = db.query(AIProvider).filter(
+            AIProvider.id == config.default_provider_id, AIProvider.is_enabled == True).first()
+    if not provider:
+        from app.services.ai_provider_health import select_healthy_provider
+        _all = db.query(AIProvider).filter(AIProvider.is_enabled == True).all()
+        _sel, _cand, _skip = select_healthy_provider(_all)
+        provider = _sel or (_all[0] if _all else None)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "未配置可用的 AI 模型提供商，请在 AI 设置中配置并启用一个"})
+
+    # 组装日志文本（按时间倒序已由前端保证）
+    lines = []
+    for i, lg in enumerate(logs[:100], 1):
+        ts = (lg.get("timestamp") or "").replace("T", " ")[:19]
+        lvl = lg.get("level") or "info"
+        host = lg.get("host") or "-"
+        svc = lg.get("service") or "-"
+        msg = (lg.get("message") or "").strip()
+        lines.append(f"{i}. [{ts}] [{lvl}] host={host} service={svc} | {msg}")
+
+    sys_prompt = (
+        "你是一名资深 SRE 运维专家，精通日志分析与故障根因定位。"
+        f"用户从日志中心（数据源: {source_name}）勾选了 {len(lines)} 条日志请求分析。"
+        "请输出结构化分析：\n"
+        "1. **异常模式**：识别日志中的错误/告警规律（报错组件、重复频率、关联线索）\n"
+        "2. **根因推断**：最可能的故障根因，按可能性排序并说明依据\n"
+        "3. **影响评估**：受影响的服务/主机范围与严重程度\n"
+        "4. **处置建议**：给出可执行的具体命令或操作步骤（P0/P1/P2 优先级）\n"
+        "如果日志无明显异常，请如实说明，并给出排查建议。"
+    )
+    user_prompt = "以下是被勾选的日志（已按时间倒序）：\n\n" + "\n".join(lines)
+    if question:
+        user_prompt += f"\n\n用户附加诉求：{question}"
+
+    resp = call_llm(provider, [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_prompt},
+    ], timeout_override=max(provider.timeout_seconds, 90))
+    if resp.get("error"):
+        return JSONResponse({"ok": False, "error": f"AI 分析失败: {resp['error']}"})
+    try:
+        content = resp["choices"][0]["message"]["content"]
+    except Exception:
+        return JSONResponse({"ok": False, "error": "AI 返回格式异常"})
+
+    return JSONResponse({"ok": True, "analysis": content or "", "provider": provider.default_model, "log_count": len(logs)})
 

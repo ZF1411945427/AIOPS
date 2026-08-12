@@ -1,7 +1,7 @@
 import json
 import re
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
@@ -241,3 +241,96 @@ def get_trace(trace_id: str, db: Session = Depends(get_db)):
         "spans": span_list,
         "topology": {"services": services, "edges": edges},
     })
+
+
+@router.post("/analyze")
+async def traces_ai_analyze(request: Request, db: Session = Depends(get_db)):
+    """AI 调用链分析：把慢调用链 / ERROR 链路的 span 快照交给 LLM 做瓶颈定位与根因分析。
+
+    body: {
+      "traces": [
+        {"trace_id": "...", "root_service": "...", "root_operation": "...",
+         "total_duration_ms": 1234, "worst_status": "ERROR", "started_at": "...",
+         "spans": [{"service_name": "...", "operation_name": "...", "duration_ms": 500, "status": "OK"}]}
+      ],
+      "question": "可选，自定义分析诉求"
+    }
+    返回: {ok, analysis, provider, trace_count}
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "请求体格式错误"}, status_code=400)
+
+    traces = body.get("traces") or []
+    question = (body.get("question") or "").strip()
+    if not traces:
+        return JSONResponse({"error": "请先选择要分析的调用链"}, status_code=400)
+    if len(traces) > 20:
+        return JSONResponse({"error": "单次最多分析 20 条调用链"}, status_code=400)
+
+    # 取默认 AI Provider
+    from app.models import AgentConfig, AIProvider
+    from app.services.agent_service import call_llm
+    config = db.query(AgentConfig).filter(AgentConfig.is_enabled == True).order_by(AgentConfig.id.asc()).first()
+    provider = None
+    if config and config.default_provider_id:
+        provider = db.query(AIProvider).filter(
+            AIProvider.id == config.default_provider_id, AIProvider.is_enabled == True).first()
+    if not provider:
+        from app.services.ai_provider_health import select_healthy_provider
+        _all = db.query(AIProvider).filter(AIProvider.is_enabled == True).all()
+        _sel, _cand, _skip = select_healthy_provider(_all)
+        provider = _sel or (_all[0] if _all else None)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "未配置可用的 AI 模型提供商，请在 AI 设置中配置并启用一个"})
+
+    # 组装调用链文本（精简：每链路最多取 30 个 span，仅保留关键字段）
+    blocks = []
+    for i, tr in enumerate(traces[:20], 1):
+        spans = tr.get("spans") or []
+        if len(spans) > 30:
+            spans = spans[:30]
+        head = (
+            f"{i}. 调用链 {tr.get('trace_id', '?')[:20]} "
+            f"根服务={tr.get('root_service') or '-'} 操作={tr.get('root_operation') or '-'} "
+            f"总耗时={tr.get('total_duration_ms')}ms 状态={tr.get('worst_status') or 'OK'} "
+            f"开始={tr.get('started_at') or '-'} 路径数={len(tr.get('spans') or [])}"
+        )
+        span_lines = []
+        for j, s in enumerate(spans, 1):
+            span_lines.append(
+                f"    {j}. [{s.get('service_name') or '-'}] {s.get('operation_name') or '-'} "
+                f"耗时={s.get('duration_ms')}ms 状态={s.get('status') or 'OK'}"
+            )
+        blocks.append(head + ("\n" + "\n".join(span_lines) if span_lines else " (无 span 明细)"))
+
+    sys_prompt = (
+        "你是一名资深 SRE 工程师，精通分布式系统调用链分析（APM / 全链路追踪）。"
+        f"用户从链路追踪页提交了 {len(traces)} 条调用链（慢调用或异常链路）的 span 明细请求分析。"
+        "请输出结构化分析：\n"
+        "1. **瓶颈定位**：哪条链路、哪个服务、哪个操作耗时占比最高（列出 top 耗时 span，按耗时倒序）\n"
+        "2. **异常链路**：状态为 ERROR 的调用链及其错误服务/操作，推断可能原因（超时/资源不足/依赖故障/代码问题）\n"
+        "3. **依赖关系**：识别上下游服务依赖，指出是否有单点或雪崩风险\n"
+        "4. **处置建议**：按 P0/P1/P2 给出可执行建议（扩容/限流/降级/慢 SQL 优化/重试策略等）\n"
+        "如果链路均正常，请如实说明，并给出性能基线建议。"
+    )
+    user_prompt = "以下是待分析的调用链 span 快照：\n\n" + "\n".join(blocks)
+    if question:
+        user_prompt += f"\n\n用户附加诉求：{question}"
+
+    resp = call_llm(provider, [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_prompt},
+    ], timeout_override=max(provider.timeout_seconds, 90))
+    if resp.get("error"):
+        return JSONResponse({"ok": False, "error": f"AI 分析失败: {resp['error']}"})
+    try:
+        content = resp["choices"][0]["message"]["content"]
+    except Exception:
+        return JSONResponse({"ok": False, "error": "AI 返回格式异常"})
+
+    return JSONResponse({"ok": True, "analysis": content or "", "provider": provider.default_model, "trace_count": len(traces)})

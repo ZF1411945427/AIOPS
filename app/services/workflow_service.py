@@ -3,7 +3,7 @@ import threading
 import time
 from collections import deque, defaultdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from jinja2 import Environment, BaseLoader
 from sqlalchemy.orm import Session
@@ -71,11 +71,20 @@ def topological_sort(nodes: List[Dict], edges: List[Dict]) -> List[str]:
     return order
 
 
+def _render_context(context: Dict) -> Dict:
+    """为渲染构造安全的 context：确保 context.probe 恒为 dict，
+    避免 Jinja2 对中间节点缺失属性抛 UndefinedError（如 {{ context.probe.top_dirs }}）。"""
+    ctx = dict(context)
+    probe = ctx.get("probe")
+    ctx["probe"] = probe if isinstance(probe, dict) else {}
+    return ctx
+
+
 def render_payload(payload_template: Dict, context: Dict, upstream_results: Dict[str, Any]) -> Dict:
     """Jinja2 渲染 payload_template。注入 context 和 upstream_results（{node_id: result}）。
     payload_template 中字符串值若含 {{ }} 则渲染，dict/list 递归渲染。"""
     render_ctx = {
-        "context": context or {},
+        "context": _render_context(context or {}),
         "upstream": upstream_results or {},
         "results": upstream_results or {},
     }
@@ -95,6 +104,127 @@ def render_payload(payload_template: Dict, context: Dict, upstream_results: Dict
         return value
 
     return _render(payload_template or {})
+
+
+# ─── Pre-Run 环境探测器 ───
+# 对 context.asset_id 目标资产跑一组只读命令，解析为 context.probe.* 注入所有节点渲染。
+# 只读命令集合（契约见 CONTRACT.md 第十章）：df/du/ls/find/awk/sort/free/uptime
+_PROBE_SCRIPT = r'''
+echo '=== DF ==='
+df -h -x tmpfs -x devtmpfs 2>/dev/null
+echo '=== MOUNT_USAGE ==='
+df -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1{gsub("%","",$5); print $6, $5}'
+echo '=== LOG_DIRS ==='
+ls -d /var/log /var/log/nginx /var/log/app /var/log/redis /var/log/mysql /var/log/secure /var/log/haproxy 2>/dev/null
+echo '=== TOP_DIRS ==='
+M=$(df -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1{gsub("%","",$5); if($5+0>max){max=$5+0; mp=$6}} END{print mp}')
+if [ -n "$M" ]; then du -x --max-depth=1 "$M" 2>/dev/null | sort -rh | head -10; fi
+echo '=== MEM ==='
+free -m 2>/dev/null
+echo '=== LOAD ==='
+uptime 2>/dev/null
+'''
+
+_PROBE_LOG_DIR_FIELDS = (
+    ("nginx", "nginx_log_dir"), ("app", "app_log_dir"), ("redis", "redis_log_dir"),
+    ("mysql", "mysql_log_dir"), ("secure", "auth_log_dir"), ("haproxy", "haproxy_log_dir"),
+)
+
+
+def _parse_probe_output(stdout: str) -> Dict:
+    """解析探测脚本输出为 context.probe.* 字典。任何段缺失即省略该字段。"""
+    probe: Dict = {}
+    section = None
+    df_lines: List[str] = []
+    mount_lines: List[str] = []
+    log_dirs: List[str] = []
+    top_lines: List[str] = []
+    mem_lines: List[str] = []
+    load_lines: List[str] = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if line.startswith("===") and line.endswith("==="):
+            section = line.strip("=").strip().lower().replace(" ", "_")
+            continue
+        if not line or not section:
+            continue
+        if section == "df":
+            df_lines.append(line)
+        elif section == "mount_usage":
+            mount_lines.append(line)
+        elif section == "log_dirs":
+            log_dirs.append(line)
+        elif section == "top_dirs":
+            top_lines.append(line)
+        elif section == "mem":
+            mem_lines.append(line)
+        elif section == "load":
+            load_lines.append(line)
+    raw: Dict = {}
+    if df_lines:
+        raw["df_text"] = "\n".join(df_lines)
+    if mem_lines:
+        raw["mem_text"] = "\n".join(mem_lines)
+    if load_lines:
+        raw["load_text"] = "\n".join(load_lines)
+    if raw:
+        probe["raw"] = raw
+
+    best = None
+    for ln in mount_lines:
+        parts = ln.split()
+        if len(parts) >= 2 and parts[-1].isdigit():
+            pct = int(parts[-1])
+            if best is None or pct > best[0]:
+                best = (pct, " ".join(parts[:-1]))
+    if best:
+        probe["fullest_mount"] = best[1]
+        probe["disk_usage_pct"] = str(best[0])
+
+    keep_dirs = []
+    for d in log_dirs:
+        keep_dirs.append(d)
+        base = d.rstrip("/").rsplit("/", 1)[-1]
+        for key, field in _PROBE_LOG_DIR_FIELDS:
+            if base == key:
+                probe[field] = d
+    if keep_dirs:
+        probe["log_dirs"] = " ".join(keep_dirs)
+
+    dirs = []
+    for ln in top_lines:
+        parts = ln.split(None, 1)
+        if len(parts) == 2 and parts[1] not in ("/", "/proc", "/sys", "/dev", "/run"):
+            dirs.append(parts[1])
+    if dirs:
+        probe["top_dirs"] = " ".join(dirs[:8])
+    return probe
+
+
+def _run_environment_probe(db: Session, asset_id: int) -> Dict:
+    """对目标资产执行只读探测命令，返回 context.probe 字典。
+    探测失败/资产离线/超时一律返回 {}，不阻塞工作流（模板靠 default 兜底）。"""
+    if not asset_id:
+        return {}
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        result = call_mcp_tool(
+            "execute_run_command",
+            {"command": _PROBE_SCRIPT, "asset_id": int(asset_id), "timeout": 25},
+            db=db,
+            allow_internal=True,
+        )
+        payload = (result or {}).get("result", {}) if isinstance(result, dict) else {}
+        if not isinstance(payload, dict) or result.get("status") != "success" or payload.get("status") != "success":
+            logger.warning("环境探测未返回成功 asset_id=%s: %s", asset_id, (result or {}).get("message"))
+            return {}
+        probe = _parse_probe_output(payload.get("message", ""))
+        probe["timestamp"] = datetime.now().isoformat(timespec="seconds")
+        return probe
+    except Exception as e:  # 探测失败不阻塞工作流
+        logger.warning("环境探测失败 asset_id=%s: %s", asset_id, e)
+        return {}
 
 
 def _serialize_run(run: WorkflowRun, node_runs: Optional[List[WorkflowNodeRun]] = None) -> Dict:
@@ -191,6 +321,16 @@ def start_workflow_run(
     if not template_id:
         run_context["_edges"] = edges or []
 
+    # Pre-Run 环境探测：对目标资产自动注入 context.probe.*（只读，失败不阻塞）
+    _asset_id = run_context.get("asset_id")
+    if _asset_id is not None:
+        try:
+            _asset_id = int(_asset_id)
+        except (TypeError, ValueError):
+            _asset_id = None
+    if _asset_id:
+        run_context["probe"] = _run_environment_probe(db, _asset_id)
+
     run = WorkflowRun(
         template_id=template_id,
         session_id=session_id,
@@ -255,13 +395,14 @@ def _advance_run(db: Session, run_id: int):
         if not nr or nr.status != WorkflowNodeRun.STATUS_PENDING:
             continue
         deps = _node_dependencies(nid, edges)
-        if not deps.issubset(completed_ids):
-            continue
-        if failed_ids & deps:
+        if failed_ids & deps or skipped_ids & deps:
             nr.status = WorkflowNodeRun.STATUS_SKIPPED
             nr.completed_at = _now()
             db.commit()
             progressed = True
+            skipped_ids.add(nid)
+            continue
+        if not deps.issubset(completed_ids):
             continue
 
         payload_tpl = nr.get_payload()
@@ -337,11 +478,41 @@ def _node_dependencies(node_id: str, edges: List[Dict]) -> set:
     return deps
 
 
+def _tool_input_fields(tool_name: str) -> Set[str]:
+    """返回 execute_* 内部工具 input_schema 的顶层字段名集合（驱动通用自动注入）。"""
+    for tool in get_internal_tools():
+        if tool.name == tool_name:
+            props = (tool.input_schema or {}).get("properties", {})
+            return set(props.keys())
+    return set()
+
+
+def _inject_context_fields(payload: Dict, context: Dict, action_type: str) -> Dict:
+    """通用自动注入：execute_* 工具 schema 要求但 payload 缺失的字段，
+    若 run.context 有同名键则自动补齐。
+
+    不硬编码白名单——asset_id/hostname/service/package_name 等任何工具参数，
+    只要 context 里有同名键就自动注入，用户无需手写 `{{ context.xxx }}`；
+    手写模板语法（{{ context.任意 }}）仍由 render_payload 支持，两条路并存。
+    """
+    if not isinstance(context, dict) or not context:
+        return payload
+    fields = _tool_input_fields(f"execute_{action_type}")
+    if not fields:
+        return payload
+    missing = {k: context[k] for k in fields if k not in payload and k in context}
+    if not missing:
+        return payload
+    return {**payload, **missing}
+
+
 def _execute_node(db: Session, run: WorkflowRun, nr: WorkflowNodeRun, payload: Dict):
     """执行单个节点：调 execute_* MCP 工具，记录结果。失败按 retry_count 重试。"""
     nr.status = WorkflowNodeRun.STATUS_RUNNING
     nr.started_at = _now()
     db.commit()
+
+    payload = _inject_context_fields(payload, run.get_context(), nr.action_type)
 
     tool_name = f"execute_{nr.action_type}"
     max_retry = nr.retry_count or 0
@@ -562,30 +733,43 @@ def get_run(db: Session, run_id: int) -> Optional[Dict]:
     return _serialize_run(r, node_runs)
 
 
-def seed_workflow_templates(db: Session):
-    """幂等播种 5 个预置 SOP 模板。按 name 去重。"""
-    existing_names = {t.name for t in db.query(WorkflowTemplate).all()}
+def seed_workflow_templates(db: Session, update_presets: bool = False):
+    """幂等播种预置 SOP 模板。按 name 去重。
+    update_presets=True 时用预置内容覆盖同名模板（预置库升级后调用会覆盖同名模板的修改），
+    enabled 开关保留不重置。"""
+    existing = {t.name: t for t in db.query(WorkflowTemplate).all()}
     presets = _preset_templates()
-    added = 0
+    added = updated = 0
     for p in presets:
-        if p["name"] in existing_names:
+        t = existing.get(p["name"])
+        if t is None:
+            t = WorkflowTemplate(
+                name=p["name"],
+                description=p.get("description", ""),
+                category=p.get("category", "generic"),
+                trigger_type=p.get("trigger_type", "manual"),
+                trigger_condition=json.dumps(p.get("trigger_condition", {}), ensure_ascii=False),
+                nodes=json.dumps(p.get("nodes", []), ensure_ascii=False),
+                edges=json.dumps(p.get("edges", []), ensure_ascii=False),
+                risk_level=p.get("risk_level", "medium"),
+                enabled=bool(p.get("enabled", True)),
+            )
+            db.add(t)
+            added += 1
             continue
-        t = WorkflowTemplate(
-            name=p["name"],
-            description=p.get("description", ""),
-            category=p.get("category", "generic"),
-            trigger_type=p.get("trigger_type", "manual"),
-            trigger_condition=json.dumps(p.get("trigger_condition", {}), ensure_ascii=False),
-            nodes=json.dumps(p.get("nodes", []), ensure_ascii=False),
-            edges=json.dumps(p.get("edges", []), ensure_ascii=False),
-            risk_level=p.get("risk_level", "medium"),
-            enabled=bool(p.get("enabled", True)),
-        )
-        db.add(t)
-        added += 1
-    if added:
+        if not update_presets:
+            continue
+        t.description = p.get("description", "")
+        t.category = p.get("category", "generic")
+        t.trigger_type = p.get("trigger_type", "manual")
+        t.trigger_condition = json.dumps(p.get("trigger_condition", {}), ensure_ascii=False)
+        t.nodes = json.dumps(p.get("nodes", []), ensure_ascii=False)
+        t.edges = json.dumps(p.get("edges", []), ensure_ascii=False)
+        t.risk_level = p.get("risk_level", "medium")
+        updated += 1
+    if added or updated:
         db.commit()
-    return added
+    return added + updated
 
 
 def _preset_templates() -> List[Dict]:

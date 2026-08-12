@@ -61,14 +61,12 @@ def _remote_exec_ssh(ip: str, user: str, password: str, port: int, command: str,
     """
     通过 SSH 在远程主机执行命令，返回 (success: bool, output: str)
     timeout 单位秒，默认 5 分钟（安装类任务需要）
+    统一走 ssh_helper.connect_ssh：首次连接自动信任（TOFU），之后严格白名单校验。
     """
-    import paramiko
+    from app.services.ssh_helper import connect_ssh
 
     try:
-        client = paramiko.SSHClient()
-        # 后台任务执行 SSH 命令到已录入资产，AutoAddPolicy 兼容首次连接（生产可设 SSH_STRICT=1 改 RejectPolicy）
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
-        client.connect(ip, username=user, password=password, port=port, timeout=30, banner_timeout=30)
+        client = connect_ssh(ip, port=port, username=user, password=password, timeout=30)
         stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
         exit_status = stdout.channel.recv_exit_status()
         output = stdout.read().decode("utf-8", errors="replace")

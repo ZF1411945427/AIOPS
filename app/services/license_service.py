@@ -16,18 +16,24 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 
-PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2rptRkjkS5ji4ryRz6dq
-IjOUcmpJDVEoXuiB5yomibrAzLefDvVK+W9TZAGneQDC4nvtenMmgmrmJW2rHver
-T84hSmAgO5cC1cnTXtCrUdhTuc3+3pDDBzr3MHTys+3rtTPf3vVY3WSqnrf4ISQL
-vAEbefgqn8dv93go+GRsHC9vSQErA9SHgnzcWZHxEeVhs6i1uYiLJE/Rd6cquat5
-QkVHRoVdW+wH0HygVVI8e55P24sFaF5zXGxGyUuPPSLbQ48+8rX7sKCzIFgOY5Oa
-852obp06qcDmvc0NVxcNZRH9p6qodPqGFTzBtWCHVBGHH7Ak/Exrja5zvs7b5jcj
-pQIDAQAB
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+_PUB_KEY_FILE = os.path.join(_PROJECT_ROOT, "tools", "public_key.pem")
+_PUBLIC_KEY_PEM_HARDCODED = """-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvthz7tE1LYkkzKk29win
+5iKI2fSLoKD8TXS8DvKyS5w8HXPhwp3tDnGnz1gn/4JIGMaWi8kcZ3PlwmMQLpCe
+4LAr9fvq/E5cxF5ehAqJWsorbsTslZ/oF8+OzPGaTmvXtlVjQbjyrRUeuJlZHiZl
+H6LPL/pQu/cUy7LZDRctbIkIH5uZot0aMrE4N/M1MT9MFU/BcB74t1ZR4d4xwPm3
+rOeiltnTbcsYEdFcTEl+6BKAsKqdmPIgCb2obO62oCjqoAWFQmUd5YnoiJHOIPKW
+0f5u3KLIFmwCVOcURziQnNkahYpXk80Qjdl8XXV6qV7I2rEpJ2irlhZi6GIUP08t
+awIDAQAB
 -----END PUBLIC KEY-----"""
 
-
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if os.path.exists(_PUB_KEY_FILE):
+    with open(_PUB_KEY_FILE, "r", encoding="utf-8") as _f:
+        _PUBLIC_KEY_PEM = _f.read().strip()
+else:
+    _PUBLIC_KEY_PEM = _PUBLIC_KEY_PEM_HARDCODED
 LICENSE_FILE = os.path.join(_PROJECT_ROOT, "license.lic")
 STATE_DIR = os.path.join(_PROJECT_ROOT, "data")
 STATE_FILE = os.path.join(STATE_DIR, "license_state.json")
@@ -57,7 +63,7 @@ _LICENSE_PUBLIC_PREFIXES = (
 
 
 def _load_public_key():
-    return serialization.load_pem_public_key(PUBLIC_KEY_PEM.encode("utf-8"))
+    return serialization.load_pem_public_key(_PUBLIC_KEY_PEM.encode("utf-8"))
 
 
 def _collect_mac():

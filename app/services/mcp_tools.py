@@ -1301,13 +1301,14 @@ def execute_run_command(db: Optional[Session] = None, user_id: Optional[int] = N
 
 @register_mcp_tool(
     name="execute_acknowledge_alert",
-    description="确认告警 (标记为已处理)",
+    description="确认告警 (标记为已处理)，支持单个或批量",
     input_schema={
         "type": "object",
         "properties": {
-            "alert_id": {"type": "integer", "description": "告警 ID"},
+            "alert_id": {"type": "integer", "description": "单个告警 ID（与 alert_ids 二选一）"},
+            "alert_ids": {"type": "array", "items": {"type": "integer"}, "description": "批量告警 ID 列表（与 alert_id 二选一）"},
         },
-        "required": ["alert_id"],
+        "required": [],
     },
     risk_level="low",
     display_name="确认告警",
@@ -1322,12 +1323,20 @@ def execute_acknowledge_alert(db: Optional[Session] = None, user_id: Optional[in
         close_db = True
     try:
         alert_id = kwargs.get("alert_id")
-        if alert_id is None:
-            raise ValueError("缺少必填参数: alert_id")
-        alert = alert_service.acknowledge_alert(db, int(alert_id))
-        if not alert:
-            raise ValueError(f"告警 {alert_id} 未找到")
-        return {"status": "success", "message": f"告警 {alert_id} 已确认", "data": {"alert_id": alert.id, "status": alert.status}}
+        alert_ids = kwargs.get("alert_ids")
+        if alert_id is None and not alert_ids:
+            raise ValueError("缺少必填参数: alert_id 或 alert_ids")
+        if alert_id is not None:
+            alert_ids = [alert_id]
+        confirmed = []
+        for aid in alert_ids:
+            alert = alert_service.acknowledge_alert(db, int(aid))
+            if not alert:
+                raise ValueError(f"告警 {aid} 未找到")
+            confirmed.append(alert.id)
+        if len(confirmed) == 1:
+            return {"status": "success", "message": f"告警 {confirmed[0]} 已确认", "data": {"alert_ids": confirmed, "status": "acknowledged"}}
+        return {"status": "success", "message": f"已批量确认 {len(confirmed)} 条告警", "data": {"alert_ids": confirmed, "status": "acknowledged"}}
     finally:
         if close_db:
             db.close()

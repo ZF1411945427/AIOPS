@@ -5,9 +5,55 @@
       <el-icon class="loading-spin" :size="32"><Loading /></el-icon>
     </div>
     <aside class="sidebar" :class="{ collapsed: appStore.sidebarCollapsed }">
-      <div class="sidebar-header">
-        <div class="logo-badge">AI</div>
-        <span v-if="!appStore.sidebarCollapsed" class="brand-name">AIOps</span>
+<div class="sidebar-header">
+        <div class="logo-badge">
+          <!-- Taste 皮肤: 粉橙 -->
+          <svg v-if="appStore.skin === 'taste'" viewBox="0 0 44 44" width="40" height="40">
+            <defs><linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#c84e89" /><stop offset="100%" stop-color="#f15f79" /></linearGradient>
+            <linearGradient id="lgB" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#fcb045" /><stop offset="100%" stop-color="#f59e0b" /></linearGradient></defs>
+            <rect x="8" y="6" width="4" height="32" rx="2" fill="url(#lgA)" /><rect x="32" y="6" width="4" height="32" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="6" width="28" height="4" rx="2" fill="url(#lgA)" /><rect x="8" y="34" width="28" height="4" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="20" width="28" height="3" rx="1.5" fill="url(#lgA)" opacity="0.6" />
+            <line x1="8" y1="6" x2="36" y2="20" stroke="url(#lgA)" stroke-width="2.5" stroke-linecap="round" />
+            <line x1="8" y1="20" x2="36" y2="34" stroke="url(#lgB)" stroke-width="2.5" stroke-linecap="round" />
+            <circle cx="8" cy="6" r="2.5" fill="#fff" /><circle cx="36" cy="6" r="2.5" fill="#fff" />
+            <circle cx="8" cy="34" r="2.5" fill="#fff" /><circle cx="36" cy="34" r="2.5" fill="#fff" />
+            <circle cx="8" cy="20" r="2" fill="#fff" /><circle cx="36" cy="20" r="2" fill="#fff" />
+            <circle cx="22" cy="20" r="3" fill="url(#lgA)" /><circle cx="22" cy="20" r="1.5" fill="#fff" />
+          </svg>
+          <!-- Frost 皮肤: 冰霜 -->
+          <svg v-else-if="appStore.skin === 'frost'" viewBox="0 0 44 44" width="40" height="40">
+            <defs><linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#06b6d4" /><stop offset="100%" stop-color="#22d3ee" /></linearGradient>
+            <linearGradient id="lgB" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e2e8f0" /><stop offset="100%" stop-color="#f1f5f9" /></linearGradient></defs>
+            <rect x="8" y="6" width="4" height="32" rx="2" fill="url(#lgA)" /><rect x="32" y="6" width="4" height="32" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="6" width="28" height="4" rx="2" fill="url(#lgA)" /><rect x="8" y="34" width="28" height="4" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="20" width="28" height="3" rx="1.5" fill="url(#lgA)" opacity="0.6" />
+            <line x1="8" y1="6" x2="36" y2="20" stroke="url(#lgA)" stroke-width="2.5" stroke-linecap="round" />
+            <line x1="8" y1="20" x2="36" y2="34" stroke="url(#lgB)" stroke-width="2.5" stroke-linecap="round" />
+            <circle cx="8" cy="6" r="2.5" fill="#fff" /><circle cx="36" cy="6" r="2.5" fill="#fff" />
+            <circle cx="8" cy="34" r="2.5" fill="#fff" /><circle cx="36" cy="34" r="2.5" fill="#fff" />
+            <circle cx="8" cy="20" r="2" fill="#fff" /><circle cx="36" cy="20" r="2" fill="#fff" />
+            <circle cx="22" cy="20" r="3" fill="url(#lgA)" /><circle cx="22" cy="20" r="1.5" fill="#fff" />
+          </svg>
+          <!-- 默认皮肤: 蓝紫 -->
+          <svg v-else viewBox="0 0 44 44" width="40" height="40">
+            <defs><linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6366f1" /><stop offset="100%" stop-color="#8b5cf6" /></linearGradient>
+            <linearGradient id="lgB" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0ea5e9" /><stop offset="100%" stop-color="#06b6d4" /></linearGradient></defs>
+            <rect x="8" y="6" width="4" height="32" rx="2" fill="url(#lgA)" /><rect x="32" y="6" width="4" height="32" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="6" width="28" height="4" rx="2" fill="url(#lgA)" /><rect x="8" y="34" width="28" height="4" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="20" width="28" height="3" rx="1.5" fill="url(#lgA)" opacity="0.6" />
+            <line x1="8" y1="6" x2="36" y2="20" stroke="url(#lgA)" stroke-width="2.5" stroke-linecap="round" />
+            <line x1="8" y1="20" x2="36" y2="34" stroke="url(#lgB)" stroke-width="2.5" stroke-linecap="round" />
+            <circle cx="8" cy="6" r="2.5" fill="#fff" /><circle cx="36" cy="6" r="2.5" fill="#fff" />
+            <circle cx="8" cy="34" r="2.5" fill="#fff" /><circle cx="36" cy="34" r="2.5" fill="#fff" />
+            <circle cx="8" cy="20" r="2" fill="#fff" /><circle cx="36" cy="20" r="2" fill="#fff" />
+            <circle cx="22" cy="20" r="3" fill="url(#lgA)" /><circle cx="22" cy="20" r="1.5" fill="#fff" />
+          </svg>
+        </div>
+        <span v-if="!appStore.sidebarCollapsed" class="brand-name" :class="'skin-' + appStore.skin">
+          <span class="brand-cn">智渊</span>
+          <span class="brand-en">AIOPS</span>
+        </span>
       </div>
 
       <div v-if="!appStore.sidebarCollapsed" class="sidebar-search">
@@ -136,6 +182,24 @@
                   @click="appStore.setColorScheme('fluorescent-green')"
                 >荧光绿</span>
               </div>
+              <div class="appearance-label">皮肤</div>
+              <div class="skin-row">
+                <span
+                  class="skin-opt"
+                  :class="{ active: appStore.skin === '' }"
+                  @click="appStore.setSkin('')"
+                >默认</span>
+                <span
+                  class="skin-opt taste"
+                  :class="{ active: appStore.skin === 'taste' }"
+                  @click="appStore.setSkin('taste')"
+                >Taste</span>
+                <span
+                  class="skin-opt frost"
+                  :class="{ active: appStore.skin === 'frost' }"
+                  @click="appStore.setSkin('frost')"
+                >Frost</span>
+              </div>
             </div>
           </el-popover>
           <button class="header-action" @click="toggleChatWidget" title="AI 助手">
@@ -178,6 +242,34 @@
           </el-dropdown>
         </div>
       </header>
+
+      <div v-if="marqueeAlerts.length" class="alert-marquee">
+        <div class="marquee-icon" @click="goToAlerts">
+          <el-icon><Bell /></el-icon>
+        </div>
+        <div class="marquee-track" @click="goToAlerts">
+          <div class="marquee-content" :style="marqueeStyle">
+            <span
+              v-for="(a, i) in [...marqueeAlerts, ...marqueeAlerts]"
+              :key="a.id + '-' + i"
+              class="marquee-item"
+              :class="a.severity"
+            >
+              <span class="marquee-sev">{{ a.severity === 'critical' ? '严重' : '警告' }}</span>
+              <span class="marquee-msg">{{ a.message }}</span>
+              <span v-if="a.asset_name" class="marquee-asset">[{{ a.asset_name }}]</span>
+              <span class="marquee-time">{{ a.created_at }}</span>
+            </span>
+          </div>
+        </div>
+        <div class="marquee-speed">
+          <input type="range" min="0" max="100" v-model.number="marqueeSpeedVal" class="speed-slider" @click.stop />
+          <span class="speed-label">{{ speedLabel }}</span>
+        </div>
+        <div class="marquee-count" @click="goToAlerts">
+          {{ marqueeAlerts.length }} 条
+        </div>
+      </div>
 
       <main class="content">
         <div class="content-inner">
@@ -279,6 +371,7 @@
           <TraceAnomalyConfigView v-else-if="activeView === 'trace-anomaly-config'" />
           <K8sHpaRecommendView v-else-if="activeView === 'k8s-hpa-recommend'" />
           <K8sResourceOptimizeView v-else-if="activeView === 'k8s-resource-optimize'" />
+          <K8sCertView v-else-if="activeView === 'k8s-cert-inspect'" />
           <NetworkTestView v-else-if="activeView === 'network-test'" />
           <BackgroundTasksView v-else-if="activeView === 'background-tasks'" />
           <ContractCheckView v-else-if="activeView === 'contract-check'" />
@@ -288,6 +381,8 @@
           <SandboxView v-else-if="activeView === 'sandbox-overview'" />
           <AgentManageView v-else-if="activeView === 'agent-deploy'" />
           <AgentAutonomousView v-else-if="activeView === 'agent-autonomous'" />
+          <DeployView v-else-if="activeView === 'ai-deploy'" />
+          <OfflineRepoView v-else-if="activeView === 'offline-repo'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -408,6 +503,7 @@ const ObservabilityCorrelationView = defineAsyncComponent(() => import('@/views/
 const TraceAnomalyConfigView = defineAsyncComponent(() => import('@/views/TraceAnomalyConfigView.vue'))
 const K8sHpaRecommendView = defineAsyncComponent(() => import('@/views/K8sHpaRecommendView.vue'))
 const K8sResourceOptimizeView = defineAsyncComponent(() => import('@/views/K8sResourceOptimizeView.vue'))
+const K8sCertView = defineAsyncComponent(() => import('@/views/K8sCertView.vue'))
 const NetworkTestView = defineAsyncComponent(() => import('@/views/NetworkTestView.vue'))
 const BackgroundTasksView = defineAsyncComponent(() => import('@/views/BackgroundTasksView.vue'))
 const ContractCheckView = defineAsyncComponent(() => import('@/views/ContractCheckView.vue'))
@@ -417,6 +513,8 @@ const SecurityAuditView = defineAsyncComponent(() => import('@/views/SecurityAud
 const SandboxView = defineAsyncComponent(() => import('@/views/SandboxView.vue'))
 const AgentManageView = defineAsyncComponent(() => import('@/views/AgentManageView.vue'))
 const AgentAutonomousView = defineAsyncComponent(() => import('@/views/AgentAutonomousView.vue'))
+const DeployView = defineAsyncComponent(() => import('@/views/DeployView.vue'))
+const OfflineRepoView = defineAsyncComponent(() => import('@/views/OfflineRepoView.vue'))
 const MonitorView = defineAsyncComponent(() => import('@/views/MonitorView.vue'))
 import request from '@/api/request'
 
@@ -436,6 +534,38 @@ const noticeCount = ref(0)
 const notifications = ref([])
 const userInfo = ref(null)
 let notifTimer = null
+const marqueeAlerts = ref([])
+let marqueeTimer = null
+const marqueeSpeedVal = ref(5)
+
+const marqueeStyle = computed(() => {
+  if (marqueeSpeedVal.value <= 0) return { animationPlayState: 'paused' }
+  const dur = Math.max(24, 2400 / marqueeSpeedVal.value)
+  return { animationDuration: dur + 's' }
+})
+
+const speedLabel = computed(() => {
+  const v = marqueeSpeedVal.value
+  if (v <= 0) return '静止'
+  if (v <= 3) return '极慢'
+  if (v <= 8) return '慢'
+  if (v <= 20) return '中'
+  if (v <= 50) return '快'
+  return '极快'
+})
+
+async function loadMarqueeAlerts() {
+  try {
+    const data = await request.get('/alerts/api/marquee')
+    marqueeAlerts.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    if (marqueeAlerts.value.length) marqueeAlerts.value = []
+  }
+}
+
+function goToAlerts() {
+  window._navigateTo && window._navigateTo('alerts')
+}
 
 async function loadNotifications() {
   try {
@@ -511,7 +641,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
+const VUE_PAGES = new Set(['roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'k8s-cert-inspect', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
 
 function _flattenItems(items) {
   const result = []
@@ -602,6 +732,10 @@ onMounted(async () => {
   loadNotifications()
   notifTimer = setInterval(loadNotifications, 30000)
 
+  // 告警走马灯 + 15s 轮询
+  loadMarqueeAlerts()
+  marqueeTimer = setInterval(loadMarqueeAlerts, 15000)
+
   // 加载用户信息（含租户）
   loadUserInfo()
 
@@ -634,6 +768,10 @@ onBeforeUnmount(() => {
   if (notifTimer) {
     clearInterval(notifTimer)
     notifTimer = null
+  }
+  if (marqueeTimer) {
+    clearInterval(marqueeTimer)
+    marqueeTimer = null
   }
 })
 
@@ -748,6 +886,81 @@ async function handleDbModeSwitch() {
 }
 .sidebar-search :deep(.menu-search-input .el-input__inner::placeholder) {
   color: var(--sidebar-text, #94a3b8);
+}
+
+/* 告警走马灯 */
+.alert-marquee {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px; height: 32px;
+  background: rgba(239, 68, 68, 0.06);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.08);
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.alert-marquee:hover { background: rgba(239, 68, 68, 0.08); }
+.marquee-icon {
+  flex-shrink: 0; font-size: 14px; color: #ef4444;
+  display: flex; align-items: center;
+}
+.marquee-track {
+  flex: 1; overflow: hidden; position: relative;
+  height: 32px; display: flex; align-items: center;
+}
+.marquee-content {
+  display: flex; gap: 24px; white-space: nowrap;
+  animation: marqueeScroll 30s linear infinite;
+}
+.marquee-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-primary);
+  flex-shrink: 0;
+}
+.marquee-item.critical { color: #ef4444; }
+.marquee-item.warning { color: #f59e0b; }
+.marquee-sev {
+  display: inline-block; padding: 0 5px; font-size: 10px; font-weight: 700;
+  border-radius: 3px; text-transform: uppercase;
+  background: rgba(239, 68, 68, 0.12); color: #ef4444;
+}
+.marquee-item.warning .marquee-sev { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+.marquee-msg { font-weight: 500; }
+.marquee-asset { opacity: 0.7; }
+.marquee-time { font-size: 11px; opacity: 0.5; }
+.marquee-count {
+  flex-shrink: 0; font-size: 11px; color: var(--text-muted); padding-left: 8px;
+  border-left: 1px solid rgba(239, 68, 68, 0.12);
+  cursor: pointer;
+}
+.marquee-count:hover { color: var(--text-primary); }
+.marquee-speed {
+  flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+  padding: 0 8px 0 4px; cursor: pointer; user-select: none;
+  border-left: 1px solid rgba(239, 68, 68, 0.12);
+  height: 20px;
+}
+.speed-slider {
+  width: 60px; height: 3px; -webkit-appearance: none; appearance: none;
+  background: rgba(239,68,68,0.15); border-radius: 2px; outline: none;
+  cursor: pointer; margin: 0;
+}
+.speed-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #ef4444; border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  cursor: pointer;
+}
+.speed-slider::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #ef4444; border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  cursor: pointer;
+}
+.speed-label { font-size: 11px; color: var(--text-muted); min-width: 2em; text-align: center; }
+@keyframes marqueeScroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 </style>
 

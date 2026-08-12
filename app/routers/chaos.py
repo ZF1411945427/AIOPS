@@ -130,10 +130,9 @@ def _ssh_connect(asset, timeout: int = 15) -> "paramiko.SSHClient":
     host = asset.ip or ""
     if not host:
         raise ValueError(f"资产 {asset.name}(id={asset.id}) 无 IP 地址")
-    from app.services.ssh_helper import get_ssh_client
-    ssh = get_ssh_client()
-    ssh.connect(host, port=cfg.get("ssh_port", 22), username=cfg.get("ssh_user", "root"),
-                password=cfg.get("ssh_password", ""), timeout=timeout, banner_timeout=timeout)
+    from app.services.ssh_helper import connect_ssh
+    ssh = connect_ssh(host, port=cfg.get("ssh_port", 22), username=cfg.get("ssh_user", "root"),
+                      password=cfg.get("ssh_password", ""), timeout=timeout)
     return ssh
 
 

@@ -9,9 +9,13 @@
 """
 import os
 import paramiko
+from pathlib import Path
 from app.logger import logger
 
-_KNOWN_HOSTS_PATH = os.environ.get("AIOPS_SSH_KNOWN_HOSTS", "")
+# known_hosts 文件路径：环境变量优先，默认落盘项目 data/known_hosts（持久化指纹，重启不丢）
+_KNOWN_HOSTS_PATH = os.environ.get("AIOPS_SSH_KNOWN_HOSTS", "").strip()
+if not _KNOWN_HOSTS_PATH:
+    _KNOWN_HOSTS_PATH = str(Path(__file__).resolve().parent.parent.parent / "data" / "known_hosts")
 _SSH_STRICT = os.environ.get("AIOPS_SSH_STRICT", "true").lower() == "true"
 
 # 全局 known_hosts 内存缓存（启动时加载一次）
@@ -63,6 +67,7 @@ def connect_ssh(host: str, port: int = 22, username: str = "root",
     """创建并连接 SSH 客户端的便捷方法.
 
     自动使用安全策略，调用方只需提供连接参数。
+    首次连接未知主机时自动信任并录入指纹（TOFU），后续走严格白名单校验。
     """
     client = get_ssh_client()
     kwargs = dict(hostname=host, port=port, username=username, timeout=timeout,
@@ -74,7 +79,42 @@ def connect_ssh(host: str, port: int = 22, username: str = "root",
     else:
         kwargs["look_for_keys"] = False
         kwargs["allow_agent"] = False
+    try:
+        client.connect(**kwargs)
+        return client
+    except paramiko.BadHostKeyException as e:
+        # 指纹已录入但本次不一致 → 可能 MITM，拒绝
+        client.close()
+        lookup_key = f"[{host}]:{port}" if port != 22 else host
+        logger.error(f"主机 {lookup_key} SSH 密钥不匹配，拒绝连接（可能存在中间人攻击）: {e}")
+        raise
+    except paramiko.SSHException as e:
+        if "not found in known_hosts" not in str(e):
+            client.close()
+            raise
+        # 首次连接：指纹不在白名单 → TOFU 信任并录入
+        client.close()
+        return _connect_with_tofu(host, port, username, password, pkey, timeout, kwargs)
+
+
+def _connect_with_tofu(host: str, port: int, username: str, password: str,
+                       pkey, timeout: int, kwargs: dict) -> "paramiko.SSHClient":
+    """首次连接（TOFU）自举：自动信任新主机指纹并录入 known_hosts 后重连.
+
+    仅当主机指纹不在 known_hosts 时触发（视为首次连接）。
+    若指纹已录入但本次不一致（BadHostKeyException），由调用方直接拒绝。
+    """
+    lookup_key = f"[{host}]:{port}" if port != 22 else host
+    hosts = _load_known_hosts()
+    if hosts and lookup_key in hosts:
+        logger.error(f"主机 {lookup_key} SSH 密钥已变更，拒绝连接（可能存在中间人攻击）")
+        raise RuntimeError(f"主机 {lookup_key} SSH 密钥已变更，拒绝连接（可能存在中间人攻击）")
+
+    logger.warning(f"首次连接主机 {lookup_key}，自动信任并录入指纹（TOFU）")
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
     client.connect(**kwargs)
+    save_host_key(client, host, port)
     return client
 
 

@@ -582,6 +582,95 @@ async def correlation_analyze(request: Request, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/transfer-from-analysis")
+async def transfer_from_analysis(request: Request, db: Session = Depends(get_db)):
+    """把日志/指标/链路的 AI 分析结果转交到智能助手会话，自动提议可执行修复动作。
+
+    body: {
+      "source_type": "metrics" | "logs" | "traces",
+      "title": "展示用标题(可选)",
+      "analysis": "AI 分析结果 markdown",
+      "context": {"asset_id": 1, "asset_name": "...", "source_id": 1, "metric_count": 30, ...},
+      "instruction": "可选: 追加执行诉求"
+    }
+    返回: {session_id, title}
+    前端收到 session_id 后跳转到 agent-chat，pendingAutoSend 会重发 user 消息
+    触发 process_chat_message，LLM 依据注入的分析上下文用 propose_action 提议修复动作。
+    """
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+
+    data = await request.json()
+    source_type = data.get("source_type", "")
+    analysis = (data.get("analysis") or "").strip()
+    ctx = data.get("context") or {}
+    instruction = (data.get("instruction") or "").strip()
+
+    if source_type not in ("metrics", "logs", "traces"):
+        return JSONResponse({"error": "source_type 必须是 metrics/logs/traces"}, status_code=400)
+    if not analysis:
+        return JSONResponse({"error": "缺少 AI 分析结果"}, status_code=400)
+
+    source_labels = {
+        "metrics": "指标健康体检",
+        "logs": "日志异常分析",
+        "traces": "链路瓶颈分析",
+    }
+    title = data.get("title") or f"{source_labels.get(source_type, source_type)} → 转交执行"
+
+    # 1. 创建会话（Agent 模式）
+    session = ChatSession(user_id=user_id, title=title, context="{}")
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    # 2. 注入上下文（供 process_chat_message / 会话页使用）
+    c = json.loads(session.context or "{}")
+    c["transfer_from"] = "analysis"
+    c["analysis_source_type"] = source_type
+    c["analysis_title"] = title
+    for k, v in ctx.items():
+        c[k] = v
+    session.context = json.dumps(c, ensure_ascii=False)
+    db.commit()
+
+    # 3. system 消息：注入 AI 分析结果 + 上下文
+    ctx_parts = []
+    for k, v in ctx.items():
+        if v not in (None, "", 0, [], {}):
+            ctx_parts.append(f"- {k}: {v}")
+    context_text = (
+        f"**用户从「{source_labels.get(source_type, source_type)}」页面转交了 AI 分析结果，"
+        f"请求你据此定位问题并提议可执行的修复动作。**\n\n"
+        f"【来源】{title}\n"
+        + ("【关联上下文】\n" + "\n".join(ctx_parts) if ctx_parts else "")
+        + "\n\n【AI 分析结果】\n"
+        + analysis
+        + "\n\n请在分析时优先基于上述结果，利用你的全域工具（查询资产/日志/链路/命令等）"
+        "验证并补充定位。所有需要落地的动作，必须通过 `propose_action` 工具提议"
+        "（提供 action_type/title/payload/reason/risk_level），等待用户确认后才会执行。"
+    )
+    add_message(db, session.id, "system", context_text, message_type="text")
+
+    # 4. user 消息：引导 LLM 分析并提议动作
+    analysis_prompt = (
+        "请对以上转交的 AI 分析结果进行复核并输出可执行方案：\n"
+        "1. 总结确认的关键问题与根因\n"
+        "2. 评估分析结果中的处置建议是否安全可行，必要时用工具验证（查询资产、日志、进程状态等）\n"
+        "3. 对每项处置动作调用 `propose_action` 提议（明确 action_type、title、payload、reason、risk_level）\n"
+        "4. 若判断无需执行动作，请说明理由并给出观测建议"
+    )
+    if instruction:
+        analysis_prompt += f"\n\n用户附加诉求：{instruction}"
+    add_message(db, session.id, "user", analysis_prompt, message_type="text")
+
+    return {
+        "session_id": session.id,
+        "title": title,
+    }
+
+
 @router.post("/transfer-from-remediation")
 async def transfer_from_remediation(request: Request, db: Session = Depends(get_db)):
     """自愈方案转交智能助手深度分析：注入告警+诊断报告+AI方案上下文 → 创建会话 → 自动发起分析."""

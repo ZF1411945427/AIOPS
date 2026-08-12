@@ -111,7 +111,8 @@ def update_source(db: Session, source_id: int, data: dict):
     if not source:
         return None
     if isinstance(data.get("auth_config"), dict):
-        data["auth_config"] = json.dumps(data["auth_config"], ensure_ascii=False)
+        # 敏感字段「空值=不更新」：合并进已有配置，避免空密码/Token 覆盖旧值
+        data["auth_config"] = _merge_auth_config(source.auth_config, data["auth_config"])
     if isinstance(data.get("mapping_config"), dict):
         data["mapping_config"] = json.dumps(data["mapping_config"], ensure_ascii=False)
     for k, v in data.items():
@@ -119,6 +120,23 @@ def update_source(db: Session, source_id: int, data: dict):
     db.commit()
     db.refresh(source)
     return source
+
+
+_SENSITIVE_AUTH_KEYS = ("ssh_password", "ssh_private_key", "k8s_token", "kubeconfig", "db_password", "http_credential")
+
+
+def _merge_auth_config(existing, incoming: dict) -> str:
+    """合并 auth_config：incoming 为空值的敏感字段沿用 existing 旧值，其余覆盖。"""
+    try:
+        old = json.loads(existing) if isinstance(existing, str) and existing else (existing or {})
+    except Exception:
+        old = {}
+    merged = dict(old)
+    for k, v in incoming.items():
+        if v in (None, "") and k in _SENSITIVE_AUTH_KEYS:
+            continue
+        merged[k] = v
+    return json.dumps(merged, ensure_ascii=False)
 
 
 def delete_source(db: Session, source_id: int):
@@ -165,10 +183,9 @@ def _test_ssh(source: DataSource) -> tuple:
     try:
         import paramiko
         cfg = parse_json_config(source.auth_config)
-        from app.services.ssh_helper import get_ssh_client
-        client = get_ssh_client()
-        client.connect(
-            hostname=source.endpoint,
+        from app.services.ssh_helper import connect_ssh
+        client = connect_ssh(
+            source.endpoint,
             port=int(cfg.get("ssh_port", cfg.get("port", 22))),
             username=cfg.get("ssh_user", cfg.get("username", "")),
             password=cfg.get("ssh_password", cfg.get("password", "")),
@@ -581,9 +598,8 @@ def _scrape_ssh(db: Session, source: DataSource) -> tuple:
     username = cfg.get("ssh_user", cfg.get("username", ""))
     password = cfg.get("ssh_password", cfg.get("password", ""))
 
-    from app.services.ssh_helper import get_ssh_client
-    client = get_ssh_client()
-    client.connect(hostname=host, port=port, username=username, password=password, timeout=8)
+    from app.services.ssh_helper import connect_ssh
+    client = connect_ssh(host, port=port, username=username, password=password, timeout=8)
 
     now = datetime.now()
     collected = 0
