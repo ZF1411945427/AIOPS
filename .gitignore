@@ -169,3 +169,16 @@ tools/public_key.pem
 
 # ===== 实验/测试项目目录（不入库）=====
 labs/
+data/known_hosts
+
+# ===== Sensitive config (contains plaintext API key, never commit) =====
+opencode1.json
+opencode2.json
+opencode*.json
+
+# ===== Runtime data / test artifacts =====
+data/aiops.db
+storage/
+data/license_state.json
+data/victoriametrics/
+

@@ -40,6 +40,36 @@ def _alert_to_dict(a):
     }
 
 
+@router.get("/api/marquee")
+def api_marquee_alerts(db: Session = Depends(get_db)):
+    """返回最新 critical/warning 告警,供顶栏走马灯轮询"""
+    from app.models import Asset
+    alerts = db.query(Alert).filter(
+        Alert.status.in_(["triggered", "acknowledged"]),
+        Alert.severity.in_(["critical", "warning"])
+    ).order_by(
+        Alert.severity.desc(),
+        Alert.created_at.desc()
+    ).limit(10).all()
+    result = []
+    for a in alerts:
+        asset_name = ""
+        if a.asset_id:
+            asset = db.query(Asset).filter(Asset.id == a.asset_id).first()
+            if asset:
+                asset_name = asset.name
+        result.append({
+            "id": a.id,
+            "severity": a.severity,
+            "message": a.message or a.metric_name,
+            "metric_name": a.metric_name,
+            "actual_value": a.actual_value,
+            "asset_name": asset_name,
+            "created_at": a.created_at.strftime("%m-%d %H:%M") if a.created_at else "",
+        })
+    return JSONResponse(result)
+
+
 @router.get("/api/list")
 def api_alert_list(
     status: str = "",

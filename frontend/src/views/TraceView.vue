@@ -7,6 +7,10 @@
       </div>
       <div class="workbench-card-actions">
         <button class="btn btn-guide" @click="showGuide = !showGuide">📖 操作说明</button>
+        <el-button type="primary" size="small" @click="openAiAnalyze" :disabled="aiLoading || !traces.length">
+          {{ aiLoading ? 'AI 分析中...' : 'AI 链路分析' }}
+        </el-button>
+        <el-button size="small" @click="openHistory">🕘 历史</el-button>
         <el-button size="small" @click="loadTraces" :loading="loading">刷新</el-button>
       </div>
     </div>
@@ -232,6 +236,80 @@
       </ul>
     </section>
   </GuideDrawer>
+
+  <div v-if="aiDrawer.show" class="ai-drawer-mask" @click.self="closeAiDrawer">
+    <div class="ai-drawer">
+      <div class="ai-drawer-head">
+        <div>
+          <div class="ai-drawer-title">AI 链路分析</div>
+          <div v-if="aiMeta" class="ai-drawer-meta">{{ aiMeta }}</div>
+        </div>
+        <button class="ai-drawer-close" @click="closeAiDrawer">&times;</button>
+      </div>
+      <div class="ai-drawer-body">
+        <div class="ai-trace-note">
+          将分析当前查询结果中的 <b>{{ traces.length }}</b> 条调用链（默认取异常/慢链路优先，自动裁剪 span 控制 token）。
+        </div>
+        <div class="ai-question-row">
+          <input
+            v-model="aiQuestion" class="ai-question-input"
+            placeholder="可选：输入你想问的（如：哪个服务是瓶颈？）" @keyup.enter="runAiAnalyze"
+          />
+          <button class="btn-ai" :disabled="aiLoading" @click="runAiAnalyze">{{ aiLoading ? '分析中...' : '开始分析' }}</button>
+        </div>
+        <div v-if="aiError" class="ai-error-bar">{{ aiError }}</div>
+        <div v-if="aiLoading" class="ai-loading">
+          <div class="ai-spinner"></div>
+          <span>AI 正在分析调用链...</span>
+        </div>
+        <div v-else-if="aiResult">
+          <div v-if="bottleneckSvc && bottleneckSvc.length" class="bottleneck-panel">
+            <div class="bn-head">📊 跨链路瓶颈聚合</div>
+            <div v-for="s in bottleneckSvc.slice(0, 8)" :key="s.service" class="bn-row">
+              <span class="bn-rank">#{{ bottleneckSvc.indexOf(s) + 1 }}</span>
+              <span class="bn-svc">{{ s.service }}</span>
+              <span class="bn-p90">P90 {{ s.p90_duration_ms }}ms</span>
+              <span class="bn-err" :class="{ 'bn-err-high': s.error_rate > 10 }">错误率 {{ s.error_rate }}%</span>
+              <div class="bn-bar-wrap"><div class="bn-bar" :style="{ width: Math.min(s.bottleneck_score * 10, 100) + '%' }"></div></div>
+            </div>
+          </div>
+          <div class="ai-result" v-html="aiResult"></div>
+        </div>
+        <div v-else class="ai-empty">点击「开始分析」，AI 将基于当前查询结果做瓶颈定位与根因分析</div>
+        <div v-if="aiResult && !aiLoading" class="ai-transfer-bar">
+          <button class="btn-transfer" :disabled="transferring" @click="transferToAgent">
+            {{ transferring ? '转交中...' : '转交执行 → 智能助手' }}
+          </button>
+          <span class="ai-transfer-tip">生成待确认动作，经你确认后才执行</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showHistory" class="modal-overlay" @click.self="closeHistory">
+      <div class="modal-box" style="width:680px;max-height:80vh;overflow-y:auto">
+        <div class="modal-head">
+          <b>🕘 AI 链路分析历史</b>
+          <button class="d-close" @click="closeHistory">&times;</button>
+        </div>
+        <div v-if="historyLoading" class="empty-trace">加载中...</div>
+        <div v-else-if="historyDetail" class="history-detail">
+          <button class="d-close" @click="historyDetail = null" style="position:static;display:inline-block;margin-bottom:10px;font-size:12px">← 返回列表</button>
+          <div class="hi-title">{{ historyDetail.title }}</div>
+          <div class="hi-meta">{{ historyDetail.created_at }} · 评分: {{ historyDetail.score }}/100 · {{ historyDetail.provider }}</div>
+          <div class="hi-content" v-html="mdToHtml(historyDetail.analysis)"></div>
+        </div>
+        <div v-else>
+          <div v-for="h in historyList" :key="h.id" class="hi-item" @click="loadHistoryDetail(h.id)">
+            <div class="hi-title">{{ h.title }}</div>
+            <div class="hi-meta">{{ h.created_at }} · 评分{{ h.score }} · {{ h.provider }}</div>
+            <div class="hi-preview">{{ h.analysis_preview }}</div>
+            <button class="hi-del" @click.stop="deleteHistory(h.id)">删除</button>
+          </div>
+          <div v-if="!historyList.length" class="empty-trace">暂无历史分析记录</div>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -252,6 +330,19 @@ const detailTab = ref('waterfall')
 const wfBody = ref(null)
 const topoSvg = ref(null)
 const listRef = ref(null)
+const aiDrawer = ref({ show: false })
+const aiQuestion = ref('')
+const aiLoading = ref(false)
+const aiError = ref('')
+const aiResult = ref('')
+const aiResultRaw = ref('')
+const aiMeta = ref('')
+const transferring = ref(false)
+const bottleneckSvc = ref([])
+const showHistory = ref(false)
+const historyList = ref([])
+const historyLoading = ref(false)
+const historyDetail = ref(null)
 
 const filters = reactive({
   domain: '', service: '', keyword: '', status: '', min_dur: 0, limit: 50,
@@ -420,10 +511,152 @@ async function showDetail(tr) {
   } catch (e) { console.error(e) }
 }
 
+async function openHistory() {
+  showHistory.value = true
+  historyDetail.value = null
+  historyLoading.value = true
+  try {
+    historyList.value = await request.get('/ai-insight/history', { params: { source_type: 'traces', limit: 50 } })
+  } catch (e) { /* ignore */ }
+  finally { historyLoading.value = false }
+}
+async function loadHistoryDetail(id) {
+  try { historyDetail.value = await request.get(`/ai-insight/history/${id}`) } catch (e) { /* ignore */ }
+}
+async function deleteHistory(id) {
+  try {
+    await request.delete(`/ai-insight/history/${id}`)
+    historyList.value = historyList.value.filter(h => h.id !== id)
+  } catch (e) { /* ignore */ }
+}
+function closeHistory() { showHistory.value = false; historyDetail.value = null }
+
 onMounted(() => {
   loadDomains()
   loadTraces()
 })
+
+function mdToHtml(text) {
+  const esc = t => String(t)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const lines = esc(text).split('\n')
+  const html = []
+  for (const line of lines) {
+    const m = line.match(/^(\s*)([-*]|\d+[.、)])\s+(.*)$/)
+    if (m) {
+      html.push(`<div class="ai-li">${m[1] ? '<span class="ai-li-indent"></span>' : ''}<span class="ai-li-mark">${m[2]}</span> ${m[3]}</div>`)
+    } else if (/^#{1,4}\s/.test(line)) {
+      html.push(`<div class="ai-h">${line.replace(/^#{1,4}\s*/, '')}</div>`)
+    } else if (line.trim() === '') {
+      html.push('')
+    } else {
+      html.push(`<div class="ai-p">${line}</div>`)
+    }
+  }
+  return html.join('\n')
+}
+
+async function openAiAnalyze() {
+  if (!traces.value.length) return
+  aiDrawer.value = { show: true }
+  aiQuestion.value = ''
+  aiError.value = ''
+  aiResult.value = ''
+  aiResultRaw.value = ''
+  aiMeta.value = `当前查询结果 ${traces.value.length} 条调用链 · 将自动裁剪 span 明细`
+}
+
+function closeAiDrawer() {
+  if (aiLoading.value) return
+  aiDrawer.value = { show: false }
+}
+
+async function runAiAnalyze() {
+  const target = [...traces.value]
+    .sort((a, b) => {
+      const ea = a.worst_status === 'ERROR' ? 1 : 0
+      const eb = b.worst_status === 'ERROR' ? 1 : 0
+      if (ea !== eb) return eb - ea
+      return (b.total_duration_ms || 0) - (a.total_duration_ms || 0)
+    })
+    .slice(0, 20)
+  if (!target.length) return
+  aiLoading.value = true
+  aiError.value = ''
+  aiResult.value = ''
+  bottleneckSvc.value = []
+  try {
+    const enriched = []
+    for (const tr of target.slice(0, 10)) {
+      let spans = []
+      try {
+        const detail = await request.get(`/api/traces/${tr.trace_id}`)
+        spans = (detail.spans || []).map(s => ({
+          service_name: s.service_name, operation_name: s.operation_name,
+          duration_ms: s.duration_ms, status: s.status,
+        }))
+      } catch (e) { /* 单条详情失败不阻塞整体分析 */ }
+      enriched.push({
+        trace_id: tr.trace_id, root_service: tr.root_service, root_operation: tr.root_operation,
+        total_duration_ms: tr.total_duration_ms, worst_status: tr.worst_status, started_at: tr.started_at,
+        spans,
+      })
+    }
+    const res = await request.post('/ai-insight/analyze', {
+      source_type: 'traces',
+      traces: enriched,
+      question: aiQuestion.value.trim(),
+      title: `链路分析 #${Date.now().toString().slice(-6)}`,
+    }, { timeout: 120000 })
+    if (res.ok) {
+      aiResult.value = mdToHtml(res.analysis || '')
+      aiResultRaw.value = res.analysis || ''
+      const m = res.meta || {}
+      aiMeta.value = `分析 ${m.trace_count || enriched.length} 条调用链 · ${m.service_count || 0} 个服务 · 模型: ${res.provider || '-'} · 记录 #${res.record_id || '-'}`
+      if (res.enhanced && res.enhanced.aggregation && res.enhanced.aggregation.services) {
+        bottleneckSvc.value = res.enhanced.aggregation.services
+      }
+    } else {
+      aiError.value = res.error || 'AI 分析失败'
+    }
+  } catch (e) {
+    aiError.value = 'AI 分析请求失败：' + (e.message || e)
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function transferToAgent() {
+  if (transferring.value || !aiResult.value) return
+  transferring.value = true
+  aiError.value = ''
+  const top = [...traces.value]
+    .sort((a, b) => (b.total_duration_ms || 0) - (a.total_duration_ms || 0))
+    .slice(0, 5)
+  try {
+    const res = await request.post('/agent/transfer-from-analysis', {
+      source_type: 'traces',
+      title: `链路瓶颈转交 #${Date.now().toString().slice(-6)}`,
+      analysis: aiResultRaw.value || '',
+      context: {
+        trace_count: traces.value.length,
+        top_slow: top.map(t => `${t.root_service}/${t.root_operation} ${t.total_duration_ms}ms(${t.worst_status})`).join('; '),
+        span_detail_fetched: true,
+      },
+      instruction: '',
+    })
+    if (res.session_id) {
+      window._pendingAgentSessionId = res.session_id
+      window._navigateTo && window._navigateTo('agent-chat')
+    } else {
+      aiError.value = res.error || '转交失败'
+    }
+  } catch (e) {
+    aiError.value = '转交执行请求失败：' + (e.message || e)
+  } finally {
+    transferring.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -554,4 +787,95 @@ onMounted(() => {
 .tag-row { display: flex; gap: 12px; padding: 4px 0; font-size: 11px; border-bottom: 1px solid rgba(148,163,184,0.04); }
 .tag-key { color: #6366f1; font-weight: 500; min-width: 100px; }
 .tag-val { color: var(--text-primary); word-break: break-all; }
+
+.btn-ai {
+  padding: 6px 14px; border-radius: 6px; border: none;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.btn-ai:disabled { opacity: 0.5; cursor: not-allowed; }
+.bottleneck-panel {
+  background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px;
+  padding: 12px; margin-bottom: 12px;
+}
+.bn-head { font-size: 13px; font-weight: 700; color: #5b21b6; margin-bottom: 10px; }
+.bn-row { display: flex; gap: 8px; align-items: center; padding: 4px 0; font-size: 12px; }
+.bn-rank { font-size: 10px; font-weight: 700; color: #8b5cf6; width: 20px; }
+.bn-svc { font-weight: 600; color: #1e293b; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bn-p90 { color: #64748b; font-size: 11px; min-width: 70px; }
+.bn-err { font-size: 11px; color: #059669; min-width: 70px; }
+.bn-err-high { color: #dc2626; }
+.bn-bar-wrap { flex: 1; height: 4px; background: rgba(139,92,246,0.1); border-radius: 2px; overflow: hidden; }
+.bn-bar { height: 100%; background: linear-gradient(90deg, #8b5cf6, #6366f1); border-radius: 2px; }
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal-box { background: #fff; border-radius: 12px; padding: 18px 20px; width: 560px; max-width: 92vw; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+.modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.hi-item { padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,0.1); cursor: pointer; transition: background 0.15s; position: relative; }
+.hi-item:hover { background: rgba(99,102,241,0.04); }
+.hi-title { font-size: 13px; font-weight: 600; color: #1e293b; }
+.hi-meta { font-size: 11px; color: #94a3b8; margin: 2px 0; }
+.hi-preview { font-size: 12px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hi-del { position: absolute; top: 10px; right: 10px; font-size: 11px; color: #ef4444; background: none; border: 1px solid rgba(239,68,68,0.2); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.history-detail { padding: 8px 0; }
+.hi-content { font-size: 13px; line-height: 1.7; color: #1e293b; }
+
+.ai-drawer-mask {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(0,0,0,0.45);
+  display: flex; justify-content: flex-end;
+}
+.ai-drawer {
+  width: 460px; max-width: 92vw; height: 100%;
+  background: #fff; display: flex; flex-direction: column;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.15);
+  animation: aiSlideIn 0.25s ease;
+}
+@keyframes aiSlideIn { from { transform: translateX(60px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
+.ai-drawer-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid #ebeef5;
+}
+.ai-drawer-title { font-size: 16px; font-weight: 700; color: #303133; }
+.ai-drawer-meta { font-size: 12px; color: #909399; margin-top: 4px; }
+.ai-drawer-close { border: none; background: none; font-size: 22px; color: #909399; cursor: pointer; line-height: 1; }
+.ai-drawer-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+.ai-trace-note {
+  background: #f5f3ff; color: #5b21b6; border: 1px solid #ddd6fe;
+  border-radius: 6px; padding: 10px 12px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;
+}
+.ai-question-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.ai-question-input {
+  flex: 1; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid rgba(148,163,184,0.3); font-size: 13px; font-family: inherit;
+}
+.ai-error-bar {
+  background: #fef0f0; color: #f56c6c; border: 1px solid #fbc4c4;
+  border-radius: 6px; padding: 10px 12px; font-size: 13px; margin-bottom: 10px;
+}
+.ai-loading { display: flex; align-items: center; gap: 10px; color: #909399; font-size: 13px; padding: 24px 0; }
+.ai-spinner {
+  width: 18px; height: 18px; border: 2px solid #e0e7ff; border-top-color: #6366f1;
+  border-radius: 50%; animation: aiSpin 0.8s linear infinite;
+}
+@keyframes aiSpin { to { transform: rotate(360deg) } }
+.ai-result { font-size: 13px; line-height: 1.8; color: #303133; }
+.ai-result .ai-h { font-weight: 700; color: #4f46e5; margin: 12px 0 6px; font-size: 14px; }
+.ai-result .ai-p { margin: 4px 0; }
+.ai-result .ai-li { margin: 3px 0; }
+.ai-result .ai-li-mark { color: #6366f1; font-weight: 600; }
+.ai-empty { color: #909399; font-size: 13px; text-align: center; padding: 40px 0; }
+.ai-transfer-bar {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  padding-top: 14px; border-top: 1px dashed rgba(148,163,184,0.3);
+}
+.btn-transfer {
+  padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer;
+  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  color: #fff; font-size: 13px; font-weight: 600; font-family: inherit;
+}
+.btn-transfer:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-transfer-tip { font-size: 11px; color: #909399; }
 </style>

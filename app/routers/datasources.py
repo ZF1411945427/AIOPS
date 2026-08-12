@@ -13,6 +13,27 @@ templates = get_templates()
 
 # ─── JSON API（供 Vue 前端调用，保留 HTML 路由作 fallback）───
 
+_SENSITIVE_FIELDS = ("ssh_password", "ssh_private_key", "k8s_token", "kubeconfig", "db_password", "http_credential")
+
+
+def _masked_auth_config(auth_config):
+    """敏感字段按 CONTRACT.md 第五章掩码：返回 *** + has_* 标记。"""
+    if not auth_config:
+        return {}
+    try:
+        cfg = json.loads(auth_config) if isinstance(auth_config, str) else (dict(auth_config) or {})
+    except Exception:
+        return {}
+    masked = {}
+    for k, v in cfg.items():
+        if k in _SENSITIVE_FIELDS:
+            masked[k] = "***"
+            masked[f"has_{k}"] = bool(v)
+        else:
+            masked[k] = v
+    return masked
+
+
 def _source_to_dict(s):
     return {
         "id": s.id,
@@ -25,6 +46,7 @@ def _source_to_dict(s):
         "last_scraped_at": s.last_scraped_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(s, "last_scraped_at", None) else None,
         "last_status": getattr(s, "last_status", None) or "",
         "created_at": s.created_at.strftime("%Y-%m-%d %H:%M") if getattr(s, "created_at", None) else None,
+        "auth_config": _masked_auth_config(getattr(s, "auth_config", None)),
     }
 
 

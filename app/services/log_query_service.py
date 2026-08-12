@@ -186,6 +186,21 @@ _RE2_SPECIAL = re.compile(r'([\\\.\+\*\?\(\)\|\[\]\{\}\^\$])')
 def _re2_escape(s: str) -> str:
     return _RE2_SPECIAL.sub(r"\\\1", s)
 
+
+def _has_positive_matcher(filters: List[str]) -> bool:
+    """判断 selector 是否含"正向非空"匹配器.
+
+    Loki 要求 LogQL selector 至少有一个正则/等值匹配器且其值非空兼容
+    (如 job=~".+", host="x"), 排除式(level!~"..." / level!="x")不计入。
+    否则查询报 HTTP 400 "queries require at least one regexp or equality matcher..."
+    """
+    for f in filters:
+        if "!=" in f or "!~" in f:
+            continue
+        if "=" in f:
+            return True
+    return False
+
 _docker_map_cache = {"ts": 0.0, "data": {}}
 
 
@@ -196,11 +211,8 @@ def _load_docker_container_map(max_age: float = 300.0) -> Dict[str, str]:
         return _docker_map_cache["data"]
     mapping: Dict[str, str] = {}
     try:
-        import paramiko
-        c = paramiko.SSHClient()
-        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        c.connect("11.0.1.132", username="root", password="123456",
-                  timeout=8, banner_timeout=30)
+        from app.services.ssh_helper import connect_ssh
+        c = connect_ssh("11.0.1.132", port=22, username="root", password="123456", timeout=8)
         _, stdout, stderr = c.exec_command(
             "docker ps --format '{{.ID}}|{{.Names}}'", timeout=10)
         out = stdout.read().decode("utf-8", "ignore")
@@ -303,19 +315,25 @@ class LokiAdapter(LogQueryAdapter):
             base_filters.append(f'host="{host}"')
         if service:
             base_filters.append(self._service_selector(service))
-        # Loki 要求选择器至少含一个非空通配的匹配器,裸 `{}` 会 400
-        no_filter_sel = '{job=~".+"}'
+        # Loki 要求选择器至少含一个非空通配的匹配器,裸 `{}` 会 400,
+        # 由 _has_positive_matcher 兜底插入 job=~".+"
 
         # 数据查询选择器: level 用排除法(保留目标级别+无 level 堆栈行)
+        # 注意: level!~/!= 是"排除式"匹配器,Loki 校验时不会被计为有效 matcher,
+        # 因此 base 无 host/service 时必须以 job=~".+" 兜底,否则 HTTP 400
         data_filters = list(base_filters)
+        if not _has_positive_matcher(data_filters):
+            data_filters.append('job=~".+"')
         if level:
             data_filters.append(f'level!~"{_LEVEL_EXCLUDE.get(level.lower(), r"(?i)^(info|debug)$")}"')
-        data_selector = "{" + ",".join(data_filters) + "}" if data_filters else no_filter_sel
+        data_selector = "{" + ",".join(data_filters) + "}"
         # 计数查询选择器: 正向过滤目标级别,保证 total 准确
         count_filters = list(base_filters)
+        if not _has_positive_matcher(count_filters):
+            count_filters.append('job=~".+"')
         if level:
             count_filters.append(f'level=~"(?i)^{re.escape(level)}$"')
-        count_selector = "{" + ",".join(count_filters) + "}" if count_filters else no_filter_sel
+        count_selector = "{" + ",".join(count_filters) + "}"
 
         # 数据查询
         expr = data_selector

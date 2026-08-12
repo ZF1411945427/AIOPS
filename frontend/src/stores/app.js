@@ -6,6 +6,9 @@ export const useAppStore = defineStore('app', () => {
     const sidebarCollapsed = ref(false)
     const theme = ref(localStorage.getItem('aiops-theme') || 'light')
     const colorScheme = ref(localStorage.getItem('aiops-color-scheme') || 'indigo')
+    const VALID_SKINS = ['', 'taste', 'frost']
+    const rawSkin = localStorage.getItem('aiops-skin') || ''
+    const skin = ref(VALID_SKINS.includes(rawSkin) ? rawSkin : '')
     const dbMode = ref(localStorage.getItem('aiops-db-mode') || 'demo')
     const k8sCluster = ref(localStorage.getItem('aiops-k8s-cluster') || '')
 
@@ -19,6 +22,10 @@ export const useAppStore = defineStore('app', () => {
 
     function setColorScheme(scheme) {
         colorScheme.value = scheme
+    }
+
+    function setSkin(val) {
+        skin.value = VALID_SKINS.includes(val) ? val : ''
     }
 
     function setK8sCluster(name) {
@@ -52,6 +59,11 @@ export const useAppStore = defineStore('app', () => {
         document.documentElement.setAttribute('data-theme', val)
     }, { immediate: true })
 
+    watch(skin, (val) => {
+        localStorage.setItem('aiops-skin', val)
+        document.documentElement.setAttribute('data-skin', val || 'none')
+    }, { immediate: true })
+
     watch(colorScheme, (val) => {
         localStorage.setItem('aiops-color-scheme', val)
         document.documentElement.setAttribute('data-color-scheme', val)
@@ -66,8 +78,8 @@ export const useAppStore = defineStore('app', () => {
     })
 
     return {
-        sidebarCollapsed, theme, colorScheme, dbMode, k8sCluster,
-        toggleSidebar, toggleTheme, setColorScheme, setK8sCluster,
+        sidebarCollapsed, theme, colorScheme, skin, dbMode, k8sCluster,
+        toggleSidebar, toggleTheme, setColorScheme, setSkin, setK8sCluster,
         fetchDbMode, switchDbMode,
     }
 })

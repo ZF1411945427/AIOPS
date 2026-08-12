@@ -52,7 +52,7 @@ from app.routers import assets, asset_changes, asset_discovery, lifecycle, topol
 # alerts 告警监控域
 from app.routers import alerts, alert_console, alert_events, alert_silence, alert_storm, alert_webhooks, anomaly, cluster_anomaly, hotspot
 # k8s 容器编排域
-from app.routers import k8s_monitor, k8s_resources, containers, helm, blue_green, service_mesh
+from app.routers import k8s_monitor, k8s_resources, k8s_cert, containers, helm, blue_green, service_mesh
 # ai 智能体域
 from app.routers import ai_providers, agent_chat, agent_sse, agent_workflow, agent_eval, agent_ground_truth, ab_test, anomaly_eval, sub_agents, im_chatops, edge_tunnel, webssh
 # sre 可靠性工程域
@@ -68,10 +68,15 @@ from app.routers import auth, users, roles, settings, system, system_posture, au
 # admin 系统管理路由（领域清单 + 背景任务看板，P1 任务#4/#6）
 from app.routers import admin
 from app.routers import sandbox
+from app.routers import deploy
+# 离线部署(Offline Repo) — 对标 Pixiu builder serve
+from app.routers import offline_repo
 # P2 任务#9 告警收敛闭环 / P2 任务#10 RAG 检索质量评估
 from app.routers import alert_correlation, rag_eval
 # 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线，打磨期 P0）
 from app.routers import security_audit
+# AI 洞察引擎 — 统一指标/日志/链路三页 AI 增强
+from app.routers import ai_insight
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service, trace_anomaly_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
@@ -159,6 +164,35 @@ _MIGRATIONS = {
     ],
     "remediation_effects": [
         "remediation_type VARCHAR(16) DEFAULT 'rule'",
+    ],
+    "deploy_plans": [
+        "environment_probe_json TEXT DEFAULT '{}'",
+        "env_analysis_json TEXT DEFAULT '{}'",
+        "deploy_report_json TEXT DEFAULT '{}'",
+        "test_results_json TEXT DEFAULT '{}'",
+        "execution_history_json TEXT DEFAULT '[]'",
+        "cleanup_history_json TEXT DEFAULT '[]'",
+        "last_deployed_at DATETIME",
+        "deploy_count INTEGER DEFAULT 0",
+        "dag_json TEXT DEFAULT '{}'",
+        "ai_decision_log_json TEXT DEFAULT '[]'",
+        "strategy VARCHAR(32) DEFAULT 'auto'",
+        "risk_score INTEGER DEFAULT 0",
+        "health_gate_json TEXT DEFAULT '[]'",
+        "deployment_feature_json TEXT DEFAULT '{}'",
+    ],
+    "deploy_steps": [
+        "diagnosis TEXT DEFAULT ''",
+        "fix_command TEXT DEFAULT ''",
+        "retry_count INTEGER DEFAULT 0",
+        "precheck_result TEXT DEFAULT ''",
+    ],
+    "metric_dashboard_cards": [
+        "user_id INTEGER DEFAULT 0",
+        "hours INTEGER DEFAULT 24",
+        "w INTEGER DEFAULT 2",
+        "h INTEGER DEFAULT 1",
+        "order INTEGER DEFAULT 0",
     ],
 }
 for _eng in get_all_engines().values():
@@ -558,6 +592,7 @@ app.include_router(hotspot.router)
 # ── k8s 容器编排域 ──
 app.include_router(k8s_monitor.router)
 app.include_router(k8s_resources.router)
+app.include_router(k8s_cert.router)
 app.include_router(containers.router)
 app.include_router(helm.router)
 app.include_router(blue_green.router)
@@ -583,6 +618,9 @@ app.include_router(sandbox.router)
 app.include_router(agent_deploy.router)
 # ── agent 自主巡检闭环 ──
 app.include_router(agent_autonomous.router)
+app.include_router(deploy.router)
+# 离线部署(Offline Repo)
+app.include_router(offline_repo.router)
 
 # ── sre 可靠性工程域 ──
 app.include_router(sre.router)
@@ -677,6 +715,8 @@ app.include_router(alert_correlation.router)
 app.include_router(rag_eval.router)
 # ── 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线）──
 app.include_router(security_audit.router)
+# ── AI 洞察引擎（指标/日志/链路三页统一增强）──
+app.include_router(ai_insight.router)
 
 
 def _collect_all_menu_keys():
@@ -699,6 +739,7 @@ def _collect_all_menu_keys():
 
 def init_admin():
     db = get_session_for(get_db_mode())()
+    _admin_role = None
     # ── 种子角色（幂等）──
     from app.models import Role as _Role, RoleMenu as _RoleMenu
     _preset_roles = [
@@ -706,16 +747,22 @@ def init_admin():
         {"name": "operator", "description": "运维工程师，可执行操作", "is_system": True, "sort_order": 1},
         {"name": "viewer", "description": "只读用户，仅可查看", "is_system": True, "sort_order": 2},
     ]
-    for _pr in _preset_roles:
-        _existing = db.query(_Role).filter(_Role.name == _pr["name"]).first()
-        if not _existing:
-            db.add(_Role(**_pr))
-    db.commit()
+    try:
+        for _pr in _preset_roles:
+            _existing = db.query(_Role).filter(_Role.name == _pr["name"]).first()
+            if not _existing:
+                db.add(_Role(**_pr))
+        db.commit()
+        _admin_role = db.query(_Role).filter(_Role.name == "admin").first()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("init_admin 种子角色失败(DB 忙/锁), 跳过本次: ", exc_info=True)
+        db.rollback()
+        _admin_role = db.query(_Role).filter(_Role.name == "admin").first()
     user = db.query(User).filter(User.username == "admin").first()
     if not user:
         from app.security import hash_password
         default_pwd = _os.environ.get("AIOPS_ADMIN_PASSWORD", "admin123")
-        _admin_role = db.query(_Role).filter(_Role.name == "admin").first()
         admin = User(
             username="admin",
             password_hash=hash_password(default_pwd),
@@ -732,6 +779,13 @@ def init_admin():
                 for _k in _all_keys:
                     db.add(_RoleMenu(role_id=_admin_role.id, menu_key=_k))
                 db.commit()
+    # 确保新菜单 key 被 admin 角色拥有（幂等，用于已有数据库的增量更新）
+    if _admin_role:
+        _existing_admin_keys = set(_k for _k, in db.query(_RoleMenu.menu_key).filter(_RoleMenu.role_id == _admin_role.id).all())
+        for _new_key in _collect_all_menu_keys():
+            if _new_key not in _existing_admin_keys:
+                db.add(_RoleMenu(role_id=_admin_role.id, menu_key=_new_key))
+        db.commit()
     log_channel = db.query(NotificationChannel).filter(NotificationChannel.type == "log").first()
     if not log_channel:
         db.add(NotificationChannel(name="系统日志", type="log", channel_config="{}", enabled=True))
@@ -777,6 +831,18 @@ def init_admin():
         db.execute(text("ALTER TABLE assets DROP COLUMN ssh_user"))
         db.execute(text("ALTER TABLE assets DROP COLUMN ssh_password"))
         db.execute(text("ALTER TABLE assets DROP COLUMN ssh_port"))
+        db.commit()
+    except Exception:
+        pass
+    try:
+        from sqlalchemy import text as _t
+        db.execute(_t("ALTER TABLE deploy_plans ADD COLUMN doc_file_name VARCHAR(256) DEFAULT ''"))
+        db.commit()
+    except Exception:
+        pass
+    try:
+        from sqlalchemy import text as _t
+        db.execute(_t("ALTER TABLE deploy_plans ADD COLUMN asset_ids TEXT DEFAULT '[]'"))
         db.commit()
     except Exception:
         pass

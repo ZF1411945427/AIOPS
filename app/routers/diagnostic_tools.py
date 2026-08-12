@@ -17,7 +17,6 @@ from typing import Optional
 from app.database import get_db
 from app.models import Asset, AIProvider, AgentConfig
 from app.services.agent_service import call_llm
-from app.services.ssh_helper import get_ssh_client
 
 router = APIRouter(prefix="/api/diagnostic-tools", tags=["diagnostic-tools"])
 
@@ -367,12 +366,12 @@ def execute_tool(body: ExecuteToolBody, db: Session = Depends(get_db)):
 
     timeout = tool.get("timeout", 30)
     try:
-        ssh = get_ssh_client()
-        ssh.connect(
+        from app.services.ssh_helper import connect_ssh
+        ssh = connect_ssh(
             host, port=cfg.get("ssh_port", 22),
             username=cfg.get("ssh_user", "root"),
             password=cfg.get("ssh_password", ""),
-            timeout=15, banner_timeout=15,
+            timeout=15,
         )
         _, stdout, stderr = ssh.exec_command(command, timeout=timeout)
         out = stdout.read().decode(errors="ignore").strip()

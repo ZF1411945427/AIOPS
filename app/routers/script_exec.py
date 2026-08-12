@@ -158,13 +158,12 @@ def api_script_execute(
                 if r.status_code != 0:
                     error = f"(exit_code={r.status_code}) {error}"
             else:
-                from app.services.ssh_helper import get_ssh_client
-                client = get_ssh_client()
+                from app.services.ssh_helper import connect_ssh
                 if key_path:
                     key = paramiko.RSAKey.from_private_key_file(key_path)
-                    client.connect(host, port=port, username=username, pkey=key, timeout=timeout)
+                    client = connect_ssh(host, port=port, username=username, pkey=key, timeout=timeout)
                 else:
-                    client.connect(host, port=port, username=username, password=password, timeout=timeout)
+                    client = connect_ssh(host, port=port, username=username, password=password, timeout=timeout)
                 stdin, stdout, stderr = client.exec_command(script_content, timeout=timeout)
                 output = stdout.read().decode(errors="ignore")
                 error = stderr.read().decode(errors="ignore")

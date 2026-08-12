@@ -280,6 +280,25 @@
 > **type 枚举**(由后端 `DS_TYPES` 驱动,前端下拉自动同步):`prometheus` / `custom_api` / `log_file` / `ssh` / `kubernetes` / `docker` / `elasticsearch` / `loki` / `jaeger` / `otel`
 >
 > **loki**: endpoint 填 Loki HTTP 地址(如 `http://10.0.9.12:3100`),auth_config 支持 `username`/`password`(Basic)与 `org_id`(X-Scope-OrgID 多租户)。日志查询走 `log_query_service.LokiAdapter`(LogQL `/loki/api/v1/query_range`),`logs.py` 的 `/logs/api/sources` 与 `/logs/api/search` 已按 type 分发;日志中心与 MCP `query_log_sources` 均自动包含 loki。
+>
+> **kubernetes** auth_config 字段(证书巡检走 SSH,务必保留以下 ssh_ 前缀字段):
+>
+> | 字段名 | 类型 | 说明 |
+> |--------|------|------|
+> | `k8s_auth` | String | 认证方式(token / kubeconfig 等),复用现有字段 |
+> | `k8s_api_server` | String | K8s API Server 地址(如 `https://192.168.100.129:6443`) |
+> | `k8s_token` | String | 敏感;后端返回 `***` + `has_k8s_token`,前端编辑置空、空值=不更新 |
+> | `kubeconfig` | String | 敏感;后端返回 `***` + `has_kubeconfig` |
+> | `verify_ssl` | Boolean | 是否校验 SSL |
+> | `k8s_distro` | String | **K8s 发行版类型**(2026-08-12 新增):自动检测/手动指定,枚举值: `auto`(自动检测) / `kubeadm` / `k3s` / `rke` / `openshift` / `binary`(自定义路径) / `cloud`(云托管,走 API) |
+> | `cert_paths` | Text | **自定义证书路径列表**(2026-08-12 新增):JSON 数组,如 `["/etc/kubernetes/pki/*.crt"]`;binary 模式必填,其他模式可选追加 |
+> | `renew_command` | String | **自定义续期命令**(2026-08-12 新增):binary 模式可选,空则提示手动续期 |
+> | `ssh_host` | String | master 节点 SSH 地址(证书巡检扫描 `/etc/kubernetes/pki` 用) |
+> | `ssh_user` | String | SSH 用户名(默认 root) |
+> | `ssh_password` | String | 敏感;后端返回 `***` + `has_ssh_password`,前端编辑置空、空值=不更新 |
+> | `ssh_port` | Integer | SSH 端口(默认 22) |
+>
+> 消费方:`app/services/k8s_cert_service.py`(多发行版适配器,2026-08-12 重构)、`app/routers/k8s_cert.py`(`/k8s/cert/api/clusters` / `/k8s/cert/api/inspect` / `/k8s/cert/api/renew`)、`connection_service._test_kubernetes`、`datasource_service._scrape_kubernetes`。新增/修改字段必须先改本契约,再同步前后端与数据库。
 
 ### `change_requests` — 变更请求
 
@@ -1016,4 +1035,264 @@ ame | String(64) | - | 策略名 |
 - 风险等级枚举：ead_only < dvisory < medium < high < critical（只升不降）
 - 决策顺序：先查黑名单（blocked）→ 再查白名单（allowed）→ 再查风险等级 → 再查执行配额
 - 黑名单优先级高于白名单
-- 本模块独立，不修改 gent_service.py / emediation_service.py / edge_tunnel_service.py 现有执行链
+
+---
+
+## 第十章：工作流运行时 context 注入规范（Pre-Run Probe）
+
+> 适用：`WorkflowTemplate` / `WorkflowRun`（workflow_service）、`sop_templates.py` 节点命令。
+> 新增/修改任何 `context.*` 字段必须先改本节，再同步模板与代码。
+
+### 10.1 节点命令参数化三来源（优先级从高到低）
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1 | `context.<用户/LLM字段>` | 创建 run 时由调用方传入，如 `service_name`、`namespace`、`asset_id` |
+| 2 | `context.probe.<探测字段>` | 引擎 Pre-Run 自动探测注入（见 10.2），无则回退 default |
+| 3 | `{{ xxx | default(写死值) }}` | 兜底默认值，保证无探测/无参数时行为不变（向后兼容） |
+
+### 10.2 探测字段命名（`context.probe.*`）
+
+引擎在 `start_workflow_run` 创建 run 后、执行只读节点前，对 `context.asset_id` 目标资产自动跑一组只读命令，结果解析注入 `context.probe`。**探测失败/资产离线不阻塞工作流**，模板靠 `default` 兜底。
+
+| 字段 | 类型 | 说明 | 示例 |
+|------|------|------|------|
+| `probe.timestamp` | String | 探测时间 ISO 格式 | "2026-08-11T15:04:05" |
+| `probe.raw` | Object | 原始命令输出（诊断用，不参与模板渲染）；探测不到某段则缺省 | `{"df_text": "...", "mem_text": "...", "load_text": "..."}` |
+| `probe.raw.df_text` | String | `df -h` 原始输出（不含 tmpfs） | 多行文本 |
+| `probe.raw.mem_text` | String | `free -m` 原始输出 | 多行文本 |
+| `probe.raw.load_text` | String | `uptime` 原始输出 | 一行文本 |
+| `probe.fullest_mount` | String | 使用率最高的挂载点路径 | "/" |
+| `probe.disk_usage_pct` | String | 最满挂载点使用率（数字字符串） | "92" |
+| `probe.top_dirs` | String | 最满挂载点下 TOP 大目录（空格分隔，可直接嵌入 `du -sh <目录...>`） | "/tmp /var/log" |
+| `probe.log_dirs` | String | 存在的日志目录（空格分隔，可直接嵌入 `find <目录...>`） | "/var/log /var/log/nginx" |
+| `probe.nginx_log_dir` / `probe.app_log_dir` / `probe.redis_log_dir` / `probe.mysql_log_dir` / `probe.auth_log_dir` / `probe.haproxy_log_dir` | String | 探测到存在的具体日志目录；探测不到则字段不存在，用模板 default 兜底 | "/var/log/nginx" |
+
+### 10.3 模板命令规范
+
+1. **路径/目录必须优先引用 probe**，格式统一：`{{ context.probe.xxx | default('原写死值') }}`
+2. 探测字段为空格分隔目录列表时，命令可直接内嵌：`du -sh {{ context.probe.top_dirs | default('/tmp /var/log /home /opt') }}`
+3. **禁止**新增模板写死绝对路径（如 `find /var/log -name ...`），除非该路径探测不可得（如具体配置文件）。
+4. 探测命令集合（`_PROBE_SCRIPT`，见 workflow_service.py）必须全部为只读命令（df/du/ls/find/awk/sort/free/uptime），禁止写操作。
+5. 上游节点输出可被下游引用：`{{ upstream.<node_id>.data.xxx }}`（`_advance_run` 自动收集已完成节点 result 注入渲染）。
+- 本模块独立，不修改 gent_service.py / 
+emediation_service.py / edge_tunnel_service.py 现有执行链
+
+---
+
+## 第十一章：AI 自动部署（Deploy）字段契约
+
+> 适用：`deploy_plans` / `deploy_steps` 两张表，`app/services/deploy_service.py`，`app/routers/deploy.py`。
+> 前端 `DeployView.vue` 消费。
+> 新增/修改字段必须先改本节，再同步前后端代码。
+
+### 11.1 deploy_plans — 部署计划
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | 主键 |
+| name | String(128) | NOT NULL | 计划名称 |
+| description | Text | "" | 描述 |
+| artifact_path | String(512) | "" | **代码包引用路径（资产服务器路径），平台不落本地** |
+| doc_raw | Text | "" | 部署手册原始内容（markdown） |
+| doc_file_name | String(256) | "" | 上传的部署手册文件名（.md/.txt/.docx 等） |
+| asset_ids | Text | "[]" | 目标环境资产 ID 列表（JSON 数组，支持多资产） |
+| env_mapping | Text | "{}" | 环境映射对照表 JSON，如 `{"target_ip": "192.168.1.100", "app_dir": "/opt/app"}` |
+| environment_probe_json | Text | "{}" | **环境探查结果 JSON**：SSH 目标机后采集的 compose 内容/端口/镜像/目录/OS |
+| env_analysis_json | Text | "{}" | **AI 环境分析 JSON**：基于探查结果，AI 生成的 SOP 适配建议（自适应调整） |
+| sop_json | Text | "[]" | AI 解析手册后生成的结构化 SOP JSON，schema 见 11.3 |
+| status | String(32) | "draft" | draft / planned / running / succeeded / failed / rolled_back |
+| preflight_json | Text | "{}" | 预飞行检查结果 JSON |
+| deploy_report_json | Text | "{}" | **部署报告 JSON**：AI 生成的交付级部署报告（含 executive_summary 执行摘要、environment 环境信息、timeline 时间线、steps_table 步骤表、key_observations 关键观察、verification 验证、test_results 测试记录、issues 问题列表、risk_assessment 风险评估、recommendations 建议、overall_assessment 总体评估，以及 total_steps/succeeded_steps/failed_steps/skipped_steps/total_assets/preflight_passed/verification_passed/ai_decisions 等 KPI 指标） |
+| test_results_json | Text | "{}" | **部署后验证/测试记录 JSON**：SSH 健康检查、容器状态、端口检查、HTTP 探测结果 |
+| execution_history_json | Text | "[]" | **执行历史记录 JSON**：每次部署的时间戳、状态、资产统计（最多保留 50 条） |
+| cleanup_history_json | Text | "[]" | **回滚清理历史记录 JSON**：每次手动回滚清理的时间戳(cleaned_at)、目标目录(app_dir)、各资产(assets[]：asset/ip/status/lines 操作日志行)（最多保留 20 条） |
+| last_deployed_at | DateTime | nullable | 最近一次部署时间 |
+| deploy_count | Integer | 0 | 累计部署次数 |
+| dag_json | Text | "{}" | **AI 执行引擎 DAG 执行计划 JSON**：AI 分析步骤依赖后生成的 DAG，含 groups(并行组/串行组)、reasoning |
+| ai_decision_log_json | Text | "[]" | **AI 自主决策日志 JSON**：每次失败时 AI 的决策记录(fix/retry/skip/rollback)，含根因、修复命令、时间戳(最多 200 条) |
+| created_by | Integer FK(users.id) | nullable | 创建人 |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+### 11.2 deploy_steps — 部署步骤（执行记录）
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | 主键 |
+| plan_id | Integer FK(deploy_plans.id) | NOT NULL | 所属计划 |
+| step_order | Integer | 0 | 步骤序号 |
+| description | String(512) | "" | 步骤说明 |
+| command | Text | "" | 待执行命令（已做环境代换，含 `${ENV_xxx}` 占位符） |
+| verify_command | Text | "" | 校验命令 |
+| rollback_command | Text | "" | 回滚命令 |
+| risk_level | String(16) | "medium" | low / medium / high |
+| status | String(32) | "pending" | pending / running / succeeded / failed / skipped / rolled_back / fixing（修复中） |
+| output | Text | "" | 执行输出 |
+| diagnosis | Text | "" | **失败时 AI 诊断结果文本**：根因分析 |
+| fix_command | Text | "" | **AI 建议的修复命令**（人工确认后执行） |
+| retry_count | Integer | 0 | 重试次数 |
+| precheck_result | Text | "" | **AI 预执行风险检查结果**：执行前 AI 分析命令风险(risk/reason/precheck) |
+| started_at | DateTime | nullable | - |
+| finished_at | DateTime | nullable | - |
+
+### 11.3 SOP JSON schema（`deploy_plans.sop_json` 存储格式）
+
+```json
+{
+  "plan_name": "xxx 部署",
+  "preflight": [
+    {"check": "disk_space", "command": "df -h /", "expect": "使用率 < 80%"},
+    {"check": "port_available", "command": "ss -tlnp | grep 8080", "expect": "端口未占用"}
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "description": "拉取代码包",
+      "command": "wget -q ${ARTIFACT_URL} -O /tmp/package.tar.gz && echo 'sha256: ${CHECKSUM}'",
+      "verify": "ls -la /tmp/package.tar.gz",
+      "rollback": "rm -f /tmp/package.tar.gz",
+      "risk": "low"
+    }
+  ]
+}
+```
+
+### 11.4 环境映射占位符约定
+
+| 占位符 | 来源 | 示例 |
+|--------|------|------|
+| `${TARGET_IP}` | assets.ip | 192.168.1.100 |
+| `${APP_DIR}` | probe/用户输入 | /opt/myapp |
+| `${LOG_DIR}` | probe/用户输入 | /var/log/myapp |
+| `${ARTIFACT_URL}` | deploy_plans.artifact_path | http://artifacts.local/release/v1.0.tar.gz |
+| `${CHECKSUM}` | 用户输入 | a1b2c3d4... |
+| `${SERVICE_NAME}` | 用户输入 | myapp-backend |
+| `${ENV_xxx}` | env_mapping JSON | 自定义占位符，由 AI 识别手册后提出 |
+
+### 11.5 状态机
+
+```
+draft → planned → running → succeeded → (post-verify → report)
+                    ↓               ↘
+                 failed → rolled_back
+```
+
+- 执行完成后自动记录执行历史、生成部署报告、运行后验证
+- 部署报告含：概述、步骤表、环境信息、验证结果、测试记录、问题与建议
+- 验证涵盖：Docker 状态、容器运行、端口监听、HTTP 健康检查
+
+- `draft`: 刚创建，尚未解析
+- `planned`: AI 解析完成，生成 SOP + 环境映射，待人工确认
+- `running`: 执行中
+- `succeeded`: 全部步骤成功
+- `failed`: 某步失败（含校验失败）
+- `rolled_back`: 失败后执行回滚完成
+
+### 11.6 AI 执行引擎（10 分能力）
+
+> 前端 `DeployView.vue` 执行 Tab 消费，WS 事件兼容旧事件 + 新增事件。
+
+**五大 AI 能力：**
+
+| 能力 | 说明 | 事件 |
+|------|------|------|
+| ① 动态编排(DAG) | 执行前 AI 分析步骤依赖，生成并行组/串行组执行计划 | `dag_plan` |
+| ② 自主决策 | 步骤失败后 AI 直接决策 fix/retry/skip/rollback，无需人工确认 | `ai_decision` |
+| ③ 执行前预判 | 每步执行前 AI 分析命令风险，产出 risk/precheck/suggest_modify | `ai_precheck` |
+| ④ 并行调度 | DAG parallel=true 组内步骤多线程并行执行 | `parallel_group` |
+| ⑤ 自适应回滚 | AI 只回滚有状态步骤，跳过 echo/mkdir/校验等无状态步骤 | — |
+
+**新增 WS 事件：**
+
+| 事件类型 | 字段 | 说明 |
+|---------|------|------|
+| dag_plan | groups, reasoning | DAG 执行计划 |
+| parallel_group | group, steps, parallel, reason | 并行组开始 |
+| ai_precheck | step, risk, reason, precheck, guard_note | AI 预执行风险检查 |
+| ai_decision | step, decision, reason, fix_commands | AI 自主决策（不再等用户） |
+
+**AI 回退策略：** 任一 AI 能力不可用时静默回退为安全的确定性行为（DAG→线性、自主决策→回滚、预判→跳过、回滚→全量逆序），不影响部署可用。
+
+---
+
+## 第十二章：离线部署（Offline Repo）字段契约
+
+> 适用：`offline_repo_bundles` / `offline_registries` / `offline_package_sources` 三张表，
+> `app/services/offline_repo_service.py`，`app/routers/offline_repo.py`。
+> 前端 `OfflineRepoView.vue` 消费。
+> 新增/修改字段必须先改本节，再同步前后端代码。
+
+### 12.1 offline_repo_bundles — 离线仓库包
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | 主键 |
+| name | String(128) | NOT NULL | 离线包名称，如 `pixiu-packages-ubuntu-24.04` |
+| description | Text | "" | 描述 |
+| version | String(64) | "" | K8S/应用版本，如 `v1.31.6` |
+| os_type | String(32) | "" | 系统类型：ubuntu/centos/debian |
+| os_version | String(32) | "" | 系统版本：24.04/7/11 |
+| bundle_type | String(32) | NOT NULL | 包类型：images/packages/server |
+| file_path | String(512) | "" | **离线包文件路径（服务器存储路径，不落前端）** |
+| file_size | Integer | 0 | 文件大小（字节） |
+| md5 | String(64) | "" | 文件 MD5 校验 |
+| status | String(32) | "pending" | pending/loading/loaded/failed |
+| loaded_images | Integer | 0 | 已加载镜像数 |
+| total_images | Integer | 0 | 总镜像数 |
+| loaded_packages | Integer | 0 | 已加载系统包数 |
+| load_message | String(512) | "" | 加载进度消息/失败原因 |
+| loaded_at | DateTime | nullable | 加载完成时间 |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+### 12.2 offline_registries — 私有镜像仓库
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | 主键 |
+| name | String(128) | NOT NULL | 仓库名称 |
+| registry_url | String(256) | NOT NULL | 仓库地址，如 `10.0.0.1:5000` |
+| is_internal | Boolean | False | 是否内嵌（平台自管理） |
+| storage_path | String(512) | "" | 内嵌仓库存储路径 |
+| is_secure | Boolean | False | 是否 HTTPS |
+| username | String(64) | "" | 仓库用户名 |
+| password | String(128) | "" | **敏感字段：仓库密码（后端返回 `***` + `has_password` 标记，前端编辑置空、保存空值=不更新）** |
+| has_password | Boolean | False | 是否已设置密码 |
+| is_default | Boolean | False | 是否默认仓库 |
+| status | String(32) | "active" | active/inactive/error |
+| created_at | DateTime | now() | - |
+| updated_at | DateTime | now()/onupdate | - |
+
+### 12.3 offline_package_sources — 离线系统包源（deb/rpm）
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| id | Integer PK | - | 主键 |
+| bundle_id | Integer FK(offline_repo_bundles.id) | nullable | 关联离线包 |
+| os_type | String(32) | NOT NULL | 系统类型 |
+| os_version | String(32) | "" | 系统版本 |
+| source_url | String(256) | NOT NULL | 源地址，如 `http://10.0.0.1:8080/deb` |
+| source_type | String(16) | NOT NULL | deb/rpm |
+| package_count | Integer | 0 | 软件包数量 |
+| is_active | Boolean | True | 是否启用 |
+| created_at | DateTime | now() | - |
+
+### 12.4 离线部署流程
+
+```
+用户上传离线包(.tar.gz)
+  → 保存到 <PROJECT_ROOT>/storage/offline/ 目录 + 校验 MD5
+  → 用户点击"加载"
+      → 解压扫描 images/ 与 packages/ 目录
+      → 镜像: docker load → docker tag → docker push 到默认 Registry（可选）
+      → 包源: 生成 Packages.gz(deb) / repodata(rpm) 索引 + 本地 HTTP 静态服务
+      → bundle.status = loaded / failed
+创建部署计划时: 离线模式自动填入私有 Registry + 包源 URL（后续阶段对接 deploy_plans）
+```
+
+### 12.5 敏感字段掩码规则（沿用第五章）
+
+- `offline_registries.password`：后端详情/列表返回 `***`，同时返回 `has_password` 布尔标记
+- 前端编辑时密码输入框置空；提交时空值=不更新（保留旧密码）
+- `storage_path`（内嵌仓库本地路径）属于服务器侧字段，不回传、前端不可编辑

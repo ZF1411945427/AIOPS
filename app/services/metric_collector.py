@@ -73,10 +73,8 @@ def _ssh_connect(asset, timeout=10):
     if not host:
         return None
 
-    from app.services.ssh_helper import get_ssh_client
-    ssh = get_ssh_client()
-    ssh.connect(host, port=port, username=username, password=password,
-                timeout=timeout, banner_timeout=timeout)
+    from app.services.ssh_helper import connect_ssh
+    ssh = connect_ssh(host, port=port, username=username, password=password, timeout=timeout)
     return ssh
 
 

@@ -311,6 +311,26 @@
             "type": "vue",
             "icon": "TrendCharts",
             "path": "/k8s/resource-optimize"
+          },
+          {
+            "key": "k8s-cert-inspect",
+            "label": "证书巡检",
+            "type": "vue",
+            "icon": "Lock",
+            "path": "/k8s/cert-inspect"
+          }
+        ]
+      },
+      {
+        "key": "offline-management",
+        "label": "离线仓库",
+        "items": [
+          {
+            "key": "offline-repo",
+            "label": "离线仓库",
+            "type": "vue",
+            "icon": "Box",
+            "path": "/offline-repo"
           }
         ]
       }
@@ -764,6 +784,13 @@
             "type": "vue",
             "icon": "Odometer",
             "path": "/agent-autonomous"
+          },
+          {
+            "key": "ai-deploy",
+            "label": "AI 自动部署",
+            "type": "vue",
+            "icon": "Upload",
+            "path": "/ai-deploy"
           }
         ]
       },

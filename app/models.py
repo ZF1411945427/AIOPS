@@ -612,6 +612,19 @@ class MetricRecord(Base):
     timestamp = Column(DateTime, default=lambda: datetime.now())
 
 
+class MetricDashboardCard(Base):
+    __tablename__ = "metric_dashboard_cards"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, default=0)
+    title = Column(String(128), nullable=False)
+    promql = Column(String(512), nullable=False)
+    hours = Column(Integer, default=24)
+    w = Column(Integer, default=2)
+    h = Column(Integer, default=1)
+    order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
 class ChangeRequest(Base):
     __tablename__ = "change_requests"
 
@@ -2275,4 +2288,134 @@ class AutonomousCycle(Base):
     duration_ms = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
     finished_at = Column(DateTime, nullable=True)
+
+
+class DeployPlan(Base):
+    """AI 自动部署计划（契约见 CONTRACT.md 第十一章）"""
+    __tablename__ = "deploy_plans"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    artifact_path = Column(String(512), default="")
+    doc_raw = Column(Text, default="")
+    doc_file_name = Column(String(256), default="")
+    asset_ids = Column(Text, default="[]")
+    env_mapping = Column(Text, default="{}")
+    environment_probe_json = Column(Text, default="{}")  # SSH 环境探查结果
+    env_analysis_json = Column(Text, default="{}")  # AI 环境分析→SOP 适配建议
+    sop_json = Column(Text, default="[]")
+    status = Column(String(32), default="draft")
+    preflight_json = Column(Text, default="{}")
+    deploy_report_json = Column(Text, default="{}")  # 部署报告（AI 生成）
+    test_results_json = Column(Text, default="{}")  # 部署后验证/测试记录
+    execution_history_json = Column(Text, default="[]")  # 执行历史记录
+    cleanup_history_json = Column(Text, default="[]")  # 回滚清理历史记录
+    last_deployed_at = Column(DateTime, nullable=True)
+    deploy_count = Column(Integer, default=0)
+    dag_json = Column(Text, default="{}")  # AI 执行引擎 DAG 执行计划
+    ai_decision_log_json = Column(Text, default="[]")  # AI 自主决策日志
+    strategy = Column(String(32), default="auto")  # AI 选定的部署策略: auto/rolling/blue-green/canary/recreate
+    risk_score = Column(Integer, default=0)  # AI 预判的部署风险评分 0-100
+    deployment_feature_json = Column(Text, default="{}")  # 部署特征向量(供 L5 学习)
+    health_gate_json = Column(Text, default="[]")  # 部署过程中的健康门控记录
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class DeployStep(Base):
+    """AI 自动部署步骤（契约见 CONTRACT.md 第十一章）"""
+    __tablename__ = "deploy_steps"
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("deploy_plans.id"), nullable=False)
+    step_order = Column(Integer, default=0)
+    description = Column(String(512), default="")
+    command = Column(Text, default="")
+    verify_command = Column(Text, default="")
+    rollback_command = Column(Text, default="")
+    risk_level = Column(String(16), default="medium")
+    status = Column(String(32), default="pending")
+    output = Column(Text, default="")
+    diagnosis = Column(Text, default="")  # AI 失败诊断
+    fix_command = Column(Text, default="")  # AI 建议修复命令
+    retry_count = Column(Integer, default=0)
+    precheck_result = Column(Text, default="")  # AI 预执行风险检查结果
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
+# ==================== 离线部署（Offline Repo）模型 ====================
+# 契约见 CONTRACT.md 第十二章。对标 Pixiu `builder serve`：离线包 → 私有 Registry + Apt/Yum 源
+
+class OfflineRepoBundle(Base):
+    """离线仓库包 - 对标 Pixiu builder 的离线包管理"""
+    __tablename__ = "offline_repo_bundles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    version = Column(String(64), default="")
+    os_type = Column(String(32), default="")
+    os_version = Column(String(32), default="")
+    bundle_type = Column(String(32), nullable=False, default="images")
+    file_path = Column(String(512), default="")
+    file_size = Column(Integer, default=0)
+    md5 = Column(String(64), default="")
+    status = Column(String(32), default="pending")
+    loaded_images = Column(Integer, default=0)
+    total_images = Column(Integer, default=0)
+    loaded_packages = Column(Integer, default=0)
+    load_message = Column(String(512), default="")
+    loaded_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class OfflineRegistry(Base):
+    """私有镜像仓库配置 - 对标 Pixiu builder 的 Registry"""
+    __tablename__ = "offline_registries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    registry_url = Column(String(256), nullable=False)
+    is_internal = Column(Boolean, default=False)
+    storage_path = Column(String(512), default="")
+    is_secure = Column(Boolean, default=False)
+    username = Column(String(64), default="")
+    password = Column(String(128), default="")
+    has_password = Column(Boolean, default=False)
+    is_default = Column(Boolean, default=False)
+    status = Column(String(32), default="active")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class OfflinePackageSource(Base):
+    """离线系统包源 - 对标 Pixiu builder 的 Apt/Yum 源"""
+    __tablename__ = "offline_package_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bundle_id = Column(Integer, ForeignKey("offline_repo_bundles.id"), nullable=True)
+    os_type = Column(String(32), nullable=False)
+    os_version = Column(String(32), default="")
+    source_url = Column(String(256), nullable=False)
+    source_type = Column(String(16), nullable=False)
+    package_count = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class AIInsightRecord(Base):
+    """AI 分析历史记录沉淀 - 跨指标/日志/链路三页"""
+    __tablename__ = "ai_insight_records"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, default=0)
+    source_type = Column(String(16), nullable=False, index=True)  # metrics / logs / traces
+    title = Column(String(256), default="")
+    question = Column(Text, default="")
+    analysis = Column(Text, default="")
+    meta_json = Column(Text, default="{}")  # {provider, metric_count, source_name, trend_data, etc}
+    provider = Column(String(64), default="")
+    score = Column(Integer, default=0)  # 0-100 AI 自评分数
+    created_at = Column(DateTime, default=lambda: datetime.now())
 

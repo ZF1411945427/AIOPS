@@ -101,6 +101,29 @@
           <div v-if="form.type === 'kubernetes'" class="auth-section">
             <div class="form-group"><label>API Server URL</label><input v-model="authConfig.k8s_api_server" class="input" placeholder="https://192.168.1.10:6443" /></div>
             <div class="form-group"><label>Token</label><textarea v-model="authConfig.k8s_token" class="input" rows="3" placeholder="ServiceAccount Token"></textarea></div>
+            <div class="form-group"><label>K8s 发行版</label>
+              <select v-model="authConfig.k8s_distro" class="input">
+                <option value="auto">自动检测</option>
+                <option value="kubeadm">kubeadm</option>
+                <option value="k3s">K3s</option>
+                <option value="rke">RKE</option>
+                <option value="openshift">OpenShift</option>
+                <option value="binary">自定义路径</option>
+                <option value="cloud">云托管集群 (API 巡检)</option>
+              </select>
+            </div>
+            <div class="form-group" v-if="authConfig.k8s_distro === 'binary'">
+              <label>证书路径 (每行一个)</label>
+              <textarea v-model="authConfig.cert_paths" class="input" rows="2" placeholder="/etc/kubernetes/pki/*.crt&#10;/etc/kubernetes/pki/etcd/*.crt"></textarea>
+            </div>
+            <div class="form-group" v-if="authConfig.k8s_distro === 'binary'">
+              <label>续期命令 (可选)</label>
+              <input v-model="authConfig.renew_command" class="input" placeholder="kubeadm certs renew all" />
+            </div>
+            <div class="form-group"><label>SSH 地址 (证书巡检用)</label><input v-model="authConfig.ssh_host" class="input" placeholder="192.168.1.10" /></div>
+            <div class="form-group"><label>SSH 用户</label><input v-model="authConfig.ssh_user" class="input" placeholder="root" /></div>
+            <div class="form-group"><label>SSH 密码</label><input v-model="authConfig.ssh_password" type="password" class="input" placeholder="密码" /></div>
+            <div class="form-group"><label>SSH 端口</label><input v-model.number="authConfig.ssh_port" type="number" class="input" placeholder="22" /></div>
           </div>
 
           <div class="form-group"><label>采集间隔 (秒)</label>
@@ -143,6 +166,7 @@ const authConfig = reactive({
   api_key: '', api_value: '',
   ssh_user: 'root', ssh_password: '', ssh_port: 22,
   k8s_api_server: '', k8s_token: '',
+  k8s_distro: 'auto', cert_paths: '', renew_command: '', ssh_host: '',
 })
 
 function buildAuthConfig() {
@@ -152,16 +176,39 @@ function buildAuthConfig() {
   if (at === 'bearer') return { token: authConfig.token }
   if (at === 'api_key') return { api_key: authConfig.username, api_value: authConfig.password }
   if (t === 'ssh') return { ssh_user: authConfig.ssh_user, ssh_password: authConfig.ssh_password, ssh_port: authConfig.ssh_port }
-  if (t === 'kubernetes') return { k8s_api_server: authConfig.k8s_api_server, k8s_token: authConfig.k8s_token }
+  if (t === 'kubernetes') {
+    const cfg = { k8s_api_server: authConfig.k8s_api_server, k8s_distro: authConfig.k8s_distro || 'auto' }
+    if (authConfig.k8s_token) cfg.k8s_token = authConfig.k8s_token
+    if (authConfig.ssh_host) cfg.ssh_host = authConfig.ssh_host
+    if (authConfig.ssh_user) cfg.ssh_user = authConfig.ssh_user
+    if (authConfig.ssh_password) cfg.ssh_password = authConfig.ssh_password
+    if (authConfig.ssh_port) cfg.ssh_port = authConfig.ssh_port
+    if (authConfig.cert_paths) {
+      const lines = authConfig.cert_paths.split('\n').map(l => l.trim()).filter(Boolean)
+      cfg.cert_paths = JSON.stringify(lines)
+    }
+    if (authConfig.renew_command) cfg.renew_command = authConfig.renew_command
+    return cfg
+  }
   return {}
 }
 
 function parseAuthConfig(cfg, type, authType) {
-  if (authType === 'basic') { authConfig.username = cfg.username || ''; authConfig.password = cfg.password || '' }
-  else if (authType === 'bearer') { authConfig.token = cfg.token || '' }
-  else if (authType === 'api_key') { authConfig.username = cfg.api_key || ''; authConfig.password = cfg.api_value || '' }
-  if (type === 'ssh') { authConfig.ssh_user = cfg.ssh_user || 'root'; authConfig.ssh_password = cfg.ssh_password || ''; authConfig.ssh_port = cfg.ssh_port || 22 }
-  if (type === 'kubernetes') { authConfig.k8s_api_server = cfg.k8s_api_server || ''; authConfig.k8s_token = cfg.k8s_token || '' }
+  if (authType === 'basic') { authConfig.username = cfg.username || ''; authConfig.password = cfg.password === '***' ? '' : (cfg.password || '') }
+  else if (authType === 'bearer') { authConfig.token = cfg.token === '***' ? '' : (cfg.token || '') }
+  else if (authType === 'api_key') { authConfig.username = cfg.api_key || ''; authConfig.password = cfg.api_value === '***' ? '' : (cfg.api_value || '') }
+  if (type === 'ssh') { authConfig.ssh_user = cfg.ssh_user || 'root'; authConfig.ssh_password = cfg.ssh_password === '***' ? '' : (cfg.ssh_password || ''); authConfig.ssh_port = cfg.ssh_port || 22 }
+  if (type === 'kubernetes') {
+    authConfig.k8s_api_server = cfg.k8s_api_server || ''
+    authConfig.k8s_token = cfg.k8s_token === '***' ? '' : (cfg.k8s_token || '')
+    authConfig.k8s_distro = cfg.k8s_distro || 'auto'
+    authConfig.cert_paths = cfg.cert_paths || ''
+    authConfig.renew_command = cfg.renew_command || ''
+    authConfig.ssh_host = cfg.ssh_host || ''
+    authConfig.ssh_user = cfg.ssh_user || 'root'
+    authConfig.ssh_password = cfg.ssh_password === '***' ? '' : (cfg.ssh_password || '')
+    authConfig.ssh_port = cfg.ssh_port || 22
+  }
 }
 
 async function loadSources() {
@@ -200,7 +247,7 @@ function openCreate() {
   isEdit.value = false
   editId.value = null
   Object.assign(form, { name: '', type: '', endpoint: '', auth_type: 'none', scrape_interval: 30 })
-  Object.assign(authConfig, { username: '', password: '', token: '', api_key: '', api_value: '', ssh_user: 'root', ssh_password: '', ssh_port: 22, k8s_api_server: '', k8s_token: '' })
+  Object.assign(authConfig, { username: '', password: '', token: '', api_key: '', api_value: '', ssh_user: 'root', ssh_password: '', ssh_port: 22, k8s_api_server: '', k8s_token: '', k8s_distro: 'auto', cert_paths: '', renew_command: '', ssh_host: '' })
   showDialog.value = true
 }
 
@@ -212,12 +259,12 @@ async function openEdit(s) {
   form.endpoint = s.endpoint || ''
   form.auth_type = s.auth_type || 'none'
   form.scrape_interval = s.scrape_interval || 30
-  Object.assign(authConfig, { username: '', password: '', token: '', api_key: '', api_value: '', ssh_user: 'root', ssh_password: '', ssh_port: 22, k8s_api_server: '', k8s_token: '' })
+  Object.assign(authConfig, { username: '', password: '', token: '', api_key: '', api_value: '', ssh_user: 'root', ssh_password: '', ssh_port: 22, k8s_api_server: '', k8s_token: '', k8s_distro: 'auto', cert_paths: '', renew_command: '', ssh_host: '' })
   try {
     const detail = await request.get(`/datasources/api/${s.id}`)
     if (detail.auth_config) {
       try {
-        const cfg = JSON.parse(detail.auth_config)
+        const cfg = detail.auth_config
         parseAuthConfig(cfg, form.type, form.auth_type)
       } catch {}
     }
