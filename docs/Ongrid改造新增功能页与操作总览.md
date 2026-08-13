@@ -72,17 +72,69 @@
 
 ## 三、已有页面增强（改造）
 
-### 1. 拓扑视图 TopologyView + 架构巡检图 FireMapView（服务调用拓扑）
-- **新增**：`TopologyView.vue` Tab3「服务调用拓扑」(时间窗口 1h/6h/24h/7d/全部，节点健康着色 `<5%/5~30%/≥30%`，边宽=调用量、边色=错误率) + 「自动刷新」(30s)。
-- **新增**：`FireMapView.vue` 业务域下钻「架构拓扑 · 分层实体 · 调用连线」面板(分层着色)。
-- 详见 `docs/Topology拓扑改造功能页与操作手册.md`。
+### 1. 拓扑/连线图（TopologyView + FireMapView）★ 专项
+
+对标 Ongrid 的 **Topology(拓扑/连线图)**，改造了**两个页面**，各承担不同视角：
+
+| 页面 | 菜单入口 | 定位 |
+|------|---------|------|
+| **架构巡检图** `FireMapView.vue` | 值班驾驶舱 → 监控总览 → 架构巡检图 (`/firemap`) | 全局/业务域视角，健康驾驶舱 + 分层架构 + 服务调用连线 |
+| **拓扑视图** `TopologyView.vue` | 资源管理 → 资产管理 → 拓扑视图 (`/topology`) | 三类拓扑(资产/网络/服务调用) 独立页，含自动刷新 |
+
+**服务调用拓扑** 核心：`topology_service.build_service_call_topo(db, hours=168, min_calls=1)`(约 line 299)——按 `trace_id+parent_span_id` 还原跨服务调用、只统计跨服务调用、过滤最小调用量，返回 `{nodes, edges, stats}`。两个页面共用同一后端。
+
+#### 3.1.1 架构巡检图 FireMapView（值班视角）
+- 定位：「架构巡检图 · 全域 Entity 健康驾驶舱」，两种模式(overview 全域 / domain 业务域下钻)。
+- **服务调用拓扑面板**：进入业务域(domain)后，分层架构卡下方「架构拓扑 · 分层实体 · 调用连线 · 自动排版」面板，数据 `GET /topology/api/service-calls?hours=168&min_calls=1`。
+- 分层配色：接入层/服务调用层/应用层/数据库/中间件/基础设施；节点圆角卡片按层着色。
+- 边：宽度固定 2，**颜色按错误率** ≥30% 红 / ≥5% 橙 / 否则灰(`#94a3b8`)。
+- **操作**：值班驾驶舱 → 架构巡检图 → 点业务域下钻 → 看分层架构卡 + 下方服务调用连线面板；按颜色读健康(绿<5%/黄5~30%/红≥30%)。
+
+#### 3.1.2 拓扑视图 TopologyView（三类拓扑独立页）
+页面标题「拓扑视图」，共 **3 个 Tab** + 每 Tab「自动刷新」。
+
+- **Tab1 资产拓扑**：`GET /topology/api/asset-by-node`(K8s 子资源过滤，cluster+node 维度)。
+  - 操作：类型下拉 + 名称搜索 + 「仅异常」过滤；「+ 新增关系」`POST /topology/api/relations/create` / 删除 `POST /topology/api/relations/{id}/delete`；「刷新」/「自动刷新」。
+  - 单击节点 → 右侧「关联资产 (N)」为**单跳直接邻居**（非多跳影响面）。
+- **Tab2 网络拓扑**：`GET /topology/api/network?mode=...`。
+  - 两模式：「📡 网络设备关系」(只显示网络设备及其关系) / 「🗂️ IP 网段拓扑」(按 /24 聚类)。
+- **Tab3 服务调用拓扑**（改造核心）：`GET /topology/api/service-calls?hours=&min_calls=1`。
+  - 时间范围：**1h / 6h / 24h / 7d / 全部**(默认 24h)。
+  - 节点着色 `svcNodeColor`(817)：`critical→#ef4444` / `warning→#E6A23C` / 健康→`#67C23A`；阈值=错误率 <5% / 5~30% / ≥30%。
+  - 边：**宽度=调用量**(`1+(call_count/maxCalls)*5`)，**颜色=错误率**；选中边变 `#6366f1`。
+- **自动刷新**：复选框开启后**每 30 秒**刷新当前 Tab(`autoRefresh` ref，30000ms)。
+
+#### 3.1.3 后端端点清单（拓扑）
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/topology/api/list` | 通用资产树/关系 |
+| GET | `/topology/api/asset-by-node` | Tab1 资产拓扑 |
+| GET | `/topology/api/network?mode=` | Tab2 网络拓扑(devices/subnets) |
+| GET | `/topology/api/service-calls?hours=&min_calls=` | Tab3 服务调用拓扑 |
+| POST | `/topology/api/relations/create` | 新增关系 |
+| POST | `/topology/api/relations/{id}/delete` | 删除关系 |
+| POST | `/topology/api/path/find` | 单条 BFS 最短连通路径(body: source_id, target_id) |
+| GET | `/containers/topology/graph` | K8s 资源拓扑(相关) |
+
+#### 3.1.4 拓扑验证/通过标准
+- [ ] 架构巡检图进入业务域后显示服务调用连线面板，节点按层着色、边按错误率着色
+- [ ] 拓扑视图三 Tab 可切换；Tab3 服务调用按时间窗口(1h~全部)刷新
+- [ ] 调用量大 → 边宽，错误率高 → 边红/橙；选中边高亮
+- [ ] 自动刷新勾选后每 30s 更新
+- [ ] 资产拓扑支持新增/删除关系、类型/搜索/仅异常过滤
+- [ ] 网络拓扑支持「设备关系 / IP 网段」两模式
+- [ ] `/topology/api/service-calls` 返回 `{nodes,edges,stats}`，空时返回空结构不报错
+
+#### 3.1.5 拓扑已知缺口（待补，勿写成已有）
+- **Blast Radius(爆炸半径/N 跳影响面)** **未实现**（计划 T2，❌）：后端无 `expand`/N 跳 BFS；仅 `topology_path.py:bfs_path` 做两个节点间单条最短路径；前端「关联资产」为单跳直接邻居。
+- **`topology-path` 页面**(`TopologyPathView.vue`)已注册但**无菜单入口**(孤儿页，可通过 `window._navigateTo('topology-path')` 触达)。
 
 ### 2. 告警规则页 AlertRulesView（规则类型化）
 - **新增**：「规则类型」下拉(metric_raw/anomaly/forecast/burn_rate) + 表格「类型」列。
 - 操作：新建/编辑规则时选类型；anomaly 用均值±z·σ、forecast 用线性外推、burn_rate 用错误预算消耗速率。
 
-### 3. Slack 等既有页面
-- 本次对 `SubAgentsView`(独立 persona 子代理)、`AgentWorkflowEditor`(notify/agent 节点)、`IncidentsView`(自动调查报告)、`ReportsView`、`AssetsView`、`K8sOfflineDeployView` 等做了能力增强，非新增页，详见对应 MEMORY 条目。
+### 3. 其它既有页面
+- 对 `SubAgentsView`(独立 persona 子代理)、`AgentWorkflowEditor`(notify/agent 节点)、`IncidentsView`(自动调查报告)、`ReportsView`、`AssetsView`、`K8sOfflineDeployView` 等做了能力增强，非新增页，详见对应 MEMORY 条目。
 
 ---
 
@@ -113,13 +165,12 @@
 - 后端：`python run.py`(FastAPI :8000)，重启请按**:8000 端口 listener 杀进程**再 Start-Process(否则新代码不生效，新路由返回 SPA HTML 即为旧进程残留)。
 - 前端：`npm run build --prefix frontend` 后在 `http://localhost:3000`(dev) 或 `http://localhost:8000`(SPA) 访问。
 - 自监控：`GET /healthz`、`GET /readyz`、`GET /metrics`(Prometheus text)。
-- 手动测试步骤：见 `docs/20260813_新功能测试手动操作手册.md`(各功能节) + `docs/Topology拓扑改造功能页与操作手册.md`。
+- 手动测试步骤：见 `docs/20260813_新功能测试手动操作手册.md`(各功能节)；拓扑操作见本文档「三、1 拓扑」。
 
 ---
 
 ## 相关文档索引
 - 改造状态/缺口：`docs/20260813_系统赶超Ongrid差距分析与赶超计划.md`
 - 手动测试手册：`docs/20260813_新功能测试手动操作手册.md`
-- 拓扑专项手册：`docs/Topology拓扑改造功能页与操作手册.md`
 - 开发记忆：`MEMORY.md`
 - 字段契约：`CONTRACT.md`
