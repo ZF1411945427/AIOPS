@@ -49,7 +49,7 @@ def run_discovery(schedule_id: int, db: Session) -> dict:
     hosts = _parse_target_range(target_range)
     results = []
 
-    for ip in hosts:
+    def _probe(ip):
         try:
             if protocol == "ssh":
                 status = _check_ssh(ip, port)
@@ -59,21 +59,31 @@ def run_discovery(schedule_id: int, db: Session) -> dict:
                 status = _check_icmp(ip)
             else:
                 status = "unknown"
-
-            dr = DiscoveryResult(
-                schedule_id=schedule_id,
-                ip=ip,
-                port=port if port else 0,
-                status=status,
-                hostname="",
-                os_type="",
-                services="",
-            )
-            db.add(dr)
-            results.append({"ip": ip, "status": status})
+            return {"ip": ip, "status": status}
         except Exception as e:
-            results.append({"ip": ip, "status": f"error: {e}"})
+            return {"ip": ip, "status": f"error: {e}"}
 
+    # 并行扫描，避免串行长耗时（254 IP × 单IP超时 ≈ 分钟级）导致请求超时/前端"无反应"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=128) as executor:
+        futures = {executor.submit(_probe, ip): ip for ip in hosts}
+        ordered = {}
+        for future in concurrent.futures.as_completed(futures):
+            ordered[futures[future]] = future.result()
+        # 保持原始 IP 顺序输出
+        for ip in hosts:
+            if ip in ordered:
+                results.append(ordered[ip])
+
+    for r in results:
+        db.add(DiscoveryResult(
+            schedule_id=schedule_id,
+            ip=r["ip"],
+            port=port if port else 0,
+            status=r["status"],
+            hostname="",
+            os_type="",
+            services="",
+        ))
     db.commit()
     return {"ok": True, "schedule_id": schedule_id, "scanned": len(hosts), "results": results}
 
@@ -103,7 +113,7 @@ def _parse_target_range(target_range: str) -> list:
     return hosts[:256]
 
 
-def _check_tcp(host: str, port: int, timeout: int = 3) -> str:
+def _check_tcp(host: str, port: int, timeout: int = 2) -> str:
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -114,7 +124,7 @@ def _check_tcp(host: str, port: int, timeout: int = 3) -> str:
         return f"error:{e}"
 
 
-def _check_ssh(host: str, port: int = 22, timeout: int = 3) -> str:
+def _check_ssh(host: str, port: int = 22, timeout: int = 2) -> str:
     return _check_tcp(host, port, timeout)
 
 

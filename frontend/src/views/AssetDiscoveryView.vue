@@ -6,7 +6,7 @@
     </div>
 
     <div class="toolbar">
-      <button class="btn btn-primary" @click="showCreate = true">+ 新建扫描任务</button>
+      <button class="btn btn-primary" @click="showCreate = true; editingId = null">+ 新建扫描任务</button>
       <button class="btn" @click="loadSchedules">刷新</button>
     </div>
 
@@ -24,6 +24,7 @@
             <div class="sched-target">范围: {{ s.target_range }}</div>
             <div class="sched-actions">
               <button class="btn btn-sm btn-primary" @click="runNow(s)">立即扫描</button>
+              <button class="btn btn-sm" @click="editSchedule(s)">编辑</button>
               <button class="btn btn-sm" @click="toggleSchedule(s)">{{ s.enabled ? '停用' : '启用' }}</button>
               <button class="btn btn-sm btn-ghost" @click="deleteSchedule(s)">删除</button>
             </div>
@@ -55,9 +56,9 @@
       </div>
     </div>
 
-    <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
+    <div v-if="showCreate" class="modal-overlay" @click.self="closeModal">
       <div class="modal-box">
-        <h3>新建扫描任务</h3>
+        <h3>{{ editingId ? '编辑扫描任务' : '新建扫描任务' }}</h3>
         <div class="form-group">
           <label class="form-label">任务名称</label>
           <input v-model="form.name" class="input" placeholder="例如: 内网服务器发现">
@@ -83,8 +84,8 @@
           <input v-model="form.schedule_cron" class="input" placeholder="0 2 * * *">
         </div>
         <div class="modal-actions">
-          <button class="btn" @click="showCreate = false">取消</button>
-          <button class="btn btn-primary" @click="createSchedule">创建</button>
+          <button class="btn" @click="closeModal">取消</button>
+          <button class="btn btn-primary" @click="saveSchedule">{{ editingId ? '保存' : '创建' }}</button>
         </div>
       </div>
     </div>
@@ -100,7 +101,18 @@ const schedules = ref([])
 const results = ref([])
 const loading = ref(false)
 const showCreate = ref(false)
+const editingId = ref(null)
 const form = ref({ name: '', protocol: 'tcp', target_range: '', port: 22, schedule_cron: '0 2 * * *' })
+
+function resetForm() {
+  form.value = { name: '', protocol: 'tcp', target_range: '', port: 22, schedule_cron: '0 2 * * *' }
+}
+
+function closeModal() {
+  showCreate.value = false
+  editingId.value = null
+  resetForm()
+}
 
 function statusClass(s) {
   if (s === 'open' || s === 'reachable') return 'status-open'
@@ -123,13 +135,30 @@ async function loadResults() {
   } catch (e) { ElMessage.error('加载失败: ' + (e.message || e)) } finally { loading.value = false }
 }
 
-async function createSchedule() {
+async function saveSchedule() {
   try {
-    await request.post('/assets/api/discovery/schedules', form.value)
-    ElMessage.success('任务已创建')
-    showCreate.value = false
+    if (editingId.value) {
+      await request.put('/assets/api/discovery/schedules/' + editingId.value, form.value)
+      ElMessage.success('任务已更新')
+    } else {
+      await request.post('/assets/api/discovery/schedules', form.value)
+      ElMessage.success('任务已创建')
+    }
+    closeModal()
     loadSchedules()
-  } catch (e) { ElMessage.error('创建失败: ' + (e.message || e)) }
+  } catch (e) { ElMessage.error((editingId.value ? '更新' : '创建') + '失败: ' + (e.message || e)) }
+}
+
+function editSchedule(s) {
+  editingId.value = s.id
+  form.value = {
+    name: s.name || '',
+    protocol: s.protocol || 'tcp',
+    target_range: s.target_range || '',
+    port: s.port ?? 22,
+    schedule_cron: s.schedule_cron || '0 2 * * *',
+  }
+  showCreate.value = true
 }
 
 async function runNow(s) {

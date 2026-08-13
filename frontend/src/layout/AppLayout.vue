@@ -378,6 +378,12 @@
           <RagEvalView v-else-if="activeView === 'rag-eval'" />
           <AuditMatrixView v-else-if="activeView === 'audit-matrix'" />
           <SecurityAuditView v-else-if="activeView === 'security-audit'" />
+          <SecretsVaultView v-else-if="activeView === 'secret-vault'" />
+          <SkillsView v-else-if="activeView === 'skills'" />
+          <MarketplaceView v-else-if="activeView === 'skill-market'" />
+          <MultiClusterView v-else-if="activeView === 'multicluster'" />
+          <UpgradeJobsView v-else-if="activeView === 'upgrade-jobs'" />
+          <NetworkDevicesView v-else-if="activeView === 'network-devices'" />
           <SandboxView v-else-if="activeView === 'sandbox-overview'" />
           <AgentManageView v-else-if="activeView === 'agent-deploy'" />
           <AgentAutonomousView v-else-if="activeView === 'agent-autonomous'" />
@@ -511,6 +517,12 @@ const ContractCheckView = defineAsyncComponent(() => import('@/views/ContractChe
 const RagEvalView = defineAsyncComponent(() => import('@/views/RagEvalView.vue'))
 const AuditMatrixView = defineAsyncComponent(() => import('@/views/AuditMatrixView.vue'))
 const SecurityAuditView = defineAsyncComponent(() => import('@/views/SecurityAuditView.vue'))
+const SecretsVaultView = defineAsyncComponent(() => import('@/views/SecretsVaultView.vue'))
+const SkillsView = defineAsyncComponent(() => import('@/views/SkillsView.vue'))
+const MarketplaceView = defineAsyncComponent(() => import('@/views/MarketplaceView.vue'))
+const MultiClusterView = defineAsyncComponent(() => import('@/views/MultiClusterView.vue'))
+const UpgradeJobsView = defineAsyncComponent(() => import('@/views/UpgradeJobsView.vue'))
+const NetworkDevicesView = defineAsyncComponent(() => import('@/views/NetworkDevicesView.vue'))
 const SandboxView = defineAsyncComponent(() => import('@/views/SandboxView.vue'))
 const AgentManageView = defineAsyncComponent(() => import('@/views/AgentManageView.vue'))
 const AgentAutonomousView = defineAsyncComponent(() => import('@/views/AgentAutonomousView.vue'))

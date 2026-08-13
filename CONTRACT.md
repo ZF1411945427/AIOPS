@@ -2,7 +2,7 @@
 
 > **所有数据库表、前后端代码的字段命名必须以本文件为准。**
 > 新增/修改任何字段，必须先改本文件，再同步前后端代码。
-> 最后更新: 2026-07-19
+> 最后更新: 2026-08-13
 
 ---
 
@@ -1007,7 +1007,8 @@ ame | String(64) | - | 策略名 |
 | locked_commands | Text | "[]" | 禁止的命令黑名单（JSON 数组，支持正则） |
 | max_risk_level | String(16) | "critical" | 本策略允许的最大风险等级 |
 | max_actions_per_day | Integer | 0 | 本策略单日最大执行次数（0=继承全局） |
-| equire_second_approval | Boolean | false | 高危操作是否需要二级审批 |
+| 
+equire_second_approval | Boolean | false | 高危操作是否需要二级审批 |
 | is_enabled | Boolean | true | 策略是否启用 |
 | created_at | DateTime | now | |
 | updated_at | DateTime | now/onupdate | |
@@ -1021,18 +1022,21 @@ ame | String(64) | - | 策略名 |
 | ction_type | String(32) | "" | 动作类型（restart/clean/scale/script/run_command） |
 | 	ool_name | String(64) | "" | 调用的 MCP 工具名 |
 | sset_id | Integer | 0 | 目标资产 ID |
-| isk_level | String(16) | "medium" | 动作风险等级 |
+| 
+isk_level | String(16) | "medium" | 动作风险等级 |
 | mode | String(8) | "live" | 执行模式：dry_run / live |
 | payload | Text | "{}" | 动作参数（JSON） |
 | decision | String(16) | "allowed" | 决策：allowed / rejected / dry_run |
-| eject_reason | String(255) | "" | 拒绝原因 |
+| 
+eject_reason | String(255) | "" | 拒绝原因 |
 | pproved_by | Integer | 0 | 审批人 ID |
 | created_at | DateTime | now | |
 
 ### 9.4 约定
 
 - 所有 JSON 字段用 Text 列存 JSON 字符串，后端提供 get_xxx() 解析方法
-- 风险等级枚举：ead_only < dvisory < medium < high < critical（只升不降）
+- 风险等级枚举：
+ead_only < dvisory < medium < high < critical（只升不降）
 - 决策顺序：先查黑名单（blocked）→ 再查白名单（allowed）→ 再查风险等级 → 再查执行配额
 - 黑名单优先级高于白名单
 
@@ -1394,3 +1398,505 @@ draft → planned → running → succeeded → (post-verify → report)
 - 部署成功自动在 `data_sources` 表创建一行 `type='kubernetes'` 记录，`name` = 集群名称，
   `auth_config['kubeconfig']` = 采集到的 kubeconfig，`enabled=true`，`endpoint` = 首 master `https://<ip>:6443`
 - 该 DataSource 立即被 `k8s_monitor` / `k8s_resources` 消费（集群资源自动纳管）
+
+---
+
+## 第十四章：MCP 工具注册表装饰器元数据（2026-08-13 新增）
+
+> `app/services/tool_registry.py` + `app/services/mcp_registry.MCPToolDef` 为工具注册提供横切装饰器链
+> （对齐 Ongrid `tools/decorators`：audit / ratelimit / review_gate / timeout）。
+> 装饰器只写函数属性 `_tool_*`，`@register_mcp_tool` 读取并落入 `MCPToolDef`；`call_mcp_tool` 统一强制执行。
+
+### 14.1 MCPToolDef 元数据字段（内存态，非 DB 列）
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| `timeout_seconds` | int \| None | None(=30s 默认) | 工具级超时；`call_mcp_tool` 用独立线程+独立 session 执行并在超时后返回 `timeout:true` 错误，防 Agent 卡死 |
+| `ratelimit_per_minute` | int \| None | None(=不限) | 滑动窗口限流（进程内，按工具名隔离），超限返回 error |
+| `audit_enabled` | bool | False | 每次调用写一条 `AuditLog`（method='TOOL'，action='tool_execute'，path='tool://<name>'） |
+| `review_gate` | bool | False | 写操作审查门（write gate）：内部写工具本身 `expose_to_llm=False`，此标记供 reviewer 子代理二签 |
+
+### 14.2 装饰器用法（与 @register_mcp_tool 等价，可在其下叠加）
+
+```python
+@register_mcp_tool(name="xxx", ...)          # 方式A：直接传参数
+@tool_timeout(10)                            # 方式B：叠装饰器（在 @register_mcp_tool 之下）
+@tool_ratelimit(120)
+@tool_audit()
+def xxx(db=None, user_id=None, **kwargs): ...
+```
+
+已应用示例（当前实际值）：`query_metrics`(10s,120/min)、`query_knowledge_rag`(45s,60/min)、
+`propose_action`(10s,audit,review_gate)。
+
+### 14.3 工具执行超时行为契约
+
+- `call_mcp_tool(name, args, db, user_id, allow_internal, timeout_override)`
+- 超时路径在**独立线程 + 独立 DB session** 内执行 handler（SQLAlchemy Session 非线程安全，禁止跨线程共享调用方 session）
+- 超时返回 `{"status":"error","message":"...执行超时...", "timeout":true, "tool_name":name}`
+- Agent 循环把 timeout error 当普通工具结果回灌 LLM，由 LLM 决定重试/放弃
+
+---
+
+## 第十五章：智能体工作流告警自动触发契约（2026-08-13 新增）
+
+### 15.1 `agent_workflows` 触发字段
+
+| 字段名 | 当前 | 类型 | 说明 |
+|--------|------|------|------|
+| `trigger_type` | 已有 | String(32) | `manual` / `alert_auto`（告警自动触发）/ `chat` / `scheduled` |
+| `trigger_condition` | 已有 | Text(JSON) | 告警匹配条件，形如 `{"severity":"critical"}` 或 `{"metric_name":"cpu_usage"}`；空 `{}` = 匹配所有；支持 key：`severity`/`status`/`metric_name`/`rule_id`/`asset_id` |
+
+### 15.2 触发行为
+
+- `main.py background_loop` 周期调用 `agent_workflow_service.check_alert_triggers(db, lookback_minutes=10)`：
+  - 查询 `trigger_type='alert_auto'` 且 `enabled=true` 的工作流
+  - 匹配最近 10 分钟新告警（`Alert.created_at >= cutoff`，最多扫 200 条）
+  - **防重复**：同一告警对同一工作流只触发一次（按 `AgentWorkflowRun.inputs.alert_id` 历史去重）
+  - 触发时 `inputs={"alert_id": <id>, "alert": {id,rule_id,asset_id,metric_name,actual_value,severity,status,message,created_at}}`
+    `trigger_source="alert"`、`triggered_by="system"`
+- 触发后仍走 `start_workflow_run` 异步执行（后台线程独立 session），工作流节点照常 fan-out
+
+### 15.3 并行 fan-out 与恢复
+
+- 并发上限：`SystemConfig.key='workflow_max_concurrency'`（默认 4，范围 1~32）
+- `_advance_run` 每轮取所有依赖已满足的 pending 节点，`ThreadPoolExecutor` 并发执行（每节点独立 session）
+- 任一节点 `awaiting_confirm` → run 置 `awaiting_confirm` 暂停；确认后 `_advance_run` 续推
+- 重启恢复：启动时 `agent_workflow_service.resume_unfinished_runs(db)` 扫描 `running`/`awaiting_confirm` 的 run 续跑
+- ⚠️ 节点构造固定用 `AgentWorkflowNodeRun.run_config`（模型列名，勿用 `config`，历史 bug）
+
+### 15.4 cron 定时触发（B3，2026-08-13 扩展）
+
+| 字段名 | 约定 |
+|--------|------|
+| `trigger_type` | `cron`（定时调度） |
+| `trigger_condition` | `{"cron": "<5字段cron表达式>"}`，如 `{"cron": "0 8 * * *"}`；支持 `cron_expr` 别名 |
+| 触发源 | `AgentWorkflowRun.trigger_source="cron"`、`triggered_by="system"` |
+
+- `main.py background_loop` 周期调用 `workflow_cron_scheduler.check_cron_triggers(db)`：
+  - 遍历 `trigger_type='cron'` 且 `enabled=true` 的工作流
+  - croniter 判定当前分钟命中；防重复：该工作流最后一次 cron run 的 `started_at >= 当前分钟` 则跳过
+  - 非法表达式（<5 字段/空）跳过并 warning 日志
+- `inputs` 取自 `trigger_condition.inputs`（可选），供节点模板引用
+- API：`GET /agent-workflow/api/cron/next-runs`（未来计划）、`POST /agent-workflow/api/cron/preview`（body `{"cron":...}` 返回 5 次）
+
+### 15.5 notify / agent 节点（B5，2026-08-13 扩展）
+
+节点类型 `type` 新增 `notify`、`agent`（`NODE_EXECUTORS` 注册）。
+
+**notify 节点 `node_data`:**
+
+| 字段名 | 必填 | 说明 |
+|--------|------|------|
+| `channel` | ✅ | `NotificationChannel.name`（须 enabled） |
+| `recipient` | | chat_id/群会话ID；缺省取 channel_config.chat_id |
+| `title` / `content` | content 必填 | 支持 `{{ }}` Jinja 模板 |
+| `fallback_channel` | | 主渠道失败时的备用渠道名 |
+
+- 发送走 `im_chatops_service.reply_to_im(channel, chat_id, text)`（feishu/dingtalk/wecom webhook）
+- 失败返回 `status=failed` + `error`（不中断进程）
+
+**agent 节点 `node_data`:**
+
+| 字段名 | 必填 | 说明 |
+|--------|------|------|
+| `sub_agent_name` | | 子代理名；空=自动路由（`route_sub_agent`） |
+| `prompt` | ✅ | 任务文本，支持模板 |
+| `max_tokens` | | 覆盖 Provider 配置 |
+
+- 调用 `call_llm(provider, [system(子代理prompt), user(prompt)])`，输出 `{reply, sub_agent, system_prompt}`
+
+## 第十六章：LLM Reviewer 写操作审查门契约（2026-08-13 新增）
+
+### 16.1 判定规则
+
+- 入口：`app/services/reviewer_agent.py` `should_review(tool_name)`，命中任一即审查：
+  - 工具元数据 `review_gate=True`
+  - 工具 `risk_level` 为 `high` / `critical`
+- 审查时机：`confirm_pending_action`（agent_service）与 `confirm_workflow_node`（agent_workflow_service）在**用户确认后、执行前**调用 `review_action`
+- 审查器输出 JSON：`{"verdict": "approve"|"reject", "confidence": 0-100, "reason": "中文理由", "suggestions": [...]}`
+- `verdict=reject` → 阻断执行：PendingAction `status=failed`、工作流节点 `failed` 后 `_advance_run` 续推
+- 无 LLM / 异常 → **fail-open 放行**（保可用），但 `error` 字段标记原因
+
+### 16.2 `pending_actions` 新增字段
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `review_result` | Text | LLM reviewer 二签结果 JSON（verdict/confidence/reason/suggestions）；空串=未审查 |
+
+- 迁移：`app/main.py _MIGRATIONS['pending_actions']` 含 `review_result TEXT DEFAULT ''`，启动自动补列
+
+### 16.3 工具元数据（A2 装饰器契约补充）
+
+- `MCPToolDef` 增加 `review_gate` 字段；`propose_action` 已标记 `review_gate=True`
+- 高危/写操作建议显式 `review_gate=True`（否则按 risk_level 自动命中）
+
+## 第十七章：自动调查闭环契约（C1-C3，2026-08-13 新增）
+
+### 17.1 触发策略（C1 worker）
+
+- 入口：`app/services/auto_investigator.py` `auto_investigate_new_incidents`，注册于 `background_loop`（服务名 `auto_investigate`）
+- 触发条件（全部满足才 spawn worker）：
+  - `incidents.status = 'open'`
+  - `incidents.severity in ('critical', 'high')`
+  - `incidents.created_at` 在回溯窗口内（默认 30 分钟）
+  - `incidents.ai_rca_at` 为空（防重复标记，spawn 前置位）
+  - 无 `completed` 状态的 `investigation_reports`
+- 手动触发：`POST /incidents/api/{incident_id}/investigate` → 异步 `run_investigation_async(incident_id, db=db)`，worker 沿用当前库模式
+
+### 17.2 `investigation_reports` 表字段
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `id` | Integer PK | 报告 ID |
+| `incident_id` | FK→incidents | 关联故障单 |
+| `alert_id` | FK→alerts | 可空，预留单告警调查 |
+| `investigation_type` | String(32) | 默认 `root_cause` |
+| `title` | String(256) | 报告标题（取 incident.title） |
+| `status` | String(16) | `running` / `completed` / `failed`（三态） |
+| `report_data` | Text(JSON) | 结构化报告：`summary` / `root_cause` / `root_causes` / `evidence` / `timeline` / `recommendations` / `risks` / `action_needed` |
+| `report_md` | Text | 渲染后的 Markdown（IM/会话回写用） |
+| `evidence_summary` | Text | 证据摘要（前 5 条 evidence_texts JSON） |
+| `error_message` | Text | failed 时的错误原因 |
+| `created_at` / `completed_at` | DateTime | 创建/完成时间 |
+
+- 表由 `Base.metadata.create_all` 自动建（`InvestigationReport` 定义于 `app/models.py`），无需迁移条目
+
+### 17.3 结构化报告 JSON 字段（C2 LLM 二次抽取）
+
+- 来源：`rca_service.analyze_incident` 的 6 部分 Investigation Package（facts/timeline/candidate_causes/evidence/exclusions/next_steps）整理成 `evidence_package` 后交给二次 LLM
+- LLM 输出严格 JSON：`summary`(String)、`root_cause`(Dict)、`root_causes`(List[Dict]：rank/asset/confidence/reason)、`evidence`(List[String])、`timeline`(String)、`recommendations`(List[Dict]：action/priority)、`risks`(List)、`action_needed`(Bool)
+- 无 Provider / LLM 解析失败 → `_fallback_report` 降级（基于算法包，`_fallback` 字段标记原因），**不产生空壳报告**
+
+### 17.4 回写通道（C3）
+
+- 聊天会话：复用标题 `[自动调查] {incident.title}` 的 ChatSession（不存在则创建，归属 admin），写入 `message_type=analysis` 的 assistant 消息，正文为 `**自动调查报告（故障 #{id}）**\n\n{report_md}`
+- IM 渠道：仅 `notification_channels.bidirectional=True AND enabled=True` 的渠道，取 `channel_config.chat_id`，调用 `im_chatops_service.reply_to_im(channel, chat_id, report_md[:3900])`；无 chat_id 跳过、发送失败仅记日志不影响主流程
+
+### 17.5 对外 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/incidents/api/reports/investigation?incident_id=&limit=` | 报告列表 |
+| GET | `/incidents/api/reports/investigation/{report_id}` | 报告详情（含完整 report_data/report_md） |
+| POST | `/incidents/api/{incident_id}/investigate` | 手动触发异步调查 |
+
+---
+
+## 第十八章：凭据保险库（Secrets Vault）契约
+
+> 2026-08-13 新增（F3）。集中加密存储连接凭据，数据源/连接配置只存 `{{secret:name}}` 引用，运行时才解密注入。
+
+### 18.1 表 `secret_vaults`（`SecretVault` 模型，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| name | String(128) unique | 引用名（`{{secret:<name>}}` 中的 name），不允许含 `{`/`}`/空白 |
+| description | String(256) | 用途说明 |
+| value_type | String(32) | `password`/`token`/`api_key`/`private_key`/`custom` |
+| scope | String(64) | `global`/`data_source`/`asset`（默认 `global`，仅作分组语义，不做硬约束） |
+| secret_value_encrypted | Text | **Fernet 加密密文**（`VAULT_ENCRYPT_SEED` 派生 key），绝不存明文 |
+| created_by | Integer nullable | 创建人 user_id |
+| created_at / updated_at | DateTime | 时间戳 |
+
+### 18.2 加密与掩码规范
+
+- 加密复用 AIProvider 的 Fernet 方案：`base64.urlsafe_b64encode(sha256(VAULT_ENCRYPT_SEED).digest())`，新增 `app/config.py` 的 `VAULT_ENCRYPT_SEED`（环境变量 `AIOPS_VAULT_SEED`）
+- 列表/详情接口**一律返回掩码值**：`value_masked = "***"` + `has_value` 布尔标记；解密只在服务内部（引用注入、`/resolve` 测试接口）
+- 创建/更新接口 `secret_value` 为空 ⇒ 不更新密文（沿用 第五章 空值=不更新 规则）
+
+### 18.3 引用注入规范（DataSource `auth_config` 集成）
+
+- 格式：`{{secret:<name>}}`，可出现在 `auth_config` JSON 的任意字段值（含 ssh_password/k8s_token/db_password 等敏感字段），也支持嵌套进字符串（如 URL 内）
+- 解析时机：**使用点**（`datasource_service.test_source` / `scrape_source` 各分支解析 `auth_config` 之后），由 `secret_vault.resolve_secret_refs(cfg, db)` 递归替换
+- 未找到引用名 ⇒ 保留原占位符不动，调用方照常使用（fail-open，避免连接报错信息泄露）
+- `_SENSITIVE_AUTH_KEYS` 掩码规则不变：`auth_config` 中存的是 `{{secret:name}}` 引用而非真实值，前端显示 `***` 天然成立；保存时合并逻辑（空值=不更新）对引用字符串同样适用
+
+### 18.4 对外 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/vault/secrets` | 凭据列表（掩码 + has_value） |
+| POST | `/api/vault/secrets` | 创建（name/description/value_type/scope/secret_value） |
+| PUT | `/api/vault/secrets/{id}` | 更新（secret_value 空 = 不更新） |
+| DELETE | `/api/vault/secrets/{id}` | 删除 |
+| GET | `/api/vault/secrets/{id}` | 详情（掩码） |
+| POST | `/api/vault/secrets/resolve` | 测试引用解析：传入任意 dict/str，返回替换后的结果 |
+| GET | `/api/vault/references` | 扫描 `data_sources.auth_config` 中所有 `{{secret:name}}` 引用（含失效引用标记） |
+
+---
+
+## 第十九章：技能体系（SKILL.md + 注册表 + 市场）契约
+
+> 2026-08-13 新增（F1/F2）。技能 = 可执行的 SKILL.md 指令集（frontmatter 元数据 + Markdown 指令正文），加载进注册表后可被 Agent 通过 MCP 工具调用；市场做 zip 打包私服分发。
+
+### 19.1 SKILL.md 规范
+
+- 存放目录：内置技能 `skills/<name>/SKILL.md`（随仓库分发）；导入/市场技能入库（`skills` 表），不落盘
+- frontmatter（YAML，`---` 包裹，必须字段 `name`）：`name`、`description`、`version`、`author`、`license`、`category`、`risk_level`(`read_only`/`interactive`/`danger`)、`keywords`(JSON list)、`tools_required`(JSON list，声明依赖的 MCP 工具名)
+- 正文 = Markdown 操作指令，供 LLM 阅读后按步骤执行（配合 `tools_required` 调工具）
+- 解析失败 / 缺 `name` ⇒ 跳过该技能并记日志，不影响其他技能加载
+
+### 19.2 表 `skills`（`Skill` 模型，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| name | String(128) unique | 技能名（frontmatter.name），`use_skill` 的入参名 |
+| description | String(512) | frontmatter.description |
+| version / author / license | String | 版本 / 作者 / 许可 |
+| category | String(64) | 分类（diagnosis/remediation/inspection/…） |
+| risk_level | String(32) | `read_only` / `interactive` / `danger` |
+| keywords | Text | JSON list |
+| tools_required | Text | JSON list（依赖 MCP 工具名） |
+| content | Text | SKILL.md 全文（frontmatter + 正文） |
+| source | String(32) | `builtin`(skills/ 目录) / `upload`(JSON 安装) / `marketplace`(zip 导入) |
+| file_path | String(512) | builtin 相对路径，其余为空 |
+| enabled | Boolean | 默认 True；false 时不出现在 Agent 工具清单 |
+| usage_count | Integer | 被 `use_skill` 调用次数（审计计数） |
+| created_by / created_at / updated_at | | 创建人 / 时间戳 |
+
+### 19.3 表 `skill_executions`（`SkillExecution` 模型，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| skill_id | Integer | 关联 skills.id |
+| skill_name | String(128) | 冗余技能名 |
+| tool | String(64) | 触发来源：`use_skill`(Agent) / `manual`(页面按钮) |
+| status | String(16) | `success` / `failed` |
+| input_summary | Text | 入参摘要（截断 500） |
+| output_summary | Text | 输出摘要（截断 2000） |
+| duration_ms | Integer | 执行耗时 |
+| executed_by | Integer nullable | 用户 id（manual 时有值） |
+| created_at | DateTime | 执行时间 |
+
+### 19.4 注册表 / Agent 集成
+
+- `app/services/skill_registry.py`：`scan_builtin_skills(db)` 启动时扫描 `skills/**/SKILL.md` 增量入库（已有 name 不覆盖）；`list_skills`/`get_skill`/`create_skill`/`update_skill`/`delete_skill`/`record_execution`/`list_executions`/`export_package`(zip)/`import_package`(zip)
+- 内置技能「卸载」= 置 `enabled=False`（删除后重启会被 scan 重新加入）；导入/市场技能删除直接删行
+- MCP 工具（注册于 `skill_mcp_tools.py`，随 mcp_tools 导入生效）：
+  - `list_skills`(read_only)：列出所有 enabled 技能（name/description/category）
+  - `use_skill`(read_only)：入参 `name`+`input`，返回 SKILL.md 指令正文供 LLM 执行；每次调用记录 `skill_executions` 审计 + `skills.usage_count+1`；技能不存在/已禁用返回错误
+- 市场 `app/routers/marketplace.py` + `marketplace/packages/*.zip` 私服目录：publish(库→zip)/install(zip→库)/list/delete；zip 内为单个 `SKILL.md`（frontmatter 即 manifest）
+
+### 19.5 对外 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/skills` | 技能列表（?keyword=） |
+| GET | `/api/skills/{id}` | 详情（含 content） |
+| POST | `/api/skills` | 创建/安装（JSON 含 content） |
+| PUT | `/api/skills/{id}` | 更新（enabled/description/…） |
+| DELETE | `/api/skills/{id}` | 卸载（内置=禁用） |
+| POST | `/api/skills/{id}/run` | 手动执行（写审计记录） |
+| GET | `/api/skills/executions` | 执行审计列表 |
+| GET | `/api/skills/{id}/export` | 导出技能包 zip |
+| POST | `/api/skills/import` | 上传 zip 导入安装 |
+| GET | `/api/marketplace/packages` | 市场包列表 |
+| POST | `/api/marketplace/publish` | 发布技能到市场（{skill_id}） |
+| POST | `/api/marketplace/install` | 从市场安装（{package}） |
+| DELETE | `/api/marketplace/packages/{package}` | 删除市场包 |
+
+---
+
+## 第二十章：K8s 多集群 data plane + edge 升级协作器契约
+
+> 2026-08-13 新增（F5）。对标 Ongrid `controller/node 双角色 + edge upgrade_job`（状态机+批次+回滚）。核心：① `k8s_clusters` 注册表把多个 K8s `DataSource(type='kubernetes')` 聚合成命名集群，各自独立 telemetry 通道；② `k8s_upgrade_jobs`+`k8s_upgrade_steps` 持久化升级协调器，批量滚动 edge 代理版本、逐批 verify、失败回滚。
+
+### 20.1 表 `k8s_clusters`（`K8sCluster` 模型，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| name | String(128) unique | 集群名 |
+| role | String(16) | `controller` / `node`（双角色） |
+| datasource_id | Integer nullable | 关联 `data_sources.id`（type=kubernetes） |
+| data_plane_status | String(16) | `active` / `standby` / `error`（独立遥测通道状态） |
+| telemetry_channel | String(64) | 该集群独立 telemetry 通道名（默认 `<name>.telemetry`） |
+| namespace_scope | String(128) | 命名空间范围（空=全集群） |
+| target_version | String(32) | 升级目标 agent 版本 |
+| agent_version | String(32) | 当前 agent 版本 |
+| last_check_at | DateTime | 最近连通性检查 |
+| created_at / updated_at | | 时间戳 |
+
+### 20.2 表 `k8s_upgrade_jobs`（`K8sUpgradeJob`，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| name | String(128) | 升级任务名 |
+| cluster_id | Integer nullable | 关联 k8s_clusters.id |
+| from_version | String(32) | 当前版本 |
+| to_version | String(32) | 目标版本 |
+| status | String(24) | `pending`/`running`/`paused`/`completed`/`failed`/`rolled_back` |
+| strategy | String(16) | `all_at_once` / `batch` |
+| batch_size | Integer | 每批 agent 数（batch 策略） |
+| overall_progress | Integer | 0-100 进度 |
+| log_json | Text | 执行日志（JSON list） |
+| created_by / created_at / updated_at | | 创建人/时间戳 |
+
+### 20.3 表 `k8s_upgrade_steps`（`K8sUpgradeStep`，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| job_id | Integer | 关联 k8s_upgrade_jobs.id |
+| step_order | Integer | 批内顺序 |
+| batch_no | Integer | 批次号 |
+| agent_id | String(64) | edge agent_id（edge_sessions.agent_id） |
+| hostname | String(128) | 目标主机名 |
+| action | String(16) | `upgrade` / `verify` / `rollback` |
+| status | String(16) | `pending`/`running`/`success`/`failed`/`skipped` |
+| output | Text | 执行输出 |
+| duration_ms | Integer | 耗时 |
+| created_at | DateTime | |
+
+### 20.4 升级协调器语义
+- 状态机：`pending → running →（逐批 running → completed）`；任一步升级失败 → 自动触发同批 `rollback` → `failed`；手动 pause 可中断。
+- `verify`：升级某 agent 后对 `edge_sessions.agent_version` 断言 == `to_version`（失败视为该步失败）。
+- 幂等续传：job/steps 全部落库，重启后按 status=running 的 job 可恢复（当前版本不自动续跑，提供查询+手动继续）。
+- 内置角色语义：cluster.role=controller 的 agent 先升级（批次单独），再 node。
+
+### 20.5 对外 API
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/k8s-clusters` | 多集群列表（含独立遥测汇总） |
+| POST | `/api/k8s-clusters` | 注册集群（name/role/datasource_id/...） |
+| PUT | `/api/k8s-clusters/{id}` | 更新（role/data_plane_status/target_version/...） |
+| DELETE | `/api/k8s-clusters/{id}` | 删除集群 |
+| GET | `/api/k8s-clusters/{id}/telemetry` | 单集群独立 telemetry（events/资产汇总） |
+| GET | `/api/upgrade-jobs` | 升级任务列表 |
+| POST | `/api/upgrade-jobs` | 创建升级任务（to_version/strategy/batch_size/cluster_id/agent_id 列表） |
+| GET | `/api/upgrade-jobs/{id}` | 任务详情（含 steps） |
+| POST | `/api/upgrade-jobs/{id}/run` | 启动/继续执行（同步跑完批次，便于测试与查看） |
+| POST | `/api/upgrade-jobs/{id}/pause` | 暂停 |
+| DELETE | `/api/upgrade-jobs/{id}` | 删除任务 |
+
+---
+
+## 第二十一章：网络设备管理契约
+
+> 2026-08-13 新增（F6）。对标 Ongrid 网络设备管理：SNMP 校验/邻居发现/接口轮询/主机-网络设备链路映射。SNMP 客户端为**纯 Python UDP 实现**（无外部依赖，支持 v1/v2c GET/WALK），并内置 **mock 模式**（`AIOPS_SNMP_MOCK=1` 或设备不可达时）用于开发/测试。
+
+### 21.1 表 `network_devices`（`NetworkDevice`，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| asset_id | Integer nullable | 关联 assets.id（可选） |
+| name | String(128) | 设备名 |
+| ip | String(64) | 管理 IP |
+| device_type | String(16) | `switch`/`router`/`firewall`/`ap`/`other` |
+| vendor | String(64) | 厂商（sysObjectID 推断） |
+| model | String(128) | 型号 |
+| snmp_version | String(8) | `v1`/`v2c` |
+| community | String(128) | read community |
+| port | Integer | SNMP 端口（默认 161） |
+| status | String(16) | `unreachable`/`ok`/`error` |
+| last_poll_at | DateTime | 最近轮询 |
+| created_by / created_at / updated_at | | |
+
+### 21.2 表 `network_interfaces`（`NetworkInterface`，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| device_id | Integer | 关联 network_devices.id |
+| if_index | Integer | ifIndex |
+| name | String(64) | ifDescr |
+| type | Integer | ifType |
+| mac | String(32) | ifPhysAddress |
+| admin_status | Integer | 1=up 2=down |
+| oper_status | Integer | 1=up 2=down |
+| speed | BigInt | ifSpeed |
+| in_octets / out_octets | BigInt | 累计字节计数 |
+| in_errors / out_errors | BigInt | 错误计数 |
+| last_poll_at | DateTime | |
+
+### 21.3 表 `network_neighbors`（`NetworkNeighbor`，create_all 自动建）
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | Integer PK | 自增 |
+| device_id | Integer | 关联 network_devices.id |
+| local_interface | String(64) | 本端接口 |
+| neighbor_device | String(128) | 邻居设备名/IP |
+| neighbor_port | String(64) | 邻居端口 |
+| proto | String(8) | `lldp`/`cdp` |
+| last_seen_at | DateTime | |
+
+### 21.4 语义
+- `validate_snmp`：完整连通校验（sysDescr/uptime），落 `status`。
+- `poll_interfaces`：IF-MIB 轮询接口表，UDP+速率推算（前后两次 octets 差/时长），写 `network_interfaces`。
+- `discover_neighbors`：LLDP-MIB（.1.0.8802.1.1.2）或 CDP（.1.3.6.1.4.1.9.9.23）邻居发现，写 `network_neighbors`。
+- `map_host_links`：用 switch 邻居 + 主机 MAC（asset mac / 邻居表）反查主机→交换机端口映射。
+- mock 模式：SNMP 不可达且 `AIOPS_SNMP_MOCK=1` 时生成确定性假数据，保证流程端到端可测。
+
+### 21.5 对外 API
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/network/devices` | 设备列表 |
+| POST | `/api/network/devices` | 添加设备（name/ip/device_type/snmp_*） |
+| GET | `/api/network/devices/{id}` | 设备详情（含接口/邻居） |
+| PUT | `/api/network/devices/{id}` | 更新 |
+| DELETE | `/api/network/devices/{id}` | 删除 |
+| POST | `/api/network/devices/{id}/validate` | SNMP 连通校验 |
+| POST | `/api/network/devices/{id}/discover` | 邻居发现 |
+| POST | `/api/network/devices/{id}/poll` | 接口轮询 |
+| POST | `/api/network/devices/map-links` | 主机-交换机端口映射（body: host_ip） |
+
+---
+
+## 第二十二章：类型化告警规则、外部 MCP、代码知识库、RCA 算法、可观测性 契约
+
+> 2026-08-14 新增（G1 / P1-5 / P2-3 / P2-5 / P3-2 / D2 / D3 / G2 相关）。
+
+### 22.1 告警规则类型化（G1）
+
+- `alert_rules` 表新增两列（`_MIGRATIONS` 幂等 ALTER）：
+  - `kind VARCHAR(24) DEFAULT 'metric_raw'`：`metric_raw` / `anomaly` / `forecast` / `burn_rate`
+  - `config_json TEXT DEFAULT '{}'`：各 kind 参数（anomaly → z_score；forecast → horizon_points；burn_rate → window_hours/error_budget）
+- 评估分发：`alert_service.check_rules` 对每条 rule 调 `_eval_rule_by_kind(rule, latest, db)`，返回 `(triggered, actual_value, message)`。
+  - `metric_raw`：原静态阈值逻辑（condition+threshold）
+  - `anomaly`：基线 mean±z·std，触发=当前值超基线（`z_score` 默认取自 threshold）
+  - `forecast`：线性外推未来 `horizon_points` 点，投影值穿越阈值即触发
+  - `burn_rate`：错误预算消耗速率 burn_rate = 消耗/(预算秒数)，触发=burn_rate 超 threshold 倍
+- 规则 CRUD 增加 `kind`/`config_json` 透传与校验；列表返回 `kind`+`config`+`kinds`。
+- 前端：AlertRulesView 表加「类型」列 + 表单 kind 下拉（四种）。
+
+### 22.2 外部 MCP 服务器（P1-5）
+
+- 表：`mcp_servers`（既有，空壳补齐）。新增 `app/services/mcp_external.py`：
+  - `_rpc_call`：HTTP JSON-RPC（MCP `tools/list` / `tools/call`），支持 `auth_config.api_key`（Bearer），零外部依赖
+  - `fetch_external_manifest(server)`：拉外部工具清单，工具名以 `<sever>:<tool>` 前缀隔离
+  - `reload_external_tools(db)`：清空并重载所有启用外部工具到 `mcp_registry`（启动 + `/api/mcp/reload` 及 CRUD 后调用）
+- `mcp_registry` 增加外部工具钩子：`_EXTERNAL_TOOLS`/`_EXTERNAL_TARGET`，`get_mcp_manifest()` 合并、`call_mcp_tool()` 未命中内置时回退外部。
+- API：`/api/mcp`（CRUD + `/tools` + `/{id}/test` + `/reload`）。安全：外部工具默认 `risk_level=read_only` 只读视角，`api_key` 存 `auth_config` 掩码返回。
+
+### 22.3 代码/git 知识库（P2-5）
+
+- 表 `git_repos`：name(url 唯一)/url/branch/local_path/status(pending|cloning|ready|error)/file_count/last_sync_at/error_msg。
+- 目录：`<PROJECT_ROOT>/repo_cache/<name>`（git clone --depth 1）。
+- `git_knowledge_service.sync_repo`：clone/pull + 遍历可索引扩展名(.py/.js/.go/.md/... 跳过 .git/node_modules/dist)写入 `kb_documents`（`source_type="git"`，`file_path="__git__/<name>/<rel>"`），增量更新/删除失效文件。
+- `search_code(query, repo, limit)`：对 ready 仓库内容 grep，返回 `{repo, path, line, snippet}`。
+- API `/api/git-knowledge/*`：repos CRUD + `/sync` + `/search`。MCP 工具 `search_code`（read_only, category=knowledge）供 Agent 使用。
+
+### 22.4 RCA 算法实装（P3-2，log_rca / idice）
+
+- `app/services/rca_algos_service.py`：
+  - `run_log_rca(db, asset_id, hours, keyword)`：基于指标 z 分异常 + 资产关系（`asset_relations.parent_id/child_id/relation_type`）产出异常指标/相关资产/根因假设/建议
+  - `run_idice(db, asset_id, target_metric, hours)`：目标指标 vs 各候选指标皮尔逊相关 + 共同偏离 → 归因排序
+- 路由：`GET /log-rca/analyze/{asset_id}`、`GET /idice/attribute/{asset_id}`（原纯 stub 已实装，status 返回 version=real）。
+
+### 22.5 命令策略沙箱（P2-3）接线
+
+- `evaluate_request(action_type, tool_name, asset_id, command, risk_level, session_id, user_id, role_id, db)` 已在 sandbox_service（全局开关关闭=放行，不改变现有行为）。
+- 接线点：`script_exec.py` 执行前 + `mcp_tools.py` 的 `execute_run_command` / `execute_run_script`（沙盒异常不阻断，回归安全）。
+
+### 22.6 可观测性（D2 / D3）
+
+- `/healthz`、`/readyz` 已存在；新增 `GET /metrics`（Prometheus text/plain exposition，公开）：`aiops_healthz`、`aiops_mcp_tool_count`、`aiops_alert_rule_count`、`aiops_skill_count`、`aiops_network_device_count`、`aiops_app_up`、`aiops_db_alive`。
+- 日志 trace_id：`logger.py` 格式含 `{extra[trace_id]}` + `AIOPS_LOG_JSON=1` 输出 JSON 行；`TraceIdMiddleware`（最外层）每个请求生成/透传 `x-request-id` 并 `logger.contextualize(trace_id=...)`，实现全链路串联。
+- embedding（G2）：`embedding_service.py` 默认 `bge-m3` 本地 BGE-small-zh-v1.5（`models/bge-small-zh-v1.5`）离线可用，已满足对 ONNX 的目标（部署如需 ONNX 可另导出）。

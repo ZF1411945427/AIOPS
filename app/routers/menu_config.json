@@ -717,13 +717,55 @@
             "icon": "CircleCheck",
             "path": "/audit-matrix"
           },
-          {
-            "key": "security-audit",
-            "label": "安全自查",
-            "type": "vue",
-            "icon": "Lock",
-            "path": "/security-audit"
-          },
+    {
+     "key": "security-audit",
+     "label": "安全自查",
+     "type": "vue",
+     "icon": "Lock",
+     "path": "/security-audit"
+    },
+    {
+     "key": "secret-vault",
+     "label": "凭据保险库",
+     "type": "vue",
+     "icon": "Lock",
+     "path": "/secret-vault"
+    },
+    {
+     "key": "skills",
+     "label": "技能库",
+     "type": "vue",
+     "icon": "MagicStick",
+     "path": "/skills"
+    },
+    {
+     "key": "skill-market",
+     "label": "技能市场",
+     "type": "vue",
+     "icon": "Shop",
+     "path": "/skill-market"
+    },
+    {
+     "key": "multicluster",
+     "label": "多集群管理",
+     "type": "vue",
+     "icon": "Coin",
+     "path": "/multicluster"
+    },
+    {
+     "key": "upgrade-jobs",
+     "label": "Edge 升级",
+     "type": "vue",
+     "icon": "Top",
+     "path": "/upgrade-jobs"
+    },
+    {
+     "key": "network-devices",
+     "label": "网络设备",
+     "type": "vue",
+     "icon": "Connection",
+     "path": "/network-devices"
+    },
           {
             "key": "tenant-management",
             "label": "租户管理",

@@ -8,7 +8,8 @@ import json
 import re
 import threading
 import traceback
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.database import get_session_for, get_db_mode
 from app.models import (
     AgentWorkflow, AgentWorkflowRun, AgentWorkflowNodeRun,
-    AIProvider, ChatSession, PendingAction, WorkflowAuditLog,
+    AIProvider, ChatSession, PendingAction, SystemConfig, WorkflowAuditLog,
 )
 from app.services.mcp_registry import call_mcp_tool, get_internal_tools
 from app.services.mcp_tools import _get_db  # 复用 db helper
@@ -70,6 +71,7 @@ def _serialize_workflow(wf: AgentWorkflow) -> Dict:
         "enabled": bool(wf.enabled),
         "published": bool(wf.published),
         "trigger_type": wf.trigger_type or "manual",
+        "trigger_condition": wf.get_trigger_condition(),
         "created_at": str(wf.created_at) if wf.created_at else None,
         "updated_at": str(wf.updated_at) if wf.updated_at else None,
     }
@@ -472,6 +474,115 @@ def _exec_http(node_data: Dict, runtime_context: Dict, db: Session) -> Dict:
         return {"output": {}, "status": "failed", "error": f"HTTP 请求异常: {e}"}
 
 
+def _exec_notify(node_data: Dict, runtime_context: Dict, db: Session) -> Dict:
+    """B5: notify 节点——通过 IM 渠道（飞书/钉钉/企微）发送通知。
+
+    node_data:
+      channel:    NotificationChannel.name（必填）
+      recipient:  chat_id / 群会话 ID（可选，默认取渠道记录的第一个会话或空）
+      title:      标题（模板渲染）
+      content:    正文（模板渲染）
+      fallback_channel: 主渠道发送失败时备选渠道名（可选）
+    """
+    from app.models import NotificationChannel
+    from app.services.im_chatops_service import reply_to_im
+
+    channel_name = _render_value(node_data.get("channel", ""), runtime_context)
+    recipient = _render_value(node_data.get("recipient", ""), runtime_context)
+    title = _render_value(node_data.get("title", ""), runtime_context)
+    content = _render_value(node_data.get("content", ""), runtime_context)
+    fallback_channel = _render_value(node_data.get("fallback_channel", ""), runtime_context)
+
+    if not channel_name:
+        return {"output": {}, "status": "failed", "error": "未指定通知渠道 channel"}
+
+    text = f"{title}\n{content}".strip() if title else str(content or "").strip()
+    if not text:
+        return {"output": {}, "status": "failed", "error": "通知内容为空"}
+
+    channel = db.query(NotificationChannel).filter(
+        NotificationChannel.name == channel_name, NotificationChannel.enabled == True
+    ).first()
+    if not channel:
+        return {"output": {}, "status": "failed", "error": f"通知渠道「{channel_name}」不存在或未启用"}
+
+    chat_id = recipient
+    if not chat_id:
+        chat_id = channel.channel_config and json.loads(channel.channel_config).get("chat_id", "") or ""
+    if not chat_id:
+        chat_id = ""
+
+    ok, resp = reply_to_im(channel, chat_id, text)
+    if not ok and fallback_channel:
+        fb = db.query(NotificationChannel).filter(
+            NotificationChannel.name == fallback_channel, NotificationChannel.enabled == True
+        ).first()
+        if fb:
+            ok2, resp2 = reply_to_im(fb, chat_id, text)
+            if ok2:
+                return {"output": {"channel": fallback_channel, "chat_id": chat_id, "sent": True}, "status": "completed"}
+            return {"output": {"channel": channel_name, "chat_id": chat_id, "sent": False, "error": resp, "fallback_error": resp2}, "status": "failed", "error": f"通知发送失败(含备用渠道): {resp2}"}
+    if not ok:
+        return {"output": {"channel": channel_name, "chat_id": chat_id, "sent": False, "error": resp}, "status": "failed", "error": f"通知发送失败: {resp}"}
+
+    return {"output": {"channel": channel_name, "chat_id": chat_id, "sent": True}, "status": "completed"}
+
+
+def _exec_agent(node_data: Dict, runtime_context: Dict, db: Session) -> Dict:
+    """B5: agent 节点——把子代理（persona）嵌入工作流执行。
+
+    node_data:
+      sub_agent_name: 子代理名（默认自动路由，对应系统里的 sub-agent）
+      prompt:         发给子代理的任务文本（模板渲染）
+      max_tokens:     可选，限制生成长度
+    返回: {output: {reply, sub_agent}, status}
+    """
+    from app.models import AIProvider
+    from app.services.agent_service import call_llm
+    from app.services.sub_agent_service import route_sub_agent, get_sub_agent_prompt, get_sub_agent
+
+    sub_agent_name = _render_value(node_data.get("sub_agent_name", ""), runtime_context)
+    prompt = _render_value(node_data.get("prompt", ""), runtime_context)
+    max_tokens = node_data.get("max_tokens")
+
+    if not prompt:
+        return {"output": {}, "status": "failed", "error": "agent 节点未指定 prompt"}
+
+    # 路由/解析子代理
+    sa = None
+    if sub_agent_name:
+        sa = get_sub_agent(db, sub_agent_name)
+    else:
+        routed = route_sub_agent(prompt, db)
+        sa = get_sub_agent(db, routed) if routed else None
+
+    system_prompt = get_sub_agent_prompt(sa)
+
+    provider = db.query(AIProvider).filter(AIProvider.is_enabled == True).first()
+    if not provider:
+        return {"output": {}, "status": "failed", "error": "无可用 LLM Provider"}
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        resp = call_llm(provider, messages, timeout_override=60,
+                        max_tokens_override=int(max_tokens) if max_tokens else None)
+        if "error" in resp:
+            return {"output": {}, "status": "failed", "error": f"子代理调用失败: {resp['error']}"}
+        text = ""
+        choices = resp.get("choices", [])
+        if choices:
+            msg = choices[0].get("message", {})
+            text = msg.get("content", "") or ""
+        if isinstance(text, list):
+            text = "".join(t.get("text", "") for t in text if isinstance(t, dict))
+        return {"output": {"reply": text.strip(), "sub_agent": sa.name if sa else "default", "system_prompt": system_prompt[:200]}, "status": "completed"}
+    except Exception as e:
+        return {"output": {}, "status": "failed", "error": f"子代理调用异常: {e}"}
+
+
 NODE_EXECUTORS = {
     "start": _exec_start,
     "end": _exec_end,
@@ -481,6 +592,8 @@ NODE_EXECUTORS = {
     "condition": _exec_condition,
     "code": _exec_code,
     "http": _exec_http,
+    "notify": _exec_notify,
+    "agent": _exec_agent,
 }
 
 
@@ -609,7 +722,7 @@ def start_workflow_run(
             node_id=n.get("id", ""),
             node_type=n.get("type", ""),
             node_name=n.get("name", n.get("data", {}).get("label", "")),
-            config=json.dumps(n.get("data", {}), ensure_ascii=False),
+            run_config=json.dumps(n.get("data", {}), ensure_ascii=False),
             status=AgentWorkflowNodeRun.STATUS_PENDING,
         )
         db.add(nr)
@@ -648,8 +761,227 @@ def start_workflow_run(
     return run, ""
 
 
+# ─── B1: 告警自动触发 ─────────────────────────────────────────
+def _alert_matches_condition(alert: Any, condition: Dict) -> bool:
+    """按 trigger_condition 匹配告警。支持字段：severity/status/metric_name/rule_id/asset_id。
+    空条件 {} 匹配所有告警。condition 形如 {"severity": "critical"} 或 {"metric_name": "cpu_usage"}。
+    """
+    if not condition:
+        return True
+    for key, val in condition.items():
+        if val is None or val == "":
+            continue
+        if key == "severity" and alert.severity != val:
+            return False
+        if key == "status" and alert.status != val:
+            return False
+        if key == "metric_name" and alert.metric_name != val:
+            return False
+        if key == "rule_id" and (alert.rule_id is None or alert.rule_id != int(val)):
+            return False
+        if key == "asset_id" and (alert.asset_id is None or alert.asset_id != int(val)):
+            return False
+    return True
+
+
+def check_alert_triggers(db: Session, lookback_minutes: int = 10, max_workflows: int = 20) -> List[Dict]:
+    """后台轮询：新告警 → 匹配 trigger_type=alert_auto 的工作流 → 自动拉起。
+
+    防重复：同一告警对同一工作流只触发一次（查 AgentWorkflowRun 历史，按 inputs.alert_id 去重）。
+    由 main.py background_loop 周期调用。
+    """
+    from app.logger import logger
+    from app.models import Alert
+
+    wfs = db.query(AgentWorkflow).filter(
+        AgentWorkflow.trigger_type == "alert_auto",
+        AgentWorkflow.enabled == True,
+    ).order_by(AgentWorkflow.id.desc()).limit(max_workflows).all()
+    if not wfs:
+        return []
+
+    cutoff = datetime.now() - timedelta(minutes=lookback_minutes)
+    recent_alerts = db.query(Alert).filter(Alert.created_at >= cutoff).order_by(Alert.created_at.desc()).limit(200).all()
+    if not recent_alerts:
+        return []
+
+    triggered = []
+    for wf in wfs:
+        condition = wf.get_trigger_condition() or {}
+        # 历史已触发的 alert_id 集合（按 inputs.alert_id 去重）
+        history_runs = db.query(AgentWorkflowRun).filter(
+            AgentWorkflowRun.workflow_id == wf.id,
+            AgentWorkflowRun.trigger_source == "alert",
+        ).order_by(AgentWorkflowRun.id.desc()).limit(500).all()
+        used_alert_ids = set()
+        for hr in history_runs:
+            try:
+                aid = hr.get_inputs().get("alert_id")
+                if aid:
+                    used_alert_ids.add(int(aid))
+            except Exception:
+                continue
+
+        for a in recent_alerts:
+            if a.id in used_alert_ids:
+                continue
+            if not _alert_matches_condition(a, condition):
+                continue
+            inputs = {
+                "alert_id": a.id,
+                "alert": {
+                    "id": a.id, "rule_id": a.rule_id, "asset_id": a.asset_id,
+                    "metric_name": a.metric_name, "actual_value": a.actual_value,
+                    "severity": a.severity, "status": a.status, "message": a.message,
+                    "created_at": str(a.created_at) if a.created_at else None,
+                },
+            }
+            try:
+                run, err = start_workflow_run(
+                    db, wf.id, inputs, trigger_source="alert", triggered_by="system"
+                )
+                if run:
+                    used_alert_ids.add(a.id)
+                    triggered.append({"workflow_id": wf.id, "workflow_name": wf.name, "run_id": run.id, "alert_id": a.id})
+                    logger.info(f"[workflow-alert] 告警#{a.id} 自动触发工作流「{wf.name}」 run#{run.id}")
+                elif err:
+                    logger.warning(f"[workflow-alert] 工作流「{wf.name}」触发失败: {err}")
+            except Exception as e:
+                logger.warning(f"[workflow-alert] 工作流「{wf.name}」触发异常: {e}")
+    return triggered
+
+
+def resume_unfinished_runs(db: Session):
+    """B4: 进程重启后恢复未完成的工作流 run（running/awaiting_confirm 续跑）。
+
+    启动时调用一次：把卡住的 running/awaiting_confirm run 重新丢给 _advance_run 推进。
+    """
+    from app.logger import logger
+
+    unfinished = db.query(AgentWorkflowRun).filter(
+        AgentWorkflowRun.status.in_([
+            AgentWorkflowRun.STATUS_RUNNING,
+            AgentWorkflowRun.STATUS_AWAITING_CONFIRM,
+        ])
+    ).all()
+    resumed = 0
+    for r in unfinished:
+        _run_id = r.id
+        _db_mode = get_db_mode()
+
+        def _bg():
+            bg_db = get_session_for(_db_mode)()
+            try:
+                _advance_run(bg_db, _run_id)
+            except Exception as e:
+                logger.warning(f"[workflow-resume] run#{_run_id} 恢复执行异常: {e}")
+            finally:
+                bg_db.close()
+
+        threading.Thread(target=_bg, daemon=True).start()
+        resumed += 1
+    if resumed:
+        logger.info(f"[workflow-resume] 恢复 {resumed} 个未完成工作流 run")
+    return resumed
+
+
+def _workflow_max_concurrency(db: Session) -> int:
+    """工作流并行 fan-out 并发上限（可配置，默认 4）。"""
+    try:
+        cfg = db.query(SystemConfig).filter(SystemConfig.key == "workflow_max_concurrency").first()
+        if cfg and cfg.config_value:
+            val = int(cfg.config_value)
+            if 1 <= val <= 32:
+                return val
+    except Exception:
+        pass
+    return 4
+
+
+def _execute_node_isolated(
+    run_id: int,
+    node_id: str,
+    node_type: str,
+    node_data: Dict,
+    runtime_context: Dict,
+    db_mode: str,
+) -> Dict[str, Any]:
+    """在独立线程 + 独立 DB session 中执行单个节点（fan-out 用，线程安全）。
+
+    返回 {node_id, status, output, error, pending_action_id}。
+    """
+    from app.logger import logger
+
+    bg_db = get_session_for(db_mode)()
+    try:
+        nr = bg_db.query(AgentWorkflowNodeRun).filter(
+            AgentWorkflowNodeRun.run_id == run_id,
+            AgentWorkflowNodeRun.node_id == node_id,
+        ).first()
+        if not nr:
+            return {"node_id": node_id, "status": "skipped", "output": {}, "error": "节点不存在"}
+
+        # 并发保护：仅 PENDING 才执行（可能有竞态，重新确认）
+        if nr.status != AgentWorkflowNodeRun.STATUS_PENDING:
+            return {"node_id": node_id, "status": nr.status, "output": nr.get_output(), "error": nr.error or ""}
+
+        executor = NODE_EXECUTORS.get(node_type)
+        if not executor:
+            nr.status = AgentWorkflowNodeRun.STATUS_FAILED
+            nr.error = f"未知节点类型: {node_type}"
+            nr.completed_at = _now()
+            bg_db.commit()
+            return {"node_id": node_id, "status": "failed", "output": {}, "error": nr.error}
+
+        nr.status = AgentWorkflowNodeRun.STATUS_RUNNING
+        nr.started_at = _now()
+        bg_db.commit()
+
+        try:
+            if node_type == "tool":
+                result = executor(node_data, runtime_context, bg_db, node_run=nr)
+            else:
+                result = executor(node_data, runtime_context, bg_db)
+            result_status = result.get("status", "completed")
+            if result_status == "awaiting_confirm":
+                nr.status = AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM
+                nr.output = json.dumps(result.get("output", {}), ensure_ascii=False)
+                nr.completed_at = None
+                bg_db.commit()
+                return {
+                    "node_id": node_id, "status": "awaiting_confirm",
+                    "output": result.get("output", {}), "error": "",
+                    "pending_action_id": result.get("pending_action_id"),
+                }
+            nr.output = json.dumps(result.get("output", {}), ensure_ascii=False)
+            nr.status = result_status
+            nr.error = result.get("error", "")
+            nr.completed_at = _now()
+        except Exception as e:
+            nr.status = AgentWorkflowNodeRun.STATUS_FAILED
+            nr.error = f"执行异常: {e}\n{traceback.format_exc()[-500:]}"
+            nr.completed_at = _now()
+        bg_db.commit()
+        return {
+            "node_id": node_id, "status": nr.status,
+            "output": nr.get_output(), "error": nr.error or "",
+        }
+    except Exception as e:
+        from app.logger import logger as _lg
+        _lg.warning(f"fan-out 节点 {node_id} 执行异常: {e}")
+        return {"node_id": node_id, "status": "failed", "output": {}, "error": str(e)}
+    finally:
+        bg_db.close()
+
+
 def _advance_run(db: Session, run_id: int):
-    """调度执行节点。"""
+    """调度执行节点。多轮推进：每轮取所有依赖已满足的 pending 节点并行 fan-out。
+
+    并发上限 `workflow_max_concurrency`（SystemConfig，默认 4）。
+    每轮串行确定「就绪集」→ 线程池并发执行 → 合并输出 → 进入下一轮。
+    """
+    from app.logger import logger
+
     run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run_id).first()
     if not run or run.status not in (AgentWorkflowRun.STATUS_RUNNING, AgentWorkflowRun.STATUS_AWAITING_CONFIRM):
         return
@@ -671,119 +1003,107 @@ def _advance_run(db: Session, run_id: int):
     nodes = snapshot.get("nodes", []) if snapshot else []
     edges = snapshot.get("edges", []) if snapshot else []
     if not nodes:
-        # 无 snapshot（自定义工作流），从 node_runs 重建
         nodes = [{"id": nr.node_id, "type": nr.node_type, "data": nr.get_config()} for nr in node_runs]
-        # edges 无法重建，存入 runtime_context（start_workflow_run 已存入 snapshot 为空）
         edges = runtime_context.get("_edges", [])
 
     order = topological_sort(nodes, edges)
     node_data_map = {n.get("id"): n for n in nodes}
+    db_mode = get_db_mode()
+    max_workers = _workflow_max_concurrency(db)
 
-    progressed = False
-    for nid in order:
-        nr = nr_map.get(nid)
-        # 跳过非 pending 节点（含 awaiting_confirm——已暂停的节点等确认/取消）
-        if not nr or nr.status != AgentWorkflowNodeRun.STATUS_PENDING:
-            continue
-        deps = _node_dependencies(nid, edges)
-        completed_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_COMPLETED}
-        failed_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_FAILED}
-        skipped_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_SKIPPED}
+    # 多轮推进：直到无新就绪节点或全部结束
+    while True:
+        # 重新读取节点状态（fan-out 线程已更新）
+        node_runs = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.run_id == run_id).all()
+        nr_map = {nr.node_id: nr for nr in node_runs}
+        ready = []
 
-        # 上游有失败 → 跳过当前节点
-        if failed_deps:
-            nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
-            nr.completed_at = _now()
-            db.commit()
-            progressed = True
-            continue
-        # 多分支汇聚：部分依赖被 condition 路由 skip，但至少一个 completed → 继续执行
-        if skipped_deps and not completed_deps:
-            # 所有依赖都被 skip → 跳过
-            nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
-            nr.completed_at = _now()
-            db.commit()
-            progressed = True
-            continue
-        if skipped_deps and completed_deps:
-            # 部分 skip 部分 completed → 多分支汇聚，继续执行
-            pass
-        elif not deps.issubset(completed_deps):
-            # 还有 pending 依赖未完成 → 等待
-            continue
+        for nid in order:
+            nr = nr_map.get(nid)
+            if not nr or nr.status != AgentWorkflowNodeRun.STATUS_PENDING:
+                continue
+            deps = _node_dependencies(nid, edges)
+            completed_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_COMPLETED}
+            failed_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_FAILED}
+            skipped_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_SKIPPED}
 
-        # 条件分支路由检查：如果上游是 condition 节点，检查是否路由到当前节点
-        condition_branch_match = True
-        for d in deps:
-            d_nr = nr_map.get(d)
-            if d_nr and d_nr.node_type == "condition":
-                d_output = d_nr.get_output()
-                matched = d_output.get("matched_branch")
-                if matched and matched != nid:
-                    condition_branch_match = False
-                    break
-        if not condition_branch_match:
-            nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
-            nr.completed_at = _now()
-            db.commit()
-            progressed = True
-            continue
-
-        # 执行节点
-        node = node_data_map.get(nid, {})
-        node_data = node.get("data", nr.get_config())
-        nr.status = AgentWorkflowNodeRun.STATUS_RUNNING
-        nr.started_at = _now()
-        db.commit()
-
-        executor = NODE_EXECUTORS.get(nr.node_type)
-        if not executor:
-            nr.status = AgentWorkflowNodeRun.STATUS_FAILED
-            nr.error = f"未知节点类型: {nr.node_type}"
-            nr.completed_at = _now()
-            db.commit()
-            progressed = True
-            continue
-
-        try:
-            if nr.node_type == "tool":
-                result = executor(node_data, runtime_context, db, node_run=nr)
-            else:
-                result = executor(node_data, runtime_context, db)
-            result_status = result.get("status", "completed")
-            if result_status == "awaiting_confirm":
-                nr.status = AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM
-                nr.output = json.dumps(result.get("output", {}), ensure_ascii=False)
-                nr.completed_at = None
+            if failed_deps:
+                nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+                nr.completed_at = _now()
                 db.commit()
-                # 暂停工作流，等用户确认
-                run.status = AgentWorkflowRun.STATUS_AWAITING_CONFIRM
+                continue
+            if skipped_deps and not completed_deps:
+                nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+                nr.completed_at = _now()
                 db.commit()
-                return  # 停止推进
-            nr.output = json.dumps(result.get("output", {}), ensure_ascii=False)
-            nr.status = result_status
-            nr.error = result.get("error", "")
-            nr.completed_at = _now()
-        except Exception as e:
-            nr.status = AgentWorkflowNodeRun.STATUS_FAILED
-            nr.error = f"执行异常: {e}\n{traceback.format_exc()[-500:]}"
-            nr.completed_at = _now()
-        db.commit()
-        progressed = True
+                continue
+            if skipped_deps and completed_deps:
+                pass
+            elif not deps.issubset(completed_deps):
+                continue
 
-        # 更新 runtime_context
-        runtime_context.setdefault("nodes", {})[nid] = {"output": nr.get_output()}
+            # 条件分支路由检查
+            condition_branch_match = True
+            for d in deps:
+                d_nr = nr_map.get(d)
+                if d_nr and d_nr.node_type == "condition":
+                    d_output = d_nr.get_output()
+                    matched = d_output.get("matched_branch")
+                    if matched and matched != nid:
+                        condition_branch_match = False
+                        break
+            if not condition_branch_match:
+                nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+                nr.completed_at = _now()
+                db.commit()
+                continue
+
+            node = node_data_map.get(nid, {})
+            node_data = node.get("data", nr.get_config())
+            ready.append((nid, nr.node_type, node_data))
+
+        if not ready:
+            break
+
+        # ── 并行 fan-out：线程池并发执行就绪节点 ──
+        futures = []
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="wf_fanout") as pool:
+            for nid, ntype, ndata in ready:
+                futures.append(pool.submit(
+                    _execute_node_isolated, run_id, nid, ntype, ndata, runtime_context, db_mode
+                ))
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.warning(f"fan-out 任务异常: {e}")
+
+        # 合并并行节点输出到 runtime_context
+        node_runs = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.run_id == run_id).all()
+        for nr in node_runs:
+            if nr.status == AgentWorkflowNodeRun.STATUS_COMPLETED:
+                runtime_context.setdefault("nodes", {})[nr.node_id] = {"output": nr.get_output()}
+        run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run_id).first()
         run.runtime_context = json.dumps(runtime_context, ensure_ascii=False)
         db.commit()
 
+        # 任一节点等待确认 → 暂停整个工作流
+        any_awaiting = any(
+            nr.status == AgentWorkflowNodeRun.STATUS_AWAITING_CONFIRM for nr in node_runs
+        )
+        if any_awaiting:
+            run.status = AgentWorkflowRun.STATUS_AWAITING_CONFIRM
+            db.commit()
+            return
+
     # 检查是否全部完成
+    node_runs = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.run_id == run_id).all()
     all_done = all(nr.status in (
         AgentWorkflowNodeRun.STATUS_COMPLETED, AgentWorkflowNodeRun.STATUS_FAILED, AgentWorkflowNodeRun.STATUS_SKIPPED
     ) for nr in node_runs)
 
     if all_done:
         any_failed = any(nr.status == AgentWorkflowNodeRun.STATUS_FAILED for nr in node_runs)
-        # 提取 end 节点输出作为 run outputs
         outputs = {}
         for nr in node_runs:
             if nr.node_type == "end" and nr.status == AgentWorkflowNodeRun.STATUS_COMPLETED:
@@ -875,6 +1195,38 @@ def confirm_workflow_node(db: Session, node_run_id: int, user_name: str) -> Dict
     runtime_context = run.get_runtime_context()
     tool_name = node_data.get("tool_name", "")
     parameters = _render_value(node_data.get("parameters", {}), runtime_context)
+
+    # A4: LLM reviewer 审查门（write gate）——高危/写操作确认后先二签
+    try:
+        from app.services.reviewer_agent import should_review, review_action
+        if should_review(tool_name):
+            review = review_action(
+                db, tool_name, parameters, title=nr.node_name,
+                session_id=run.session_id,
+            )
+            if pending_action and hasattr(pending_action, "review_result"):
+                pending_action.review_result = json.dumps(review, ensure_ascii=False)
+                db.commit()
+            if review.get("verdict") == "reject":
+                nr.status = AgentWorkflowNodeRun.STATUS_FAILED
+                nr.error = f"审查未通过：{review.get('reason', '')}"
+                nr.completed_at = _now()
+                nr.output = "{}"
+                db.commit()
+                if pending_action:
+                    pending_action.status = PendingAction.STATUS_FAILED
+                    pending_action.result_payload = json.dumps({"error": nr.error, "review": review}, ensure_ascii=False)
+                    db.commit()
+                _audit(db, run_id=run.id, node_run_id=nr.id,
+                       action=WorkflowAuditLog.ACTION_NODE_CONFIRM, operator=user_name,
+                       tool_name=tool_name, execution_mode="confirm",
+                       risk_level=pending_action.risk_level if pending_action else "",
+                       detail={"parameters": parameters, "status": "rejected_by_reviewer", "reason": review.get("reason", "")})
+                _advance_run(db, run.id)
+                return {"is_success": False, "message": f"审查未通过：{review.get('reason', '')}"}
+    except Exception as e:
+        from app.logger import logger
+        logger.warning(f"A4 workflow review_gate 审查异常(fail-open): {e}")
 
     try:
         result = call_mcp_tool(tool_name, parameters, db=db, allow_internal=True)

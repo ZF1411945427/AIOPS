@@ -32,9 +32,9 @@ EXTRACT_ROOT = Path(os.environ.get(
 
 # 控制面内置镜像（若离线包未提供可退化的最小集；实际以离线包 images/ 为准）
 _DEFAULT_CNI_FILES = {
-    "calico": "https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml",
-    "flannel": "https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml",
-    "cilium": "https://raw.githubusercontent.com/cilium/cilium/main/install/kubernetes/quick-install.yaml",
+    "calico": "https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml",
+    "flannel": "https://raw.githubusercontent.com/flannel-io/flannel/v0.25.4/Documentation/kube-flannel.yml",
+    "cilium": "https://raw.githubusercontent.com/cilium/cilium/v1.16.5/install/kubernetes/quick-install.yaml",
 }
 
 _CNI_POD_CIDR = {
@@ -45,6 +45,10 @@ _CNI_POD_CIDR = {
 
 _EXEC_LOCK: Dict[int, bool] = {}
 _STOPPED: Dict[int, bool] = {}
+
+
+class _DeployStopped(Exception):
+    """用户点击停止时抛出，用于优雅中断部署并标记 stopped 状态。"""
 
 # kubeadm join token 有效期（超过需 regenerate）
 _JOIN_TTL = "2h"
@@ -286,18 +290,16 @@ def delete_plan(db: Session, plan_id: int) -> bool:
 
 def stop_execution(db: Session, plan_id: int) -> dict:
     _STOPPED[plan_id] = True
-    _release_exec(plan_id)
     p = db.query(K8sClusterPlan).filter(K8sClusterPlan.id == plan_id).first()
     if p and p.status == "running":
-        p.status = "failed"
-        _append_log(p, {"type": "info", "message": "部署已被用户停止"}, db)
+        p.status = "stopped"
+        _append_log(p, {"type": "info", "message": f"部署已停止(断点: 阶段{p.current_step})，可点击「继续部署」续传"}, db)
         db.commit()
     return {"ok": True}
 
 
 def _release_exec(plan_id: int):
     _EXEC_LOCK.pop(plan_id, None)
-    _STOPPED.pop(plan_id, None)
 
 
 def _check_stop(plan_id: int) -> bool:
@@ -345,6 +347,22 @@ def _get_bundle_context(db: Session, p: K8sClusterPlan) -> dict:
     else:
         ctx["image_repository"] = ""
     return ctx
+
+
+def _parse_ctl_rc(stdout: str, marker: str = "RC") -> int:
+    """从命令输出中解析 `MARKER=<数字>` 的真实返回码。
+    用于规避 `cmd; echo RC=$?` 末尾 echo 恒定返回 0 的误报。"""
+    import re as _re
+    m = None
+    for pat in (fr"{marker}=(\d+)", fr"__{marker}__=(\d+)"):
+        hits = _re.findall(pat, stdout, _re.M)
+        if hits:
+            m = hits[-1]
+            break
+    try:
+        return int(m) if m is not None else -1
+    except Exception:
+        return -1
 
 
 def _run_remote(client, command: str, timeout: int = 300) -> dict:
@@ -455,12 +473,68 @@ def _set_hostname(client, node, label, p, db) -> str:
     return hn
 
 
-def _install_containerd(client, ctx, label, p, db) -> None:
-    """安装 containerd：优先离线包 binaries/containerd，否则走包源。"""
+def _install_preflight_deps(client, label, p, db, yield_event=None) -> None:
+    """安装 kubeadm preflight 依赖：conntrack/ethtool/socat/crictl(cri-tools 可选)。"""
+    # 预配 apt 代理(环境变量可能未设置，走内置代理)以提升在线源可用性
+    proxy_conf = "cat /etc/apt/apt.conf.d/95proxies 2>/dev/null | grep -q 'Acquire' || " \
+                 """printf 'Acquire::http::Proxy "http://192.168.31.76:7897";\\nAcquire::https::Proxy "http://192.168.31.76:7897";\\n' > /etc/apt/apt.conf.d/95proxies; """
+    script = (
+        proxy_conf +
+        "which conntrack ethtool socat >/dev/null 2>&1 && echo HAVE || "
+        "(apt-get install -y conntrack ethtool socat >/dev/null 2>&1 || "
+        "yum install -y conntrack-tools ethtool socat >/dev/null 2>&1); "
+        "echo rc=$?"
+    )
+    r = _run_remote(client, script, timeout=300)
+    if "HAVE" in r["stdout"] or "rc=0" in r["stdout"]:
+        msg = "preflight 依赖(conntrack/ethtool/socat)就绪"
+    else:
+        msg = "preflight 依赖安装失败: " + r["stdout"][-150:]
+    _append_log(p, {"type": "ok" if "就绪" in msg else "warn", "node": label, "message": msg}, db)
+    if yield_event: yield_event({"type": "log", "node": label, "message": msg})
+
+
+def _containerd_config_script(p: K8sClusterPlan, ctx: dict = None) -> str:
+    """生成 containerd 配置脚本：SystemdCgroup + 与 k8s 版本匹配的 pause sandbox_image。
+    返回一段可在目标机执行的 shell 脚本。"""
+    try:
+        ver_parts = (p.kubernetes_version or "v1.31").lstrip("v").split(".")
+        k8s_minor = int(ver_parts[1]) if len(ver_parts) > 1 else 31
+    except Exception:
+        k8s_minor = 31
+    pause_tag = "3.10" if k8s_minor >= 28 else "3.9"
+    # 私有 registry 存在时 sandbox 镜像指向私有仓库，否则用官方
+    sandbox_base = "registry.k8s.io"
+    if ctx and ctx.get("registry_url"):
+        sandbox_base = ctx["registry_url"].split("/")[0] + "/kubernetes"
+    sandbox_img = f"{sandbox_base}/pause:{pause_tag}"
+    cfg = (
+        "mkdir -p /etc/containerd; containerd config default > /etc/containerd/config.toml 2>/dev/null || true; "
+        "sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml "
+        "|| sed -i 's/SystemdCgroup=false/SystemdCgroup=true/g' /etc/containerd/config.toml; "
+        # containerd config default 可能自带 sandbox_image(pause)，必须强制替换为与 k8s 匹配的版本
+        f"sed -i 's#sandbox_image = .*#sandbox_image = \"{sandbox_img}\"#' /etc/containerd/config.toml; "
+        "grep -q sandbox_image /etc/containerd/config.toml || "
+        f"echo 'sandbox_image = \"{sandbox_img}\"' >> /etc/containerd/config.toml; "
+        # 开启 hosts.toml 支持(用于 HTTP registry)
+        "sed -i 's|config_path = \"\"|config_path = \"/etc/containerd/certs.d\"|' /etc/containerd/config.toml; "
+        "grep -q config_path /etc/containerd/config.toml || "
+        "echo '      config_path = \"/etc/containerd/certs.d\"' >> /etc/containerd/config.toml; "
+        "systemctl enable containerd >/dev/null 2>&1; "
+        "(systemctl restart containerd || pkill containerd; sleep 2); echo ok"
+    )
+    return cfg
+
+
+def _install_containerd(client, ctx, label, p, db, yield_event=None) -> None:
+    """安装 containerd：优先离线包 binaries/，否则走包源。已安装时也强制刷新配置(sandbox)。"""
     script = "which containerd && containerd --version 2>/dev/null || echo MISSING"
     r = _run_remote(client, script, timeout=60)
     if r["ok"] and "MISSING" not in r["stdout"]:
-        _append_log(p, {"type": "info", "node": label, "message": "containerd 已安装，跳过"}, db)
+        # 已安装：不重新安装二进制，但仍需确保配置文件包含匹配的 sandbox_image
+        _run_remote(client, _containerd_config_script(p, ctx), timeout=180)
+        _append_log(p, {"type": "info", "node": label, "message": "containerd 已安装，刷新 CRI 配置(sandbox)"}, db)
+        if yield_event: yield_event({"type": "log", "node": label, "message": "containerd 已安装，刷新 CRI 配置(sandbox)"})
         return
     installed = False
     xdir = ctx.get("extract_dir")
@@ -479,26 +553,22 @@ def _install_containerd(client, ctx, label, p, db) -> None:
                         _append_log(p, {"type": "warn", "node": label,
                                         "message": f"上传 {name} 失败: {e}"}, db)
             installed = True
+    if yield_event: yield_event({"type": "log", "node": label, "message": "containerd 离线安装中..."})
     if not installed:
         # 走包源安装（deb/rpm）
         _run_remote(client, "apt-get install -y containerd >/dev/null 2>&1 || yum install -y containerd.io >/dev/null 2>&1; echo rc=$?", timeout=600)
     # 生成 containerd 配置
-    cfg = (
-        "mkdir -p /etc/containerd; containerd config default > /etc/containerd/config.toml 2>/dev/null || true; "
-        "sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml "
-        "|| sed -i 's/SystemdCgroup=false/SystemdCgroup=true/g' /etc/containerd/config.toml; "
-        "systemctl enable containerd >/dev/null 2>&1; "
-        "(systemctl restart containerd || pkill containerd; sleep 2); echo ok"
-    )
-    _run_remote(client, cfg, timeout=180)
+    _run_remote(client, _containerd_config_script(p, ctx), timeout=180)
     r = _run_remote(client, "containerd --version 2>/dev/null || echo FAIL", timeout=60)
     if "FAIL" in r["stdout"]:
         _append_log(p, {"type": "error", "node": label, "message": "containerd 安装/启动失败"}, db)
     else:
-        _append_log(p, {"type": "info", "node": label, "message": "containerd 就绪: " + r["stdout"].strip()[:80]}, db)
+        msg = "containerd 就绪: " + r["stdout"].strip()[:80]
+        _append_log(p, {"type": "info", "node": label, "message": msg}, db)
+        if yield_event: yield_event({"type": "log", "node": label, "message": msg})
 
 
-def _install_k8s_binaries(client, ctx, label, p, db) -> None:
+def _install_k8s_binaries(client, ctx, label, p, db, yield_event=None) -> None:
     """安装 kubeadm/kubelet/kubectl：优先离线包 binaries/，否则包源。"""
     need = []
     for b in ("kubeadm", "kubelet", "kubectl"):
@@ -506,10 +576,11 @@ def _install_k8s_binaries(client, ctx, label, p, db) -> None:
         if "MISSING" in r["stdout"] or not r["ok"]:
             need.append(b)
     if not need:
-        _append_log(p, {"type": "info", "node": label, "message": "k8s 二进制已存在，跳过"}, db)
-        return
+        msg = "k8s 二进制已存在，跳过"
+        _append_log(p, {"type": "info", "node": label, "message": msg}, db)
+        if yield_event: yield_event({"type": "log", "node": label, "message": msg})
     xdir = ctx.get("extract_dir")
-    missing = []
+    missing = list(need)
     if xdir:
         bin_dir = xdir / "binaries"
         if bin_dir.exists():
@@ -520,20 +591,68 @@ def _install_k8s_binaries(client, ctx, label, p, db) -> None:
                     try:
                         _sftp_put(client, src, remote, 0o755)
                         _append_log(p, {"type": "info", "node": label, "message": f"SFTP 上传 {b}"}, db)
+                        if b in missing:
+                            missing.remove(b)
                     except Exception as e:
                         _append_log(p, {"type": "warn", "node": label, "message": f"上传 {b} 失败: {e}"}, db)
-                        missing.append(b)
-                else:
-                    missing.append(b)
     if missing:
-        # 退化：包源安装 kubeadm 全家桶
-        _run_remote(client,
-                    "apt-get install -y kubeadm kubelet kubectl >/dev/null 2>&1 || "
-                    "yum install -y kubeadm kubelet kubectl >/dev/null 2>&1; echo rc=$?", timeout=900)
-    # 启用 kubelet
+        # 1) 在线兜底：dl.k8s.io 下载对应版本二进制(架构 amd64，可在代理下)
+        if yield_event: yield_event({"type": "log", "node": label, "message": f"缺失 {missing}，尝试在线下载 dl.k8s.io"})
+        _append_log(p, {"type": "info", "node": label, "message": f"缺失 {missing}，尝试在线下载 dl.k8s.io"}, db)
+        kv = p.kubernetes_version or "v1.31"
+        if not kv.startswith("v"):
+            kv = "v" + kv
+        for b in list(missing):
+            url = f"https://dl.k8s.io/{kv}/bin/linux/amd64/{b}"
+            r = _run_remote(client,
+                            f"export http_proxy=${{http_proxy:-}}; export https_proxy=${{https_proxy:-}}; "
+                            f"curl -fsSL -A 'curl/8.4' '{url}' -o /usr/local/bin/{b} && chmod +x /usr/local/bin/{b} && echo OK || echo FAIL",
+                            timeout=900)
+            if "OK" in r["stdout"]:
+                _append_log(p, {"type": "info", "node": label, "message": f"在线下载 {b} 成功"}, db)
+                if yield_event: yield_event({"type": "log", "node": label, "message": f"在线下载 {b} 成功"})
+                missing.remove(b)
+            else:
+                _append_log(p, {"type": "warn", "node": label, "message": f"在线下载 {b} 失败，尝试包源"}, db)
+        # 2) 退化：包源安装 kubeadm 全家桶
+        if missing:
+            _run_remote(client,
+                        "apt-get install -y kubeadm kubelet kubectl >/dev/null 2>&1 || "
+                        "yum install -y kubeadm kubelet kubectl >/dev/null 2>&1; echo rc=$?", timeout=900)
+    # 启用 kubelet(确保 systemd unit 存在，二进制安装时不会自动生成)
     _run_remote(client,
-                "systemctl enable kubelet >/dev/null 2>&1; "
-                "mkdir -p /etc/systemd/system/kubelet.service.d; echo ok", timeout=120)
+                """if [ ! -f /etc/systemd/system/kubelet.service ]; then
+cat > /etc/systemd/system/kubelet.service <<'SVC'
+[Unit]
+Description=kubelet: The Kubernetes Node Agent
+Documentation=https://kubernetes.io/docs/home/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/default/kubelet
+ExecStart=/usr/local/bin/kubelet
+Restart=always
+StartLimitInterval=0
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SVC
+mkdir -p /etc/systemd/system/kubelet.service.d
+cat > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf <<'DRP'
+[Service]
+Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+EnvironmentFile=-/etc/default/kubelet
+ExecStart=
+ExecStart=/usr/local/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_EXTRA_ARGS
+DRP
+fi
+systemctl daemon-reload
+systemctl enable kubelet >/dev/null 2>&1
+mkdir -p /etc/systemd/system/kubelet.service.d
+echo ok""", timeout=120)
 
 
 def _generate_kubeadm_config(p, first_master_ip: str, ctx: dict) -> str:
@@ -604,39 +723,54 @@ def _write_imagetar_jobs(client, ctx, label, p, db) -> None:
     _append_log(p, {"type": "info", "node": label, "message": f"离线镜像本地导入 {cnt} 个"}, db)
 
 
-def _configure_insecure_registry(client, ctx, label, p, db) -> None:
-    """节点配置 containerd 信任私有 Registry(insecure)。"""
+def _configure_insecure_registry(client, ctx, label, p, db, yield_event=None) -> None:
+    """节点配置 containerd 信任私有 Registry(insecure+hosts.toml)。"""
     ru = ctx.get("registry_url")
     if not ru:
         return
     host = ru.split("/")[0]
-    r = _run_remote(client,
-                    f"grep -q '{host}' /etc/containerd/config.toml && echo HAVE || echo NEED", timeout=60)
-    if "HAVE" in r["stdout"]:
-        return
-    # 追加 containerd CRI 私有仓库 insecure 配置(若 config 无 configs 段则新增)
-    reg_block = (
-        '      [plugins."io.containerd.grpc.v1.cri".registry.configs."%s".tls]\n'
-        '        insecure_skip_verify = true\n'
-        '      [plugins."io.containerd.grpc.v1.cri".registry.configs."%s"]\n'
-        '        [plugins."io.containerd.grpc.v1.cri".registry.configs."%s".auth]\n'
-        '        username = ""\n        password = ""\n' % (host, host, host)
-    )
-    script = (
-        "if ! grep -q 'registry.configs' /etc/containerd/config.toml; then "
-        "sed -i '/\\[plugins\\.\"io\\.containerd\\.grpc\\.v1\\.cri\".registry\\]\\]/a\\      [plugins.\"io.containerd.grpc.v1.cri\".registry.configs]' /etc/containerd/config.toml; fi; "
-        f"cat >> /etc/containerd/config.toml <<'EOF'\n{reg_block}EOF\n"
-        "systemctl restart containerd >/dev/null 2>&1 || pkill containerd; sleep 2; echo ok"
-    )
-    _run_remote(client, script, timeout=120)
-    _append_log(p, {"type": "info", "node": label, "message": f"containerd 已信任私有 Registry: {host}"}, db)
+    # 1. 写 hosts.toml 支持 HTTP registry
+    hosts_script = (
+        "mkdir -p /etc/containerd/certs.d/%(host)s; "
+        "cat > /etc/containerd/certs.d/%(host)s/hosts.toml <<'EOF'\n"
+        'server = "http://%(host)s"\n\n'
+        '[host."http://%(host)s"]\n'
+        '  capabilities = ["pull", "resolve", "push"]\n'
+        '  skip_verify = true\n'
+        "EOF\n"
+        "echo hosts_toml_ok"
+    ) % {"host": host}
+    _run_remote(client, hosts_script, timeout=60)
+    # 2. 写 configs.tls 配置
+    r = _run_remote(client, f"grep -q '{host}' /etc/containerd/config.toml && echo HAVE || echo NEED", timeout=60)
+    if "NEED" in r["stdout"]:
+        reg_block = (
+            '      [plugins."io.containerd.grpc.v1.cri".registry.configs."%s".tls]\n'
+            '        insecure_skip_verify = true\n'
+            '      [plugins."io.containerd.grpc.v1.cri".registry.configs."%s"]\n'
+            '        [plugins."io.containerd.grpc.v1.cri".registry.configs."%s".auth]\n'
+            '        username = ""\n        password = ""\n' % (host, host, host)
+        )
+        script = (
+            "if ! grep -q 'registry.configs' /etc/containerd/config.toml; then "
+            "sed -i '/\\[plugins\\.\"io\\.containerd\\.grpc\\.v1\\.cri\".registry\\]\\]/a\\      [plugins.\"io.containerd.grpc.v1.cri\".registry.configs]' /etc/containerd/config.toml; fi; "
+            f"cat >> /etc/containerd/config.toml <<'EOF'\n{reg_block}EOF\n"
+            "echo configs_ok"
+        )
+        _run_remote(client, script, timeout=60)
+    _run_remote(client, "systemctl restart containerd >/dev/null 2>&1 || pkill containerd; sleep 2; echo ok", timeout=120)
+    msg = f"containerd 已信任私有 Registry: {host}"
+    _append_log(p, {"type": "info", "node": label, "message": msg}, db)
+    if yield_event: yield_event({"type": "log", "node": label, "message": msg})
 
 
-def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
-    """kubeadm 7 阶段编排生成器。yield 事件 dict(供 WS/SSE 推送)。"""
+def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int = 0):
+    """kubeadm 7 阶段编排生成器。yield 事件 dict(供 WS/SSE 推送)。
+    resume_step>0 时为断点续传：已完成阶段直接幂等跳过。"""
     yield {"type": "status", "status": "running", "message": "开始离线集群部署"}
     p.status = "running"
-    p.current_step = 0
+    if resume_step == 0:
+        p.current_step = 0
     db.commit()
 
     nodes_db = db.query(K8sClusterNode).filter(K8sClusterNode.plan_id == plan_id).order_by(
@@ -662,6 +796,8 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
         p.current_step = 0
         yield {"type": "phase", "step": 0, "title": "阶段0/6 预检"}
         for n in nodes_db:
+            if _check_stop(plan_id):
+                raise _DeployStopped()
             label = f"{n.host_role}:{n.ip}"
             labels[n.id] = label
             n.status = "running"
@@ -670,7 +806,9 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
                 client, conn = _exec_ssh_db(db, p, n, label)
                 clients[n.id] = client
                 r = _run_remote(client, "id -u; uname -r; which swapoff", timeout=60)
-                _append_log(p, {"type": "ok", "node": label, "message": "SSH 连通，root=" + (r["stdout"].splitlines()[0] if r["stdout"] else "?")}, db)
+                msg = "SSH 连通，root=" + (r["stdout"].splitlines()[0] if r["stdout"] else "?")
+                _append_log(p, {"type": "ok", "node": label, "message": msg}, db)
+                yield {"type": "log", "node": label, "message": msg}
                 n.status = "succeeded"
             except Exception as e:
                 n.status = "failed"
@@ -681,38 +819,56 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
             raise RuntimeError("存在无法连接的节点，中止部署")
 
         # ── 阶段1 环境准备(所有节点，可并行) ──
+        pending_yields = []
+        def _emit(evt): pending_yields.append(evt)
         p.current_step = 1
         yield {"type": "phase", "step": 1, "title": "阶段1/6 环境准备(swap/内核/hosts)"}
         for n in nodes_db:
+            if _check_stop(plan_id):
+                raise _DeployStopped()
             label = labels[n.id]
             client = clients[n.id]
             hn = _set_hostname(client, {"hostname": n.hostname}, label, p, db)
             _disable_swap(client, label, p, db)
             _setup_kernel(client, label, p, db)
+            _install_preflight_deps(client, label, p, db, yield_event=_emit)
+        for evt in pending_yields:
+            yield evt
+        pending_yields.clear()
         # /etc/hosts 全部集群节点映射
         all_nodes = [{"ip": _resolve_node_conn(db, x)["ip"], "hostname": x.hostname}
                      for x in nodes_db]
         for n in nodes_db:
             _inject_etc_hosts(db, p, all_nodes, clients[n.id], labels[n.id])
         _append_log(p, {"type": "ok", "message": "环境准备完成"}, db)
+        yield {"type": "log", "message": "环境准备完成"}
 
         # ── 阶段2 容器运行时 + k8s 二进制(所有节点) ──
         p.current_step = 2
         yield {"type": "phase", "step": 2, "title": "阶段2/6 运行时与二进制"}
         for n in nodes_db:
+            if _check_stop(plan_id):
+                raise _DeployStopped()
             label = labels[n.id]
             client = clients[n.id]
+            yield {"type": "log", "node": label, "message": f"配置节点 {label}..."}
+            _install_containerd(client, ctx, label, p, db, yield_event=_emit)
             if ctx.get("registry_url"):
-                _configure_insecure_registry(client, ctx, label, p, db)
-            _install_containerd(client, ctx, label, p, db)
-            _install_k8s_binaries(client, ctx, label, p, db)
+                _configure_insecure_registry(client, ctx, label, p, db, yield_event=_emit)
+            _install_k8s_binaries(client, ctx, label, p, db, yield_event=_emit)
             _write_imagetar_jobs(client, ctx, label, p, db)
+            for evt in pending_yields:
+                yield evt
+            pending_yields.clear()
+            yield {"type": "log", "node": label, "message": f"节点 {label} 配置完成"}
         _append_log(p, {"type": "ok", "message": "运行时与二进制就绪"}, db)
         yield {"type": "log", "message": "运行时与二进制就绪"}
 
         # ── 阶段3 首 master 生成配置 + 预拉镜像 ──
         p.current_step = 3
         yield {"type": "phase", "step": 3, "title": "阶段3/6 生成 kubeadm 配置"}
+        if _check_stop(plan_id):
+            raise _DeployStopped()
         fclient = clients[first_master.id]
         cfg = _generate_kubeadm_config(p, first_ip, ctx)
         _run_remote(fclient, "mkdir -p /etc/kubernetes && echo ok", timeout=60)
@@ -725,22 +881,44 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
         _append_log(p, {"type": "ok", "node": labels[first_master.id], "message": "kubeadm-config.yaml 已生成"}, db)
         yield {"type": "log", "node": labels[first_master.id], "message": "生成 kubeadm 配置"}
         # 预拉控制面镜像(可失败)
+        yield {"type": "log", "node": labels[first_master.id], "message": "预拉控制面镜像中(可能需要几分钟)..."}
         _run_remote(fclient, "kubeadm config images pull --config /etc/kubernetes/kubeadm-config.yaml >/dev/null 2>&1; echo rc=$?", timeout=900)
 
         # ── 阶段4 kubeadm init ──
         p.current_step = 4
         yield {"type": "phase", "step": 4, "title": "阶段4/6 初始化控制平面"}
-        init_cmd = ("kubeadm init --config /etc/kubernetes/kubeadm-config.yaml "
-                    "--upload-certs")
-        for line, is_err in _iter_remote(fclient, init_cmd + " 2>&1; echo __KUBEADM_RC__=$?"):
-            if line.startswith("__KUBEADM_RC__="):
-                rc = line.split("=")[1].strip()
-                if rc != "0":
-                    raise RuntimeError(f"kubeadm init 失败(rc={rc})")
-                break
-            if line.strip():
-                yield {"type": "output", "node": labels[first_master.id], "line": line.rstrip()}
-        _append_log(p, {"type": "ok", "node": labels[first_master.id], "message": "kubeadm init 完成"}, db)
+        if _check_stop(plan_id):
+            raise _DeployStopped()
+        # 断点续传幂等：admin.conf 已存在且 API server 健康才跳过 init
+        already_init = _run_remote(fclient, "test -f /etc/kubernetes/admin.conf && echo YES || echo NO", timeout=60)
+        apiserver_ok = False
+        if "YES" in already_init["stdout"]:
+            # 健康检查 API server：只检查 admin.conf 存在不可靠，需确认 6443 可达
+            health = _run_remote(fclient,
+                                 "curl -sk -m 8 -o /dev/null -w '%{http_code}' https://127.0.0.1:6443/healthz 2>/dev/null || echo 000",
+                                 timeout=30)
+            apiserver_ok = "200" in health["stdout"]
+            if apiserver_ok:
+                _append_log(p, {"type": "ok", "node": labels[first_master.id], "message": "控制平面已初始化且 API server 健康，跳过 init"}, db)
+                yield {"type": "log", "node": labels[first_master.id], "message": "控制平面已初始化(API server 健康)，跳过 kubeadm init"}
+            else:
+                _append_log(p, {"type": "warn", "node": labels[first_master.id],
+                                "message": f"admin.conf 存在但 API server 不可达(http={health['stdout'].strip()})，将重置后重新初始化"}, db)
+                yield {"type": "log", "node": labels[first_master.id], "message": "检测到残留 admin.conf 但集群未运行，kubeadm reset 后重新初始化"}
+                _run_remote(fclient, "kubeadm reset -f >/dev/null 2>&1; rm -rf /etc/kubernetes/*.conf /etc/kubernetes/pki /etc/kubernetes/manifests /var/lib/kubelet/* /etc/cni/net.d/*; echo reset_done", timeout=180)
+                already_init = {"stdout": "NO"}
+        if not apiserver_ok:
+            init_cmd = ("kubeadm init --config /etc/kubernetes/kubeadm-config.yaml "
+                        "--upload-certs")
+            for line, is_err in _iter_remote(fclient, init_cmd + " 2>&1; echo __KUBEADM_RC__=$?"):
+                if line.startswith("__KUBEADM_RC__="):
+                    rc = line.split("=")[1].strip()
+                    if rc != "0":
+                        raise RuntimeError(f"kubeadm init 失败(rc={rc})")
+                    break
+                if line.strip():
+                    yield {"type": "output", "node": labels[first_master.id], "line": line.rstrip()}
+            _append_log(p, {"type": "ok", "node": labels[first_master.id], "message": "kubeadm init 完成"}, db)
 
         # 配置 kubectl
         _run_remote(fclient,
@@ -750,33 +928,59 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
         # ── 阶段5 CNI ──
         p.current_step = 5
         yield {"type": "phase", "step": 5, "title": "阶段5/6 安装 CNI"}
-        xdir = ctx.get("extract_dir")
-        cni_manifest = ""
-        if xdir:
-            cni_dir = xdir / "cni"
-            if cni_dir.exists():
-                cand = [f for f in cni_dir.iterdir() if p.cni.lower() in f.name.lower() and f.is_file()]
-                if cand:
-                    cni_manifest = str(cand[0])
-        if cni_manifest:
-            remote_yaml = "/root/k8s-cni.yaml"
-            _sftp_put(fclient, Path(cni_manifest), remote_yaml, 0o644)
-            r = _run_remote(fclient, f"kubectl apply -f {remote_yaml} 2>&1; echo __CNI_RC__=$?", timeout=600)
-            _append_log(p, {"type": "ok", "node": labels[first_master.id],
-                            "message": "CNI 已应用(离线清单)" if r["ok"] else "CNI 应用异常: " + r["stderr"][:150]}, db)
+        if _check_stop(plan_id):
+            raise _DeployStopped()
+        # 断点续传幂等：CNI daemonset 已存在则跳过
+        cni_exist = _run_remote(fclient,
+                                "export KUBECONFIG=/etc/kubernetes/admin.conf; kubectl get ds -A 2>/dev/null | grep -iE 'flannel|calico|cilium' | head -1 || true",
+                                timeout=60)
+        if cni_exist["stdout"].strip():
+            _append_log(p, {"type": "ok", "node": labels[first_master.id], "message": f"CNI 已安装({p.cni})，跳过"}, db)
+            yield {"type": "log", "node": labels[first_master.id], "message": f"CNI 已安装，跳过 apply"}
         else:
-            url = _DEFAULT_CNI_FILES.get(p.cni)
-            if url:
-                r = _run_remote(fclient,
-                                f"curl -fsSL {url} -o /root/k8s-cni.yaml && kubectl apply -f /root/k8s-cni.yaml 2>&1; echo __CNI_RC__=$?",
-                                timeout=600)
-                _append_log(p, {"type": "info", "node": labels[first_master.id],
-                                "message": f"CNI 在线下载并应用 rc={r['exit_code']}"}, db)
-        yield {"type": "log", "node": labels[first_master.id], "message": "CNI 安装指令已下发"}
+            xdir = ctx.get("extract_dir")
+            cni_manifest = ""
+            if xdir:
+                cni_dir = xdir / "cni"
+                if cni_dir.exists():
+                    cand = [f for f in cni_dir.iterdir() if p.cni.lower() in f.name.lower() and f.is_file()]
+                    if cand:
+                        cni_manifest = str(cand[0])
+            if cni_manifest:
+                remote_yaml = "/root/k8s-cni.yaml"
+                _sftp_put(fclient, Path(cni_manifest), remote_yaml, 0o644)
+                r = _run_remote(fclient, f"kubectl apply --validate=false -f {remote_yaml} 2>&1; echo __CNI_RC__=$?", timeout=600)
+                cni_rc = _parse_ctl_rc(r["stdout"], "CNI_RC")
+                if cni_rc == 0:
+                    _append_log(p, {"type": "ok", "node": labels[first_master.id],
+                                    "message": "CNI 已应用(离线清单) rc=0"}, db)
+                else:
+                    raise RuntimeError(f"CNI(离线清单) 应用失败 rc={cni_rc}: " + r["stdout"][-300:])
+            else:
+                url = _DEFAULT_CNI_FILES.get(p.cni)
+                if url:
+                    # 先下载独立文件，下载失败立即报错(不落到旧残留文件)；成功后再 apply
+                    r = _run_remote(fclient,
+                                    f"rm -f /root/k8s-cni-download.yaml; "
+                                    f"curl -fsSL '{url}' -o /root/k8s-cni-download.yaml 2>&1; echo CURL_RC=$?; "
+                                    f"if [ -s /root/k8s-cni-download.yaml ]; then "
+                                    f"kubectl apply --validate=false -f /root/k8s-cni-download.yaml 2>&1; echo APPLY_RC=$?; "
+                                    f"else echo APPLY_RC=99; fi",
+                                    timeout=600)
+                    dl_rc = _parse_ctl_rc(r["stdout"], "CURL_RC")
+                    apply_rc = _parse_ctl_rc(r["stdout"], "APPLY_RC")
+                    if dl_rc == 0 and apply_rc == 0:
+                        _append_log(p, {"type": "ok", "node": labels[first_master.id],
+                                        "message": f"CNI 在线下载并应用成功 ({p.cni})"}, db)
+                    else:
+                        raise RuntimeError(f"CNI 安装失败: 下载rc={dl_rc}, applyrc={apply_rc}: " + r["stdout"][-300:])
+        yield {"type": "log", "node": labels[first_master.id], "message": f"CNI 已安装: {p.cni}"}
 
         # ── 阶段6 生成 join 凭证 + worker(及额外 master)加入 ──
         p.current_step = 6
         yield {"type": "phase", "step": 6, "title": "阶段6/6 节点加入"}
+        if _check_stop(plan_id):
+            raise _DeployStopped()
         # 获取 join token + discovery hash
         token_r = _run_remote(
             fclient,
@@ -837,6 +1041,8 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
         # ── 阶段7 验证 + 接入平台 ──
         p.current_step = 7
         yield {"type": "phase", "step": 7, "title": "验证并接入平台"}
+        if _check_stop(plan_id):
+            raise _DeployStopped()
         # 等待节点 Ready
         verify_cmd = (
             "for i in $(seq 1 30); do "
@@ -861,6 +1067,11 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int):
         db.commit()
         yield {"type": "complete", "status": "succeeded",
                "message": f"集群 {p.name} 部署成功，已接入监控"}
+    except _DeployStopped:
+        p.status = "stopped"
+        _append_log(p, {"type": "info", "message": f"部署已停止(断点: 阶段{p.current_step})，可点击「继续部署」续传"}, db)
+        db.commit()
+        yield {"type": "complete", "status": "stopped", "message": "部署已停止"}
     except Exception as e:
         p.status = "failed"
         _append_log(p, {"type": "error", "message": f"部署失败: {e}"}, db)
@@ -919,7 +1130,7 @@ def _create_platform_datasource(db: Session, p: K8sClusterPlan, api_ip: str) -> 
 
 
 def run_deploy(db: Session, plan_id: int):
-    """集群部署入口(生成器，供 WS/SSE 流式推送)。"""
+    """集群部署入口(生成器，供 WS/SSE 流式推送)。支持从 stopped 状态断点续传。"""
     if _EXEC_LOCK.get(plan_id):
         yield {"type": "error", "message": "该集群正在部署中，请勿重复触发"}
         return
@@ -930,10 +1141,14 @@ def run_deploy(db: Session, plan_id: int):
     if p.status == "running":
         yield {"type": "error", "message": "该集群正在部署中"}
         return
+    resume = (p.status == "stopped" and p.current_step > 0)
     _EXEC_LOCK[plan_id] = True
     _STOPPED.pop(plan_id, None)
     try:
-        yield from _run_deploy_generator(db, p, plan_id)
+        if resume:
+            _append_log(p, {"type": "info", "message": f"断点续传：从阶段{p.current_step}继续(已完成阶段幂等跳过)"}, db)
+            yield {"type": "log", "message": f"断点续传：从阶段{p.current_step}继续"}
+        yield from _run_deploy_generator(db, p, plan_id, resume_step=p.current_step if resume else 0)
     finally:
         _release_exec(plan_id)
 
@@ -972,20 +1187,51 @@ def validate_plan(db: Session, plan_id: int, test_ssh: bool = True) -> dict:
     return {"ok": not issues, "issues": issues}
 
 
-# 供逻辑预检(不校验 SSH)使用
-def precheck_plan(db: Session, plan_id: int) -> dict:
+# 供逻辑预检(可带 SSH)使用
+def precheck_plan(db: Session, plan_id: int, test_ssh: bool = True) -> dict:
     p = db.query(K8sClusterPlan).filter(K8sClusterPlan.id == plan_id).first()
     if not p:
-        return {"ok": False, "issues": ["计划不存在"]}
+        return {"ok": False, "issues": ["计划不存在"], "checks": [{"name": "计划存在", "ok": False, "message": "计划不存在"}]}
+    checks = []
     issues = []
     nodes = db.query(K8sClusterNode).filter(K8sClusterNode.plan_id == plan_id).all()
-    if not any(n.host_role == "master" for n in nodes):
-        issues.append("缺少 master 节点")
-    if not p.pod_cidr:
-        issues.append("缺少 Pod CIDR")
-    if not p.service_cidr:
-        issues.append("缺少 Service CIDR")
+
+    def _add(name, ok, msg=""):
+        checks.append({"name": name, "ok": ok, "message": msg})
+        if not ok:
+            issues.append(f"{name}: {msg}" if msg else name)
+
+    _add("Master 节点", any(n.host_role == "master" for n in nodes), "至少需要一个 master 节点" if not any(n.host_role == "master" for n in nodes) else f"{sum(1 for n in nodes if n.host_role=='master')} 个 master, {sum(1 for n in nodes if n.host_role!='master')} 个 worker")
+    _add("Pod CIDR", bool(p.pod_cidr), "未设置" if not p.pod_cidr else p.pod_cidr)
+    _add("Service CIDR", bool(p.service_cidr), "未设置" if not p.service_cidr else p.service_cidr)
+    _add("K8s 版本", bool(p.kubernetes_version), "未设置" if not p.kubernetes_version else p.kubernetes_version)
     for n in nodes:
-        if not n.ip:
-            issues.append(f"节点(id={n.id})缺少 IP")
-    return {"ok": not issues, "issues": issues}
+        try:
+            conn = _resolve_node_conn(db, n)
+            if not conn.get("ip"):
+                _add(f"节点(id={n.id}) IP", False, "缺少 IP")
+            else:
+                _add(f"节点 {n.host_role}:{conn.get('ip')} 配置", True, f"用户 {conn.get('username')} 端口 {conn.get('port')}")
+        except ValueError as e:
+            _add(f"节点(id={n.id}) 配置", False, str(e))
+        except Exception:
+            _add(f"节点(id={n.id}) 配置", False, "缺少 IP")
+    if test_ssh:
+        ssh_results = []
+        for n in nodes:
+            label = f"{n.host_role}:{n.ip}"
+            try:
+                conn = _resolve_node_conn(db, n)
+                client = connect_ssh(conn["ip"], port=conn["port"], username=conn["username"],
+                                     password=conn["password"], timeout=10)
+                r = _run_remote(client, "id -u; which swapoff; uname -r", timeout=30)
+                client.close()
+                uid = (r["stdout"].splitlines() or [""])[0].strip()
+                ok = uid == "0"
+                _add(f"SSH 校验 {label}", ok, f"uid={uid}" if ok else f"非 root: {uid} | {r['stdout'][:80]}")
+                ssh_results.append({"node": label, "ok": ok, "message": f"SSH ok, uid={uid}" if ok else str(r["stderr"][:120] or r["stdout"][:120])})
+            except Exception as e:
+                _add(f"SSH 校验 {label}", False, str(e))
+                ssh_results.append({"node": label, "ok": False, "message": str(e)})
+        return {"ok": not issues, "issues": issues, "checks": checks, "ssh": ssh_results}
+    return {"ok": not issues, "issues": issues, "checks": checks}

@@ -405,13 +405,16 @@ def get_or_create_session(db: Session, user_id: int, session_id: Optional[int] =
     return session
 
 
-def get_message_history(db: Session, session: ChatSession, config: AgentConfig) -> List[Dict]:
-    messages = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session.id)
-        .order_by(ChatMessage.created_at.asc())
-        .all()
-    )
+def get_message_history(db: Session, session: ChatSession, config: AgentConfig,
+                        sub_agent: str = "") -> List[Dict]:
+    """获取消息历史。sub_agent 非空时只返回该子智能体的消息 + 普通消息（sub_agent=''）。
+    这样每个子专家看到自己的上下文，不混淆。"""
+    q = db.query(ChatMessage).filter(ChatMessage.session_id == session.id)
+    if sub_agent:
+        q = q.filter(
+            (ChatMessage.sub_agent == sub_agent) | (ChatMessage.sub_agent == "")
+        )
+    messages = q.order_by(ChatMessage.created_at.asc()).all()
 
     max_msgs = config.max_history_messages if config else 12
     if len(messages) > max_msgs:
@@ -426,7 +429,7 @@ def get_message_history(db: Session, session: ChatSession, config: AgentConfig) 
 def add_message(
     db: Session, session_id: int, role: str, content: str,
     message_type: str = "text", citations: Optional[List] = None,
-    tool_calls: Optional[List] = None,
+    tool_calls: Optional[List] = None, sub_agent: str = "",
 ) -> ChatMessage:
     msg = ChatMessage(
         session_id=session_id,
@@ -435,6 +438,7 @@ def add_message(
         message_content=content or "",
         citations=json.dumps(citations or [], ensure_ascii=False),
         tool_calls=json.dumps(tool_calls or [], ensure_ascii=False),
+        sub_agent=sub_agent or "",
     )
     db.add(msg)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
@@ -1145,6 +1149,34 @@ def confirm_pending_action(db: Session, action_id: int, user_name: str) -> Dict:
     schema_error = _validate_payload_schema(tool_name, payload)
     if schema_error:
         return _fail(f"payload 校验失败：{schema_error}")
+
+    # A4: LLM reviewer 审查门（write gate）
+    # 仅对 review_gate 标记的工具执行（如 propose_action 链上的 execute_*），
+    # reject 阻断执行并落审计；approve/无标记跳过。
+    try:
+        from app.services.reviewer_agent import should_review, review_action
+        if should_review(tool_name):
+            review = review_action(
+                db, action.action_type, payload,
+                title=action.title, session_id=action.session_id,
+                provider_id=getattr(config, "default_provider_id", None) if config else None,
+            )
+            # 存审查结果到 result_payload（供前端/审计展示）
+            action.review_result = json.dumps(review, ensure_ascii=False) if hasattr(action, "review_result") else ""
+            if review.get("verdict") == "reject":
+                action.status = PendingAction.STATUS_FAILED
+                action.confirmed_by = f"{user_name} (reviewer)"
+                action.confirmed_at = datetime.now()
+                fail_msg = f"审查未通过：{review.get('reason', '')}"
+                action.result_payload = json.dumps({"status": "error", "message": fail_msg, "review": review}, ensure_ascii=False)
+                db.commit()
+                from app.logger import logger
+                logger.info(f"A4 review_gate reject: {tool_name} reason={review.get('reason','')[:120]}")
+                return {"is_success": False, "status": PendingAction.STATUS_FAILED,
+                        "result": {"status": "error", "message": fail_msg, "review": review}}
+    except Exception as e:
+        from app.logger import logger
+        logger.warning(f"A4 review_gate 审查异常(fail-open): {e}")
 
     action.status = PendingAction.STATUS_CONFIRMED
     action.confirmed_by = user_name

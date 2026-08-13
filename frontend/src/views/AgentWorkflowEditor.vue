@@ -9,6 +9,7 @@
         <button class="btn" @click="newWorkflow">新建</button>
         <button class="btn" @click="loadList">打开</button>
         <button class="btn" @click="autoSave">保存</button>
+        <button class="btn" @click="showTrigger = !showTrigger">⏰ 触发器</button>
         <button class="btn btn-primary" @click="publishWorkflow">{{ workflow.published ? '取消发布' : '发布' }}</button>
         <button class="btn" @click="autoArrange">自动排列</button>
         <button class="btn btn-success" @click="runTest">运行测试</button>
@@ -44,6 +45,8 @@
           <template #node-condition="props"><NodeCard v-bind="props" :node-type-map="nodeTypeMap" @edit="openEditor(props)" /></template>
           <template #node-code="props"><NodeCard v-bind="props" :node-type-map="nodeTypeMap" @edit="openEditor(props)" /></template>
           <template #node-http="props"><NodeCard v-bind="props" :node-type-map="nodeTypeMap" @edit="openEditor(props)" /></template>
+          <template #node-notify="props"><NodeCard v-bind="props" :node-type-map="nodeTypeMap" @edit="openEditor(props)" /></template>
+          <template #node-agent="props"><NodeCard v-bind="props" :node-type-map="nodeTypeMap" @edit="openEditor(props)" /></template>
         </VueFlow>
       </div>
 
@@ -143,6 +146,23 @@
             <div class="form-row"><label>Headers (JSON)</label><textarea v-model="httpHeadersStr" class="input textarea mono" rows="2" placeholder='{"Content-Type":"application/json"}'></textarea></div>
             <div class="form-row"><label>Body (JSON)</label><textarea v-model="httpBodyStr" class="input textarea mono" rows="3" placeholder='{"message": "{{ nodes.llm1.output.text }}"}'></textarea></div>
             <div class="form-row"><label>超时(秒)</label><input v-model.number="selectedNode.data.timeout" class="input" type="number"></div>
+          </template>
+          <template v-if="selectedNode.type === 'notify'">
+            <div class="form-row"><label>通知渠道 (NotificationChannel.name)</label><input v-model="selectedNode.data.channel" class="input" placeholder="如: ops-feishu"></div>
+            <div class="form-row"><label>接收人 / 会话ID (可选)</label><input v-model="selectedNode.data.recipient" class="input" placeholder="oc_xxx / chat_id"></div>
+            <div class="form-row"><label>标题</label><input v-model="selectedNode.data.title" class="input" placeholder="【告警】服务器 CPU 过高"></div>
+            <div class="form-row"><label>内容 (支持模板)</label><textarea v-model="selectedNode.data.content" class="input textarea mono" rows="4" placeholder='节点 {{ nodes.tool1.output.data }} 已完成'></textarea></div>
+            <div class="form-row"><label>备用渠道 (可选)</label><input v-model="selectedNode.data.fallback_channel" class="input" placeholder="主渠道失败时转发的渠道名"></div>
+          </template>
+          <template v-if="selectedNode.type === 'agent'">
+            <div class="form-row"><label>子代理</label>
+              <select v-model="selectedNode.data.sub_agent_name" class="input">
+                <option value="">(自动路由)</option>
+                <option v-for="sa in subAgents" :key="sa.name" :value="sa.name">{{ sa.display_name || sa.name }}</option>
+              </select>
+            </div>
+            <div class="form-row"><label>任务 (支持模板)</label><textarea v-model="selectedNode.data.prompt" class="input textarea mono" rows="4" placeholder='分析以下指标并给出处置建议: {{ tojson(nodes.tool1.output) }}'></textarea></div>
+            <div class="form-row"><label>Max Tokens (可选)</label><input v-model.number="selectedNode.data.max_tokens" class="input" type="number" placeholder="默认使用 Provider 配置"></div>
           </template>
           </template>
 
@@ -248,6 +268,36 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+    <!-- 触发器配置 -->
+    <div v-if="showTrigger" class="modal-overlay" @click.self="showTrigger = false">
+      <div class="modal-box">
+        <h3>触发器 — {{ workflow.name }}</h3>
+        <div class="form-row"><label>触发类型</label>
+          <select v-model="workflow.trigger_type" class="input">
+            <option value="manual">manual（手动）</option>
+            <option value="alert_auto">alert_auto（告警自动触发）</option>
+            <option value="cron">cron（定时调度）</option>
+          </select>
+        </div>
+        <div v-if="workflow.trigger_type === 'cron'" class="form-row"><label>Cron 表达式 (5 字段)</label>
+          <input v-model="cronExpr" class="input mono" placeholder="0 2 * * *" @blur="syncCronExpr">
+          <div class="form-tip">格式: 分 时 日 月 周 · 示例: 0 8 * * *（每天08:00）· */30 * * * *（每30分钟）</div>
+        </div>
+        <div v-if="workflow.trigger_type === 'alert_auto'" class="form-row"><label>告警条件 (JSON)</label>
+          <textarea v-model="alertCondStr" class="input textarea mono" rows="3" placeholder='{"severity": "critical"}'></textarea>
+          <div class="form-tip">支持 key: severity / status / metric_name / rule_id / asset_id；空 {} 匹配所有告警</div>
+        </div>
+        <div class="form-row"><label><input type="checkbox" v-model="workflow.enabled"> 启用此触发器</label></div>
+        <div class="modal-actions">
+          <button class="btn" @click="showTrigger = false">取消</button>
+          <button class="btn btn-primary" @click="saveTrigger">保存</button>
+        </div>
+        <div v-if="cronPreview && workflow.trigger_type === 'cron'" class="cron-preview">
+          <div class="run-nodes-title">未来执行计划</div>
+          <div v-for="r in cronPreview" :key="r" class="cron-preview-item">{{ r }}</div>
         </div>
       </div>
     </div>
@@ -431,6 +481,8 @@ const nodeTypes = [
   { type: 'condition', label: '条件分支', icon: '◆', color: '#ec4899' },
   { type: 'code', label: '代码执行', icon: '</>', color: '#8b5cf6' },
   { type: 'http', label: 'HTTP 请求', icon: '⌘', color: '#06b6d4' },
+  { type: 'notify', label: 'IM 通知', icon: '✉', color: '#0ea5e9' },
+  { type: 'agent', label: '子代理', icon: '🤖', color: '#f97316' },
 ]
 const nodeTypeMap = computed(() => Object.fromEntries(nodeTypes.map(n => [n.type, n])))
 
@@ -439,9 +491,10 @@ const edges = ref([])
 const selectedNode = ref(null)
 const selectedEdge = ref(null)
 const edgeContextMenu = ref({ visible: false, x: 0, y: 0, edgeId: null })
-const workflow = ref({ id: null, name: '新建工作流', category: 'generic', published: false, enabled: true, description: '', trigger_type: 'manual' })
+const workflow = ref({ id: null, name: '新建工作流', category: 'generic', published: false, enabled: true, description: '', trigger_type: 'manual', trigger_condition: {} })
 const providers = ref([])
 const mcpTools = ref([])
+const subAgents = ref([])
 const showList = ref(false)
 const workflowList = ref([])
 const showRun = ref(false)
@@ -452,6 +505,54 @@ const editorConfirmingId = ref(null)
 const expandedNodes = ref(new Set())
 let pollingTimer = null
 const showGuide = ref(false)
+const showTrigger = ref(false)
+const cronExpr = ref('0 8 * * *')
+const alertCondStr = ref('{}')
+const cronPreview = ref([])
+function syncCronExpr() { try { updateCronPreview() } catch (e) {} }
+async function updateCronPreview() {
+  if (workflow.value.trigger_type !== 'cron' || !cronExpr.value.trim()) { cronPreview.value = []; return }
+  try {
+    const resp = await request.post('/agent-workflow/api/cron/preview', { cron: cronExpr.value.trim() })
+    cronPreview.value = resp?.items || []
+  } catch (e) { cronPreview.value = [] }
+}
+function openTriggerPanel() {
+  showTrigger.value = true
+  const cond = workflow.value.trigger_condition || {}
+  cronExpr.value = cond.cron || cond.cron_expr || '0 8 * * *'
+  alertCondStr.value = JSON.stringify(workflow.value.trigger_condition || {}, null, 2)
+  cronPreview.value = []
+}
+async function saveTrigger() {
+  const payload = { trigger_type: workflow.value.trigger_type, enabled: workflow.value.enabled }
+  if (workflow.value.trigger_type === 'cron') {
+    const cron = (cronExpr.value || '').trim()
+    if (!cron) { ElMessage.warning('请填写 Cron 表达式'); return }
+    payload.trigger_condition = { cron }
+  } else if (workflow.value.trigger_type === 'alert_auto') {
+    try {
+      payload.trigger_condition = JSON.parse(alertCondStr.value || '{}')
+    } catch (e) { ElMessage.error('告警条件不是合法 JSON'); return }
+  } else {
+    payload.trigger_condition = {}
+  }
+  try {
+    if (workflow.value.id) {
+      await request.post(`/agent-workflow/api/workflows/${workflow.value.id}/update`, payload)
+    } else {
+      await autoSave()
+      if (workflow.value.id) {
+        await request.post(`/agent-workflow/api/workflows/${workflow.value.id}/update`, payload)
+      }
+    }
+    workflow.value.trigger_condition = payload.trigger_condition
+    ElMessage.success('触发器已保存')
+    showTrigger.value = false
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e.message || e))
+  }
+}
 function nodeTypeDesc(type) {
   const map = {
     start: '定义工作流的输入参数，每个工作流有且只有一个开始节点',
@@ -638,8 +739,15 @@ async function loadMcpTools() {
   }
 }
 
+async function loadSubAgents() {
+  try {
+    const data = await request.get('/agent/sub-agents')
+    subAgents.value = data.sub_agents || []
+  } catch (e) { subAgents.value = [] }
+}
+
 function newWorkflow() {
-  workflow.value = { id: null, name: '新建工作流', category: 'generic', published: false, enabled: true, description: '', trigger_type: 'manual' }
+  workflow.value = { id: null, name: '新建工作流', category: 'generic', published: false, enabled: true, description: '', trigger_type: 'manual', trigger_condition: {} }
   nodes.value = [
     { id: 'start', type: 'start', position: { x: 80, y: 200 }, data: { label: '开始', inputs: [] } },
     { id: 'end', type: 'end', position: { x: 600, y: 200 }, data: { label: '结束', outputs: [] } },
@@ -661,7 +769,7 @@ async function loadList() {
 async function loadWorkflow(id) {
   try {
     const w = await request.get(`/agent-workflow/api/workflows/${id}`)
-    workflow.value = { id: w.id, name: w.name, category: w.category, published: w.published, enabled: w.enabled, description: w.description, trigger_type: w.trigger_type }
+    workflow.value = { id: w.id, name: w.name, category: w.category, published: w.published, enabled: w.enabled, description: w.description, trigger_type: w.trigger_type, trigger_condition: w.trigger_condition || {} }
     // 转换节点格式：后端 nodes 是 [{id, type, name, data}]，Vue Flow 需要 {id, type, position, data:{label}}
     const rawNodes = w.nodes || []
     const rawEdges = w.edges || []
@@ -806,6 +914,7 @@ async function autoSave() {
     description: workflow.value.description,
     enabled: workflow.value.enabled,
     trigger_type: workflow.value.trigger_type,
+    trigger_condition: workflow.value.trigger_condition || {},
     nodes: nodes.value.map(n => ({ id: n.id, type: n.type, name: n.data.label, data: n.data, position: n.position })),
     edges: edges.value.map(e => ({ source: e.source, target: e.target })),
   }
@@ -958,6 +1067,7 @@ onMounted(() => {
   newWorkflow()
   loadProviders()
   loadMcpTools()
+  loadSubAgents()
   // 监听画布拖放
   nextTick(() => {
     const canvas = document.querySelector('.canvas-wrapper')
@@ -1012,6 +1122,10 @@ onMounted(() => {
 .input { width: 100%; padding: 5px 9px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.8rem; box-sizing: border-box; }
 .textarea { resize: vertical; font-family: inherit; }
 .textarea.mono { font-family: 'Consolas', monospace; font-size: 0.75rem; }
+.form-tip { font-size: 0.7rem; color: var(--text-tertiary, #94a3b8); margin-top: 4px; line-height: 1.6; }
+.cron-preview { margin-top: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 8px; }
+.cron-preview-item { font-size: 0.75rem; font-family: 'Consolas', monospace; color: var(--text-secondary, #475569); padding: 2px 0; }
+.input.mono { font-family: 'Consolas', monospace; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: var(--bg-card-solid, #fff); border-radius: 10px; padding: 20px 24px; min-width: 380px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
 .modal-box.wide { min-width: 560px; }

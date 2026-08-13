@@ -93,6 +93,132 @@ def delete_silence(db: Session, silence_id: int):
     db.commit()
 
 
+# ─── G1 告警规则类型化评估 ──────────────────────────────────────
+RULE_KINDS = ["metric_raw", "anomaly", "forecast", "burn_rate"]
+
+
+def _load_config(rule) -> dict:
+    import json
+    try:
+        cfg = json.loads(rule.config_json) if rule.config_json else {}
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+def _metric_history(db: Session, metric_name: str, asset_id, limit: int = 120):
+    """返回某资产某指标最近 limit 条 (value, timestamp)。"""
+    q = db.query(MetricRecord).filter(MetricRecord.name == metric_name)
+    if asset_id is not None:
+        q = q.filter(MetricRecord.asset_id == asset_id)
+    rows = q.order_by(MetricRecord.timestamp.desc()).limit(limit).all()
+    return [(r.value, r.timestamp) for r in reversed(rows)]
+
+
+def _eval_metric_raw(rule, latest, db):
+    """静态阈值: 原逻辑。"""
+    cond = (rule.condition or "").strip().lower()
+    v = latest.value
+    if cond in (">", "gt"):
+        return v > rule.threshold, v, f"{rule.metric_name} 当前值:{v} 超出阈值:{rule.threshold}"
+    if cond in ("<", "lt"):
+        return v < rule.threshold, v, f"{rule.metric_name} 当前值:{v} 低于阈值:{rule.threshold}"
+    if cond in (">=", "gte"):
+        return v >= rule.threshold, v, f"{rule.metric_name} 当前值:{v} 达到阈值:{rule.threshold}"
+    if cond in ("<=", "lte"):
+        return v <= rule.threshold, v, f"{rule.metric_name} 当前值:{v} 不超过阈值:{rule.threshold}"
+    if cond in ("=", "==", "eq"):
+        return v == rule.threshold, v, f"{rule.metric_name} 当前值:{v} 等于阈值:{rule.threshold}"
+    return False, v, ""
+
+
+def _eval_anomaly(rule, latest, db):
+    """基于均值和标准差的统计偏差: 触发阈值 = mean + z*std。"""
+    import statistics
+    cfg = _load_config(rule)
+    z = float(cfg.get("z_score", rule.threshold if rule.threshold else 3.0))
+    hist = [x for x, _ in _metric_history(db, rule.metric_name, latest.asset_id, 120)]
+    if len(hist) < 5:
+        return False, latest.value, "样本不足(anomaly)"
+    mean = statistics.mean(hist)
+    std = statistics.stdev(hist) if len(hist) > 1 else 0.0
+    v = latest.value
+    cond = (rule.condition or "").strip().lower()
+    upper = mean + z * std
+    lower = mean - z * std
+    if cond in (">", "gt", ">=", "gte"):
+        triggered = v >= upper
+        msg = f"{rule.metric_name} 当前:{v:.2f} 超出基线均值+{z}σ:({upper:.2f})(mean={mean:.2f},std={std:.2f})"
+    elif cond in ("<", "lt", "<=", "lte"):
+        triggered = v <= lower
+        msg = f"{rule.metric_name} 当前:{v:.2f} 低于基线均值-{z}σ:({lower:.2f})(mean={mean:.2f},std={std:.2f})"
+    else:
+        triggered = abs(v - mean) > z * (std or 1e-9)
+        msg = f"{rule.metric_name} 当前:{v:.2f} 偏离基线 {abs(v-mean):.2f} > {z}σ"
+    return bool(triggered), v, msg
+
+
+def _eval_forecast(rule, latest, db):
+    """线性外推预测未来 points 个点, 若投影值穿越阈值则触发。"""
+    cfg = _load_config(rule)
+    horizon = int(cfg.get("horizon_points", 5))
+    hist = [x for x, _ in _metric_history(db, rule.metric_name, latest.asset_id, 60)]
+    if len(hist) < 5:
+        return False, latest.value, "样本不足(forecast)"
+    xs = list(range(len(hist)))
+    n = len(hist)
+    sx = sum(xs); sy = sum(hist); sxx = sum(x * x for x in xs); sxy = sum(x * y for x, y in zip(xs, hist))
+    denom = n * sxx - sx * sx
+    if denom == 0:
+        slope = 0.0
+    else:
+        slope = (n * sxy - sx * sy) / denom
+    intercept = (sy - slope * sx) / n
+    projected = [intercept + slope * (n - 1 + i) for i in range(1, horizon + 1)]
+    cond = (rule.condition or "").strip().lower()
+    if cond in (">", "gt", ">=", "gte"):
+        triggered = any(p >= rule.threshold for p in projected)
+    elif cond in ("<", "lt", "<=", "lte"):
+        triggered = any(p <= rule.threshold for p in projected)
+    else:
+        triggered = False
+    msg = f"{rule.metric_name} 预测未来{horizon}点将穿越阈值:{rule.threshold} (斜率:{slope:.4f},投影:{[round(x,2) for x in projected[:3]]}...)"
+    return bool(triggered), latest.value, msg
+
+
+def _eval_burn_rate(rule, latest, db):
+    """燃尽率: 基于 error_rate 类指标在窗口内累计, 触发 = 燃尽率 > 阈值倍。"""
+    cfg = _load_config(rule)
+    window_hours = float(cfg.get("window_hours", 1))
+    budget = float(cfg.get("error_budget", rule.threshold if rule.threshold else 99.0))  # 目标可用性%
+    import math
+    if budget <= 0 or budget >= 100:
+        budget = 99.0
+    error_budget_s = (100.0 - budget) / 100.0 * (window_hours * 3600)
+    hist = [x for x, _ in _metric_history(db, rule.metric_name, latest.asset_id, 500)]
+    # 取窗口内样本: 按最近 window_hours 的样本数近似(样本有 timestamp 但此处简化用全体)
+    if not hist:
+        return False, latest.value, "无样本(burn_rate)"
+    errors = sum(1 for x in hist if x is not None and float(x) < 0.99)  # 视 <0.99 为失败占比样本(0/1)
+    consumed = len(hist) * (100.0 - float(latest.value if latest.value is not None else 0)) / 100.0 * 1.0
+    burn_rate = (consumed + 1e-9) / (error_budget_s + 1e-9)
+    triggered = burn_rate > float(rule.threshold if rule.threshold else 1.0)
+    msg = f"{rule.metric_name} burn_rate:{burn_rate:.3f} 预算:{budget}% 窗口:{window_hours}h (阈值倍:{rule.threshold})"
+    return bool(triggered), latest.value, msg
+
+
+def _eval_rule_by_kind(rule, latest, db) -> tuple:
+    """按 kind 分发评估, 返回 (triggered, actual_value, message)。"""
+    kind = (rule.kind or "metric_raw").strip().lower()
+    if kind == "anomaly":
+        return _eval_anomaly(rule, latest, db)
+    if kind == "forecast":
+        return _eval_forecast(rule, latest, db)
+    if kind == "burn_rate":
+        return _eval_burn_rate(rule, latest, db)
+    return _eval_metric_raw(rule, latest, db)
+
+
 def check_rules(db: Session):
     rules = db.query(AlertRule).filter(AlertRule.enabled == True).all()
     now = datetime.now()
@@ -178,19 +304,7 @@ def check_rules(db: Session):
                 continue
             if latest.asset_id in _skip_asset_ids and latest.name != "svc_up":
                 continue
-            triggered = False
-            # 兼容 ">" 和 "gt" 两种写法（规则表实际存的是 ">" 符号）
-            cond = (rule.condition or "").strip().lower()
-            if cond in (">", "gt") and latest.value > rule.threshold:
-                triggered = True
-            elif cond in ("<", "lt") and latest.value < rule.threshold:
-                triggered = True
-            elif cond in (">=", "gte") and latest.value >= rule.threshold:
-                triggered = True
-            elif cond in ("<=", "lte") and latest.value <= rule.threshold:
-                triggered = True
-            elif cond in ("=", "==", "eq") and latest.value == rule.threshold:
-                triggered = True
+            triggered, actual_value, eval_msg = _eval_rule_by_kind(rule, latest, db)
             if triggered:
                 active = (
                     db.query(Alert)
@@ -217,11 +331,11 @@ def check_rules(db: Session):
                         rule_id=rule.id,
                         asset_id=latest.asset_id,
                         metric_name=rule.metric_name,
-                        actual_value=latest.value,
+                        actual_value=actual_value,
                         threshold=rule.threshold,
                         severity=rule.severity,
                         status="triggered",
-                        message=f"{rule.name} - {rule.metric_name} 当前值:{latest.value} 超出阈值:{rule.threshold}",
+                        message=f"{rule.name} - {rule.metric_name} 当前值:{actual_value} 超出阈值:{rule.threshold}",
                     )
                     db.add(alert)
                     new_alerts.append(alert)
@@ -230,11 +344,11 @@ def check_rules(db: Session):
                         rule_id=rule.id,
                         asset_id=latest.asset_id,
                         metric_name=rule.metric_name,
-                        actual_value=latest.value,
+                        actual_value=actual_value,
                         threshold=rule.threshold,
                         severity=rule.severity,
                         status="triggered",
-                        message=f"{rule.name} - {rule.metric_name} 当前值:{latest.value} 超出阈值:{rule.threshold}",
+                        message=f"{rule.name} - {eval_msg}",
                     )
                     db.add(alert)
                     new_alerts.append(alert)

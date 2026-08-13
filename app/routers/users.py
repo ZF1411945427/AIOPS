@@ -68,7 +68,8 @@ def api_user_create(request: Request, payload: dict = Body(...), db: Session = D
     if role_id:
         role_obj = db.query(Role).filter(Role.id == role_id).first()
         if role_obj:
-            role = role_obj.name if role_obj.name in ("admin", "operator", "viewer") else "viewer"
+            # 自定义角色保留自身名称（权限由 role_permissions 决定，role 字段仅展示用）
+            role = role_obj.name if role_obj.name in ("admin", "operator", "viewer", "superuser") else f"custom:{role_obj.name}"
         else:
             role_id = None
     user = User(username=username, password_hash=hash_password(password), role=role, role_id=role_id, tenant_id=tenant_id)
@@ -94,7 +95,7 @@ def api_set_user_role(user_id: int, payload: dict = Body(...), request: Request 
         return {"status": "error", "message": "用户不存在"}
     user.role_id = role_id
     if role_id and role_obj:
-        user.role = role_obj.name if role_obj.name in ("admin", "operator", "viewer") else "viewer"
+        user.role = role_obj.name if role_obj.name in ("admin", "operator", "viewer", "superuser") else f"custom:{role_obj.name}"
     elif not role_id:
         user.role = "viewer"
     db.commit()

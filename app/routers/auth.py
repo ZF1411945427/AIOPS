@@ -166,6 +166,20 @@ def me(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": "用户不存在"}, status_code=401)
     from app.services.tenant_service import get_tenant
     tenant = get_tenant(db, user.tenant_id or 1)
-    return {"ok": True, "user": {"id": user.id, "username": user.username, "role": user.role, "role_id": user.role_id, "tenant_id": user.tenant_id or 1, "tenant_name": tenant.get("name", "默认租户") if tenant else "默认租户"}}
+    perms = {}
+    try:
+        from app.services.permission_service import user_permissions
+        perms = user_permissions(db, user.id)
+    except Exception:
+        perms = {}
+    return {
+        "ok": True,
+        "user": {
+            "id": user.id, "username": user.username, "role": user.role,
+            "role_id": user.role_id, "tenant_id": user.tenant_id or 1,
+            "tenant_name": tenant.get("name", "默认租户") if tenant else "默认租户",
+            "permissions": perms,
+        },
+    }
 
 

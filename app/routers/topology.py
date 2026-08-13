@@ -90,3 +90,12 @@ def api_topology_network(mode: str = "devices", db: Session = Depends(get_db)):
         return JSONResponse(topology_service.build_network_topo(db, mode))
     except Exception as e:
         return JSONResponse({"nodes": [], "edges": [], "relations": [], "stats": {}, "mode": mode, "warning": str(e)}, status_code=200)
+
+
+@router.get("/api/service-calls")
+def api_service_call_topo(hours: int = 24, min_calls: int = 1, db: Session = Depends(get_db)):
+    """Tab3: 服务调用链拓扑（从 Span 表聚合跨服务调用关系）。"""
+    try:
+        return JSONResponse(topology_service.build_service_call_topo(db, hours=hours, min_calls=min_calls))
+    except Exception as e:
+        return JSONResponse({"nodes": [], "edges": [], "stats": {}, "warning": str(e)}, status_code=200)

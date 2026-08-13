@@ -143,44 +143,24 @@
         <input v-model="entityQuery" class="search-input" placeholder="搜索实体名称 / ci_type..." />
       </div>
 
-      <!-- Layer cards -->
-      <div class="fm-layers">
-        <div v-for="layer in layers" :key="layer.key" class="fm-layer-card">
-          <div class="layer-header">
-            <div class="layer-title">{{ layer.name }}</div>
-            <div class="layer-meta">
-              <span class="layer-count">{{ visibleCount(layer) }}/{{ layer.count }} 个实体</span>
-              <span v-if="layer.fault" class="layer-badge fault">{{ layer.fault }} 故障</span>
-              <span v-if="layer.offline" class="layer-badge offline">{{ layer.offline }} 离线</span>
-              <span v-if="layer.healthy === layer.count" class="layer-badge ok">全部健康</span>
-            </div>
-          </div>
-          <div class="layer-entities">
-            <div
-              v-for="e in visibleEntities(layer)"
-              :key="e.id"
-              class="entity-node"
-              :class="[`status-${e.health_status}`]"
-              @click="openDetail(e)"
-            >
-              <div class="entity-status-dot">
-                <svg viewBox="0 0 16 16" width="16" height="16">
-                  <circle cx="8" cy="8" r="5" fill="currentColor"/>
-                </svg>
-              </div>
-              <div class="entity-info">
-                <div class="entity-name">{{ e.name }}</div>
-                <div class="entity-meta">
-                  <span class="entity-ci-type">{{ e.ci_type }}</span>
-                  <span v-if="e.alert_count" class="entity-alert-badge">{{ e.alert_count }} 告警</span>
-                </div>
-              </div>
-            </div>
-            <div v-if="!layer.entities.length" class="layer-empty">该层暂无实体</div>
-          </div>
-          <button v-if="layer.count > SHOW_LIMIT" class="layer-toggle" @click="toggleLayer(layer.key)">
-            {{ expandedLayers.has(layer.key) ? '收起' : `展开全部 ${layer.count} 个` }}
-          </button>
+      <!-- ====== 架构拓扑(分层卡片 + 调用连线) ====== -->
+      <div class="arch-topo-wrap">
+        <div class="arch-topo-head">
+          <span class="arch-topo-icon">🗺️</span>
+          <span class="arch-topo-title">架构拓扑</span>
+          <span class="arch-topo-sub">分层实体 · 调用连线 · 自动排版</span>
+        </div>
+        <div ref="archChartRef" class="arch-topo-chart"></div>
+        <div class="arch-topo-legend">
+          <span class="lg-label">健康:</span>
+          <span class="lg-dot" style="background:#67C23A"></span>健康
+          <span class="lg-dot" style="background:#E6A23C"></span>警告
+          <span class="lg-dot" style="background:#ef4444"></span>严重
+          <span class="lg-dot" style="background:#94a3b8"></span>离线
+          <span class="lg-label" style="margin-left:16px">调用:</span>
+          <span class="lg-line" style="background:#94a3b8"></span>低错误
+          <span class="lg-line" style="background:#E6A23C"></span>警告
+          <span class="lg-line" style="background:#ef4444"></span>严重
         </div>
       </div>
     </template>
@@ -362,7 +342,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import * as echarts from 'echarts'
 import request from '@/api/request'
 import { Loading } from '@element-plus/icons-vue'
 
@@ -396,6 +377,230 @@ const drawerEntity = ref(null)
 const drawerLoading = ref(false)
 const drawerError = ref('')
 const detail = ref(null)
+
+// ====== 架构拓扑(ECharts 分层卡片 + 调用连线) ======
+const svcNodes = ref([])
+const svcEdges = ref([])
+const archChartRef = ref(null)
+let archChart = null
+
+async function loadServiceCalls() {
+  try {
+    const data = await request.get('/topology/api/service-calls', { params: { hours: 168, min_calls: 1 } })
+    svcNodes.value = data.nodes || []
+    svcEdges.value = data.edges || []
+  } catch (e) {
+    // silent
+  }
+}
+
+function _edgeColor(er) {
+  if (er >= 30) return '#ef4444'
+  if (er >= 5) return '#E6A23C'
+  return '#94a3b8'
+}
+
+function _nameMatch(name) {
+  return (name || '').replace(/-\d+$/, '').toLowerCase()
+}
+
+function renderDomainGraph() {
+  if (!archChartRef.value || !layers.value.length) return
+  if (archChart) { archChart.dispose(); archChart = null }
+  archChart = echarts.init(archChartRef.value, null, { renderer: 'canvas', devicePixelRatio: 2 })
+
+  const allEntities = []
+  for (const layer of layers.value) {
+    for (const e of layer.entities) {
+      allEntities.push({ ...e, layerKey: layer.key, layerName: layer.name })
+    }
+  }
+
+  const LAYER_STYLE = {
+    '1': { bg: '#eef2ff', border: '#6366f1', label: '接入层', textColor: '#4338ca' },
+    svc: { bg: '#e0f2fe', border: '#0284c7', label: '服务调用层', textColor: '#075985' },
+    '2': { bg: '#f0fdf4', border: '#22c55e', label: '应用层', textColor: '#15803d' },
+    '3-db': { bg: '#fff7ed', border: '#f97316', label: '数据库', textColor: '#c2410c' },
+    '3-mq': { bg: '#ecfeff', border: '#06b6d4', label: '中间件', textColor: '#0e7490' },
+    '4': { bg: '#f8fafc', border: '#64748b', label: '基础设施', textColor: '#475569' },
+  }
+
+  const chartW = archChartRef.value.clientWidth || 800
+  const CARD_W = 160
+  const CARD_H = 46
+  const GAP_X = 28
+  const ROW_H = 62
+
+  const LAYER_ORDER = ['1', 'svc', '2', '3-db', '3-mq', '4']
+
+  const nameToId = {}
+  for (const e of allEntities) {
+    nameToId[_nameMatch(e.name)] = e.id
+    try {
+      const attrs = typeof e.ci_attributes === 'string' ? JSON.parse(e.ci_attributes || '{}') : (e.ci_attributes || {})
+      if (attrs.service) nameToId[_nameMatch(attrs.service)] = e.id
+    } catch (e2) {}
+  }
+
+  const svcEntities = []
+  for (const sn of svcNodes.value) {
+    const mid = _nameMatch(sn.name)
+    if (nameToId[mid]) continue
+    svcEntities.push({
+      id: 'svc-' + svcEntities.length,
+      name: sn.name,
+      ci_type: sn.service_type || 'service',
+      health_status: sn.health_status || 'green',
+      alert_count: 0,
+      layerKey: 'svc',
+      layerName: '服务调用层',
+    })
+  }
+
+  for (const sn of svcEntities) {
+    nameToId[_nameMatch(sn.name)] = sn.id
+  }
+
+  const finalEntities = allEntities.length > 0
+    ? [...allEntities, ...svcEntities]
+    : svcEntities
+
+  const perRow = Math.max(1, Math.floor((chartW - 40) / (CARD_W + GAP_X)))
+  const layerGroups = LAYER_ORDER.map(key => ({
+    key,
+    items: finalEntities.filter(e => e.layerKey === key),
+  })).filter(g => g.items.length > 0)
+
+  const rowsByKey = {}
+  for (const g of layerGroups) {
+    rowsByKey[g.key] = Math.ceil(g.items.length / perRow)
+  }
+
+  let yCursor = 30
+  const layerYMap = {}
+  for (const g of layerGroups) {
+    layerYMap[g.key] = yCursor
+    yCursor += rowsByKey[g.key] * ROW_H + 40
+  }
+
+  const layerXMap = {}
+  for (const g of layerGroups) {
+    const items = g.items
+    const n = items.length
+    const rows = rowsByKey[g.key]
+    const rowStartY = layerYMap[g.key]
+    items.forEach((e, i) => {
+      const row = Math.floor(i / perRow)
+      const inRow = n - row * perRow < perRow && row === rows - 1
+        ? n - row * perRow
+        : perRow
+      const idxInRow = i % perRow
+      const rowW = (inRow - 1) * (CARD_W + GAP_X)
+      const x = (chartW - rowW) / 2 + idxInRow * (CARD_W + GAP_X)
+      layerXMap[e.id] = { x, y: rowStartY + row * ROW_H + ROW_H * 0.35 }
+    })
+  }
+
+  function _truncate(s, max) {
+    return s && s.length > max ? s.slice(0, max - 1) + '…' : s
+  }
+
+  for (const sn of svcEntities) {
+    nameToId[_nameMatch(sn.name)] = sn.id
+  }
+
+  const graphNodes = finalEntities.map(e => {
+    const pos = layerXMap[e.id] || { x: chartW / 2, y: 100 }
+    const style = LAYER_STYLE[e.layerKey] || LAYER_STYLE['4']
+    return {
+      id: String(e.id),
+      name: e.name,
+      x: pos.x, y: pos.y,
+      symbol: 'roundRect',
+      symbolSize: [CARD_W, CARD_H],
+      itemStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#ffffff' },
+          { offset: 1, color: style.bg },
+        ]),
+        borderColor: style.border,
+        borderWidth: 1.5,
+        borderRadius: 10,
+        shadowBlur: 6,
+        shadowOffsetY: 2,
+        shadowColor: 'rgba(15,23,42,0.10)',
+      },
+      label: {
+        show: true, position: 'inside',
+        formatter: `{name|${_truncate(e.name, 16)}}\n{type|${_truncate(e.ci_type || '', 14)}}`,
+        rich: {
+          name: { fontSize: 11, fontWeight: 700, color: '#1e293b', lineHeight: 17, width: 130, overflow: 'truncate' },
+          type: { fontSize: 9, color: '#64748b', lineHeight: 13, width: 130, overflow: 'truncate' },
+        },
+      },
+      raw: e,
+    }
+  })
+
+  const graphEdges = []
+  const seen = new Set()
+  for (const edge of svcEdges.value) {
+    const srcId = nameToId[_nameMatch(edge.source)]
+    const tgtId = nameToId[_nameMatch(edge.target)]
+    if (!srcId || !tgtId) continue
+    const key = `${srcId}-${tgtId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    graphEdges.push({
+      source: String(srcId), target: String(tgtId),
+      lineStyle: { color: _edgeColor(edge.error_rate || 0), width: 2, curveness: 0.25, opacity: 0.85 },
+      label: { show: edge.call_count > 3, formatter: `{c|${edge.call_count}次}`, rich: { c: { fontSize: 9, color: '#64748b', padding: [1, 4] } } },
+    })
+  }
+
+  archChart.setOption({
+    tooltip: {
+      formatter: (p) => {
+        if (p.dataType === 'node') {
+          const e = p.data.raw
+          let html = `<b>${e.name}</b><br/>类型: ${e.ci_type || '-'}<br/>状态: ${e.health_status || '-'}<br/>层: ${e.layerName || '-'}`
+          if (e.alert_count) html += `<br/>告警: ${e.alert_count}`
+          return html
+        }
+        if (p.dataType === 'edge') {
+          return `<b>${p.data.source} → ${p.data.target}</b><br/>调用 ${p.data.call_count} 次, 错误 ${p.data.error_count} 次`
+        }
+        return ''
+      },
+    },
+    series: [{
+      type: 'graph', layout: 'none',
+      roam: true, draggable: true,
+      data: graphNodes, links: graphEdges,
+      edgeSymbol: ['none', 'arrow'],
+      edgeSymbolSize: [0, 10],
+      edgeLabel: { fontSize: 9, color: '#64748b' },
+      emphasis: { focus: 'adjacency', lineStyle: { width: 3 } },
+      lineStyle: { color: '#94a3b8' },
+    }],
+  }, true)
+
+  archChart.off('click')
+  archChart.on('click', (p) => {
+    if (p.dataType === 'node' && p.data.raw) {
+      openDetail(p.data.raw)
+    }
+  })
+
+  setTimeout(() => {
+    if (archChart) {
+      const needH = yCursor + 40
+      const targetH = Math.max(560, needH)
+      archChartRef.value.style.height = targetH + 'px'
+      archChart.resize()
+    }
+  }, 60)
+}
 
 async function loadDomains() {
   try {
@@ -438,6 +643,9 @@ async function loadDomainDetail() {
     })
     stats.value = data.stats || { total: 0, green: 0, gray: 0, red: 0 }
     layers.value = data.layers || []
+    await loadServiceCalls()
+    await nextTick()
+    renderDomainGraph()
   } catch (e) {
     console.error('Failed to load domain detail:', e)
   } finally {
@@ -1307,4 +1515,36 @@ html[data-theme="dark"] .fm-refresh:hover {
 }
 .spinning { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 架构拓扑(分层卡片+调用连线,一套) ── */
+.arch-topo-wrap {
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border, rgba(0,0,0,0.07));
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+html[data-theme="dark"] .arch-topo-wrap {
+  background: rgba(15,23,42,0.6);
+  border-color: rgba(51,65,85,0.3);
+}
+.arch-topo-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07));
+}
+.arch-topo-icon { font-size: 1rem; }
+.arch-topo-title { font-weight: 600; font-size: 0.88rem; color: var(--text, #1e293b); }
+.arch-topo-sub { font-size: 0.72rem; color: var(--text-secondary, #64748b); }
+.arch-topo-stats { margin-left: auto; font-size: 0.75rem; color: var(--text-tertiary, #94a3b8); }
+
+/* ── 架构拓扑图表 ── */
+.arch-topo-chart { width: 100%; height: 560px; }
+.arch-topo-legend {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 16px; border-top: 1px solid var(--border, rgba(0,0,0,0.07));
+  font-size: 0.72rem; color: var(--text-tertiary, #94a3b8);
+}
+.lg-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.lg-line { width: 14px; height: 2px; display: inline-block; }
+.lg-label { font-weight: 500; color: var(--text-secondary, #64748b); }
 </style>

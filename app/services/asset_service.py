@@ -144,6 +144,10 @@ def probe_assets(db: Session):
                 ci_attrs = {}
 
             # 按 CI 类型选择探活方式：有业务端口的探业务端口，否则按 connection_type
+            # 演示资产(demo=true)跳过探活，保持在线，避免假 IP 被探活打成 offline
+            if ci_attrs.get("demo"):
+                return None
+
             probe_port = None
             if a.ci_type == "middleware":
                 probe_port = ci_attrs.get("mw_port", "")

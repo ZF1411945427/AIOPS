@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Role, RoleMenu
+from app.services import permission_service
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
@@ -25,6 +26,46 @@ class RoleUpdate(BaseModel):
 
 class MenuAssign(BaseModel):
     menu_keys: list[str]
+
+
+class PermissionAssign(BaseModel):
+    matrix: dict[str, list[str]]  # {resource: [action,...]}
+
+
+@router.get("/permission-meta")
+def get_permission_meta():
+    """返回资源/动作目录（前端渲染策略矩阵用）。"""
+    from app.casbin_engine import ACTION_LABELS, RESOURCE_LABELS, get_all_resources
+    resources = sorted(get_all_resources(), key=lambda r: RESOURCE_LABELS.get(r, r))
+    return {
+        "ok": True,
+        "resources": [
+            {"key": r, "label": RESOURCE_LABELS.get(r, r)}
+            for r in resources
+        ],
+        "actions": [
+            {"key": a, "label": ACTION_LABELS.get(a, a)}
+            for a in ["read", "write", "execute", "delete"]
+        ],
+        "action_labels": ACTION_LABELS,
+    }
+
+
+@router.get("/{role_id}/permissions")
+def get_role_permissions(role_id: int, db: Session = Depends(get_db)):
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    return {"ok": True, "role_id": role_id, "matrix": permission_service.get_role_permissions(db, role_id)}
+
+
+@router.put("/{role_id}/permissions")
+def set_role_permissions(role_id: int, body: PermissionAssign, db: Session = Depends(get_db)):
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    permission_service.set_role_permissions(db, role_id, body.matrix)
+    return {"ok": True, "matrix": permission_service.get_role_permissions(db, role_id)}
 
 
 @router.get("")

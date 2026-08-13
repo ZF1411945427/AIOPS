@@ -26,7 +26,7 @@
           <thead>
             <tr>
               <th class="col-id">ID</th><th>名称</th><th>CI 类型</th><th>IP / 地址</th><th>状态</th><th>生命周期</th>
-              <th>引用/孤岛</th><th>创建时间</th><th>操作</th>
+              <th>引用/孤岛</th><th>最近检查</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -43,6 +43,7 @@
                 </span>
                 <span v-else class="text-muted">-</span>
               </td>
+              <td class="text-sm"><span class="check-time" :class="a.status === 'offline' ? 'stale' : 'fresh'">{{ checkTimeLabel(a) }}</span></td>
               <td class="text-sm">{{ a.created_at || '-' }}</td>
               <td>
                 <button v-if="a.ci_type === 'kubernetes_cluster'" class="btn btn-sm btn-sync" :disabled="syncingId === a.id" @click="syncK8s(a)">{{ syncingId === a.id ? '同步中...' : '同步' }}</button>
@@ -369,7 +370,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
@@ -521,6 +522,26 @@ const showableFields = {
 function showField(key) { return showableFields[form.value.ci_type]?.[key] ?? false }
 
 function statusLabel(s) { return { online: '在线', offline: '离线', degraded: '降级', deprecated: '已废弃' }[s] || s }
+const checkNow = ref(Date.now())
+const checkTimer = setInterval(() => { checkNow.value = Date.now() }, 30000)
+onUnmounted(() => { if (checkTimer) clearInterval(checkTimer) })
+function timeAgo(ts) {
+  if (!ts) return null
+  let t = new Date(ts).getTime()
+  if (isNaN(t)) { const norm = String(ts).replace(' ', 'T'); t = new Date(norm).getTime() }
+  if (isNaN(t)) return null
+  const sec = Math.max(0, Math.floor((checkNow.value - t) / 1000))
+  if (sec < 60) return `${sec}秒前`
+  if (sec < 3600) return `${Math.floor(sec / 60)}分钟前`
+  if (sec < 86400) return `${Math.floor(sec / 3600)}小时前`
+  return `${Math.floor(sec / 86400)}天前`
+}
+function checkTimeLabel(a) {
+  const ago = timeAgo(a.last_checked_at)
+  if (!ago) return '-'
+  const s = a.status === 'online' ? '在线' : a.status === 'offline' ? '离线' : statusLabel(a.status)
+  return `${s} · ${ago}`
+}
 function lifecycleClass(s) {
   if (s === 'active') return 'lc-active'
   if (s === 'maintenance') return 'lc-maintenance'
@@ -1037,6 +1058,9 @@ onMounted(() => { loadAssets() })
 .ref-info { font-size: 0.72rem; color: #06b6d4; font-weight: 500; }
 .ref-info.orphan { color: #ef4444; font-weight: 600; }
 .text-muted { color: var(--text-tertiary, #94a3b8); }
+.check-time { font-size: 0.75rem; font-weight: 500; }
+.check-time.fresh { color: #16a34a; }
+.check-time.stale { color: #ef4444; }
 .badge.deprecated { background: rgba(100,116,139,0.15); color: #64748b; text-decoration: line-through; }
 tr.row-deprecated td { opacity: 0.55; }
 tr.row-deprecated .asset-name { text-decoration: line-through; }

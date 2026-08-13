@@ -94,6 +94,24 @@ def api_script_execute(
     if dangerous:
         return JSONResponse({"ok": False, "error": f"命令被安全策略拦截(匹配: {pattern})"}, status_code=403)
 
+    # cmdpolicy 沙箱: 沙盒启用时按策略二次校验(黑/白名单/风险/执行窗口)
+    try:
+        from app.services import sandbox_service
+        user_id = request.session.get("user_id") or 0
+        role_id = 0
+        from app.models import User
+        _u = db.query(User).filter(User.id == user_id).first()
+        if _u and _u.role_id:
+            role_id = _u.role_id
+        asset_id = int(target_id.replace("asset_", "")) if target_id.startswith("asset_") else 0
+        sb = sandbox_service.evaluate_request(
+            "script_exec", "script_exec", asset_id or 0, script_content,
+            "medium", session_id=0, user_id=user_id, role_id=role_id, db=db)
+        if sb.get("decision") == "rejected":
+            return JSONResponse({"ok": False, "error": f"沙盒策略拦截: {sb.get('reason')}"}, status_code=403)
+    except Exception:
+        pass  # 沙盒异常不阻断执行(回归安全)
+
     is_asset = target_id.startswith("asset_")
     if is_asset:
         asset_id = int(target_id.replace("asset_", ""))

@@ -48,6 +48,7 @@
                 <button v-if="inc.status === 'open'" class="btn btn-sm btn-primary" @click="resolveIncident(inc.id)">解决</button>
                 <button class="btn btn-sm" @click="quickRca(inc.id)">根因分析</button>
                 <button class="btn btn-sm btn-ai" :disabled="!!aiRcaLoading[inc.id]" @click="quickAiRca(inc.id)">{{ aiRcaLoading[inc.id] ? 'AI 分析中...' : 'AI 深度分析' }}</button>
+                <button class="btn btn-sm btn-investigate" :disabled="!!investigateLoading[inc.id]" @click="quickInvestigate(inc.id)">{{ investigateLoading[inc.id] ? '调查中...' : '自动调查' }}</button>
                 <button class="btn btn-sm btn-sop" :disabled="!!sopGenerating[inc.id]" @click="quickSop(inc.id)">{{ sopGenerating[inc.id] ? '生成中...' : '生成 SOP' }}</button>
                 <button class="btn btn-sm" @click="showDetail(inc.id)">详情</button>
               </td>
@@ -92,6 +93,7 @@
             <button class="btn" @click="doRca">根因分析</button>
             <button class="btn btn-ai" :disabled="!!aiRcaLoading[detail.incident.id]" @click="doAiRca()">{{ aiRcaLoading[detail.incident.id] ? 'AI 分析中...' : (aiRcaResult ? 'AI 深度分析' : 'AI 深度分析') }}</button>
             <button v-if="aiRcaResult && !aiRcaLoading[detail.incident.id]" class="btn btn-ai" style="opacity:0.75" @click="reAnalyze">重新分析</button>
+            <button class="btn btn-investigate" :disabled="!!investigateLoading[detail.incident.id]" @click="triggerInvestigate(detail.incident.id)">{{ investigateLoading[detail.incident.id] ? '调查中...' : '自动调查' }}</button>
             <button class="btn btn-sop" :disabled="!!sopGenerating[detail.incident.id]" @click="generateSop(detail.incident.id)">{{ sopGenerating[detail.incident.id] ? '生成中...' : '生成 SOP 知识' }}</button>
           </div>
           <h4 class="sub-title">关联告警 ({{ detail.alerts.length }})</h4>
@@ -116,6 +118,16 @@
           <div v-if="aiRcaResult" class="rca-box ai-rca-box">
             <h4>🤖 AI 深度分析</h4>
             <div class="ai-rca-content" v-html="aiRcaResult"></div>
+          </div>
+
+          <div v-if="investigation" class="rca-box inv-box">
+            <h4>🧭 自动调查报告
+              <span class="inv-status" :class="investigation.status">
+                {{ { running: '调查中...', completed: '已完成', failed: '失败' }[investigation.status] || investigation.status }}
+              </span>
+            </h4>
+            <div v-if="investigation.status === 'failed'" class="inv-error">{{ investigation.error_message || '调查失败' }}</div>
+            <div v-else class="inv-content" v-html="invMd"></div>
           </div>
 
           </div>
@@ -144,6 +156,9 @@ const rcaResult = ref('')
 const aiRcaResult = ref('')
 const aiRcaLoading = ref({})   // 按 incident id 跟踪，避免全局联动
 const sopGenerating = ref({})  // 按 incident id 跟踪
+const investigateLoading = ref({})  // 自动调查触发状态
+const investigation = ref(null)      // 最新自动调查报告
+const invMd = ref('')
 
 const pageNumbers = computed(() => {
   const pages = []
@@ -191,6 +206,8 @@ async function loadIncidents() {
 async function showDetail(id) {
   rcaResult.value = ''
   aiRcaResult.value = ''
+  investigation.value = null
+  invMd.value = ''
   try {
     const data = await request.get(`/incidents/api/${id}`)
     detail.value = data
@@ -201,8 +218,45 @@ async function showDetail(id) {
     } else {
       aiRcaResult.value = ''
     }
+    loadInvestigation(id)
   } catch (e) {
     ElMessage.error('加载详情失败: ' + e.message)
+  }
+}
+
+async function loadInvestigation(id) {
+  try {
+    const data = await request.get('/incidents/api/reports/investigation', { params: { incident_id: id, limit: 5 } })
+    const items = data.items || []
+    const latest = items[0] || null
+    investigation.value = latest
+    if (latest) {
+      invMd.value = md.render(latest.report_md || '')
+    }
+  } catch (e) {
+    // 报告列表加载失败不阻断详情
+  }
+}
+
+async function triggerInvestigate(id) {
+  investigateLoading.value[id] = true
+  try {
+    const data = await request.post(`/incidents/api/${id}/investigate`, {})
+    if (data.ok === false) { ElMessage.error(data.error || '启动调查失败'); return }
+    ElMessage.success('自动调查已启动，正在分析中...')
+    // 轮询等待报告完成（最多 5 次）
+    for (let i = 0; i < 5; i++) {
+      await new Promise(r => setTimeout(r, 5000))
+      await loadInvestigation(id)
+      if (investigation.value && investigation.value.status === 'completed') {
+        ElMessage.success('自动调查报告已生成')
+        break
+      }
+    }
+  } catch (e) {
+    ElMessage.error('启动调查失败: ' + (e.message || e))
+  } finally {
+    investigateLoading.value[id] = false
   }
 }
 
@@ -296,6 +350,10 @@ async function quickAiRca(id) {
 function quickSop(id) {
   generateSop(id)
 }
+async function quickInvestigate(id) {
+  await showDetail(id)
+  await triggerInvestigate(id)
+}
 
 
 
@@ -388,6 +446,24 @@ onMounted(() => {
 .btn-ai { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; }
 .btn-ai:hover:not(:disabled) { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
 .btn-sop { background: rgba(34,197,94,0.1); color: #22c55e; border-color: rgba(34,197,94,0.3); font-weight: 600; }
+.btn-investigate { background: rgba(6,182,212,0.1); color: #06b6d4; border-color: rgba(6,182,212,0.35); font-weight: 600; }
+.btn-investigate:hover:not(:disabled) { background: rgba(6,182,212,0.18); }
+.inv-box { background: rgba(6,182,212,0.04); border: 1px solid rgba(6,182,212,0.18); }
+.inv-box h4 { color: #0891b2; display: flex; align-items: center; gap: 8px; }
+.inv-status { font-size: 0.7rem; font-weight: 600; padding: 2px 8px; border-radius: 8px; }
+.inv-status.completed { background: rgba(34,197,94,0.12); color: #16a34a; }
+.inv-status.running { background: rgba(6,182,212,0.12); color: #0891b2; }
+.inv-status.failed { background: rgba(239,68,68,0.12); color: #ef4444; }
+.inv-error { color: #ef4444; font-size: 0.82rem; }
+.inv-content { font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); }
+.inv-content :deep(h1), .inv-content :deep(h2), .inv-content :deep(h3), .inv-content :deep(h4) { margin: 14px 0 6px; font-weight: 600; }
+.inv-content :deep(h2) { font-size: 1rem; color: #0891b2; }
+.inv-content :deep(h3) { font-size: 0.92rem; }
+.inv-content :deep(p) { margin: 6px 0; }
+.inv-content :deep(ul), .inv-content :deep(ol) { padding-left: 20px; margin: 6px 0; }
+.inv-content :deep(li) { margin-bottom: 4px; }
+.inv-content :deep(strong) { color: #0891b2; }
+.inv-content :deep(code) { background: rgba(6,182,212,0.1); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; color: #0891b2; }
 .ai-rca-box { background: linear-gradient(135deg, rgba(99,102,241,0.04), rgba(139,92,246,0.08)); border: 1px solid rgba(99,102,241,0.15); }
 .ai-rca-box h4 { color: #6366f1; }
 .ai-rca-content { font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); }

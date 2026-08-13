@@ -17,6 +17,7 @@
         <div v-if="loading" class="loading-state">加载中...</div>
         <div v-else-if="reports.length" class="card-grid">
           <div v-for="r in reports" :key="r.id" class="rep-card" @click="viewReport(r.id)">
+            <button class="card-del" @click.stop="deleteReport(r.id, $event)" title="删除">×</button>
             <div class="card-top">
               <span class="badge" :class="r.type">{{ typeLabel(r.type) }}</span>
               <span class="text-sm">{{ r.created_at || '-' }}</span>
@@ -34,44 +35,34 @@
       <div class="toolbar">
         <button class="btn" @click="backToList">← 返回列表</button>
         <span class="rep-title-inline">{{ currentReport.title }}</span>
+        <button class="btn btn-primary" style="margin-left:auto;" @click="exportReport">导出 HTML</button>
+      </div>
+
+      <div class="exec-summary" :class="overallGrade">
+        <div class="exec-grade">{{ overallGrade === 'A' ? '优' : overallGrade === 'B' ? '良' : overallGrade === 'C' ? '中' : '差' }}</div>
+        <div class="exec-body">
+          <div class="exec-title">{{ overallTitle }}</div>
+          <div class="exec-meta">告警 {{ detail.total_alerts }} 条 · 严重 {{ detail.critical_count }} 条 · 解决率 {{ detail.resolve_rate }}% · 平均处置 {{ detail.avg_resolve_minutes || '-' }} 分钟</div>
+          <div class="exec-meta" v-if="detail.prev_total_alerts">环比：上周期 {{ detail.prev_total_alerts }} 条 → 本期 {{ detail.total_alerts }} 条（{{ diffText(detail.total_alerts, detail.prev_total_alerts) }}）</div>
+        </div>
       </div>
 
       <div class="stat-cards">
-        <div class="stat-card blue"><div class="stat-num">{{ detail.total_alerts || 0 }}</div><div class="stat-label">告警总数</div></div>
+        <div class="stat-card blue"><div class="stat-num">{{ detail.total_alerts || 0 }}</div><div class="stat-label">告警总数</div>
+          <div v-if="detail.prev_total_alerts" class="stat-diff" :class="diffClass(detail.total_alerts - detail.prev_total_alerts)">{{ diffText(detail.total_alerts, detail.prev_total_alerts) }}</div>
+        </div>
         <div class="stat-card red"><div class="stat-num">{{ detail.critical_count || 0 }}</div><div class="stat-label">严重告警</div></div>
-        <div class="stat-card green"><div class="stat-num">{{ detail.resolve_rate || 0 }}%</div><div class="stat-label">解决率</div></div>
+        <div class="stat-card green"><div class="stat-num">{{ detail.resolve_rate || 0 }}%</div><div class="stat-label">解决率</div>
+          <div v-if="detail.prev_resolve_rate" class="stat-diff" :class="diffClass(detail.resolve_rate - detail.prev_resolve_rate)">{{ diffText(detail.resolve_rate, detail.prev_resolve_rate) }}</div>
+        </div>
+        <div class="stat-card purple"><div class="stat-num">{{ detail.avg_resolve_minutes || '-' }}</div><div class="stat-label">平均处置(分钟)</div></div>
         <div class="stat-card indigo"><div class="stat-num">{{ detail.asset_count || 0 }}</div><div class="stat-label">资产总数</div></div>
         <div class="stat-card teal"><div class="stat-num">{{ detail.asset_health || 0 }}%</div><div class="stat-label">在线率</div></div>
-        <div class="stat-card orange"><div class="stat-num">{{ detail.total_incidents || 0 }}</div><div class="stat-label">事件总数</div></div>
       </div>
 
-      <div class="grid-2">
-        <div class="panel">
-          <div class="panel-head">告警级别分布</div>
-          <div class="panel-body">
-            <div v-if="severityEntries.length" class="bar-list">
-              <div v-for="[k, v] in severityEntries" :key="k" class="bar-row">
-                <span class="bar-label">{{ k }}</span>
-                <div class="bar-track"><div class="bar-fill" :class="sevClass(k)" :style="{ width: barWidth(v, maxSeverity) }"></div></div>
-                <span class="bar-num">{{ v }}</span>
-              </div>
-            </div>
-            <div v-else class="empty-state">暂无数据</div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">资产概览</div>
-          <div class="panel-body">
-            <div class="kv-row"><span>在线</span><span class="num on">{{ detail.online_count || 0 }} 台</span></div>
-            <div class="kv-row"><span>离线</span><span class="num off">{{ detail.offline_count || 0 }} 台</span></div>
-            <div class="kv-row"><span>在线率</span><span class="num">{{ detail.asset_health || 0 }}%</span></div>
-            <div class="progress-track" style="margin-top:8px;"><div class="progress-fill" :style="{ width: (detail.asset_health || 0) + '%' }"></div></div>
-            <div style="margin-top:16px;font-weight:600;font-size:0.85rem;color:var(--text-secondary,#64748b);">事件概览</div>
-            <div class="kv-row"><span>未关闭</span><span class="num warn">{{ detail.open_incidents || 0 }} 个</span></div>
-            <div class="kv-row"><span>已关闭</span><span class="num on">{{ detail.resolved_incidents || 0 }} 个</span></div>
-          </div>
-        </div>
+      <div class="chart-row">
+        <div class="panel"><div class="panel-head">告警趋势</div><div class="panel-body"><div ref="trendChartRef" class="echart-box"></div></div></div>
+        <div class="panel"><div class="panel-head">告警级别分布</div><div class="panel-body"><div ref="severityChartRef" class="echart-box"></div></div></div>
       </div>
 
       <div class="grid-2" style="margin-top:14px;">
@@ -104,10 +95,32 @@
         </div>
       </div>
 
+      <div class="panel" style="margin-top:14px;" v-if="groupedIncidents.length">
+        <div class="panel-head">受影响资产（{{ groupedIncidents.length }} 个）</div>
+        <div class="panel-body">
+          <div class="inc-table">
+            <div class="inc-row inc-header">
+              <span class="inc-col-title">资产</span>
+              <span class="inc-col-sev">级别</span>
+              <span class="inc-col-sta">状态</span>
+              <span class="inc-col-id" style="text-align:center;">告警数</span>
+              <span class="inc-col-time">最近时间</span>
+            </div>
+            <div v-for="g in groupedIncidents" :key="g.asset" class="inc-row" :class="g.severity">
+              <span class="inc-col-title">{{ g.asset }}</span>
+              <span class="inc-col-sev"><span class="sev-badge" :class="g.severity">{{ sevLabel(g.severity) }}</span></span>
+              <span class="inc-col-sta"><span class="sta-badge" :class="g.status === 'resolved' ? 'resolved' : 'open'">{{ g.status === 'resolved' ? '已处理' : '待处理' }}</span></span>
+              <span class="inc-col-id" style="text-align:center;font-weight:600;">{{ g.total_alerts }}</span>
+              <span class="inc-col-time">{{ g.latest_time }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel" style="margin-top:14px;">
         <div class="panel-head">评估与建议</div>
         <div class="panel-body">
-          <pre class="summary-pre">{{ extractAdvice(currentReport.summary) }}</pre>
+          <pre class="summary-pre">{{ currentReport.summary }}</pre>
         </div>
       </div>
     </div>
@@ -115,8 +128,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import * as echarts from 'echarts'
 import request from '@/api/request'
 
 const loading = ref(false)
@@ -124,29 +138,108 @@ const generating = ref(false)
 const reports = ref([])
 const currentReport = ref(null)
 const detail = ref({})
-
-const severityEntries = computed(() => {
-  const bs = detail.value.by_severity || {}
-  return Object.entries(bs)
-})
-const maxSeverity = computed(() => Math.max(1, ...severityEntries.value.map(([, v]) => v)))
+const trendChartRef = ref(null)
+const severityChartRef = ref(null)
+let trendChart = null
+let severityChart = null
 
 function typeLabel(t) {
   return { daily: '日报', weekly: '周报', monthly: '月报' }[t] || t
 }
-function sevClass(k) {
-  if (k.includes('严重') || k === 'critical') return 'sev-critical'
-  if (k.includes('警告') || k === 'warning') return 'sev-warning'
-  return 'sev-info'
+function diffClass(val) {
+  if (val > 0) return 'diff-up'
+  if (val < 0) return 'diff-down'
+  return 'diff-flat'
 }
-function barWidth(v, max) {
-  return Math.max(4, Math.round(v / max * 100)) + '%'
+function diffText(cur, prev) {
+  if (!prev || prev === 0) return ''
+  const diff = cur - prev
+  const pct = Math.round(Math.abs(diff) / prev * 100)
+  const arrow = diff > 0 ? '↑' : '↓'
+  return `${arrow} ${pct}%`
 }
-function extractAdvice(summary) {
-  if (!summary) return '暂无评估'
-  const idx = summary.indexOf('【评估与建议】')
-  return idx >= 0 ? summary.slice(idx).replace('【评估与建议】', '').trim() : summary
+
+function sevLabel(s) {
+  return { critical: '严重', warning: '警告', info: '提示' }[s] || s || '未知'
 }
+function staLabel(s) {
+  return { open: '待处理', analyzing: '分析中', triggered: '已触发', acknowledged: '已确认', resolved: '已解决', closed: '已关闭', done: '已完成' }[s] || s || '未知'
+}
+
+const overallGrade = computed(() => {
+  const d = detail.value
+  if (!d.total_alerts) return 'A'
+  if (d.critical_count > 5 || d.resolve_rate < 60) return 'D'
+  if (d.critical_count > 2 || d.resolve_rate < 80) return 'C'
+  if (d.critical_count > 0) return 'B'
+  return 'A'
+})
+const overallTitle = computed(() => {
+  const d = detail.value
+  const g = overallGrade.value
+  if (g === 'A') return `本周期系统运行平稳，共 ${d.total_alerts} 条告警妥善处置，无严重风险项`
+  if (g === 'B') return `本周期系统基本正常，${d.critical_count} 条严重告警已处置，建议关注高频指标`
+  if (g === 'C') return `本周期存在 ${d.critical_count} 条严重告警，解决率 ${d.resolve_rate}%，需加强运维响应`
+  return `本周期系统告警较多（${d.total_alerts} 条），严重告警 ${d.critical_count} 条，解决率 ${d.resolve_rate}%，建议立即排查并升级处理`
+})
+
+const groupedIncidents = computed(() => {
+  const incidents = detail.value.incident_details || []
+  const groups = {}
+  for (const inc of incidents) {
+    const title = inc.title || ''
+    const m = title.match(/\]\s*(.+?)\s*(异常|故障|告警|down|宕机)/)
+    const asset = m ? m[1].trim() : title
+    if (!groups[asset]) {
+      groups[asset] = { asset, total_alerts: 0, severity: 'info', status: 'open', latest_time: inc.created_at }
+    }
+    groups[asset].total_alerts += inc.alert_count || 1
+    if (inc.severity === 'critical') groups[asset].severity = 'critical'
+    if (['resolved', 'closed', 'done'].includes(inc.status)) groups[asset].status = 'resolved'
+    if (inc.created_at > groups[asset].latest_time) groups[asset].latest_time = inc.created_at
+  }
+  return Object.values(groups).sort((a, b) => b.total_alerts - a.total_alerts)
+})
+
+function renderCharts() {
+  if (!trendChartRef.value || !severityChartRef.value) return
+  nextTick(() => {
+    const trend = detail.value.trend || []
+    if (trend.length && trendChartRef.value) {
+      if (!trendChart) trendChart = echarts.init(trendChartRef.value)
+      trendChart.setOption({
+        tooltip: { trigger: 'axis' },
+        grid: { left: 40, right: 12, bottom: 24, top: 8 },
+        xAxis: { type: 'category', data: trend.map(d => d.date), axisLabel: { fontSize: 11 } },
+        yAxis: { type: 'value', minInterval: 1 },
+        series: [{
+          type: 'line', data: trend.map(d => d.count), smooth: true,
+          lineStyle: { color: '#6366f1', width: 2 },
+          areaStyle: { color: 'rgba(99,102,241,0.12)' },
+          symbol: 'circle', symbolSize: 6,
+          itemStyle: { color: '#6366f1' }
+        }]
+      }, true)
+    }
+    const sev = detail.value.by_severity || {}
+    const sevEntries = Object.entries(sev)
+    if (sevEntries.length && severityChartRef.value) {
+      if (!severityChart) severityChart = echarts.init(severityChartRef.value)
+      const colors = { '严重': '#ef4444', '警告': '#f59e0b', '提示': '#3b82f6' }
+      severityChart.setOption({
+        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+        series: [{
+          type: 'pie', radius: ['30%', '65%'],
+          data: sevEntries.map(([k, v]) => ({ name: k, value: v })),
+          label: { formatter: '{b}\n{d}%' },
+          color: sevEntries.map(([k]) => colors[k] || '#6366f1')
+        }]
+      }, true)
+    }
+  })
+}
+
+watch(detail, renderCharts, { deep: true, flush: 'post' })
 
 async function loadReports() {
   loading.value = true
@@ -184,6 +277,7 @@ async function viewReport(id) {
     }
     currentReport.value = { id: data.id, title: data.title, type: data.type, summary: data.summary }
     detail.value = data.data || {}
+    nextTick(renderCharts)
   } catch (e) {
     ElMessage.error('加载详情失败: ' + (e.message || e))
   }
@@ -192,9 +286,42 @@ async function viewReport(id) {
 function backToList() {
   currentReport.value = null
   detail.value = {}
+  trendChart = null
+  severityChart = null
+}
+
+function exportReport() {
+  if (!currentReport.value) return
+  window.open(`/reports/api/${currentReport.value.id}/export`, '_blank')
+}
+
+async function deleteReport(id, e) {
+  e.stopPropagation()
+  try {
+    await ElMessageBox.confirm('确认删除这份报表？此操作不可恢复。', '删除报表', {
+      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
+    })
+  } catch (err) {
+    return
+  }
+  try {
+    const data = await request.post(`/reports/api/${id}/delete`)
+    if (data.status === 'ok') {
+      ElMessage.success('已删除')
+      loadReports()
+    } else {
+      ElMessage.error(data.message || '删除失败')
+    }
+  } catch (err) {
+    ElMessage.error('删除失败: ' + (err.message || err))
+  }
 }
 
 onMounted(loadReports)
+onUnmounted(() => {
+  trendChart?.dispose()
+  severityChart?.dispose()
+})
 </script>
 
 <style scoped>
@@ -212,8 +339,11 @@ onMounted(loadReports)
 .panel-head { padding: 12px 18px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); font-weight: 600; font-size: 0.9rem; color: var(--text, #1e293b); }
 .panel-body { padding: 16px 18px; }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.rep-card { border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; padding: 14px; background: var(--bg-card-solid, #fff); cursor: pointer; transition: all 0.2s; }
+.rep-card { border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 8px; padding: 14px; background: var(--bg-card-solid, #fff); cursor: pointer; transition: all 0.2s; position: relative; }
 .rep-card:hover { border-color: var(--accent, #6366f1); box-shadow: 0 2px 8px rgba(99,102,241,0.15); transform: translateY(-1px); }
+.card-del { position: absolute; top: 6px; right: 8px; width: 22px; height: 22px; border: none; background: transparent; color: var(--text-muted, #94a3b8); font-size: 16px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s; line-height: 1; }
+.rep-card:hover .card-del { opacity: 0.7; }
+.card-del:hover { opacity: 1 !important; background: rgba(239,68,68,0.1); color: #ef4444; }
 .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .rep-title { font-weight: 600; font-size: 0.95rem; color: var(--text, #1e293b); margin-bottom: 4px; }
 .rep-period { margin-bottom: 6px; }
@@ -233,26 +363,16 @@ onMounted(loadReports)
 .stat-card.indigo { background: linear-gradient(135deg, #6366f1, #4f46e5); }
 .stat-card.teal { background: linear-gradient(135deg, #14b8a6, #0d9488); }
 .stat-card.orange { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.stat-card.purple { background: linear-gradient(135deg, #a855f7, #7c3aed); }
 .stat-num { font-size: 1.6rem; font-weight: 700; }
 .stat-label { font-size: 0.72rem; opacity: 0.9; margin-top: 2px; }
+.stat-diff { font-size: 0.7rem; font-weight: 600; margin-top: 4px; opacity: 0.9; }
+.stat-diff.diff-up { color: #fca5a5; }
+.stat-diff.diff-down { color: #86efac; }
+.stat-diff.diff-flat { color: #d1d5db; }
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.echart-box { width: 100%; height: 260px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.bar-list { display: flex; flex-direction: column; gap: 10px; }
-.bar-row { display: flex; align-items: center; gap: 8px; }
-.bar-label { min-width: 48px; font-size: 0.8rem; color: var(--text-secondary, #64748b); }
-.bar-track { flex: 1; height: 18px; background: rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
-.bar-fill.sev-critical { background: linear-gradient(90deg, #ef4444, #dc2626); }
-.bar-fill.sev-warning { background: linear-gradient(90deg, #f59e0b, #d97706); }
-.bar-fill.sev-info { background: linear-gradient(90deg, #3b82f6, #2563eb); }
-.bar-num { min-width: 32px; text-align: right; font-size: 0.82rem; font-weight: 600; color: var(--text, #1e293b); }
-.kv-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.85rem; border-bottom: 1px dashed var(--border, rgba(0,0,0,0.07)); }
-.kv-row:last-child { border-bottom: none; }
-.num { font-weight: 600; }
-.num.on { color: #22c55e; }
-.num.off { color: #64748b; }
-.num.warn { color: #f59e0b; }
-.progress-track { height: 8px; background: rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; }
-.progress-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #16a34a); border-radius: 4px; transition: width 0.4s; }
 .rank-list { display: flex; flex-direction: column; gap: 8px; }
 .rank-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--border, rgba(0,0,0,0.07)); }
 .rank-row:last-child { border-bottom: none; }
@@ -260,4 +380,34 @@ onMounted(loadReports)
 .rank-name { flex: 1; font-size: 0.85rem; color: var(--text, #1e293b); }
 .rank-count { font-size: 0.8rem; color: var(--text-secondary, #64748b); font-weight: 600; }
 .summary-pre { white-space: pre-wrap; font-family: inherit; font-size: 0.85rem; line-height: 1.7; color: var(--text, #1e293b); margin: 0; }
+
+.exec-summary { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border-radius: 10px; margin-bottom: 14px; color: #fff; }
+.exec-summary.A { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.exec-summary.B { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.exec-summary.C { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.exec-summary.D { background: linear-gradient(135deg, #ef4444, #dc2626); }
+.exec-grade { font-size: 2rem; font-weight: 800; line-height: 1; opacity: 0.9; }
+.exec-body { flex: 1; }
+.exec-title { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+.exec-meta { font-size: 0.78rem; opacity: 0.85; margin-top: 2px; }
+
+.inc-table { font-size: 0.82rem; }
+.inc-row { display: flex; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border, rgba(0,0,0,0.06)); gap: 8px; }
+.inc-row.inc-header { font-weight: 600; color: var(--text-secondary, #64748b); font-size: 0.75rem; text-transform: uppercase; border-bottom: 2px solid var(--border, rgba(0,0,0,0.1)); }
+.inc-col-id { width: 50px; flex-shrink: 0; }
+.inc-col-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inc-col-sev { width: 56px; }
+.inc-col-sta { width: 60px; }
+.inc-col-time { width: 100px; text-align: right; color: var(--text-secondary, #64748b); }
+.sev-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+.sev-badge.critical { background: rgba(239,68,68,0.1); color: #ef4444; }
+.sev-badge.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.sev-badge.info { background: rgba(59,130,246,0.1); color: #3b82f6; }
+.sta-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+.sta-badge.open { background: rgba(239,68,68,0.1); color: #ef4444; }
+.sta-badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
+.sta-badge.closed { background: rgba(34,197,94,0.1); color: #22c55e; }
+.sta-badge.done { background: rgba(34,197,94,0.1); color: #22c55e; }
+.sta-badge.acknowledged { background: rgba(99,102,241,0.1); color: #6366f1; }
+.sta-badge.analyzing { background: rgba(245,158,11,0.1); color: #f59e0b; }
 </style>

@@ -15,6 +15,9 @@ SESSION_SECRET = os.environ.get("AIOPS_SESSION_SECRET", SECRET_KEY)
 # AI Provider 加密种子（每个部署应不同）
 PROVIDER_ENCRYPT_SEED = os.environ.get("AIOPS_PROVIDER_SEED", "aiops-agent-provider-key-seed")
 
+# Secrets Vault 加密种子（集中保险库，每个部署应不同）
+VAULT_ENCRYPT_SEED = os.environ.get("AIOPS_VAULT_SEED", "aiops-secret-vault-key-seed")
+
 # 移动端 JWT 密钥
 MOBILE_JWT_SECRET = os.environ.get("MOBILE_JWT_SECRET", "aiops-mobile-secret-dev")
 

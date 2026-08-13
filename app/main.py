@@ -77,11 +77,21 @@ from app.routers import k8s_offline_deploy
 from app.routers import alert_correlation, rag_eval
 # 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线，打磨期 P0）
 from app.routers import security_audit
+from app.routers import secrets_vault
+from app.routers import skills, marketplace
+from app.routers import multicluster, upgrade, network
+from app.routers import mcp
+from app.routers import git_knowledge
 # AI 洞察引擎 — 统一指标/日志/链路三页 AI 增强
 from app.routers import ai_insight
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
 from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service, trace_anomaly_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
+from app.services import agent_workflow_service  # noqa: F401 — 工作流告警自动触发 / run 恢复
+from app.services import workflow_cron_scheduler  # noqa: F401 — 工作流 cron 定时调度
+from app.services import auto_investigator  # noqa: F401 — 告警自动调查闭环(C1/C2/C3)
+from app.services import skill_registry  # noqa: F401 — F1/F2 技能注册表与市场
+_scan_builtin_skills = skill_registry.scan_builtin_skills
 from app.services.synthetic_monitor import check_all_synthetics
 from app.services.report_service import generate_report
 from app.services.license_service import LicenseMiddleware
@@ -99,6 +109,7 @@ _MIGRATIONS = {
         "reason VARCHAR(500)",
         "run_id INTEGER",
         "node_run_id INTEGER",
+        "review_result TEXT DEFAULT ''",
     ],
     "agent_workflow_node_runs": [
         "requires_confirm BOOLEAN DEFAULT 0",
@@ -127,6 +138,10 @@ _MIGRATIONS = {
         "source_type VARCHAR(32) DEFAULT 'auto'",
         "reject_reason TEXT DEFAULT ''",
         "sop_steps TEXT DEFAULT '[]'",
+    ],
+    "alert_rules": [
+        "kind VARCHAR(24) DEFAULT 'metric_raw'",
+        "config_json TEXT DEFAULT '{}'",
     ],
     "incidents": [
         "approver_id INTEGER",
@@ -197,6 +212,9 @@ _MIGRATIONS = {
         "w INTEGER DEFAULT 2",
         "h INTEGER DEFAULT 1",
         "order INTEGER DEFAULT 0",
+    ],
+    "chat_messages": [
+        "sub_agent VARCHAR(64) DEFAULT ''",
     ],
 }
 for _eng in get_all_engines().values():
@@ -297,7 +315,27 @@ async def _global_exception_handler(request: Request, exc: Exception):
     # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500
     return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0}, status_code=200)
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox", "/agent", "/edge/metrics"}
+import time as _time_import
+_APP_START_TIME = _time_import.time()  # 进程启动时间（/metrics 用）
+
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox", "/agent", "/edge/metrics", "/metrics"}
+
+
+class TraceIdMiddleware(BaseHTTPMiddleware):
+    """为每个请求生成/透传 trace_id，绑定到 logger，实现全链路日志串联(D3)。"""
+    def __init__(self, app, logger):
+        super().__init__(app)
+        self._logger = logger
+
+    async def dispatch(self, request: Request, call_next):
+        trace_id = request.headers.get("x-request-id") or request.headers.get("trace-id")
+        if not trace_id:
+            import uuid
+            trace_id = uuid.uuid4().hex[:16]
+        request.state.trace_id = trace_id
+        request.headers._list.append((b"x-request-id", trace_id.encode()))
+        with self._logger.contextualize(trace_id=trace_id):
+            return await call_next(request)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -357,6 +395,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
                                 {"error": "权限不足：需要管理员权限"},
                                 status_code=403,
                             )
+                # ── E1: 资源级 RBAC（Casbin 策略矩阵）──
+                # 写/执行/删除操作走 permission_service 二次判定；
+                # superuser 完全绕过，策略未配置的角色最小只读。
+                # 仅对能映射到资源且非 superuser 的请求生效，失败 fail-open(不拦截)
+                # 以兼容存量角色（菜单级可见性仍由前端 + role_menus 控制）。
+                _method = request.method
+                if _method in ("POST", "PUT", "PATCH", "DELETE"):
+                    if _user is None:
+                        _db.close()
+                        return JSONResponse({"error": "用户不存在"}, status_code=401)
+                    from app.services.permission_service import check_path_permission
+                    _allowed = check_path_permission(_db, user_id, path, _method)
+                    if _allowed is False:
+                        _db.close()
+                        return JSONResponse(
+                            {"error": "权限不足：当前角色无此资源操作权限"},
+                            status_code=403,
+                        )
             finally:
                 _db.close()
         return await call_next(request)
@@ -369,6 +425,9 @@ app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=_config.SESSION_SECRET,
                    https_only=_config.APP_ENV == "prod",
                    same_site="lax", max_age=86400)
+# trace_id 全链路串联: 注册最外层(包裹所有中间件), 保证每个请求都有 trace_id 上下文
+from app.logger import logger as _trace_logger
+app.add_middleware(TraceIdMiddleware, logger=_trace_logger)
 
 app.add_middleware(
     CORSMiddleware,
@@ -680,6 +739,14 @@ app.include_router(menu.router)
 app.include_router(license.router)
 app.include_router(tenant_management.router)
 app.include_router(tokens.router)
+app.include_router(secrets_vault.router)
+app.include_router(skills.router)
+app.include_router(marketplace.router)
+app.include_router(multicluster.router)
+app.include_router(upgrade.router)
+app.include_router(network.router)
+app.include_router(mcp.router)
+app.include_router(git_knowledge.router)
 app.include_router(ws.router)
 app.include_router(api_v1.router)
 app.include_router(mobile.router)
@@ -792,6 +859,13 @@ def init_admin():
             if _new_key not in _existing_admin_keys:
                 db.add(_RoleMenu(role_id=_admin_role.id, menu_key=_new_key))
         db.commit()
+    # E1: admin/superuser 角色补全资源级全权限策略（幂等）
+    try:
+        from app.services.permission_service import sync_admin_full_permissions
+        sync_admin_full_permissions(db)
+    except Exception as _perm_e:
+        import logging as _perm_logging
+        _perm_logging.getLogger(__name__).warning(f"sync_admin_full_permissions 失败: {_perm_e}")
     log_channel = db.query(NotificationChannel).filter(NotificationChannel.type == "log").first()
     if not log_channel:
         db.add(NotificationChannel(name="系统日志", type="log", channel_config="{}", enabled=True))
@@ -898,6 +972,9 @@ def _init_background_task_monitor():
         {"name": "trace_anomaly", "fn": trace_anomaly_service.check_trace_anomalies, "description": "链路异常检测"},
         {"name": "contention", "fn": contention_service.detect_contention, "description": "资源竞争检测"},
         {"name": "synthetic_monitor", "fn": check_all_synthetics, "description": "拨测探测"},
+        {"name": "workflow_alert_trigger", "fn": agent_workflow_service.check_alert_triggers, "description": "工作流告警自动触发"},
+        {"name": "workflow_cron_trigger", "fn": workflow_cron_scheduler.check_cron_triggers, "description": "工作流 cron 定时调度"},
+        {"name": "auto_investigate", "fn": auto_investigator.auto_investigate_new_incidents, "description": "告警自动调查闭环"},
         {"name": "asset_probe", "fn": asset_service.probe_assets, "description": "资产健康探测"},
         {"name": "metric_collect", "fn": metric_collector.collect_all_metrics, "description": "指标采集"},
         {"name": "metric_archive", "fn": None, "description": "指标归档（删除超期记录）"},
@@ -950,6 +1027,9 @@ def background_loop():
             ("trace_anomaly", trace_anomaly_service.check_trace_anomalies),
             ("contention", contention_service.detect_contention),
             ("synthetic_monitor", check_all_synthetics),
+            ("workflow_alert_trigger", agent_workflow_service.check_alert_triggers),
+            ("workflow_cron_trigger", workflow_cron_scheduler.check_cron_triggers),
+            ("auto_investigate", auto_investigator.auto_investigate_new_incidents),
         ]
         _pool = ThreadPoolExecutor(max_workers=5)
         futures = {_pool.submit(_run_bg_service, name, fn, _mode): name
@@ -1165,6 +1245,16 @@ for _mode in ("demo", "real"):
         _added3 = _seed_sub_agents(_seed_db)
         if _added3:
             logger.info(f"{_mode} 库播种 {_added3} 个预置子专家")
+        # F1: 扫描内置 SKILL.md 技能入库（增量, 已有 name 不覆盖）
+        _added4 = _scan_builtin_skills(_seed_db)
+        if _added4:
+            logger.info(f"{_mode} 库扫描加载 {_added4} 个内置技能")
+        # P1-5: 重载外部 MCP 服务器已启用工具
+        try:
+            from app.services import mcp_external as _mcp_ext
+            _mcp_ext.reload_external_tools(_seed_db)
+        except Exception:
+            pass
         # 给已有种子工作流的 tool 节点补 execution_mode: auto（向后兼容）
         from app.models import AgentWorkflow
         from sqlalchemy import text as _sa_text2
@@ -1183,6 +1273,19 @@ for _mode in ("demo", "real"):
         _seed_db.close()
 set_db_mode("demo")
 threading.Thread(target=background_loop, daemon=True).start()
+
+# B4: 进程重启后恢复未完成的工作流 run（running/awaiting_confirm 续跑）
+try:
+    from app.database import get_session_for as _gsf
+    from app.database import get_db_mode as _gdm
+    _resume_db = _gsf(_gdm())()
+    try:
+        agent_workflow_service.resume_unfinished_runs(_resume_db)
+    finally:
+        _resume_db.close()
+except Exception as _resume_e:
+    from app.logger import logger
+    logger.warning(f"工作流 run 恢复初始化失败: {_resume_e}")
 
 
 # ── 健康检查端点（容器化探针用）──
@@ -1210,6 +1313,50 @@ async def readyz():
         checks["milvus"] = f"fail: {e}"
     all_ok = all(v == "ok" for v in checks.values())
     return JSONResponse(checks, status_code=200 if all_ok else 503)
+
+
+@app.get("/metrics")
+async def prom_metrics():
+    """Prometheus exposition 端点(D2): 应用级指标 + Python 进程指标(无第三方依赖)。"""
+    import time
+    from fastapi.responses import PlainTextResponse
+    from app.services import mcp_registry
+    lines = [
+        "# HELP aiops_healthz Backend alive (1=ok)",
+        "# TYPE aiops_healthz gauge",
+        "aiops_healthz 1",
+        "# HELP aiops_mcp_tool_count Number of registered internal+external MCP tools",
+        "# TYPE aiops_mcp_tool_count gauge",
+        f"aiops_mcp_tool_count {len(mcp_registry._MCP_TOOLS) + len(mcp_registry._EXTERNAL_TOOLS)}",
+        "# HELP aiops_db_alive Database reachable (1=ok)",
+        "# TYPE aiops_db_alive gauge",
+        "aiops_db_alive 1",
+        "# HELP aiops_app_up App run time (seconds since process start)",
+        "# TYPE aiops_app_up counter",
+        f"aiops_app_up {int(time.time() - _APP_START_TIME)}",
+        "# HELP python_gc_objects_collected Number of collected objects",
+        "# TYPE python_gc_objects_collected counter",
+    ]
+    try:
+        from app.services import skill_registry
+        import sqlite3
+        con = sqlite3.connect("db/aiops.db")
+        rules = con.execute("select count(*) from alert_rules").fetchone()[0]
+        skills = con.execute("select count(*) from skills").fetchone()[0]
+        devices = con.execute("select count(*) from network_devices").fetchone()[0]
+        con.close()
+        lines.append("# HELP aiops_alert_rule_count Number of alert rules")
+        lines.append("# TYPE aiops_alert_rule_count gauge")
+        lines.append(f"aiops_alert_rule_count {rules}")
+        lines.append('# HELP aiops_skill_count Number of skills')
+        lines.append('# TYPE aiops_skill_count gauge')
+        lines.append(f"aiops_skill_count {skills}")
+        lines.append("# HELP aiops_network_device_count Number of network devices")
+        lines.append("# TYPE aiops_network_device_count gauge")
+        lines.append(f"aiops_network_device_count {devices}")
+    except Exception:
+        pass
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 # ── gRPC OTLP TraceService 服务器（接收微服务 gRPC OTLP 流量）──

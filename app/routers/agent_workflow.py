@@ -6,8 +6,32 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services import agent_workflow_service
+from app.services import workflow_cron_scheduler
 
 router = APIRouter(prefix="/agent-workflow", tags=["agent-workflow"])
+
+
+@router.get("/api/cron/next-runs")
+def cron_next_runs(db: Session = Depends(get_db)):
+    try:
+        return {"items": workflow_cron_scheduler.next_runs(db)}
+    except Exception as e:
+        return JSONResponse({"warning": str(e)}, status_code=200)
+
+
+@router.post("/api/cron/preview")
+def cron_preview(payload: dict):
+    from croniter import croniter
+    from datetime import datetime, timedelta
+    try:
+        cron = payload.get("cron", "").strip()
+        if not cron:
+            return {"items": []}
+        it = croniter(cron, datetime.now())
+        items = [it.get_next(datetime).strftime("%Y-%m-%d %H:%M") for _ in range(5)]
+        return {"items": items}
+    except Exception as e:
+        return JSONResponse({"warning": f"cron 表达式非法: {e}", "items": []}, status_code=200)
 
 
 @router.get("/api/workflows")

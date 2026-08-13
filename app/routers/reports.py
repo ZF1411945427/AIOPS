@@ -1,5 +1,6 @@
 import json
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -51,3 +52,18 @@ def api_report_generate(report_type: str, db: Session = Depends(get_db)):
         report_type = "daily"
     report = report_service.generate_report(db, report_type)
     return {"status": "ok", "id": report.id, "title": report.title}
+
+
+@router.get("/api/{report_id}/export")
+def api_report_export(report_id: int, db: Session = Depends(get_db)):
+    report = report_service.get_report(db, report_id)
+    if not report:
+        return {"status": "error", "message": "报表不存在"}
+    html = report_service.render_report_html(report)
+    return HTMLResponse(content=html, status_code=200)
+
+
+@router.post("/api/{report_id}/delete")
+def api_report_delete(report_id: int, db: Session = Depends(get_db)):
+    ok = report_service.delete_report(db, report_id)
+    return {"status": "ok" if ok else "error", "message": "已删除" if ok else "报表不存在"}

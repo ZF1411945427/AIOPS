@@ -491,6 +491,11 @@ def get_agent_capabilities(request: Request, db: Session = Depends(get_db)):
             "safe": t.safe,
             "read_only": t.read_only,
             "ai_only": t.ai_only,
+            # 装饰器横切链元数据（tool_registry）
+            "timeout_seconds": t.timeout_seconds,
+            "ratelimit_per_minute": t.ratelimit_per_minute,
+            "audit_enabled": t.audit_enabled,
+            "review_gate": t.review_gate,
         })
 
     total = len(tools)

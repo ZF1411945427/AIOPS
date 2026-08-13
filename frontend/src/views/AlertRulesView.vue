@@ -28,7 +28,7 @@
         <table v-else-if="rules.length" class="table">
           <thead>
             <tr>
-              <th>ID</th><th>规则名称</th><th>指标</th><th>条件</th><th>阈值</th>
+              <th>ID</th><th>规则名称</th><th>类型</th><th>指标</th><th>条件</th><th>阈值</th>
               <th>级别</th><th>状态</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
@@ -36,6 +36,7 @@
             <tr v-for="r in rules" :key="r.id">
               <td>{{ r.id }}</td>
               <td>{{ r.name }}</td>
+              <td><span class="badge kind-{{ r.kind }}">{{ kindLabel(r.kind) }}</span></td>
               <td><code class="metric-code">{{ r.metric_name }}</code></td>
               <td><span class="cond">{{ formatCondition(r.condition) }}</span></td>
               <td><strong>{{ r.threshold }}</strong></td>
@@ -84,6 +85,15 @@
           <button class="modal-close" @click="formVisible = false">×</button>
         </div>
         <div class="modal-body">
+          <div class="form-group">
+            <label>规则类型 *</label>
+            <select v-model="form.kind" class="input">
+              <option value="metric_raw">metric_raw · 静态阈值（当前值 vs 阈值）</option>
+              <option value="anomaly">anomaly · 统计偏离（均值 ± z·σ）</option>
+              <option value="forecast">forecast · 趋势预测（外推未来点是否穿越阈值）</option>
+              <option value="burn_rate">burn_rate · 燃尽率（错误预算消耗速率）</option>
+            </select>
+          </div>
           <div class="form-group">
             <label>规则名称 *</label>
             <input v-model="form.name" class="input" placeholder="如：CPU使用率过高">
@@ -154,7 +164,7 @@ const formMode = ref('create')
 const editingId = ref(null)
 const form = reactive({
   name: '', metric_name: '', condition: '>', threshold: 90,
-  severity: 'warning', enabled: true,
+  severity: 'warning', enabled: true, kind: 'metric_raw',
 })
 
 async function loadMetrics() {
@@ -188,7 +198,7 @@ function openCreate() {
   editingId.value = null
   Object.assign(form, {
     name: '', metric_name: metrics.value[0] || 'cpu_usage',
-    condition: '>', threshold: 90, severity: 'warning', enabled: true,
+    condition: '>', threshold: 90, severity: 'warning', enabled: true, kind: 'metric_raw',
   })
   formVisible.value = true
 }
@@ -199,6 +209,7 @@ function openEdit(r) {
   Object.assign(form, {
     name: r.name, metric_name: r.metric_name, condition: r.condition,
     threshold: r.threshold, severity: r.severity, enabled: r.enabled,
+    kind: r.kind || 'metric_raw',
   })
   formVisible.value = true
 }
@@ -214,7 +225,7 @@ async function saveRule() {
     const payload = {
       name: form.name.trim(), metric_name: form.metric_name,
       condition: form.condition, threshold: Number(form.threshold),
-      severity: form.severity, enabled: form.enabled,
+      severity: form.severity, enabled: form.enabled, kind: form.kind,
     }
     if (formMode.value === 'create') {
       await request.post('/alerts/api/rules/create', payload)
@@ -261,6 +272,10 @@ function severityLabel(s) {
   return ({ critical: 'critical', warning: 'warning', info: 'info' })[s] || s
 }
 
+function kindLabel(k) {
+  return { metric_raw: 'metric_raw', anomaly: 'anomaly', forecast: 'forecast', burn_rate: 'burn_rate' }[k] || k
+}
+
 function goAnomaly() {
   if (window._navigateTo) window._navigateTo('anomaly')
 }
@@ -305,6 +320,10 @@ onMounted(() => {
 .cond { font-weight: 600; color: var(--accent, #6366f1); padding: 0 4px; }
 .muted { color: var(--text-tertiary, #94a3b8); font-size: 0.78rem; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
+.badge.kind-metric_raw { background: rgba(100,116,139,0.12); color: #64748b; }
+.badge.kind-anomaly { background: rgba(139,92,246,0.12); color: #8b5cf6; }
+.badge.kind-forecast { background: rgba(59,130,246,0.12); color: #3b82f6; }
+.badge.kind-burn_rate { background: rgba(249,115,22,0.12); color: #f97316; }
 .badge.critical { background: rgba(239,68,68,0.1); color: #ef4444; }
 .badge.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
 .badge.info { background: rgba(100,116,139,0.1); color: #64748b; }

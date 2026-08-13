@@ -590,12 +590,22 @@ def api_check_k8s_events(db: Session = Depends(get_db)):
 def api_rules_list(db: Session = Depends(get_db)):
     """告警规则列表。返回所有规则（含已禁用），按 id 倒序。"""
     rules = alert_service.list_rules(db)
+    import json as _json
+    def _cfg(c):
+        try:
+            v = _json.loads(c) if c else {}
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
     return {
         "total": len(rules),
+        "kinds": alert_service.RULE_KINDS,
         "items": [
             {
                 "id": r.id, "name": r.name, "metric_name": r.metric_name,
                 "condition": r.condition, "threshold": r.threshold,
+                "kind": getattr(r, "kind", "metric_raw") or "metric_raw",
+                "config": _cfg(getattr(r, "config_json", None)),
                 "severity": r.severity, "enabled": bool(r.enabled),
                 "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
             }
@@ -624,6 +634,8 @@ def api_rules_create(body: dict, db: Session = Depends(get_db)):
     rule = alert_service.create_rule(db, {
         "name": name, "metric_name": metric_name, "condition": condition,
         "threshold": threshold, "severity": severity,
+        "kind": (body.get("kind") or "metric_raw").strip() or "metric_raw",
+        "config_json": body.get("config_json"),
         "enabled": bool(body.get("enabled", True)),
     })
     return {"ok": True, "id": rule.id, "message": "规则创建成功"}
@@ -636,7 +648,7 @@ def api_rules_update(rule_id: int, body: dict, db: Session = Depends(get_db)):
     if not existing:
         return JSONResponse({"ok": False, "message": "规则不存在"}, status_code=404)
     data = {}
-    for k in ("name", "metric_name", "condition", "threshold", "severity", "enabled"):
+    for k in ("name", "metric_name", "condition", "threshold", "severity", "enabled", "kind", "config_json"):
         if k in body:
             v = body[k]
             if k == "name":
@@ -658,6 +670,10 @@ def api_rules_update(rule_id: int, body: dict, db: Session = Depends(get_db)):
                 return JSONResponse({"ok": False, "message": f"不支持级别: {v}"}, status_code=400)
             elif k == "enabled":
                 v = bool(v)
+            elif k == "kind":
+                v = (v or "metric_raw").strip() or "metric_raw"
+                if v not in ("metric_raw", "anomaly", "forecast", "burn_rate"):
+                    return JSONResponse({"ok": False, "message": f"不支持的 kind: {v}"}, status_code=400)
             data[k] = v
     if not data:
         return {"ok": True, "message": "无更新字段"}

@@ -83,8 +83,8 @@ def api_delete_plan(plan_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api/plans/{plan_id}/precheck")
-def api_precheck_plan(plan_id: int, db: Session = Depends(get_db)):
-    return svc.precheck_plan(db, plan_id)
+def api_precheck_plan(plan_id: int, test_ssh: bool = True, db: Session = Depends(get_db)):
+    return svc.precheck_plan(db, plan_id, test_ssh=test_ssh)
 
 
 @router.post("/api/plans/{plan_id}/validate")
@@ -137,22 +137,36 @@ def api_plan_to_assets(plan_id: int, db: Session = Depends(get_db)):
 @router.websocket("/ws/plans/{plan_id}/deploy")
 async def ws_deploy(websocket: WebSocket, plan_id: int):
     await websocket.accept()
+    import asyncio
     import threading
     from app.database import get_session_for, get_db_mode
 
     import json as _json
 
+    loop = asyncio.get_running_loop()
+    disconnected = threading.Event()
+
+    def send_event(evt: str):
+        if disconnected.is_set():
+            return
+        try:
+            fut = asyncio.run_coroutine_threadsafe(websocket.send_text(evt), loop)
+            fut.result(timeout=5)
+        except Exception:
+            disconnected.set()
+
     def producer():
         db = get_session_for(get_db_mode())()
         try:
+            # 即使 WS 断开也持续跑完部署(写入 DB 日志)，只是不再推送
             for event in svc.run_deploy(db, plan_id):
                 try:
-                    websocket.send_text(_json.dumps(event, ensure_ascii=False))
+                    send_event(_json.dumps(event, ensure_ascii=False))
                 except Exception:
-                    return
+                    pass
         except Exception as e:
             try:
-                websocket.send_text(_json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False))
+                send_event(_json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False))
             except Exception:
                 pass
         finally:
@@ -167,9 +181,5 @@ async def ws_deploy(websocket: WebSocket, plan_id: int):
         pass
     except Exception:
         pass
-    finally:
-        db = get_session_for(get_db_mode())()
-        try:
-            svc.stop_execution(db, plan_id)
-        finally:
-            db.close()
+    # 注意：断开 WS 只结束推送连接，不停止部署任务。
+    # 部署由后台线程持续执行，除非显式调用 /stop 停止。

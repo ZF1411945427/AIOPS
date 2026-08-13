@@ -14,6 +14,10 @@
         <span class="tab-icon">🌐</span> 网络拓扑
         <span class="tab-sub">{{ networkMode === 'devices' ? '设备关系' : 'IP 网段' }}</span>
       </button>
+      <button class="tab-btn" :class="{ active: activeTab === 'service' }" @click="switchTab('service')">
+        <span class="tab-icon">🔗</span> 服务调用
+        <span class="tab-sub">{{ svcTotalServices }} 服务</span>
+      </button>
     </div>
 
     <!-- ============ Tab1: 资产拓扑（K8s 按节点维度） ============ -->
@@ -202,6 +206,93 @@
       </div>
     </div>
 
+    <!-- ============ Tab3: 服务调用拓扑 ============ -->
+    <div v-show="activeTab === 'service'">
+      <div class="toolbar">
+        <div class="mode-switch">
+          <button class="mode-btn" :class="{ active: svcHours === 1 }" @click="svcHours = 1; loadServiceCalls()">1h</button>
+          <button class="mode-btn" :class="{ active: svcHours === 6 }" @click="svcHours = 6; loadServiceCalls()">6h</button>
+          <button class="mode-btn" :class="{ active: svcHours === 24 }" @click="svcHours = 24; loadServiceCalls()">24h</button>
+          <button class="mode-btn" :class="{ active: svcHours === 168 }" @click="svcHours = 168; loadServiceCalls()">7d</button>
+          <button class="mode-btn" :class="{ active: svcHours === 0 }" @click="svcHours = 0; loadServiceCalls()">全部</button>
+        </div>
+        <button class="btn" @click="loadServiceCalls">刷新</button>
+        <button class="btn btn-guide" @click="showGuide = true">📖 操作说明</button>
+        <label class="auto-refresh-label">
+          <input type="checkbox" v-model="autoRefresh" style="accent-color:var(--accent)" />
+          自动刷新
+        </label>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-card">
+          <div class="stat-num">{{ svcStats.total_services || 0 }}</div>
+          <div class="stat-label">服务数</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num">{{ svcStats.total_edges || 0 }}</div>
+          <div class="stat-label">调用关系</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num">{{ svcStats.total_calls || 0 }}</div>
+          <div class="stat-label">总调用次数</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num">{{ svcStats.total_spans || 0 }}</div>
+          <div class="stat-label">Span 数</div>
+        </div>
+      </div>
+
+      <div class="content-grid">
+        <div class="panel chart-panel">
+          <div class="panel-head">服务调用拓扑图</div>
+          <div class="panel-body">
+            <div v-if="svcLoading" class="loading-state">加载中...</div>
+            <div v-if="svcError" class="loading-state" style="color:#ef4444">{{ svcError }}</div>
+            <div v-if="svcEmpty" class="empty-state">
+              <div style="font-size:32px;margin-bottom:8px;">🔗</div>
+              <div>暂无跨服务调用数据</div>
+              <div style="font-size:0.8rem;margin-top:8px;color:var(--text-tertiary,#94a3b8)">
+                需要应用通过 OpenTelemetry 上报含 parent_span_id 的跨服务 Span
+              </div>
+            </div>
+            <div ref="svcChartRef" class="chart-box" v-show="!svcLoading && !svcEmpty"></div>
+          </div>
+        </div>
+
+        <div class="panel legend-panel">
+          <div class="panel-head">图例 / 节点详情</div>
+          <div class="panel-body">
+            <div class="legend-section">服务健康状态</div>
+            <div class="legend-item"><span class="health-dot" style="background:#67C23A"></span>健康 (错误率 &lt; 5%)</div>
+            <div class="legend-item"><span class="health-dot" style="background:#E6A23C"></span>警告 (错误率 5% ~ 30%)</div>
+            <div class="legend-item"><span class="health-dot" style="background:#ef4444"></span>严重 (错误率 ≥ 30%)</div>
+            <div class="legend-section">调用关系</div>
+            <div class="legend-item"><span class="legend-line"></span>service_call (带箭头)</div>
+            <div class="legend-item" style="font-size:0.75rem;color:var(--text-tertiary,#94a3b8);align-items:flex-start">
+              边宽度 = 调用量, 颜色 = 错误率
+            </div>
+
+            <div v-if="selectedSvcNode" class="node-detail">
+              <div class="legend-section">服务详情</div>
+              <div class="detail-row"><span class="dlabel">服务名</span><span class="dvalue">{{ selectedSvcNode.name }}</span></div>
+              <div class="detail-row"><span class="dlabel">Span 数</span><span class="dvalue">{{ selectedSvcNode.span_count }}</span></div>
+              <div class="detail-row"><span class="dlabel">调用次数</span><span class="dvalue">{{ selectedSvcNode.call_count }}</span></div>
+              <div class="detail-row"><span class="dlabel">错误数</span><span class="dvalue">{{ selectedSvcNode.error_count }}</span></div>
+              <div class="detail-row"><span class="dlabel">错误率</span><span class="dvalue">{{ selectedSvcNode.error_rate }}%</span></div>
+              <div class="detail-row"><span class="dlabel">平均耗时</span><span class="dvalue">{{ selectedSvcNode.avg_duration_ms }}ms</span></div>
+              <div class="detail-row"><span class="dlabel">健康状态</span>
+                <span class="dvalue">
+                  <span class="health-badge" :class="'health-' + selectedSvcNode.health">{{ selectedSvcNode.health }}</span>
+                </span>
+              </div>
+              <button class="btn btn-sm" @click="clearSvcSelection" style="margin-top:8px;">关闭</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 新增关系弹窗 -->
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
       <div class="modal-box">
@@ -307,12 +398,13 @@ const typeList = computed(() => {
 })
 
 const guideSections = [
-  { title: 'Tab 切换', content: '顶部「资产拓扑」展示全资产关系，K8s 仅按节点维度呈现（隐藏 namespace/deployment/pod 等子资源）；「网络拓扑」展示网络设备关系或 IP 网段聚类。' },
+  { title: 'Tab 切换', content: '「资产拓扑」展示全资产关系，K8s 仅按节点维度呈现；「网络拓扑」展示网络设备关系或 IP 网段聚类；「服务调用」从链路追踪 Span 数据自动聚合服务间调用关系。' },
   { title: '筛选过滤', content: '资产拓扑支持类型下拉筛选、名称搜索、"仅异常"过滤（显示异常节点及其关联）。' },
   { title: '节点交互', content: '点击任一节点，右侧图例区显示详情和关联资产；选中节点高亮其所有关联关系。' },
-  { title: '拓扑浏览', content: '节点可拖拽移动；鼠标滚轮缩放；选中节点后关联节点和边高亮为橙色。' },
+  { title: '拓扑浏览', content: '节点可拖拽移动；鼠标滚轮缩放；选中节点后关联节点和边高亮。' },
   { title: '关系管理', content: '点击"+新增关系"创建资产间依赖关系；关系列表支持直接删除。' },
   { title: '网络拓扑模式', content: '网络设备关系：展示交换机/路由器/防火墙/负载均衡等网络设备及 AssetRelation 连接；IP 网段拓扑：按 /24 网段自动聚类有 IP 的资产。' },
+  { title: '服务调用拓扑', content: '从 OpenTelemetry Span 表自动聚合跨服务调用关系（基于 trace_id + parent_span_id）。节点颜色=健康状态，边宽度=调用量，边颜色=错误率。支持 1h/6h/24h/7d/全部 时间范围切换。' },
   { title: '自动刷新', content: '开启"自动刷新"后每 30 秒拉取当前 Tab 的最新拓扑数据。' },
 ]
 
@@ -379,6 +471,9 @@ const displayEdgeCount = computed(() => getDisplayData().displayEdges.length)
 const headerHint = computed(() => {
   if (activeTab.value === 'network') {
     return networkMode.value === 'devices' ? '网络设备关系拓扑' : 'IP 网段聚类拓扑'
+  }
+  if (activeTab.value === 'service') {
+    return `服务调用拓扑 · ${svcStats.value.total_services || 0} 服务 · ${svcStats.value.total_edges || 0} 调用关系`
   }
   return `${nodes.value.length} 个节点 / ${relations.value.length} 条关系`
 })
@@ -704,14 +799,152 @@ function clearNetworkSelection() {
   renderNetworkChart()
 }
 
+// ===== Tab3: 服务调用拓扑 =====
+const svcLoading = ref(false)
+const svcError = ref('')
+const svcEmpty = ref(false)
+const svcNodes = ref([])
+const svcEdges = ref([])
+const svcStats = ref({})
+const svcHours = ref(24)
+const selectedSvcNode = ref(null)
+const selectedSvcNodeId = ref(null)
+const svcChartRef = ref(null)
+let svcChart = null
+
+const svcTotalServices = computed(() => svcStats.value.total_services || 0)
+
+function svcNodeColor(n) {
+  if (n.health === 'critical') return '#ef4444'
+  if (n.health === 'warning') return '#E6A23C'
+  return '#67C23A'
+}
+
+function svcEdgeColor(e) {
+  const er = e.error_rate || 0
+  if (er >= 30) return '#ef4444'
+  if (er >= 5) return '#E6A23C'
+  return '#94a3b8'
+}
+
+async function loadServiceCalls() {
+  svcLoading.value = true
+  svcError.value = ''
+  svcEmpty.value = false
+  try {
+    const data = await request.get(`/topology/api/service-calls?hours=${svcHours.value}&min_calls=1`)
+    svcNodes.value = data.nodes || []
+    svcEdges.value = data.edges || []
+    svcStats.value = data.stats || {}
+    svcEmpty.value = svcNodes.value.length === 0
+    await nextTick()
+    if (!svcEmpty.value) renderServiceChart()
+  } catch (e) {
+    svcError.value = '加载失败: ' + (e.message || e)
+  } finally {
+    svcLoading.value = false
+  }
+}
+
+function renderServiceChart() {
+  if (!svcChartRef.value) return
+  if (!svcChart) svcChart = echarts.init(svcChartRef.value)
+
+  const nodeMap = {}
+  svcNodes.value.forEach(n => { nodeMap[n.id] = n })
+
+  const graphNodes = svcNodes.value.map(n => {
+    const selected = selectedSvcNodeId.value === n.id
+    const color = svcNodeColor(n)
+    return {
+      id: n.id,
+      name: n.name,
+      symbolSize: selected ? 56 : 48,
+      itemStyle: {
+        color: color,
+        borderColor: selected ? '#6366f1' : 'transparent',
+        borderWidth: selected ? 3 : 0,
+        shadowBlur: selected ? 12 : 0,
+        shadowColor: 'rgba(99,102,241,0.45)',
+      },
+      label: { show: true, position: 'bottom', fontSize: 12, fontWeight: selected ? 600 : 400 },
+      raw: n,
+    }
+  })
+  const maxCalls = Math.max(...svcEdges.value.map(e => e.call_count), 1)
+  const graphEdges = svcEdges.value.map(e => {
+    const connected = selectedSvcNodeId.value && (
+      e.source === selectedSvcNodeId.value || e.target === selectedSvcNodeId.value
+    )
+    const width = 1 + (e.call_count / maxCalls) * 5
+    return {
+      source: e.source,
+      target: e.target,
+      label: { show: true, formatter: `${e.call_count}次`, fontSize: 9 },
+      lineStyle: {
+        color: connected ? '#6366f1' : svcEdgeColor(e),
+        width: connected ? Math.max(width, 3) : width,
+        curveness: 0.15,
+        opacity: connected ? 1 : 0.7,
+      },
+    }
+  })
+
+  svcChart.setOption({
+    tooltip: {
+      formatter: (p) => {
+        if (p.dataType === 'node') {
+          const n = p.data.raw
+          return `<b>${n.name}</b><br/>Span: ${n.span_count} | 调用: ${n.call_count}<br/>错误: ${n.error_count} (${n.error_rate}%)<br/>平均耗时: ${n.avg_duration_ms}ms<br/>健康: ${n.health}`
+        }
+        if (p.dataType === 'edge') {
+          const e = p.data
+          return `<b>${e.source} → ${e.target}</b><br/>调用 ${e.call_count} 次, 错误 ${e.error_count} 次 (${e.error_rate}%)<br/>平均耗时: ${e.avg_duration_ms}ms`
+        }
+        return ''
+      },
+    },
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      roam: true,
+      draggable: true,
+      data: graphNodes,
+      links: graphEdges,
+      categories: [{ name: 'service' }],
+      force: { repulsion: 500, edgeLength: 250, gravity: 0.03, friction: 0.12 },
+      edgeSymbol: ['none', 'arrow'],
+      edgeSymbolSize: 10,
+      emphasis: { focus: 'adjacency', lineStyle: { width: 4 } },
+    }],
+  }, true)
+  svcChart.off('click')
+  svcChart.on('click', (p) => {
+    if (p.dataType === 'node' && p.data.raw) {
+      selectedSvcNode.value = p.data.raw
+      selectedSvcNodeId.value = p.data.raw.id
+      renderServiceChart()
+    }
+  })
+}
+
+function clearSvcSelection() {
+  selectedSvcNode.value = null
+  selectedSvcNodeId.value = null
+  renderServiceChart()
+}
+
 function switchTab(tab) {
   activeTab.value = tab
   nextTick(() => {
     if (tab === 'asset') {
       if (chart) chart.resize()
-    } else {
+    } else if (tab === 'network') {
       if (!networkNodes.value.length) loadNetwork()
       else if (networkChart) networkChart.resize()
+    } else if (tab === 'service') {
+      if (!svcNodes.value.length) loadServiceCalls()
+      else if (svcChart) svcChart.resize()
     }
   })
 }
@@ -732,7 +965,8 @@ watch(autoRefresh, (val) => {
   if (val) {
     refreshTimer = setInterval(() => {
       if (activeTab.value === 'asset') loadAll()
-      else loadNetwork()
+      else if (activeTab.value === 'network') loadNetwork()
+      else loadServiceCalls()
     }, 30000)
   }
 })
@@ -740,6 +974,7 @@ watch(autoRefresh, (val) => {
 function handleResize() {
   if (chart) chart.resize()
   if (networkChart) networkChart.resize()
+  if (svcChart) svcChart.resize()
 }
 
 onMounted(() => {
@@ -751,6 +986,7 @@ onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (chart) { chart.dispose(); chart = null }
   if (networkChart) { networkChart.dispose(); networkChart = null }
+  if (svcChart) { svcChart.dispose(); svcChart = null }
 })
 </script>
 
@@ -831,4 +1067,9 @@ onBeforeUnmount(() => {
 .related-dot.related-abnormal { background: #ef4444; box-shadow: 0 0 4px rgba(239,68,68,0.5); }
 .related-name { color: var(--text, #1e293b); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .related-status { color: var(--text-secondary, #64748b); font-size: 0.7rem; margin-left: auto; }
+.health-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.health-badge { display: inline-block; padding: 1px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
+.health-badge.health-healthy { background: rgba(103,194,58,0.15); color: #67C23A; }
+.health-badge.health-warning { background: rgba(230,162,60,0.15); color: #E6A23C; }
+.health-badge.health-critical { background: rgba(239,68,68,0.15); color: #ef4444; }
 </style>

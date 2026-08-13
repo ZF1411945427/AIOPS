@@ -296,6 +296,115 @@ def build_k8s_topo_graph(db: Session, cluster_name: str = "", namespace: str = "
     return {"nodes": nodes, "links": links, "clusters": clusters, "stats": stats, "trees": trees}
 
 
+def build_service_call_topo(db: Session, hours: int = 168, min_calls: int = 1):
+    """从 Span 表聚合服务调用链拓扑（服务 A → 服务 B 有向边）。
+
+    通过 trace_id + parent_span_id 还原调用关系，筛选跨服务调用后聚合：
+    - 节点: 每个 service_name 为一个服务节点，附带该服务的调用量/错误数/平均耗时/健康状态
+    - 边:  caller → callee, 附带调用量/错误数/平均耗时/错误率
+    hours=0 表示不限时间范围。
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+    from collections import defaultdict
+    from app.models import Span
+
+    q = db.query(Span)
+    if hours and hours > 0:
+        since = datetime.now() - timedelta(hours=hours)
+        q = q.filter(Span.started_at >= since)
+    spans = q.all()
+    if not spans:
+        return _empty_service_call_result()
+
+    span_map = {}
+    for s in spans:
+        if s.trace_id is None:
+            continue
+        span_map.setdefault(s.trace_id, []).append(s)
+
+    caller_map = defaultdict(lambda: {"count": 0, "error_count": 0, "total_duration": 0.0})
+    svc_stats = defaultdict(lambda: {"call_count": 0, "error_count": 0, "total_duration": 0.0, "span_count": 0})
+
+    for tid, trace_spans in span_map.items():
+        ss_map = {s.span_id: s for s in trace_spans if s.span_id}
+        for s in trace_spans:
+            svc = s.service_name or "unknown"
+            svc_stats[svc]["span_count"] += 1
+            if s.duration_ms:
+                svc_stats[svc]["total_duration"] += s.duration_ms
+            if s.status and s.status != "OK":
+                svc_stats[svc]["error_count"] += 1
+            if not s.parent_span_id:
+                continue
+            parent = ss_map.get(s.parent_span_id)
+            if parent and parent.service_name and parent.service_name != s.service_name:
+                caller = parent.service_name
+                callee = s.service_name
+                key = (caller, callee)
+                caller_map[key]["count"] += 1
+                caller_map[key]["error_count"] += 1 if s.status and s.status != "OK" else 0
+                if s.duration_ms:
+                    caller_map[key]["total_duration"] += s.duration_ms
+                svc_stats[caller]["call_count"] += 1
+                if s.status and s.status != "OK":
+                    svc_stats[caller]["error_count"] += 1
+
+    nodes = []
+    edge_ids = set()
+    edges = []
+    for svc, stat in svc_stats.items():
+        avg_dur = round(stat["total_duration"] / max(stat["span_count"], 1), 1)
+        error_rate = round(stat["error_count"] / max(stat["span_count"], 1) * 100, 1)
+        health = "critical" if error_rate >= 30 else ("warning" if error_rate >= 5 else "healthy")
+        nodes.append({
+            "id": svc,
+            "name": svc,
+            "type": "service",
+            "call_count": stat["call_count"],
+            "span_count": stat["span_count"],
+            "error_count": stat["error_count"],
+            "avg_duration_ms": avg_dur,
+            "error_rate": error_rate,
+            "health": health,
+        })
+
+    for (caller, callee), stat in caller_map.items():
+        if stat["count"] < min_calls:
+            continue
+        avg_dur = round(stat["total_duration"] / max(stat["count"], 1), 1)
+        error_rate = round(stat["error_count"] / max(stat["count"], 1) * 100, 1)
+        eid = f"{caller}→{callee}"
+        if eid in edge_ids:
+            continue
+        edge_ids.add(eid)
+        edges.append({
+            "id": eid,
+            "source": caller,
+            "target": callee,
+            "type": "service_call",
+            "call_count": stat["count"],
+            "error_count": stat["error_count"],
+            "avg_duration_ms": avg_dur,
+            "error_rate": error_rate,
+        })
+
+    stats = {
+        "total_services": len(nodes),
+        "total_edges": len(edges),
+        "total_calls": sum(e["call_count"] for e in edges),
+        "total_spans": sum(s["span_count"] for s in nodes),
+        "hours": hours,
+    }
+    return {"nodes": nodes, "edges": edges, "stats": stats}
+
+
+def _empty_service_call_result():
+    return {"nodes": [], "edges": [], "stats": {
+        "total_services": 0, "total_edges": 0, "total_calls": 0, "total_spans": 0, "hours": 0
+    }}
+
+
 def create_relation(db: Session, parent_id: int, child_id: int, relation_type: str = "depends_on"):
     if parent_id == child_id:
         return None

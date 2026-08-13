@@ -188,6 +188,15 @@
             </div>
           </div>
 
+          <div v-if="precheckChecks.length" class="precheck-panel">
+            <div class="precheck-title">预检明细</div>
+            <div v-for="(c, i) in precheckChecks" :key="i" class="precheck-item">
+              <span class="precheck-mark" :class="c.ok ? 'ok' : 'fail'">{{ c.ok ? '✓' : '✗' }}</span>
+              <span class="precheck-name">{{ c.name }}</span>
+              <span class="precheck-msg" :class="c.ok ? 'ok' : 'fail'">{{ c.message }}</span>
+            </div>
+          </div>
+
           <div class="terminal" v-if="detail.logs && detail.logs.length">
             <div v-for="(l, i) in detail.logs" :key="i" class="tline" :class="l.type">
               <span class="tts">{{ l.ts }}</span>
@@ -199,8 +208,8 @@
         </div>
         <div class="modal-foot">
           <button class="btn" :disabled="deploying" @click="precheck">逻辑预检</button>
-          <button class="btn" :disabled="deploying" @click="validateSsh">SSH 校验</button>
-          <button class="btn danger" v-if="deploying" @click="stopDeploy">停止</button>
+          <button class="btn danger" v-if="deploying" @click="stopDeploy">■ 停止</button>
+          <button class="btn primary" v-else-if="detail.status === 'stopped'" @click="startDeploy">▶ 继续部署</button>
           <button class="btn primary" v-else @click="startDeploy">▶ 开始部署</button>
           <button class="btn primary" v-if="detail.status === 'succeeded' && !deploying" @click="addToAssets">＋ 添加到 K8s 资产</button>
           <button class="btn" v-if="detail.status === 'succeeded'" @click="downloadKubeconfig">下载 kubeconfig</button>
@@ -229,6 +238,7 @@ const form = ref(emptyForm())
 const detail = ref(null)
 const deploying = ref(false)
 const deployWs = ref(null)
+const precheckChecks = ref([])
 
 const phases = ['预检', '环境准备', '运行时/二进制', 'kubeadm配置', '初始化', 'CNI', '节点加入']
 
@@ -239,7 +249,7 @@ function emptyForm() {
 }
 
 function statusText(s) {
-  return { draft: '草稿', planned: '已规划', running: '部署中', succeeded: '成功', failed: '失败', rolled_back: '已回滚',
+  return { draft: '草稿', planned: '已规划', running: '部署中', stopped: '已停止', succeeded: '成功', failed: '失败', rolled_back: '已回滚',
            pending: '待执行', ok: 'O' }[s] || s
 }
 function nodeSummary(p) {
@@ -326,10 +336,12 @@ async function refreshDetail(id) {
 }
 
 async function precheck() {
+  precheckChecks.value = []
   try {
-    const res = await request.post(`/k8s-offline/api/plans/${detail.value.id}/precheck`)
+    const res = await request.post(`/k8s-offline/api/plans/${detail.value.id}/precheck`, null, { params: { test_ssh: true } })
     refreshDetail(detail.value.id)
-    if (res.ok) ElMessage.success('逻辑预检通过')
+    precheckChecks.value = res.checks || []
+    if (res.ok) ElMessage.success(`逻辑预检通过 (${(res.checks || []).length} 项)`)
     else ElMessage.warning('预检问题: ' + (res.issues || []).join('; '))
   } catch (e) { ElMessage.error(e.message) }
 }
@@ -343,7 +355,7 @@ async function validateSsh() {
 }
 
 function startDeploy() {
-  detail.value.logs = []
+  if (detail.value.status !== 'stopped') detail.value.logs = []
   deploying.value = true
   const url = `ws://${location.host}/k8s-offline/ws/plans/${detail.value.id}/deploy`
   deployWs.value = new WebSocket(url)
@@ -352,6 +364,15 @@ function startDeploy() {
     try { evt = JSON.parse(ev.data) } catch (e) { return }
     if (evt.type === 'phase') detail.value.current_step = evt.step
     else if (evt.type === 'status') detail.value.status = evt.status
+    else if (evt.type === 'log' || evt.type === 'output') {
+      if (!Array.isArray(detail.value.logs)) detail.value.logs = []
+      detail.value.logs.push({
+        type: evt.type,
+        node: evt.node || '',
+        message: evt.message !== undefined && evt.message !== null ? evt.message : (evt.line || ''),
+        ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      })
+    }
     else if (evt.type === 'complete') {
       deploying.value = false
       refreshDetail(detail.value.id)
@@ -482,6 +503,14 @@ input, select { width: 100%; border: 1px solid #dcdfe6; border-radius: 4px; padd
 .terminal .warn { color: #dcdcaa; }
 .terminal .ok { color: #89d185; }
 .terminal .info { color: #9cdcfe; }
+.precheck-panel { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 4px; padding: 10px; margin-bottom: 10px; }
+.precheck-title { font-weight: 600; margin-bottom: 6px; color: #24292f; }
+.precheck-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.precheck-mark.ok { color: #1a7f37; font-weight: 700; }
+.precheck-mark.fail { color: #cf222e; font-weight: 700; }
+.precheck-name { min-width: 160px; color: #24292f; }
+.precheck-msg.ok { color: #1a7f37; }
+.precheck-msg.fail { color: #cf222e; }
 .terminal .ssh { color: #c586c0; }
 
 .modal-box .req { color: #f56c6c; }

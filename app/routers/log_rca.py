@@ -1,17 +1,19 @@
-from datetime import datetime, timedelta
-from collections import defaultdict
+from datetime import datetime
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Alert, MetricRecord, Asset, AssetRelation
-from app.template_utils import get_templates
+from app.services import rca_algos_service
 
 router = APIRouter(prefix="/log-rca", tags=["log-rca"])
-templates = get_templates()
 
 
 @router.get("/status")
 def status():
-    return {"module": "log_rca", "status": "ok"}
+    return {"module": "log_rca", "status": "ok", "version": "real"}
 
 
+@router.get("/analyze/{asset_id}")
+def analyze(asset_id: int, hours: float = 24, keyword: str = "", db: Session = Depends(get_db)):
+    result = rca_algos_service.run_log_rca(db, asset_id, hours=hours, keyword=keyword)
+    return JSONResponse({"ok": result.get("ok", False), "result": result})

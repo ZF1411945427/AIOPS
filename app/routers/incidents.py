@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Request, Body
 from fastapi.responses import JSONResponse
 from app.template_utils import get_templates
+import json
+from typing import Optional
 
 from app.database import get_db
 from app.services import incident_service, rca_service, knowledge_graph_service, config_service
@@ -335,6 +337,66 @@ def api_incident_ai_rca(incident_id: int, force: int = 0, db: Session = Depends(
     db.commit()
 
     return {"ok": True, "analysis": content, "cached": False}
+
+
+# ─── C1-C3: 自动调查闭环 API ───
+
+@router.get("/api/reports/investigation")
+def api_list_investigation_reports(incident_id: Optional[int] = None, limit: int = 20, db: Session = Depends(get_db)):
+    """列出自动调查报告（C2）。可选按 incident 过滤。"""
+    from app.models import InvestigationReport
+    q = db.query(InvestigationReport)
+    if incident_id:
+        q = q.filter(InvestigationReport.incident_id == incident_id)
+    reports = q.order_by(InvestigationReport.id.desc()).limit(limit).all()
+    items = []
+    for r in reports:
+        try:
+            report_data = json.loads(r.report_data or "{}")
+        except (json.JSONDecodeError, TypeError):
+            report_data = {}
+        items.append({
+            "id": r.id, "incident_id": r.incident_id, "alert_id": r.alert_id,
+            "investigation_type": r.investigation_type, "title": r.title,
+            "status": r.status, "summary": report_data.get("summary", ""),
+            "root_causes": report_data.get("root_causes", []),
+            "report_md": r.report_md, "error_message": r.error_message or "",
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+            "completed_at": r.completed_at.strftime("%Y-%m-%d %H:%M:%S") if r.completed_at else None,
+        })
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/api/reports/investigation/{report_id}")
+def api_get_investigation_report(report_id: int, db: Session = Depends(get_db)):
+    """调查详情（含完整结构化报告）。"""
+    from app.models import InvestigationReport
+    r = db.query(InvestigationReport).filter(InvestigationReport.id == report_id).first()
+    if not r:
+        return JSONResponse({"error": "报告不存在"}, status_code=404)
+    try:
+        report_data = json.loads(r.report_data or "{}")
+    except (json.JSONDecodeError, TypeError):
+        report_data = {}
+    return {
+        "id": r.id, "incident_id": r.incident_id, "alert_id": r.alert_id,
+        "investigation_type": r.investigation_type, "title": r.title,
+        "status": r.status, "report_data": report_data, "report_md": r.report_md,
+        "evidence_summary": r.evidence_summary or "", "error_message": r.error_message or "",
+        "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+        "completed_at": r.completed_at.strftime("%Y-%m-%d %H:%M:%S") if r.completed_at else None,
+    }
+
+
+@router.post("/api/{incident_id}/investigate")
+def api_manual_investigate(incident_id: int, db: Session = Depends(get_db)):
+    """手动触发一次自动调查（C1 worker，异步执行）。"""
+    from app.services import auto_investigator
+    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not inc:
+        return JSONResponse({"error": "故障单不存在"}, status_code=404)
+    auto_investigator.run_investigation_async(incident_id, db=db)
+    return {"ok": True, "message": "调查 worker 已启动，稍后刷新查看报告"}
 
 
 # ─── HTML 路由（fallback）───

@@ -25,6 +25,21 @@ class RoleMenu(Base):
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
+class RolePermission(Base):
+    """资源级 RBAC 策略（对齐 Ongrid Casbin resource:action 策略矩阵）。
+
+    resource=alert/asset/incident/deploy/k8s/user/role/config/report/...;
+    action=read/write/execute/delete。superuser 角色自动拥有全部权限（绕过策略）。
+    """
+    __tablename__ = "role_permissions"
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=False, index=True)
+    resource = Column(String(64), nullable=False, index=True)
+    action = Column(String(32), nullable=False)  # read / write / execute / delete
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    __table_args__ = (UniqueConstraint("role_id", "resource", "action", name="uq_role_permission"),)
+
+
 class ChaosExperiment(Base):
     __tablename__ = "chaos_experiments"
     id = Column(Integer, primary_key=True, index=True)
@@ -133,9 +148,13 @@ class AlertRule(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(128), nullable=False)
+    # G1: kind 告警规则类型化 metric_raw / anomaly / forecast / burn_rate
+    kind = Column(String(24), default="metric_raw", nullable=False)
     metric_name = Column(String(64), nullable=False)
     condition = Column(String(8), nullable=False)
     threshold = Column(Float, nullable=False)
+    # G1: 各 kind 专用参数(JSON)
+    config_json = Column(Text, default="{}")
     severity = Column(String(32), default="warning")
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
@@ -260,6 +279,34 @@ class IncidentApproval(Base):
     action = Column(String(32), nullable=False)  # submit / approve / reject
     description = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class InvestigationReport(Base):
+    """C2: 自动调查结构化报告（告警/故障触发后由 auto_investigator 生成）。
+
+    investigation_type: root_cause / performance / security / capacity ...
+    三态 status: running / completed / failed
+    """
+    __tablename__ = "investigation_reports"
+
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=True)
+    investigation_type = Column(String(32), default="root_cause")
+    title = Column(String(256), default="")
+    status = Column(String(16), default=STATUS_RUNNING)
+    # 结构化报告内容（JSON）：root_cause / evidence / recommendation / risk / summary
+    report_data = Column(Text, default="{}")
+    report_md = Column(Text, default="")
+    evidence_summary = Column(Text, default="")
+    error_message = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    completed_at = Column(DateTime, nullable=True)
+
 
 
 class KnowledgeBase(Base):
@@ -1001,6 +1048,21 @@ class AIProvider(Base):
             return ""
 
 
+class SecretVault(Base):
+    """集中凭据保险库：加密存储连接密码/Token/API Key，连接配置只存 {{secret:name}} 引用"""
+    __tablename__ = "secret_vaults"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False, index=True)
+    description = Column(String(256), default="")
+    value_type = Column(String(32), default="password")
+    scope = Column(String(64), default="global")
+    secret_value_encrypted = Column(Text, default="")
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
 class AgentConfig(Base):
     """Agent 配置"""
     __tablename__ = "agent_configs"
@@ -1107,6 +1169,7 @@ class ChatMessage(Base):
     citations = Column(Text, default="[]")
     tool_calls = Column(Text, default="[]")
     metadata_json = Column("metadata", Text, default="{}")
+    sub_agent = Column(String(64), default="")  # 该消息归属的子智能体（空=会话默认）
     created_at = Column(DateTime, default=lambda: datetime.now())
 
 
@@ -1159,6 +1222,7 @@ class PendingAction(Base):
     status = Column(String(16), default=STATUS_PENDING)
     action_payload = Column(Text, default="{}")
     result_payload = Column(Text, default="{}")
+    review_result = Column(Text, default="")  # A4: LLM reviewer 二签结果 JSON
     confirmed_by = Column(String(64), default="")
     confirmed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
@@ -1515,6 +1579,13 @@ class AgentWorkflow(Base):
             return json.loads(self.outputs_schema) if self.outputs_schema else []
         except (json.JSONDecodeError, TypeError):
             return []
+
+    def get_trigger_condition(self):
+        """告警触发条件（JSON）。空/非法返回 {}（= 匹配所有告警）。"""
+        try:
+            return json.loads(self.trigger_condition) if self.trigger_condition else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
 
 class AgentWorkflowRun(Base):
@@ -2469,4 +2540,163 @@ class AIInsightRecord(Base):
     provider = Column(String(64), default="")
     score = Column(Integer, default=0)  # 0-100 AI 自评分数
     created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class Skill(Base):
+    """技能(SKILL.md)注册表 - 对齐 Ongrid internal/skill + biz/skill(F1)。"""
+    __tablename__ = "skills"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False, index=True)  # frontmatter.name, use_skill 入参名
+    description = Column(String(512), default="")
+    version = Column(String(32), default="1.0.0")
+    author = Column(String(128), default="")
+    license = Column(String(64), default="")
+    category = Column(String(64), default="")
+    risk_level = Column(String(32), default="read_only")  # read_only / interactive / danger
+    keywords = Column(Text, default="[]")      # JSON list
+    tools_required = Column(Text, default="[]")  # JSON list of MCP tool names
+    content = Column(Text, default="")          # SKILL.md 全文(frontmatter + 正文)
+    source = Column(String(32), default="builtin")  # builtin / upload / marketplace
+    file_path = Column(String(512), default="")     # builtin 相对路径
+    enabled = Column(Boolean, default=True)
+    usage_count = Column(Integer, default=0)
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class SkillExecution(Base):
+    """技能执行审计 - use_skill/manual 触发记录(F1 可审计执行)。"""
+    __tablename__ = "skill_executions"
+    id = Column(Integer, primary_key=True, index=True)
+    skill_id = Column(Integer, index=True)
+    skill_name = Column(String(128), default="", index=True)
+    tool = Column(String(64), default="use_skill")  # use_skill / manual
+    status = Column(String(16), default="success")  # success / failed
+    input_summary = Column(Text, default="")
+    output_summary = Column(Text, default="")
+    duration_ms = Column(Integer, default=0)
+    executed_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class K8sCluster(Base):
+    """多集群注册表(F5) - 把多个 K8s DataSource 聚合为命名集群, 独立 telemetry 通道。"""
+    __tablename__ = "k8s_clusters"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False, index=True)
+    role = Column(String(16), default="node")  # controller / node
+    datasource_id = Column(Integer, nullable=True)
+    data_plane_status = Column(String(16), default="active")  # active / standby / error
+    telemetry_channel = Column(String(64), default="")
+    namespace_scope = Column(String(128), default="")
+    target_version = Column(String(32), default="")
+    agent_version = Column(String(32), default="1.0.0")
+    last_check_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class K8sUpgradeJob(Base):
+    """edge 升级任务协调器(F5) - 状态机/批次/回滚, 持久化可恢复。"""
+    __tablename__ = "k8s_upgrade_jobs"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    cluster_id = Column(Integer, nullable=True)
+    from_version = Column(String(32), default="")
+    to_version = Column(String(32), default="")
+    status = Column(String(24), default="pending")  # pending/running/paused/completed/failed/rolled_back
+    strategy = Column(String(16), default="batch")  # all_at_once / batch
+    batch_size = Column(Integer, default=1)
+    overall_progress = Column(Integer, default=0)
+    log_json = Column(Text, default="[]")
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class GitRepo(Base):
+    """代码/git 知识库同步(P2-5) - 记录已同步到本地的 git 仓库用于代码搜索。"""
+    __tablename__ = "git_repos"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False)
+    url = Column(String(512), nullable=False)
+    branch = Column(String(128), default="main")
+    local_path = Column(String(512), default="")
+    status = Column(String(16), default="pending")  # pending/cloning/ready/error
+    file_count = Column(Integer, default=0)
+    last_sync_at = Column(DateTime, nullable=True)
+    error_msg = Column(Text, default="")
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class K8sUpgradeStep(Base):
+    """升级步骤(F5) - 逐 agent 升级/verify/回滚。"""
+    __tablename__ = "k8s_upgrade_steps"
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, index=True)
+    step_order = Column(Integer, default=0)
+    batch_no = Column(Integer, default=0)
+    agent_id = Column(String(64), default="")
+    hostname = Column(String(128), default="")
+    action = Column(String(16), default="upgrade")  # upgrade / verify / rollback
+    status = Column(String(16), default="pending")  # pending/running/success/failed/skipped
+    output = Column(Text, default="")
+    duration_ms = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class NetworkDevice(Base):
+    """网络设备管理(F6) - SNMP 校验/接口轮询/邻居发现。"""
+    __tablename__ = "network_devices"
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, nullable=True)
+    name = Column(String(128), nullable=False)
+    ip = Column(String(64), nullable=False)
+    device_type = Column(String(16), default="switch")  # switch/router/firewall/ap/other
+    vendor = Column(String(64), default="")
+    model = Column(String(128), default="")
+    snmp_version = Column(String(8), default="v2c")
+    community = Column(String(128), default="public")
+    port = Column(Integer, default=161)
+    status = Column(String(16), default="unreachable")  # unreachable / ok / error
+    last_poll_at = Column(DateTime, nullable=True)
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class NetworkInterface(Base):
+    """网络设备接口(F6)。"""
+    __tablename__ = "network_interfaces"
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(Integer, index=True)
+    if_index = Column(Integer, nullable=False)
+    name = Column(String(64), default="")
+    type = Column(Integer, default=6)  # ifType, 6=ethernetCsmacd
+    mac = Column(String(32), default="")
+    admin_status = Column(Integer, default=1)  # 1=up 2=down
+    oper_status = Column(Integer, default=1)  # 1=up 2=down
+    speed = Column(Integer, default=0)
+    in_octets = Column(Float, default=0)
+    out_octets = Column(Float, default=0)
+    in_errors = Column(Float, default=0)
+    out_errors = Column(Float, default=0)
+    last_poll_at = Column(DateTime, nullable=True)
+    __table_args__ = (UniqueConstraint("device_id", "if_index", name="uq_net_if_device_index"),)
+
+
+class NetworkNeighbor(Base):
+    """网络设备邻居(F6, LLDP/CDP)。"""
+    __tablename__ = "network_neighbors"
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(Integer, index=True)
+    local_interface = Column(String(64), default="")
+    neighbor_device = Column(String(128), default="")
+    neighbor_port = Column(String(64), default="")
+    proto = Column(String(8), default="lldp")  # lldp / cdp
+    last_seen_at = Column(DateTime, default=lambda: datetime.now())
+
+
 

@@ -2,6 +2,256 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-14: 新建《Topology拓扑改造功能页与操作手册》文档
+
+- **原因**: 用户询问"是否有记录所有根据 Topology 改造新增的功能页和操作"——此前相关记录散在 `MEMORY.md`(服务调用拓扑条目)与赶超计划 `### F. Topology 专项对比`,无独立操作侧汇总。
+- **产出**: 新建 `docs/Topology拓扑改造功能页与操作手册.md`,作为操作侧 Single Source of Truth。
+- **内容**: ①改造总览(架构巡检图 FireMapView + 拓扑视图 TopologyView 双页定位) ②架构巡检图服务调用连线面板(分层着色/边按错误率) ③拓扑视图三 Tab(资产/网络/服务调用)+自动刷新(30s) ④后端端点清单 ⑤验证/通过标准 ✓(服务调用边、健康着色、边宽=调用量、边色=错误率、自动刷新) ⑥**已知缺口**: T2 Blast Radius/N 跳影响面❌未实现、`topology-path` 孤儿页无菜单。
+- **关键事实(已核实)**: 服务调用拓扑 `build_service_call_topo`(topology_service.py:299) 按 trace_id+parent_span_id 聚合跨服务调用;`TopologyView.vue` Tab3 时间窗口 1h/6h/24h/7d/全部,`svcNodeColor`(817)与`svcEdgeColor`(823)按错误率(<5%/5~30%/≥30%)着色,边宽=调用量(879);自动刷新 ref=autoRefresh 间隔 30s(961/970);`connectedNodes`(411)只做**单跳**;后端无 blast-radius/expand(**T2 缺失**)。
+
+### 2026-08-14: 批量补全(G1 告警类型化 / P1-5 外部 MCP / P2-5 git 知识库 / P2-3 cmdpolicy 接线 / P3-2 log_rca+idice / D2 metrics / D3 trace_id / G2 embedding 确认)
+
+- **目标**: 用户跳过 Casbin RBAC+多租户(E 系列), 其余未完项一次做完, 融入现有页面为主, 自测多轮。
+- **G1 告警规则类型化**: `AlertRule` 加 `kind`+`config_json` 列(`_MIGRATIONS` 幂等 ALTER, 非 create_all);`alert_service._eval_rule_by_kind` 分发 metric_raw/anomaly(mean±zσ)/forecast(线性外推穿越)/burn_rate(预算消耗速率);`alerts.py` 规则 CRUD 透传 kind+config,列表返回 `kinds`;AlertRulesView 表加「类型」列+表单 kind 下拉。
+- **P1-5 外部 MCP**: 新建 `mcp_external.py`(HTTP JSON-RPC `tools/list`/`call`,urllib 零依赖,`auth_config.api_key`→Bearer,工具名 `<server>:<tool>` 前缀);`mcp_registry` 加外部工具钩子 `_EXTERNAL_TOOLS`/`_EXTERNAL_TARGET`,`get_mcp_manifest()` 合并、`call_mcp_tool()` 未命中外抛;新路由 `/api/mcp`(CRUD+/tools+/test+/reload);启动在 demo/real 循环调 `reload_external_tools`。
+- **P2-5 git 知识库**: `GitRepo`(`git_repos` 表);`git_knowledge_service` clone 到 `repo_cache/<name>`,遍历可索引扩展名写 `kb_documents`(source_type=git,file_path=`__git__/...`,增量+删失效);`search_code` 内容 grep;`/api/git-knowledge/*`(repos CRUD+/sync+/search)+ MCP 工具 `search_code`。
+- **P2-3 cmdpolicy 接线**: `evaluate_request`(开关关闭=放行,不影响现有)接入 `script_exec.py` 执行前 + `mcp_tools.execute_run_command`/`execute_run_script`(沙盒异常不阻断)。
+- **P3-2 log_rca/idice**: 新建 `rca_algos_service.py`(`run_log_rca` 指标 z 分+资产关系;`run_idice` 目标指标 vs 候选皮尔逊相关归因);`log_rca.py`/`idice.py` 由纯 stub 改实装(`/log-rca/analyze/{id}`、`/idice/attribute/{id}`,status 返回 version=real)。注意 `AssetRelation` 字段是 `parent_id/child_id/relation_type`(非 source/target)。
+- **D2 metrics**: main.py 新增 `GET /metrics` Prometheus exposition(`aiops_*` gauges, 含 `_APP_START_TIME` 模块常量),加入 `PUBLIC_PATHS`(供 Prometheus 抓取)。
+- **D3 trace_id**: `logger.py` 格式加 `{extra[trace_id]}`+默认 extra,`AIOPS_LOG_JSON=1` JSON 行;main.py 新增 `TraceIdMiddleware`(注册在最外层,`logger.contextualize(trace_id=...)`,生成/透传 `x-request-id`)。
+- **G2 embedding**: 确认 `embedding_service` 已本地 BGE-small-zh-v1.5(PyTorch,默认 bge-m3)离线可用,满足目标,无需 ONNX 化。
+- **测试全过**: 单测(G1 metric_raw/burn_rate 评估、log_rca 检测 cpu 异常、idice 归因、git search 3 命中、external mcp manifest 合并)+ API e2e(metrics text、rule kind create/update/list/delete、log_rca/idice、git repos/search、mcp CRUD+reload、search_code 在 agent manifest 33 工具)+ 前端 build;DB `alert_rules.kind/config_json` 迁移生效,`git_repos` 表建成。**坑**: 重启后端必须按 8000 端口 listener 杀(kill run.py 进程可能杀不净→新代码不生效,/metrics 404、新路由返回 SPA HTML 是旧进程残留信号)。
+- **文件**: `app/models.py`, `app/main.py`, `app/logger.py`, `app/services/alert_service.py`, `app/routers/alerts.py`, `app/services/mcp_external.py`, `app/routers/mcp.py`, `app/services/mcp_registry.py`, `app/services/git_knowledge_service.py`, `app/routers/git_knowledge.py`, `app/services/mcp_tools.py`(search_code), `app/services/rca_algos_service.py`, `app/routers/log_rca.py`, `app/routers/idice.py`, `app/routers/script_exec.py`, `frontend/src/views/AlertRulesView.vue`, `CONTRACT.md`(第22章), 赶超计划标 G1/G2/P1-5/P2-1/P2-3/P2-5/P3-2/D2/D3 ✅。
+
+### 2026-08-13: F5 K8s 多集群 data plane + Edge 升级协作器 / F6 网络设备管理
+
+- **目标**: 赶超计划 F5（多集群 controller/node 双角色 + edge 升级任务持久协调，对齐 Ongrid upgrade_job.go）+ F6（网络设备 SNMP 校验/接口轮询/邻居发现/主机链路映射，对齐 network_discovery.go）。
+- **F5 后端**:
+  - 新增 `app/services/multicluster_service.py`：`K8sCluster`(`k8s_clusters` 表)注册表，每集群关联一个 type=kubernetes 的 DataSource，独立 telemetry 通道(按 cluster 过滤 K8sEvent/资产汇总)，controller/node 双角色;`create/update/delete/check(check_cluster 读 DataSource.last_status→data_plane_status)/cluster_telemetry/available_datasources`
+  - 新增 `app/services/upgrade_service.py`：`K8sUpgradeJob`(`k8s_upgrade_jobs`)+`K8sUpgradeStep`(`k8s_upgrade_steps`)持久化升级协调器；状态机 pending/running/paused/completed/failed/rolled_back;create 自动按在线 EdgeSession 生成每 agent 的 upgrade+verify 步骤、batch 分批;run 同步执行(upgrade 刷 EdgeSession.agent_version→verify 断言==to_version,失败即回滚该批 upgrade 为 skipped 并置 failed);pause 中断;全部落库可续查
+  - 路由 `app/routers/multicluster.py`(`/api/k8s-clusters/*`)+ `app/routers/upgrade.py`(`/api/upgrade-jobs/*`)
+- **F6 后端**:
+  - 新增 `app/services/snmp_client.py`：**纯 Python UDP SNMP v1/v2c**（BER 编码 GET/GETNEXT WALK，无外部依赖），`validate/poll_interfaces(IF-MIB)/discover_neighbors(LLDP 优先/退化 CDP)`；**mock 模式** `AIOPS_SNMP_MOCK=1` 环境变量 **或项目根 `snmp_mock.flag` 文件**(后者无需重启 backend 即可切换,便于测试)
+  - 新增 `app/services/network_service.py`：`NetworkDevice/NetworkInterface/NetworkNeighbor` 表；CRUD + `validate_device`(标厂商型号)/`poll_device`(删旧写新)/`discover_device`/`device_detail`/`map_host_links`(主机 MAC 反查交换机端口)；mock 不可达时回退 mock
+  - 路由 `app/routers/network.py`(`/api/network/*`)
+- **模型**: `K8sCluster`, `K8sUpgradeJob`, `K8sUpgradeStep`, `NetworkDevice`, `NetworkInterface`(device_id+if_index 唯一), `NetworkNeighbor`（均 create_all 自动建;MetricRecord 无 asset_type 列,计数用 count()）
+- **前端**: `MultiClusterView.vue`(集群表+统计+独立遥测详情), `UpgradeJobsView.vue`(任务卡+进度条+日志+步骤详情+创建/执行/暂停), `NetworkDevicesView.vue`(设备表+validate/poll/discover/详情/主机链路映射弹框);菜单=系统配置→系统管理→**多集群管理**(multicluster)/**Edge 升级**(upgrade-jobs)/**网络设备**(network-devices),AppLayout 注册 3 组件+分支,menu_config.json 加 4 项
+- **测试全过**: 服务层(F5: 集群 CRUD/telemetry/check/升级 create→run completed→delete;F6: mock validate/poll(接口>0)/discover(邻居≥1)/map-links/delete)；API e2e(登录→F6 设备 CRUD+validate+poll+discover+detail+map-links→F5 集群创建/列表/遥测/check→升级任务 create/run completed/步骤全 success→全清理)；前端 build 通过;backend healthz ok
+- **坑**: `Start-Process` 传递 `$env:` 到后端子进程**不可靠**(cmd 包裹也失败)→ mock 用**文件标记 `snmp_mock.flag`**(gitignore 否,测后删除);脚本测后需删该 flag 防生产误开 mock;Vue `detail` 作 ref 同时又声明函数 → 重名编译错,改为 `showDeviceDetail`;MetricRecord 无 asset_type
+- **文件**: `app/services/multicluster_service.py`, `app/services/upgrade_service.py`, `app/services/snmp_client.py`, `app/services/network_service.py`, `app/routers/multicluster.py`, `app/routers/upgrade.py`, `app/routers/network.py`, `app/models.py`, `app/main.py`, `frontend/src/views/{MultiClusterView,UpgradeJobsView,NetworkDevicesView}.vue`, `frontend/src/layout/AppLayout.vue`, `app/routers/menu_config.json`, `CONTRACT.md`(第20/21章), 测试手册补充 F5/F6 节, 赶超计划标 F5/F6 ✅
+
+### 2026-08-13: F1/F2 SKILL.md 技能库 + 技能市场 Marketplace(可执行技能注册表 + zip 打包私服分发)
+
+- **目标**: 赶超计划 F1/F2：SKILL.md 可执行技能规范 + loader 注册表 + 可审计执行;市场打包安装技能、私服分发。对标 Ongrid `internal/skill` + `biz/skill` + `biz/marketplace`。
+- **SKILL.md 规范**: `skills/<name>/SKILL.md`,frontmatter YAML(name/description/version/author/license/category/risk_level(read_only|interactive|danger)/keywords/tools_required)+ Markdown 指令正文;解析失败或缺 name 跳过记日志
+- **后端**:
+  - 新增 `app/services/skill_registry.py`：`parse_frontmatter`/`build_skill_md`;`scan_builtin_skills`(启动扫描 `skills/**/SKILL.md` 增量入库,已有 name 不覆盖,幂等);CRUD(`create_skill` 重名拦截、`delete_skill` 内置=置 enabled=False 防重启回填、其余删行);`record_execution`/`list_executions`(审计 + usage_count+1);`export_package`/`import_package`(zip 单 SKILL.md 即 manifest)/`scan_marketplace_packages`/`publish_to_marketplace`/`install_from_marketplace`
+  - `models.py` 新增 `Skill`(`skills` 表)+ `SkillExecution`(`skill_executions` 表,create_all 自动建)
+  - 新增 `app/routers/skills.py`(`/api/skills/*` list/get/create/update/delete/run/executions/export/import)+ `app/routers/marketplace.py`(`/api/marketplace/*` packages/publish/install/delete);main.py 注册 + `_scan_builtin_skills` 在 demo/real 双库播种循环内调用
+  - 新增 `app/services/skill_mcp_tools.py`:`list_skills` + `use_skill` 两个 MCP 工具(Agent 可调,调用写审计+计数);**必须在 `mcp_tools.py` 文件尾部 import**(避免与 `_get_db` 循环导入)
+  - 内置示例技能 `skills/log-troubleshooter/SKILL.md`(日志异常排查,依赖 query_logs/query_alerts/query_metrics)
+- **前端**: `SkillsView.vue`(统计/搜索/表格+启用开关+👁️详情/✏️编辑/▶️执行/⬇️导出/🗑️卸载 + 执行审计面板 + 新建/编辑弹框 + zip 导入)+ `MarketplaceView.vue`(市场包卡片 grid/发布下拉/安装/删除包);菜单=系统配置→系统管理→**技能库**(skills)+**技能市场**(skill-market),AppLayout 注册分支+组件,menu_config.json 加项
+- **测试全过**: 服务层(frontmatter 解析/roundtrip/重名拦截/内置扫描幂等/update/export-import zip 往返/审计+计数/市场 publish-scan-install-delete);MCP 工具(list_skills 返回 enabled 技能/use_skill 返回指令+audit_id/缺技能 error 不崩);API 全链路(登录→列表含 builtin→详情含 content→创建→dup 400→run→executions→export PK→publish→marketplace list→删除原技能→install 后 source=marketplace→清理→内置卸载=disabled→re-enable→菜单含两项);前端 build 通过;后端重启 healthz ok,双库播种日志确认
+- **坑**: `app/database.py` 无 `engine`/`SessionLocal` 导出,用 `get_all_engines()`/`get_session_for("demo")`;`call_mcp_tool` 返回 `{"status","result"}` 包装,断言前先解包;PowerShell 内联引号 JSON 易错→用临时 .py 文件(测后清理)
+- **文件**: `app/services/skill_registry.py`, `app/services/skill_mcp_tools.py`, `app/services/mcp_tools.py`(尾部 import), `app/routers/skills.py`, `app/routers/marketplace.py`, `app/models.py`, `app/main.py`, `skills/log-troubleshooter/SKILL.md`, `frontend/src/views/SkillsView.vue`, `frontend/src/views/MarketplaceView.vue`, `frontend/src/layout/AppLayout.vue`, `app/routers/menu_config.json`, `CONTRACT.md`(第19章), 测试手册新增 F1/F2 节, 赶超计划标 F1/F2/P1-3 ✅
+
+### 2026-08-13: F3 凭据保险库 Secrets Vault(集中加密 + `{{secret:name}}` 引用注入)
+
+- **目标**: 赶超计划 F3：集中加密存储连接凭据(密码/Token/API Key/私钥),DB 不存明文;连接配置只存引用,运行时解密注入;Ongrid `biz/secret` + secretbox 对标。
+- **后端**:
+  - `app/config.py` 新增 `VAULT_ENCRYPT_SEED`(`AIOPS_VAULT_SEED` 环境变量);`models.py` 新增 `SecretVault`(`secret_vaults` 表,create_all 自动建,name 唯一/description/value_type/scope/secret_value_encrypted/created_by/时间戳)
+  - 新增 `app/services/secret_vault.py`：`encrypt/decrypt_secret_value`(Fernet,key=sha256(VAULT_ENCRYPT_SEED));CRUD(重名拦截、空值=不更新沿用第五章规则、`to_dict` 全程掩码 `***`+`has_value`);`resolve_secret_refs`(递归解析 `{{secret:name}}`,未匹配 fail-open 原样保留,db=None 时临时开 session);`find_secret_refs`/`collect_references`(扫描 data_sources.auth_config 引用+失效标记)
+  - 新增 `app/routers/secrets_vault.py`(`/api/vault/*`)：list/get/create/update/delete + `/secrets/resolve`(测试解析) + `/references`(引用扫描);main.py 注册
+  - **DataSource 集成**: `datasource_service.py` 新增 `_source_auth(source)`(= `resolve_secret_refs(parse_json_config(source.auth_config), None)`),替换全部 8 处 `cfg = parse_json_config(source.auth_config)`(测试连接+采集路径使用点解析)
+- **前端** `SecretsVaultView.vue`：统计卡(总数/被引用/数据源引用/失效引用)+ 凭据表格(引用名+复制/类型badge/掩码值/操作)+ 新建/编辑弹框(编辑时密码置空+留空不改)+ 📎 数据源引用一览 + 🧪 引用解析测试;菜单=系统配置→系统管理→**凭据保险库**(`secret-vault`,AppLayout 注册分支+组件,menu_config.json 加项,admin role 启动时自动同步 RoleMenu)
+- **测试全过**: 服务层(加密落库无明文/掩码/重名拦截/解析/嵌套字符串/未匹配 fail-open/更新空值保持/DataSource `_source_auth` 解析/collect_references)；API 全链路(登录→空表→创建→重名400→列表无明文→resolve 替换→update 保持→数据源带引用建→references 扫描→detail→delete→404)；SSH 测试连接用 vault 引用正常执行且响应不泄露密钥；菜单 admin 可见
+- **坑**: Vue 模板里 `{{ '{{secret:name}}' }}` 表达式含 `}}` 会中断 interpolation → 用 script 常量 `refTpl`/`refStr(name)` 渲染;PowerShell 内联 python 带 `{{`/`$_` 报错 → 用临时 .py;create_all 仅在 app 启动时执行,独立测试脚本需手动 `Base.metadata.create_all(bind=engine)`
+- **文件**: `app/services/secret_vault.py`, `app/routers/secrets_vault.py`, `app/models.py`, `app/config.py`, `app/services/datasource_service.py`, `app/main.py`, `frontend/src/views/SecretsVaultView.vue`, `frontend/src/layout/AppLayout.vue`, `app/routers/menu_config.json`, `CONTRACT.md`(第18章), 测试手册新增 F3 节, 赶超计划标 F3/P1-4 ✅
+
+### 2026-08-13: C1-C3 告警自动调查闭环(incident-investigator worker + 结构化报告 + 回写)
+
+- **目标**: 赶超计划 C1/C2/C3：告警产生即自动派调查 worker → RCA 算法包收集证据 → 二次 LLM 提取结构化报告 → 回写聊天会话 + 双向 IM。
+- **后端**:
+  - 新增 `app/services/auto_investigator.py`：
+    - `run_investigation(db, incident_id)`：防重复(该 incident 已有 report 则跳过)→ 建 running 报告 → `rca_service.analyze_incident` 收集 6 部分证据包 → `_call_llm_extract` 二次 LLM 严格 JSON(summary/root_cause/root_causes/evidence/timeline/recommendations/risks/action_needed) → 无 provider/解析失败走 `_fallback_report` 降级(不空壳) → `build_report_markdown` 渲染
+    - `_writeback`(C3)：会话=`[自动调查] {incident.title}`(不存在则建,admin 归属,写 analysis 消息)；IM=仅 `bidirectional+enabled` 渠道取 `channel_config.chat_id` → `reply_to_im(report_md[:3900])`,失败仅记日志
+    - `auto_investigate_new_incidents`(C1)：background_loop 服务 `auto_investigate`,触发=open+severity∈{critical,high}+回溯30min+`ai_rca_at` 防空重;`_spawn_worker` 独立线程+独立 session(`_session_mode` 沿用当前库模式,防 set_db_mode 竞态)
+  - `models.py` 新增 `InvestigationReport`(`investigation_reports` 表,create_all 自动建,三态 status running/completed/failed)
+  - `incidents.py` 新增 3 个 API：`GET /incidents/api/reports/investigation`(列表)、`GET .../investigation/{report_id}`(详情)、`POST /incidents/api/{incident_id}/investigate`(手动异步触发)
+  - `main.py` 注册 `auto_investigate` 到后台服务列表+任务监控
+- **前端** `IncidentsView.vue`：列表行+详情弹窗加「自动调查」按钮、详情弹窗加「🧭 自动调查报告」卡片(状态 running/completed/failed + markdown 渲染 + 轮询等待)
+- **测试**: 同步调查 completed+summary/root_causes 非空+dedupe 拦截；异步 worker 完成；scan spawned 4；API 全链路(登录→列表→详情→创建→手动触发→8s 后 completed)
+- **坑**: 登录返回 `token` 非 `access_token`；PowerShell 内联 `$_`/`$r` 会被外层展开→API 测试用临时 .py；控制台 GBK 打印 emoji 会崩→`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`
+- **文件**: `app/services/auto_investigator.py`, `app/models.py`, `app/routers/incidents.py`, `app/main.py`, `frontend/src/views/IncidentsView.vue`, `CONTRACT.md`(第17章), 测试手册新增 C1-C3 节, 赶超计划标 C1/C2/C3 ✅
+
+### 2026-08-13: B5 notify / agent 工作流节点
+
+- **目标**: 赶超计划 B5：工作流内新增 `notify`（IM 通知）和 `agent`（子代理嵌入）节点。
+- **后端** `agent_workflow_service.py`:
+  - `_exec_notify(node_data, runtime_context, db)`：channel(NotificationChannel.name)+recipient+title+content(模板)+fallback_channel；走 `im_chatops_service.reply_to_im`
+  - `_exec_agent(node_data, runtime_context, db)`：sub_agent_name(空=route_sub_agent 自动路由)+prompt(模板)+max_tokens；调 `call_llm`，输出 {reply, sub_agent, system_prompt}
+  - 注册进 `NODE_EXECUTORS`（10 种节点）
+- **前端** `AgentWorkflowEditor.vue`：nodeTypes 增加「IM 通知」「子代理」+ 节点编辑面板 + VueFlow slot + 子代理下拉（`/agent/sub-agents` 返回 `sub_agents` 数组）
+- **测试**: 执行器单测（缺渠道/缺名/无webhook/模板渲染/agent自动路由）+ 全链路 e2e（start→agent(路由到 sre_expert 返回分析)→notify→end，节点状态/输出传递正确）
+- **文件**: `app/services/agent_workflow_service.py`, `frontend/src/views/AgentWorkflowEditor.vue`, `CONTRACT.md`(15.5), 测试手册新增 B5 节
+
+### 2026-08-13: B3 工作流 cron 定时调度器
+
+- **目标**: 赶超计划 B3：`trigger_type=cron` 按 cron 表达式定时触发智能体工作流。
+- **后端**:
+  - 新增 `app/services/workflow_cron_scheduler.py`：`check_cron_triggers`(croniter 轮询式调度，防重复=last cron run started_at>=当前分钟则跳过)、`next_runs`(未来5次计划)、`_get_cron_expr`/`_cron_matches_now`
+  - `agent_workflow_service.py _serialize_workflow` 补返回 `trigger_condition`
+  - `main.py` 注册 `workflow_cron_trigger` 到后台服务列表+任务监控
+  - `agent_workflow.py` 新增 `GET /api/cron/next-runs`、`POST /api/cron/preview`
+- **前端** `AgentWorkflowEditor.vue`：新增「⏰ 触发器」按钮+对话框（trigger_type manual/alert_auto/cron 选择、cron 表达式输入+未来执行计划预览、告警条件 JSON）
+- **测试**: 表达式解析、命中判定、next_runs、防重复（同分钟第二次触发返回空）、API preview/next-runs 正常
+- **坑**: cron 表达式校验放宽为 5 非空字段（语法交给 croniter 兜底，非法跳过+日志）；防重复用 `>=` 而非精确相等（started_at 是真实执行时间）
+- **文件**: `app/services/workflow_cron_scheduler.py`, `app/services/agent_workflow_service.py`, `app/main.py`, `app/routers/agent_workflow.py`, `frontend/src/views/AgentWorkflowEditor.vue`, `CONTRACT.md`(15.4), 测试手册新增 B3 节
+
+### 2026-08-13: A4 Reviewer 写操作审查门（LLM 二签 write gate）
+
+- **目标**: 赶超计划 A4：高危/写操作确认后执行前，先经过 LLM reviewer 子代理二签，reject 阻断。
+- **后端**:
+  - 新增 `app/services/reviewer_agent.py`：`should_review`（review_gate=True 或 risk_level∈{high,critical} 即审查）+ `review_action`（LLM 判 approve/reject，无 provider/异常 fail-open）+ `review_workflow_tool`
+  - `agent_service.py confirm_pending_action`：确认后、执行前调 `review_action`，reject → PendingAction `failed` + 落审计
+  - `agent_workflow_service.py confirm_workflow_node`：同样审查门，reject → 节点 failed + `_advance_run` 续推
+  - `models.py PendingAction` 新增 `review_result`(Text)；`main.py _MIGRATIONS` 补迁移
+- **测试**: 低危 acknowledge_alert 不过审直接执行；高危 run_command(资产999未验证) 被 reviewer reject（confidence 85）→ status=failed；review_result 落库正常
+- **文件**: `app/services/reviewer_agent.py`, `app/services/agent_service.py`, `app/services/agent_workflow_service.py`, `app/models.py`, `app/main.py`, `CONTRACT.md`(第16章), 测试手册新增 A4 节
+
+### 2026-08-13: A3 独立子代理升级(Coordinator+独立persona会话+前端编辑)
+
+- **目标**: 赶超计划 A3：从"关键词路由+prompt注入"升级为"独立消息历史+switch_sub_agent工具+前端编辑子代理"。
+- **后端**:
+  - `app/models.py` ChatMessage 新增 `sub_agent` 字段：每条消息归属的子智能体
+  - `app/services/agent_service.py` `get_message_history` 新增 `sub_agent` 参数过滤；`add_message` 新增 `sub_agent` 参数
+  - `app/services/mcp_tools.py` 新增 `switch_sub_agent` MCP 工具(LLM 可调，切换当前会话子代理)
+  - `app/routers/agent_sse.py` 路由提前到 add_message 前，消息带 sub_agent 标记；工具结果处理 `_switch_sub_agent` 切换 session.sub_agent
+  - `app/main.py` `_MIGRATIONS` 新增 `chat_messages.sub_agent` 迁移
+- **前端** `SubAgentsView.vue`：从只读升级为可编辑(display_name/description/icon/color/system_prompt/keywords/tool_whitelist/is_enabled)
+- **测试**: 47 工具(含 switch_sub_agent)、路由正常、编辑 API 正常、字段落库
+- **文件**: `app/models.py`, `app/services/agent_service.py`, `app/services/mcp_tools.py`, `app/routers/agent_sse.py`, `app/main.py`, `frontend/src/views/SubAgentsView.vue`
+
+### 2026-08-13: 统一三套皮肤字体（Taste/Frost 移除字体族/字重/字号覆盖，统一走基础样式）
+
+- **问题**: Taste 皮肤用 Georgia serif 22px 800 渐变标题、Frost 用 800 字重等，三套皮肤切换时字体大小/格式明显不一致
+- **改动** `frontend/src/assets/main.css`:
+  - `.page-title`: Taste 移除 `font-family:Georgia/22px/800/letter-spacing`，只保留渐变色；Frost 移除 `font-weight:800/letter-spacing`，只保留青色
+  - `.chart-card .chart-title`: Taste 移除 `font-family:Georgia/700`
+  - `.sidebar .el-menu-item.is-active`: Taste 移除 `font-weight:700`，Frost 移除冗余 `font-weight:600`
+  - `.btn-add/.btn-save`: Taste 移除 `font-weight:700/letter-spacing`
+  - `.skin-opt.taste`: 移除 `font-family:Georgia/700/11px`，改为 `font-weight:500`（与基础一致）
+  - 三套皮肤现在统一使用基础样式 `font-family: Inter, ...; font-size: 18px; font-weight: 700`（page-title）/ `13px 500`（menu）/ `15px 600`（chart-title），仅颜色/渐变/背景区分
+- **构建**: 成功（exit=0）
+
+### 2026-08-13: 赶超 Ongrid P0 首批改造——工作流告警自动触发+并行 fan-out & Agent 工具装饰器链+超时
+
+- **目标**: 落地 `docs/20260813_系统赶超Ongrid差距分析与赶超计划.md` 的 B1+B2、A1+A2 四项任务（第一批最佳方案）。
+- **B1 告警自动触发** `app/services/agent_workflow_service.py`:
+  - 新增 `check_alert_triggers(db, lookback_minutes=10)`：扫 `trigger_type='alert_auto'`+`enabled` 工作流，匹配最近 10 分钟新告警（`trigger_condition` 支持 severity/status/metric_name/rule_id/asset_id 条件，空 {} 匹配所有），按 `AgentWorkflowRun.inputs.alert_id` 历史去重防重复触发，`trigger_source="alert"`/`triggered_by="system"` 自动拉起
+  - `app/models.py` `AgentWorkflow` 补 `get_trigger_condition()` helper（原来只有 WorkflowTemplate 有，导致模型属性缺失）
+  - `app/main.py` 注册为后台任务 `workflow_alert_trigger`（`_init_background_task_monitor` + `background_loop._services`）
+- **B2 并行 fan-out** `agent_workflow_service.py`:
+  - `_advance_run` 由逐节点串行改为**多轮就绪集并行**：每轮取所有依赖已满足的 pending 节点，`ThreadPoolExecutor(max_workers=_workflow_max_concurrency)` 并发执行
+  - `_execute_node_isolated(run_id, node_id, node_type, node_data, runtime_context, db_mode)`：每节点独立线程+独立 DB session（SQLAlchemy Session 非线程安全）
+  - 并发上限可配 `SystemConfig.key='workflow_max_concurrency'`（默认 4，范围 1~32）
+  - 任一节点 `awaiting_confirm` → run 置 `awaiting_confirm` 暂停；确认/取消后 `_advance_run` 续推
+  - **B4 顺带**: `resume_unfinished_runs(db)` 启动时恢复 `running`/`awaiting_confirm` 的 run（`main.py` startup 调用）
+- **🔴 修历史 bug**: `start_workflow_run` 构造 NodeRun 用 `config=` 而模型列名是 `run_config` → **之前所有工作流执行都会崩**（`TypeError: 'config' is an invalid keyword argument`），已改 `run_config=`
+- **A2 工具装饰器链**:
+  - 新增 `app/services/tool_registry.py`：`tool_timeout` / `tool_ratelimit` / `tool_audit` / `tool_review_gate` / `tool_tenant_bind`（写函数 `_tool_*` 属性）+ `apply_decorator_meta`
+  - `app/services/mcp_registry.py`：`MCPToolDef` 增加 `timeout_seconds`/`ratelimit_per_minute`/`audit_enabled`/`review_gate`/`tenant_bind` 元数据 + `DEFAULT_TOOL_TIMEOUT=30`；`register_mcp_tool` 透传 + 读取装饰器元数据
+- **A1 工具级超时** `mcp_registry.call_mcp_tool`:
+  - 所有工具调用带超时（默认 30s，可 `timeout_override`），超时路径用**独立线程+独立 DB session** 执行 handler，超时返回 `{"status":"error","timeout":true,...}`，Agent 循环把该错误当普通工具结果回灌 LLM
+  - 滑动窗口限流 `_ratelimit_allow`（进程内按工具名隔离）；审计 `_write_tool_audit` 写 `AuditLog`（method='TOOL'/action='tool_execute'，**始终独立 session 提交，不污染调用方事务**）
+  - 已应用装饰器示例：`query_metrics`(10s,120/min)、`query_knowledge_rag`(45s,60/min)、`propose_action`(10s,audit,review_gate)
+- **测试**（临时脚本后已删，验证全过）:
+  - A1 超时: 1s 超时工具 1.0s 返回 timeout error ✅
+  - A2 限流: 2/min 第 3 次被拒 ✅；审计: AuditLog 落库 ✅
+  - B2 fan-out: 3 分支 http(sleep 1.5s) 并行总耗时 **2.0s**（串行 4.5s）✅
+  - B1: critical 告警触发、warning 不触发 critical 条件工作流、同告警不重复触发 ✅
+- **契约**: CONTRACT.md 新增 第十四章(MCP 装饰器元数据) + 第十五章(工作流告警触发/fan-out/恢复)
+- **文件**: `app/services/mcp_registry.py`, `app/services/tool_registry.py`(新), `app/services/agent_workflow_service.py`, `app/services/mcp_tools.py`, `app/models.py`, `app/main.py`, `CONTRACT.md`
+
+- **问题**: 弹窗（如「新建部署计划」）背景变暗，但侧边栏菜单不变暗。所有自定义 `.modal-overlay` 弹窗均受影响。
+- **根因**: `html[data-skin="taste"] .content` 有 `position: relative; z-index: 0` 创建了**堆叠上下文**，`.content-inner` 有 `z-index: 1` 也创建堆叠上下文。弹窗遮罩 `.modal-overlay`（`position: fixed; z-index: 1000`）被限制在 content 的堆叠上下文内（z-index 0/1），无法盖住根级 `z-index: 100` 的侧边栏。
+- **修复** `frontend/src/assets/main.css`:
+  - `.content` 移除 `z-index: 0`（保留 `position: relative` 锚定 `::before` 装饰层）
+  - `.content-inner` 移除 `z-index: 1`（保留 `position: relative`，DOM 顺序保证在 `::before` 之上）
+  - 两元素不再创建堆叠上下文 → 弹窗遮罩逃逸到根堆叠上下文 → `z-index: 1000` 正常盖住侧边栏 `z-index: 100`
+  - 装饰背景层 `::before` 仍通过 `z-index: 0` + `.content-inner` DOM 后序保持正确叠层
+- **验证**: `npm run build --prefix frontend` 成功（33.68s, exit=0）
+
+### 2026-08-13: K8s 集群部署 A/B 双方案真机验证全通（含 7 个引擎 bug 修复）
+
+- **验证环境**: 129 虚机(Ubuntu 22.04/Docker 26.1.4/4.8G/直连外网);宿主 192.168.31.76 7897 代理;39.106.16.32 私有 Registry。
+- **方案A(在线部署)✅**: k8s1 计划 v1.31.6 单master+flannel,7阶段全过,节点 Ready,DataSource(k8s1) online。镜像走 registry.k8s.io(代理)。
+- **方案B(全链路真离线)✅**: 离线包 `k8s-offline-v1.31.6.tar.gz`(257MB,bundle_id=1,由 129 上 docker save 真实控制面镜像 + dl.k8s.io 下载三件套二进制 + flannel cni yaml 打包)→ 上传离线仓库 → 镜像 push 到 `39.106.16.32:5000/kubernetes/` → 计划 `k8s-offline-b`(image_repository=39 registry, bundle=1, registry=1) → 部署成功,节点 Ready,**镜像全部从 39 私有仓库拉取**(ctr 验证),DataSource(k8s-offline-b) online。
+- **修复的 7 个引擎 bug**:
+  1. WS 同步线程调 async `send_text` 不执行 → `asyncio.run_coroutine_threadsafe`(`k8s_offline_deploy.py`)
+  2. 阶段0-2 关键步骤(SSH成功/环境准备/containerd/二进制)只写DB不 yield → 加 `yield_event` 回调
+  3. containerd `disabled_plugins=["cri"]` CRI 被禁用 → 强制刷新 `disabled_plugins=[]`
+  4. **sandbox_image 与 k8s 版本不匹配**: 版本解析 `lstrip("v").split(".")[0]` 取到 "1" 而非 "31" → 改为取第二段;containerd config default 自带 pause:3.6 需强制 sed 替换;**有私有 registry 时 sandbox 指向 `<registry>/kubernetes/pause:3.10`**
+  5. kubelet systemd unit 缺失(二进制安装不自动生成)→ 引擎自动创建 `kubelet.service` + `10-kubeadm.conf`(注意 heredoc 用 `'SVC'` 防展开,ExecStart 的 `$VAR` 不能 `\$` 转义);**k8s 二进制已存在时也要继续执行 unit 创建(去掉提前 return)**
+  6. CNI 应用误报: 命令末尾 `echo __CNI_RC__=$?` 恒返回0掩盖真实rc → `_parse_ctl_rc()` 解析标记;在线下载需先下到独立文件再 apply(防旧残留)
+  7. 私有 HTTP registry 拉镜像失败: containerd 需 `config_path=/etc/containerd/certs.d` + `certs.d/<host>/hosts.toml`(`server="http://..."`+skip_verify)+ `registry.configs.<host>.tls.insecure_skip_verify`;**顺序: 先 `_install_containerd`(会重写config) 再 `_configure_insecure_registry`**
+- **重要踩坑**:
+  - `offline_registries` 记录必须存在,否则 `_get_bundle_context` registry_url 为空 → sandbox 落回 registry.k8s.io → 拉镜像失败(静默)
+  - `storage/k8s_deploy/bundle_<id>` 是解压缓存,**目录非空时不重新解压新包** → 换新离线包必须先清该目录
+  - 129 恢复快照后宿主机 Docker Desktop 起不来(Windows 页面文件太小,`concurrent.futures` 导入偶发失败需手动重启后端)→ 镜像加载改在 129/39 上手动 docker load/tag/push 绕过
+  - kubeadm preflight 需要 conntrack/ethtool/socat 先装;crictl 缺失只是 warning
+- **DataSource 测试连接**: `_test_kubernetes` 传字符串 kubeconfig 给 `load_kube_config_from_dict` 报 `string indices must be integers` → 已修复 `yaml.safe_load` 转 dict(两处);verify_ssl=false 时仍走 SSL 校验需注意
+
+### 2026-08-13: 架构拓扑卡片升级——更大气 + 修复重叠/连线丢失
+
+- **问题**: 用户反馈卡片"不太大气"→ 增大尺寸后出现"全部重叠,连线全丢"。
+- **修复**: 
+  - 卡片尺寸从 160x46 → 200x66,玻璃质感渐变(白色→层色)、状态圆点(● 按健康状态变色)、加大阴影(borderGlow 色)
+  - 动态画布宽度:按每层最大实体数计算 `max(count * 200 + 60, containerW)`,避免重叠;超出时横向滚动
+  - 加强 nameToId 匹配:优先匹配 `ci_attributes.service` 字段,再兜底匹配 `_nameMatch(实体名)`(去掉 `-01` 后缀)
+  - 连接线加粗到 2.5px、cap:round、标签白底圆角标签
+  - 构建内存限制到 1GB,避免电脑卡死
+- **构建**: `npm run build --prefix frontend` 成功(30s,1GB)
+
+### 2026-08-13: 服务调用拓扑(对标 Ongrid Topology)实现——架构巡检图新增连线图
+
+- **背景**: 用户要求"架构巡检图能看服务间连线关系",对标 Ongrid 的 Topology 功能页。
+- **后端**: `app/services/topology_service.py` 新增 `build_service_call_topo(db, hours, min_calls)`——从 Span 表通过 `trace_id + parent_span_id` 还原跨服务调用关系,聚合为{节点(服务健康/错误率/span 数),边(调用次数/错误率/平均耗时)}。`app/routers/topology.py` 增加 `GET /topology/api/service-calls` 路由。
+- **前端 (FireMapView.vue)**: 架构巡检图进入业务域后,分层卡下方新增「服务调用拓扑」面板,用 ECharts 力导向有向图渲染。节点颜色=健康状态(绿/黄/红),边宽度=调用量,边颜色=错误率。支持 1h/6h/24h/7d/全部 时间切换。点击节点显示详情。
+- **前端 (TopologyView.vue)**: 同时新增 Tab3「服务调用拓扑」(保持两处都有)。
+- **实测**: 基于现有 100 条 Span 数据,聚合出 2 服务(test-project-web→test-project-backend, 20 调用,75%错误率),可正常渲染连线图。
+- **文件改动**: `app/services/topology_service.py`(新增 `build_service_call_topo`), `app/routers/topology.py`(新增路由), `frontend/src/views/FireMapView.vue`(新增服务调用面板), `frontend/src/views/TopologyView.vue`(新增 Tab3)。
+- **验证**: 后端 API 返回正确,前端构建成功(exit=0),后端已重启含新路由。已更新 `docs/20260813_系统赶超Ongrid差距分析与赶超计划.md` 附录 F 节。
+
+### 2026-08-13: 修复 K8s 离线部署「看不到进展」- 前端 WS 漏处理 log/output 事件
+- **现象**: 用户点「开始部署」后看不到任何实时进度,日志区一直显示「暂无执行日志」,误以为没开始部署;实际计划已跑到第4阶段「初始化」失败(kubeadm init rc=127,共10条日志)。
+- **根因(前端 WS 处理 bug)**: `K8sOfflineDeployView.vue` `startDeploy().onmessage` **只处理了 phase/status/complete/error 四种事件,漏掉后端实时推送的 `log` 和 `output` 两种** → 所有执行日志/命令输出被前端丢弃 → 日志区永远是「暂无执行日志」,看起来"没进展"。
+- **后端事件类型清单**(`k8s_offline_deploy_service.py` 各 yield): status / phase / log / output / complete / error。"phase" 前端有处理(更新 current_step 驱动阶段条),但 log(消息) 与 output(命令行) 缺失。
+- **修复** `frontend/src/views/K8sOfflineDeployView.vue` onmessage:新增 `evt.type==='log'||evt.type==='output'` 分支,标准化 `{type, node, message(兼容 output.line), ts(本地时间)}` 追加到 `detail.logs`,实时渲染。改后需 `npm run build --prefix frontend`。
+- **验证**: 前端构建成功(exit=0);dev server(3000)与后端(8000)均 200。
+- **环境事实**: k8s 计划 id=1(name=k8s1) DB status=failed, current_step=4;节点 asset_id=1(=192.168.100.129,单 master,node.ip 为空靠 asset 解析);目标机是之前 deploy 用过的 192.168.100.129。kubeadm init 失败需排离线镜像/kubelet。
+- **排查技巧(MEMORY)**: 前端看不到实时日志先核对 WS onmessage 是否覆盖后端 yield 的全部事件类型;后端日志在 DB `logs_json`(get_plan 返回 logs),可绕过前端直接看 DB 判断部署真实进度与失败点。
+
+### 2026-08-13: 资产自动发现·扫描任务卡片新增编辑功能
+- **需求**: 用户要求扫描任务的卡片可以编辑。后端本就有 `PUT /assets/api/discovery/schedules/{id}` + `update_schedule`（零后端改动），前端缺编辑入口。
+- **改动** `frontend/src/views/AssetDiscoveryView.vue`:
+  - 卡片操作区在「立即扫描」后加「编辑」按钮 → `editSchedule(s)` 回填表单并 `editingId=s.id`。
+  - 新建/编辑共用同一弹窗：标题 `{{ editingId ? '编辑扫描任务' : '新建扫描任务' }}`、按钮 `保存/创建`。
+  - 新增 `editingId` ref + `resetForm()`/`closeModal()`；`saveSchedule()`：有 editingId 走 PUT、无则 POST；「+ 新建扫描任务」先置 `editingId=null` 再打开。
+- **验证**: `npm run build --prefix frontend` 成功（EXIT=0, built in 24.28s）。
+- **环境坑**: 本机 vite 构建偶发 `[vite:esbuild-transpile] The service was stopped`（esbuild 服务进程瞬时崩溃），内存充足（System OOM 是瞬时 PowerShell 误报），**重试构建即成功**，与代码无关；另注意 `npm run dev` 的 dev server 进程(npm-cli.js + vite.js)不可杀。
+
+### 2026-08-13: 资产列表新增「最近检查」列（相对时间展示断连/在线时长）
+- **需求**: 用户想在资产列表加"最近连接/上次连接时间"字段,用于判断资产断连时长。
+- **方案决策(用户确认)**: 复用现有 `assets.last_checked_at`(不新增字段),展示**相对时间**(在线·x分钟前 / 离线·x分钟前)。
+- **改动** `frontend/src/views/AssetsView.vue`(仅前端,后端 `assets.py:85` 本就返回 `last_checked_at`,零后端改动):
+  - 表格新增「最近检查」列(位于引用/孤岛与创建时间之间)。
+  - 新增 `timeAgo(ts)`(秒/分/时/天前)与 `checkTimeLabel(a)`(带 在线/离线 前缀)。
+  - 新增 `checkNow` ref + 30s `setInterval` 定时刷新相对时间(避免相对时间随页面加载冻结),`onUnmounted` 清理定时器。
+  - 新增 `.check-time` 样式:online 绿色(.fresh) / offline 红色(.stale)。
+- **验证**: `npm run build --prefix frontend` 成功(exit=0,AssetsView 重新打包);后端 healthz/login 200,前端 dev server 200。
+- **语义注意(记忆留存)**: `last_checked_at` 是**上次探测时间**,探活(默认 60s 间隔,main.py)每轮无论成败都会更新 → **offline 的资产该时间也会持续刷新**,它不是严格的"断连时长"。若要精确统计"已断连时长",需新增 `last_connected_at` 字段(仅探测成功时更新),本次未采用(用户选复用现有字段)。
+
 ### 2026-08-12: 「停止」增强为 强制停止 + 自动回滚清理（卡死兜底）
 - **背景**: 用户询问"部署卡死了怎么处理，能否 AI 强制停止并回滚"。原 `stop_execution` 只断连 + 重置 planned，**不清理容器**；且要求 status=running 才可停；`stream_rollback_cleanup` 又拒绝 running 状态清理 → 卡死时无解。
 - **后端改动** `app/services/deploy_service.py`:

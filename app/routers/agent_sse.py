@@ -132,14 +132,6 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
     session_mode = getattr(session, "mode", None) or "agent"
     is_chat_mode = (session_mode == "chat")
 
-    user_msg = add_message(db, session.id, "user", user_message)
-    if session.title == "新会话":
-        session.title = user_message[:64]
-        db.commit()
-
-    system_prompt = config.system_prompt or _svc.DEFAULT_SYSTEM_PROMPT
-    messages = _svc.get_message_history(db, session, config) + [{"role": "user", "content": user_message}]
-
     # ─── P1-1: 子专家分派（Multi-Agent Orchestration）──────────────
     # session.sub_agent 取值: auto/sre/network/database/middleware/k8s/general
     # auto = 根据用户消息关键词自动路由; 其他 = 手动指定子专家
@@ -149,6 +141,16 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
         sub_agent_name = route_sub_agent(user_message, db)
     if sub_agent_name and sub_agent_name != "general":
         sub_agent_obj = get_sub_agent(db, sub_agent_name)
+
+    _sa = sub_agent_name if sub_agent_name != "auto" else ""
+    user_msg = add_message(db, session.id, "user", user_message, sub_agent=_sa)
+    if session.title == "新会话":
+        session.title = user_message[:64]
+        db.commit()
+
+    system_prompt = config.system_prompt or _svc.DEFAULT_SYSTEM_PROMPT
+    messages = _svc.get_message_history(db, session, config, sub_agent=_sa) + [{"role": "user", "content": user_message}]
+
     # 注入子专家 system_prompt（在 config system_prompt 之后，用户消息之前）
     sub_prompt = get_sub_agent_prompt(sub_agent_obj)
     if sub_prompt:
@@ -306,6 +308,15 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
                         yield sse_json("pending_action", {
                             "id": pa.id, "title": pa.title, "risk_level": pa.risk_level, "action_type": pa.action_type
                         })
+                # A3: 子智能体切换
+                if isinstance(result_data, dict) and result_data.get("_switch_sub_agent"):
+                    _new_sa = result_data["_switch_sub_agent"]
+                    session.sub_agent = _new_sa
+                    db.commit()
+                    yield sse_json("sub_agent_switch", {
+                        "sub_agent": _new_sa,
+                        "message": result_data.get("message", ""),
+                    })
 
         messages.append(msg)
         for tc_item, tr_item in zip(tool_calls_raw, tool_results):
@@ -355,7 +366,8 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
             tool_calls_with_steps[i] = {**tool_calls_with_steps[i], "step": s}
 
     assistant_msg = add_message(db, session.id, "assistant", cleaned,
-                              tool_calls=tool_calls_with_steps if tool_calls_with_steps else None)
+                              tool_calls=tool_calls_with_steps if tool_calls_with_steps else None,
+                              sub_agent=_sa)
     session.last_message_at = datetime.now()
     db.commit()
 

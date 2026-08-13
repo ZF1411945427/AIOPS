@@ -42,6 +42,7 @@
               <span class="sa-domain-badge" :style="{ background: a.color + '22', color: a.color }">{{ a.domain }}</span>
               <span v-if="!a.is_enabled" class="sa-disabled">已禁用</span>
               <span class="sa-tools">{{ a.tool_whitelist.length ? a.tool_whitelist.length + ' 工具' : '继承全部' }}</span>
+              <button class="edit-btn" @click="openEdit(a)">✎ 编辑</button>
             </div>
             <div class="sa-desc">{{ a.description }}</div>
             <div class="sa-keywords">
@@ -68,6 +69,46 @@
       </div>
     </template>
   </div>
+
+  <!-- 编辑子智能体对话框 -->
+  <div v-if="showForm" class="mask" @click.self="showForm = false">
+    <div class="dialog">
+      <div class="dialog-head">
+        <h3>编辑子智能体 — {{ editingAgent?.display_name }}</h3>
+        <button class="close-btn" @click="showForm = false">✕</button>
+      </div>
+      <div class="dialog-body">
+        <div class="field"><label>显示名称</label><input v-model="form.display_name" class="input" /></div>
+        <div class="field"><label>描述</label><input v-model="form.description" class="input" /></div>
+        <div class="field-row">
+          <div class="field" style="flex:0 0 60px"><label>图标</label><input v-model="form.icon" class="input" style="width:50px" /></div>
+          <div class="field" style="flex:0 0 70px"><label>颜色</label><input v-model="form.color" type="color" class="input" style="width:60px;padding:2px" /></div>
+          <div class="field" style="flex:0 0 80px"><label>排序</label><input v-model.number="form.sort_order" type="number" class="input" style="width:60px" /></div>
+          <div class="field" style="flex:0"><label class="checkbox-label">
+            <input type="checkbox" v-model="form.is_enabled" /> 启用
+          </label></div>
+        </div>
+        <div class="field"><label>路由关键词（逗号分隔）</label>
+          <input v-model="form.keywordsText" class="input" placeholder="如：mysql, 慢查询, 锁" />
+        </div>
+        <div class="field"><label>System Prompt</label>
+          <textarea v-model="form.system_prompt" class="textarea" rows="6" placeholder="子专家身份提示词"></textarea>
+        </div>
+        <div class="field"><label>工具白名单（点击切换，空=继承全部）</label>
+          <div class="tool-picker" v-if="allTools.length">
+            <span v-for="t in allTools" :key="t.name" class="tool-item"
+              :class="{ active: form.tool_whitelist.includes(t.name) }"
+              @click="toggleTool(t.name)">{{ t.display_name || t.name }}</span>
+          </div>
+          <div v-else class="loading" style="font-size:12px;color:#888">加载工具清单中...</div>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-plain" @click="showForm = false">取消</button>
+        <button class="btn-primary" :disabled="saving" @click="saveAgent">{{ saving ? '保存中...' : '保存' }}</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -79,6 +120,15 @@ const loading = ref(true)
 const agents = ref([])
 const testMessage = ref('')
 const routeResult = ref(null)
+const showForm = ref(false)
+const editingAgent = ref(null)
+const saving = ref(false)
+const allTools = ref([])
+const form = ref({
+  display_name: '', description: '', icon: '🤖', color: '#6366f1',
+  sort_order: 0, is_enabled: true,
+  system_prompt: '', keywordsText: '', tool_whitelist: [],
+})
 
 const enabledCount = computed(() => agents.value.filter(a => a.is_enabled).length)
 const presetCount = computed(() => agents.value.filter(a => ['general','sre_expert','network_expert','database_expert','middleware_expert','k8s_expert'].includes(a.name)).length)
@@ -89,6 +139,59 @@ async function load() {
     agents.value = data.sub_agents || []
   } catch (e) { console.error(e) }
   finally { loading.value = false }
+}
+
+async function loadTools() {
+  try {
+    const data = await request.get('/agent/api/capabilities')
+    const tools = data.tools || data || []
+    allTools.value = tools.filter(t => t.expose_to_llm !== false)
+  } catch (e) { allTools.value = [] }
+}
+
+function openEdit(a) {
+  editingAgent.value = a
+  form.value = {
+    display_name: a.display_name,
+    description: a.description || '',
+    icon: a.icon || '🤖',
+    color: a.color || '#6366f1',
+    sort_order: a.sort_order || 0,
+    is_enabled: a.is_enabled !== false,
+    system_prompt: a.system_prompt || '',
+    keywordsText: (a.keywords || []).join(', '),
+    tool_whitelist: [...(a.tool_whitelist || [])],
+  }
+  showForm.value = true
+}
+
+function toggleTool(name) {
+  const idx = form.value.tool_whitelist.indexOf(name)
+  if (idx >= 0) form.value.tool_whitelist.splice(idx, 1)
+  else form.value.tool_whitelist.push(name)
+}
+
+async function saveAgent() {
+  if (!editingAgent.value) return
+  saving.value = true
+  try {
+    const payload = {
+      display_name: form.value.display_name,
+      description: form.value.description,
+      icon: form.value.icon,
+      color: form.value.color,
+      sort_order: form.value.sort_order,
+      is_enabled: form.value.is_enabled,
+      system_prompt: form.value.system_prompt,
+      keywords: form.value.keywordsText.split(',').map(k => k.trim()).filter(Boolean),
+      tool_whitelist: form.value.tool_whitelist,
+    }
+    await request.put('/agent/sub-agents/' + editingAgent.value.id + '/edit', payload)
+    ElMessage.success('保存成功')
+    showForm.value = false
+    await load()
+  } catch (e) { ElMessage.error('保存失败: ' + (e.message || e)) }
+  finally { saving.value = false }
 }
 
 async function testRoute() {
@@ -107,7 +210,7 @@ async function reseed() {
   } catch (e) { ElMessage.error('重新播种失败') }
 }
 
-onMounted(load)
+onMounted(() => { load(); loadTools() })
 </script>
 
 <style scoped>
@@ -146,6 +249,7 @@ onMounted(load)
 .sa-domain-badge { font-size: 0.7rem; padding: 2px 10px; border-radius: 10px; font-weight: 600; }
 .sa-disabled { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #f3f4f6; color: #6b7280; }
 .sa-tools { margin-left: auto; font-size: 0.72rem; color: var(--text-secondary, #64748b); background: #f1f5f9; padding: 2px 10px; border-radius: 10px; }
+.edit-btn { font-size: 0.72rem; padding: 2px 10px; border: 1px solid var(--border-color,#d1d5db); border-radius: 6px; background: transparent; cursor: pointer; color: #6366f1; }
 .sa-desc { font-size: 0.82rem; color: var(--text-secondary, #64748b); margin-bottom: 10px; line-height: 1.5; }
 .sa-keywords { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .kw-label { font-size: 0.75rem; color: var(--text-secondary, #94a3b8); font-weight: 600; }
@@ -159,6 +263,27 @@ onMounted(load)
 .sa-tools-list { margin-top: 8px; }
 .tools-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .tool-chip { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #dcfce7; color: #166534; font-family: 'Fira Code', monospace; }
+
+.mask { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding-top: 40px; z-index: 100; }
+.dialog { background: var(--card-bg,#fff); border-radius: 10px; min-width: 600px; max-width: 800px; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,.15); }
+.dialog-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border-color,#e5e7eb); }
+.dialog-head h3 { margin: 0; font-size: 15px; }
+.close-btn { background: none; border: none; font-size: 18px; cursor: pointer; color: #888; padding: 0 4px; }
+.dialog-body { padding: 16px 20px; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: var(--text-muted,#888); margin-bottom: 4px; font-weight: 600; }
+.field-row { display: flex; gap: 12px; align-items: flex-end; }
+.checkbox-label { display: flex !important; align-items: center; gap: 6px; cursor: pointer; padding-bottom: 8px; }
+.input { width: 100%; padding: 7px 10px; border: 1px solid var(--border-color,#d1d5db); border-radius: 6px; background: var(--input-bg,#fff); color: var(--text,#1e293b); font-size: 13px; box-sizing: border-box; }
+.textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border-color,#d1d5db); border-radius: 6px; background: var(--input-bg,#fff); color: var(--text,#1e293b); font-size: 13px; box-sizing: border-box; resize: vertical; font-family: inherit; }
+.tool-picker { display: flex; flex-wrap: wrap; gap: 4px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color,#e5e7eb); border-radius: 6px; padding: 6px; }
+.tool-item { font-size: 0.72rem; padding: 3px 8px; border-radius: 10px; background: #f1f5f9; color: #475569; cursor: pointer; border: 1px solid transparent; transition: all .12s; }
+.tool-item:hover { background: #e2e8f0; }
+.tool-item.active { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border-color,#e5e7eb); }
+.btn-primary { padding: 7px 18px; border: none; border-radius: 6px; background: var(--primary,#6366f1); color: #fff; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.btn-plain { padding: 6px 14px; border: 1px solid var(--border-color,#d1d5db); border-radius: 6px; background: transparent; color: var(--text,#1e293b); cursor: pointer; font-size: 13px; }
 
 @media (max-width: 900px) {
   .sa-overview { grid-template-columns: 1fr; }

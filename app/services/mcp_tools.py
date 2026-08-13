@@ -17,6 +17,36 @@ def _get_db():
     return get_session_for(get_db_mode())()
 
 
+# ─── 代码/git 知识库工具(P2-5) ──────────────────────────────────
+
+@register_mcp_tool(
+    name="search_code",
+    description="在已同步的 git 代码仓库中按关键词搜索代码(返回文件:行号:片段)。需先通过 git 知识库同步仓库",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "搜索关键词(子串匹配)"},
+            "repo": {"type": "string", "description": "限定仓库名(可选, 不填搜全部)"},
+            "limit": {"type": "integer", "description": "返回条数上限", "default": 10},
+        },
+        "required": ["query"],
+    },
+    risk_level="read_only",
+    display_name="搜索代码",
+    location="cloud",
+    category="knowledge",
+)
+def search_code(db=None, user_id=None, **kwargs):
+    from app.services import git_knowledge_service
+    session = _get_db()
+    try:
+        result = git_knowledge_service.search_code(
+            session, kwargs.get("query") or "", kwargs.get("repo"), int(kwargs.get("limit") or 10))
+        return {"status": "success", "result": result}
+    finally:
+        session.close()
+
+
 # ─── Alert Tools ───────────────────────────────────────────────
 
 @register_mcp_tool(
@@ -196,6 +226,8 @@ def query_assets(db: Optional[Session] = None, user_id: Optional[int] = None, **
     display_name="查询指标",
     location="cloud",
     category="metric",
+    timeout_seconds=10,
+    ratelimit_per_minute=120,
 )
 def query_metrics(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -697,6 +729,8 @@ def query_knowledge(db: Optional[Session] = None, user_id: Optional[int] = None,
     display_name="RAG 检索",
     location="cloud",
     category="knowledge",
+    timeout_seconds=45,
+    ratelimit_per_minute=60,
 )
 def query_knowledge_rag(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False
@@ -1219,6 +1253,18 @@ def execute_run_script(db: Optional[Session] = None, user_id: Optional[int] = No
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
+        # cmdpolicy 沙箱: 沙盒启用时按策略校验
+        try:
+            from app.services import sandbox_service
+            sb = sandbox_service.evaluate_request(
+                "mcp_tool", "execute_run_script", asset.id, script,
+                "high", session_id=0, user_id=user_id or 0, role_id=0, db=db)
+            if sb.get("decision") == "rejected":
+                raise ValueError(f"沙盒策略拦截: {sb.get('reason')}")
+        except ValueError:
+            raise
+        except Exception:
+            pass  # 沙盒异常不阻断(回归安全)
         # 异步路径
         if pending_action_id:
             from app.services.background_task import submit_script_job
@@ -1273,6 +1319,19 @@ def execute_run_command(db: Optional[Session] = None, user_id: Optional[int] = N
             raise ValueError(f"资产 id={asset_id} 不存在")
         if asset.status != "online":
             raise ValueError(f"资产 {asset.name} 当前状态为 {asset.status}，仅 online 资产可远程执行")
+
+        # cmdpolicy 沙箱: 沙盒启用时按策略校验(黑/白名单/风险/执行窗口)
+        try:
+            from app.services import sandbox_service
+            sb = sandbox_service.evaluate_request(
+                "mcp_tool", "execute_run_command", asset.id, command,
+                "critical", session_id=0, user_id=user_id or 0, role_id=0, db=db)
+            if sb.get("decision") == "rejected":
+                raise ValueError(f"沙盒策略拦截: {sb.get('reason')}")
+        except ValueError:
+            raise
+        except Exception:
+            pass  # 沙盒异常不阻断(回归安全)
 
         # 统一命令路由：优先走 edge agent 隧道，无在线 agent 时回退 SSH
         from app.routers.agent_deploy import route_exec
@@ -1818,6 +1877,46 @@ def list_executable_actions(db: Optional[Session] = None, user_id: Optional[int]
 
 
 @register_mcp_tool(
+    name="switch_sub_agent",
+    description="切换子智能体（协调器用）。当前会话切换到指定子专家后，对话上下文将独立保持。可用子专家见 list_sub_agents。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "sub_agent_name": {
+                "type": "string",
+                "description": "子专家名称: sre_expert / network_expert / database_expert / middleware_expert / k8s_expert / general",
+            },
+            "reason": {"type": "string", "description": "切换原因，供用户理解"},
+        },
+        "required": ["sub_agent_name"],
+    },
+    risk_level="low",
+    display_name="切换子智能体",
+    location="cloud",
+    category="general",
+    timeout_seconds=5,
+)
+def switch_sub_agent(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    """切换当前会话的子智能体。协调器（general）检测到用户问题需特定子专家时调用此工具。"""
+    sub_agent_name = kwargs.get("sub_agent_name", "").strip()
+    if not sub_agent_name:
+        return {"status": "error", "message": "缺少 sub_agent_name"}
+    from app.services.sub_agent_service import get_sub_agent, list_sub_agents
+    valid = [sa.name for sa in list_sub_agents(db, enabled_only=True)] if db else []
+    if sub_agent_name not in valid:
+        return {"status": "error", "message": f"无效子智能体 '{sub_agent_name}'，可用: {', '.join(valid)}"}
+    return {
+        "status": "success",
+        "result": {
+            "_switch_sub_agent": sub_agent_name,
+            "message": f"已切换到子智能体「{sub_agent_name}」，后续对话将使用该子专家的上下文和工具集。",
+            "sub_agent_name": sub_agent_name,
+            "reason": kwargs.get("reason", ""),
+        },
+    }
+
+
+@register_mcp_tool(
     name="propose_action",
     description="提议一个运维操作, 生成待确认动作供用户确认后执行。不直接执行任何操作, 仅创建待确认记录。AI 助手想执行运维操作时必须用此工具提议, 不能直接调用 execute_* 工具。",
     input_schema={
@@ -1837,6 +1936,9 @@ def list_executable_actions(db: Optional[Session] = None, user_id: Optional[int]
     expose_to_llm=True,
     location="cloud",
     category="propose",
+    timeout_seconds=10,
+    audit_enabled=True,
+    review_gate=True,
 )
 def propose_action(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     action_type = kwargs.get("action_type")
@@ -2838,3 +2940,8 @@ def execute_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, *
     finally:
         if close_db:
             db.close()
+
+
+# 技能工具在文件尾部注册, 避免与 _get_db 的循环导入
+from app.services import skill_mcp_tools  # noqa: E402,F401 — 注册 list_skills/use_skill
+

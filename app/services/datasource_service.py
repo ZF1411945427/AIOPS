@@ -11,6 +11,15 @@ from app.models import DataSource, MetricRecord, Asset, K8sEvent, Alert
 from sqlalchemy import text as _sa_text
 
 
+def _source_auth(source: DataSource) -> dict:
+    """解析数据源 auth_config，并注入 Secrets Vault 引用（{{secret:name}} → 解密值）。
+
+    契约见 CONTRACT.md 第十八章 18.3；未匹配的引用原样保留（fail-open）。
+    """
+    from app.services.secret_vault import resolve_secret_refs
+    return resolve_secret_refs(parse_json_config(source.auth_config), None)
+
+
 def _next_asset_id(db: Session) -> int:
     return (db.execute(_sa_text("SELECT COALESCE(MAX(id), 0) FROM assets")).scalar() or 0) + 1
 
@@ -182,7 +191,7 @@ def test_source(db: Session, source_id: int) -> tuple:
 def _test_ssh(source: DataSource) -> tuple:
     try:
         import paramiko
-        cfg = parse_json_config(source.auth_config)
+        cfg = _source_auth(source)
         from app.services.ssh_helper import connect_ssh
         client = connect_ssh(
             source.endpoint,
@@ -202,10 +211,14 @@ def _test_ssh(source: DataSource) -> tuple:
 def _test_kubernetes(source: DataSource) -> tuple:
     try:
         from kubernetes import client
-        cfg = parse_json_config(source.auth_config)
+        cfg = _source_auth(source)
         if cfg.get("kubeconfig"):
             from kubernetes import config as k8s_config
-            k8s_config.load_kube_config_from_dict(cfg["kubeconfig"])
+            kc_raw = cfg["kubeconfig"]
+            if isinstance(kc_raw, str):
+                import yaml as _yaml
+                kc_raw = _yaml.safe_load(kc_raw)
+            k8s_config.load_kube_config_from_dict(kc_raw)
             api_client = client.ApiClient()
         elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
             configuration = client.Configuration()
@@ -226,7 +239,7 @@ def _test_kubernetes(source: DataSource) -> tuple:
 def _test_docker(source: DataSource) -> tuple:
     try:
         import docker
-        cfg = parse_json_config(source.auth_config)
+        cfg = _source_auth(source)
         if source.endpoint:
             client = docker.DockerClient(base_url=source.endpoint)
         else:
@@ -245,7 +258,7 @@ def _test_elasticsearch(source: DataSource) -> tuple:
     except ImportError:
         return (False, "missing elasticsearch package")
     try:
-        cfg = parse_json_config(source.auth_config)
+        cfg = _source_auth(source)
         username = cfg.get("username")
         if username and cfg.get("password"):
             auth = (cfg["username"], cfg["password"])
@@ -272,7 +285,7 @@ def _test_loki(source: DataSource) -> tuple:
     except ImportError:
         return (False, "missing requests package")
     try:
-        cfg = parse_json_config(source.auth_config)
+        cfg = _source_auth(source)
         base = (source.endpoint or "").rstrip("/")
         if not base:
             return (False, "Loki endpoint 未配置")
@@ -299,7 +312,7 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
         source.last_status = "error"
         source.last_error = "missing elasticsearch Python package"
     try:
-        cfg = parse_json_config(source.auth_config)
+        cfg = _source_auth(source)
         auth = ()
         if cfg.get("username") and cfg.get("password"):
             auth = (cfg["username"], cfg["password"])
@@ -592,7 +605,7 @@ def _sync_docker_asset_via_ssh(db: Session, host: str, container_id: str, name: 
 
 def _scrape_ssh(db: Session, source: DataSource) -> tuple:
     import paramiko
-    cfg = parse_json_config(source.auth_config)
+    cfg = _source_auth(source)
     host = source.endpoint
     port = int(cfg.get("ssh_port", cfg.get("port", 22)))
     username = cfg.get("ssh_user", cfg.get("username", ""))
@@ -740,12 +753,16 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
         db.commit()
         return (False, "missing kubernetes Python package")
 
-    cfg = parse_json_config(source.auth_config)
+    cfg = _source_auth(source)
     api_client = None
     try:
         if cfg.get("kubeconfig"):
             from kubernetes import config as k8s_config
-            k8s_config.load_kube_config_from_dict(cfg["kubeconfig"])
+            kc_raw = cfg["kubeconfig"]
+            if isinstance(kc_raw, str):
+                import yaml as _yaml
+                kc_raw = _yaml.safe_load(kc_raw)
+            k8s_config.load_kube_config_from_dict(kc_raw)
             api_client = client.ApiClient()
         elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
             configuration = client.Configuration()
@@ -995,7 +1012,7 @@ def _scrape_docker(db: Session, source: DataSource) -> tuple:
         source.last_status = "error"
         source.last_error = "missing docker Python package"
     try:
-        cfg = parse_json_config(source.auth_config)
+        cfg = _source_auth(source)
         if source.endpoint:
             client = docker.DockerClient(base_url=source.endpoint)
         else:
