@@ -4,7 +4,7 @@ import threading
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.models import Alert, AlertRule, MetricRecord, Asset, AlertSilence, AlertSuppression, AlertEscalation, SystemConfig, NotificationChannel, AlertSilenceSchedule
+from app.models import Alert, AlertRule, MetricRecord, Asset, AlertSilence, AlertSuppression, AlertEscalation, SystemConfig, NotificationChannel, AlertSilenceSchedule, K8sEvent
 from app.services import notification_service
 
 
@@ -94,7 +94,8 @@ def delete_silence(db: Session, silence_id: int):
 
 
 # ─── G1 告警规则类型化评估 ──────────────────────────────────────
-RULE_KINDS = ["metric_raw", "anomaly", "forecast", "burn_rate"]
+RULE_KINDS = ["metric_raw", "anomaly", "forecast", "burn_rate",
+              "trace_latency", "trace_error_rate", "log_match", "log_volume"]
 
 
 def _load_config(rule) -> dict:
@@ -219,6 +220,100 @@ def _eval_rule_by_kind(rule, latest, db) -> tuple:
     return _eval_metric_raw(rule, latest, db)
 
 
+# ─── A 补齐: log / trace 类规则(按 service_name / 关键字, 走 check_rules 独立分支) ──
+
+def _eval_trace_latency(rule, db) -> tuple:
+    """按 service_name 查 Span 表标量延迟(avg/p99), 触发=超阈值。"""
+    cfg = _load_config(rule)
+    svc = str(cfg.get("service_name") or "").strip()
+    hours = float(cfg.get("hours", 1))
+    window = datetime.now() - timedelta(hours=hours)
+    from app.models import Span
+    rows = db.query(Span).filter(Span.service_name == svc, Span.started_at >= window).all() if svc else []
+    if not rows:
+        return False, 0.0, f"trace_latency[{svc}] 无样本"
+    durations = [float(getattr(s, "duration_ms") or 0) for s in rows]
+    stat = cfg.get("stat", "p99")
+    if stat == "avg":
+        val = sum(durations) / len(durations)
+    elif stat == "p50":
+        sorted_d = sorted(durations); val = sorted_d[len(sorted_d) // 2]
+    else:
+        sorted_d = sorted(durations); val = sorted_d[int(len(sorted_d) * 0.99) - 1]
+    triggered = val > rule.threshold
+    return triggered, val, f"{svc} {stat}延迟:{val:.0f}ms 超阈值:{rule.threshold}ms (样本{len(rows)})"
+
+
+def _eval_trace_error_rate(rule, db) -> tuple:
+    """按 service_name 查 Span 错误率, 触发=超阈值(%)。"""
+    cfg = _load_config(rule)
+    svc = str(cfg.get("service_name") or "").strip()
+    hours = float(cfg.get("hours", 1))
+    window = datetime.now() - timedelta(hours=hours)
+    from app.models import Span
+    rows = db.query(Span).filter(Span.service_name == svc, Span.started_at >= window).all() if svc else []
+    if not rows:
+        return False, 0.0, f"trace_error_rate[{svc}] 无样本"
+    _STATUS_OK = {"OK", "SUCCESS", "2", "0"}
+    errors = sum(1 for s in rows if str(getattr(s, "status", "") or "").upper() not in _STATUS_OK)
+    rate = errors / len(rows) * 100.0
+    triggered = rate > rule.threshold
+    return triggered, rate, f"{svc} 错误率:{rate:.2f}% 超阈值:{rule.threshold}% ({errors}/{len(rows)})"
+
+
+def _count_k8s_events(db, keyword: str = "", level: str = "", hours: float = 2) -> int:
+    window = datetime.now() - timedelta(hours=hours)
+    q = db.query(K8sEvent)
+    if hasattr(K8sEvent, "first_seen_at"):
+        q = q.filter(K8sEvent.first_seen_at >= window)
+    if keyword:
+        q = q.filter(K8sEvent.reason.like(f"%{keyword}%"))
+    if level:
+        q = q.filter(K8sEvent.severity == level)
+    return q.count()
+
+
+def _eval_log_match(rule, db) -> tuple:
+    """关键字/级别日志命中计数, 触发=超阈值。K8sEvent + 可选 ES。"""
+    cfg = _load_config(rule)
+    keyword = str(cfg.get("keyword") or (rule.metric_name or "")).strip()
+    level = str(cfg.get("log_level") or "").strip()
+    hours = float(cfg.get("hours", 2))
+    threshold = rule.threshold
+    count = _count_k8s_events(db, keyword=keyword if keyword != rule.metric_name else "", level=level, hours=hours)
+    # 尝试 ES 聚合(幂等, 失败忽略)
+    try:
+        from app.services.log_anomaly_service import _count_es_logs
+        es_source = cfg.get("es_source") or ""
+        if es_source:
+            count += _count_es_logs(db, es_source, datetime.now() - timedelta(hours=hours), level=level, keyword=keyword)
+    except Exception:
+        pass
+    triggered = count >= threshold
+    return triggered, count, f"日志命中[{keyword or 'all'}] {count} 条 ≥阈值{threshold} (窗口{hours}h)"
+
+
+def _eval_log_volume(rule, db) -> tuple:
+    """日志量突增: 近窗口 vs 前窗口的倍数, 触发=超阈值倍。"""
+    cfg = _load_config(rule)
+    keyword = str(cfg.get("keyword") or "").strip()
+    hours = float(cfg.get("hours", 1))
+    window = datetime.now() - timedelta(hours=hours)
+    prev_window = window - timedelta(hours=hours)
+    recent = _count_k8s_events(db, keyword=keyword, hours=hours)
+    prev = K8sEvent  # placeholder to avoid unused
+    try:
+        from app.models import K8sEvent as _KE
+        _kw = f"%{keyword}%" if keyword else "%%"
+        prev = db.query(_KE).filter(_KE.first_seen_at >= prev_window, _KE.first_seen_at < window, _KE.reason.like(_kw)).count()
+    except Exception:
+        prev = 0
+    ratio = (recent / prev) if prev > 0 else (recent if recent > 0 else 0.0)
+    triggered = prev > 0 and ratio > rule.threshold
+    return triggered, ratio, f"日志量 近窗口{recent} vs 前窗口{prev}, 倍数:{ratio:.2f} 超阈值:{rule.threshold}"
+
+
+
 def check_rules(db: Session):
     rules = db.query(AlertRule).filter(AlertRule.enabled == True).all()
     now = datetime.now()
@@ -249,6 +344,37 @@ def check_rules(db: Session):
 
     for rule in rules:
         if rule.id in silenced_rule_ids:
+            continue
+
+        # A 补齐: log/trace 类规则按 service_name/关键字独立评估一次(非 per-asset)
+        if (rule.kind or "").strip().lower() in ("trace_latency", "trace_error_rate", "log_match", "log_volume"):
+            _dispatch = {
+                "trace_latency": _eval_trace_latency,
+                "trace_error_rate": _eval_trace_error_rate,
+                "log_match": _eval_log_match,
+                "log_volume": _eval_log_volume,
+            }
+            try:
+                triggered, actual, msg = _dispatch[rule.kind.strip().lower()](rule, db)
+            except Exception as e:
+                triggered, actual, msg = False, 0.0, f"{rule.kind} 评估异常: {e}"
+            if triggered:
+                active = db.query(Alert).filter(
+                    Alert.rule_id == rule.id,
+                    Alert.status.in_(["triggered", "acknowledged"]),
+                ).first()
+                recent_resolved = db.query(Alert).filter(
+                    Alert.rule_id == rule.id,
+                    Alert.status == "resolved",
+                    Alert.created_at > now - dedup_window,
+                ).first()
+                if not active and not recent_resolved:
+                    a = Alert(rule_id=rule.id, asset_id=None, metric_name=rule.metric_name,
+                              actual_value=float(actual), threshold=rule.threshold,
+                              severity=rule.severity, status="triggered",
+                              message=f"{rule.name} - {msg}")
+                    db.add(a)
+                    new_alerts.append(a)
             continue
 
         storm_count = (

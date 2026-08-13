@@ -9,6 +9,18 @@
 - **内容**: ①改造总览(架构巡检图 FireMapView + 拓扑视图 TopologyView 双页定位) ②架构巡检图服务调用连线面板(分层着色/边按错误率) ③拓扑视图三 Tab(资产/网络/服务调用)+自动刷新(30s) ④后端端点清单 ⑤验证/通过标准 ✓(服务调用边、健康着色、边宽=调用量、边色=错误率、自动刷新) ⑥**已知缺口**: T2 Blast Radius/N 跳影响面❌未实现、`topology-path` 孤儿页无菜单。
 - **关键事实(已核实)**: 服务调用拓扑 `build_service_call_topo`(topology_service.py:299) 按 trace_id+parent_span_id 聚合跨服务调用;`TopologyView.vue` Tab3 时间窗口 1h/6h/24h/7d/全部,`svcNodeColor`(817)与`svcEdgeColor`(823)按错误率(<5%/5~30%/≥30%)着色,边宽=调用量(879);自动刷新 ref=autoRefresh 间隔 30s(961/970);`connectedNodes`(411)只做**单跳**;后端无 blast-radius/expand(**T2 缺失**)。
 
+### 2026-08-14: 再赶超on-grid(告警kind补全8类 / token真流式 / 工作流OR-join / metrics计数 / H4 bootstrap / H1契约)
+
+- **目标**: 用户要求"除安全鉴权外其余项赶超 ongrid", 并对 6 项改造直接开工(融入现有页, 不新建页)+ 功能测试 + 再评分。on-grid(Go/DDD) vs 本系统(Python/FastAPI)。
+- **A 告警 kind 补全(监控)** : `alert_service.RULE_KINDS` 扩到 8 类, 新增 `_eval_trace_latency`(Span 表按 service_name 聚合 avg/p50/p99)/`_eval_trace_error_rate`(Span status!=OK 比例)/`_eval_log_match`(K8sEvent.reason 命中+可选 ES `_count_es_logs`)/`_eval_log_volume`(前后窗口倍数)。`check_rules` 循环顶部对 log/trace kind 走**独立分支**(非 per-asset, 避免重复触发)。前端 AlertRulesView 下拉+label 补 4 项。**注意**: log/trace 规则按 service_name/关键字取数, 不走 MetricRecord。
+- **B token 真流式(Agent)** : `agent_service.stream_llm(provider,...)` 生成器(requests stream=True 解析 SSE `data:` delta, 逐 token yield `{"token":...}` + 按 index 累积 tool_calls delta 最后 flush `{"complete":{content,tool_calls}}`; 失败降级阻塞 call_llm)。`agent_sse._stream_chat` 第一次 LLM 调用改走 `stream_llm` 真流式(逐 token yield `token` SSE 事件), 保留工具闭环(后续轮次仍阻塞 call_llm)。前端 `useAgentSSE.js` 加 `token` listener(逐字追加 streamingContent)。**坑**: 流式下 tool_calls 是增量片段需按 index 拼接; `"token" in chunk` 判 SSE 字符串含 "event: token" 成立。
+- **C 工作流 OR-join + error port** : `agent_workflow_service._advance_run` 依赖判定支持节点 data `join`(`and`默认/`or`任一成功即执行, 全部终结无成功则跳过); runtime_context 合并 failed 节点的 `error`(供 `{{nodes.<id>.error}}` 模板引用)。
+- **D metrics 计数** : 新 `app/services/http_metrics.py`(HttpMetricsMiddleware 记录按 path 的 request_count/error_count/latency_sum; `render_http_metrics` 输出 request_count/error_count/avg_latency/error_ratio)。main.py 注册最外层 + /metrics 追加。**坑**: 自动排/-metrics //healthz 自身不计数(在 _SKIP_PATHS)。
+- **H4 bootstrap 收敛(架构)** : 新 `app/bootstrap.py::register_routers(app)`(局部 import 131 个 router 模块 + 132 个 include_router), main.py 删 130 行 include 块改调用 `_register_routers(app)`。副作用导入(mcp_tools/workflow_cron_scheduler/auto_investigator)仍留 main.py 顶部。**验证**: openapi paths=756, 所有路由保留, 无循环 import(router 不反向 import main)。
+- **H1 契约(低风险, 不做全局 envelope)** : 新 `app/response_schema.py`(ApiError pydantic + ok()/fail()); 全局异常处理器 HTTPException 返回 `{ok,code,message,detail,error,data}`(保留 detail 兼容 request.js), fail-soft 保留 warning/items/total。**不改全局包裹**(否则 130 router + 前端大面积失效)。
+- **测试**: 单元(A: trace_latency p99/error_rate/log_match/log_volume 触发正确 + 8 kinds; B: 本地 SSE mock server 验证逐 token + tool_calls 拼接 query_alerts{limit:3}; D: metrics render)+ API(创建/列表/删除 trace_latency/log_match 规则, 8 kinds 返回)+ 前端 build + 干净重启 healthz ok + 全路由 smoke PASS + 启动日志 0 error。
+- **文件**: `app/services/alert_service.py`, `app/routers/alerts.py`, `app/services/agent_service.py`, `app/routers/agent_sse.py`, `frontend/src/composables/useAgentSSE.js`, `app/services/agent_workflow_service.py`, `app/services/http_metrics.py`(新), `app/main.py`, `app/bootstrap.py`(新), `app/response_schema.py`(新), `frontend/src/views/AlertRulesView.vue`。
+
 ### 2026-08-14: 批量补全(G1 告警类型化 / P1-5 外部 MCP / P2-5 git 知识库 / P2-3 cmdpolicy 接线 / P3-2 log_rca+idice / D2 metrics / D3 trace_id / G2 embedding 确认)
 
 - **目标**: 用户跳过 Casbin RBAC+多租户(E 系列), 其余未完项一次做完, 融入现有页面为主, 自测多轮。

@@ -311,9 +311,13 @@ async def _global_exception_handler(request: Request, exc: Exception):
     import traceback
     logger.error(f"Unhandled exception on {request.url.path}: {exc}\n{traceback.format_exc()}")
     if isinstance(exc, _HTTPException):
-        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
-    # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500
-    return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0}, status_code=200)
+        # H1: 统一错误结构(保留 detail/error 兼容 request.js)
+        return JSONResponse({
+            "ok": False, "code": exc.status_code, "message": exc.detail,
+            "detail": exc.detail, "error": exc.detail, "data": None,
+        }, status_code=exc.status_code)
+    # fail-soft 兜底：未预期异常返回 200 + warning，避免前端整页 500 (保留旧字段兼容)
+    return JSONResponse({"warning": f"服务器内部错误: {exc}", "items": [], "total": 0, "code": 500, "ok": False}, status_code=200)
 
 import time as _time_import
 _APP_START_TIME = _time_import.time()  # 进程启动时间（/metrics 用）
@@ -428,6 +432,9 @@ app.add_middleware(SessionMiddleware, secret_key=_config.SESSION_SECRET,
 # trace_id 全链路串联: 注册最外层(包裹所有中间件), 保证每个请求都有 trace_id 上下文
 from app.logger import logger as _trace_logger
 app.add_middleware(TraceIdMiddleware, logger=_trace_logger)
+# D2 增强: HTTP 应用级指标计数(最外层, 记录请求/错误/延迟)
+from app.services.http_metrics import HttpMetricsMiddleware
+app.add_middleware(HttpMetricsMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -628,168 +635,8 @@ def serve_spa():
     return HTMLResponse(content=content)
 
 
-# ── 路由按业务域分组注册（详见 app/domains/registry.py）──
-
-# ── assets 资产管理域 ──
-app.include_router(assets.router)
-app.include_router(asset_changes.router)
-app.include_router(asset_discovery.router)
-app.include_router(lifecycle.router)
-app.include_router(topology.router)
-app.include_router(topology_path.router)
-app.include_router(topo_graph.router)
-app.include_router(tags.router)
-app.include_router(ext_cmdb.router)
-
-# ── alerts 告警监控域 ──
-app.include_router(alerts.router)
-app.include_router(alert_console.router)
-app.include_router(alert_events.router)
-app.include_router(alert_silence.router)
-app.include_router(alert_storm.router)
-app.include_router(alert_webhooks.router)
-app.include_router(anomaly.router)
-app.include_router(cluster_anomaly.router)
-app.include_router(hotspot.router)
-
-# ── k8s 容器编排域 ──
-app.include_router(k8s_monitor.router)
-app.include_router(k8s_resources.router)
-app.include_router(k8s_cert.router)
-app.include_router(containers.router)
-app.include_router(helm.router)
-app.include_router(blue_green.router)
-app.include_router(service_mesh.router)
-
-# ── ai 智能体域 ──
-app.include_router(ai_providers.router)
-app.include_router(agent_chat.router)
-app.include_router(agent_sse.router)
-app.include_router(agent_workflow.router)
-app.include_router(agent_eval.router)
-app.include_router(agent_ground_truth.router)
-app.include_router(ab_test.router)
-app.include_router(anomaly_eval.router)
-app.include_router(sub_agents.router)
-app.include_router(im_chatops.router)
-app.include_router(edge_tunnel.router)
-app.include_router(webssh.router)
-
-# ── sandbox AI 运维沙盒域（独立模块，暂不侵入现有执行链）──
-app.include_router(sandbox.router)
-# ── agent 下发/统一执行路由 ──
-app.include_router(agent_deploy.router)
-# ── agent 自主巡检闭环 ──
-app.include_router(agent_autonomous.router)
-app.include_router(deploy.router)
-# 离线部署(Offline Repo)
-app.include_router(offline_repo.router)
-# K8S 离线集群部署
-app.include_router(k8s_offline_deploy.router)
-
-# ── sre 可靠性工程域 ──
-app.include_router(sre.router)
-app.include_router(chaos.router)
-app.include_router(inspection.router)
-app.include_router(baseline.router)
-app.include_router(remediation.router)
-app.include_router(remediation_workflow.router)
-app.include_router(remediation_effect.router)
-app.include_router(runbooks.router)
-
-# ── knowledge 知识管理域 ──
-app.include_router(knowledge.router)
-app.include_router(knowledge_documents.router)
-app.include_router(knowledge_v2.router)
-app.include_router(knowledge_graph.router)
-app.include_router(knowledge_autogen.router)
-app.include_router(smart_recommend.router)
-
-# ── incident 故障运营域 ──
-app.include_router(incidents.router)
-app.include_router(dashboard.router)
-app.include_router(dashboard_config.router)
-app.include_router(ops_analytics.router)
-app.include_router(reports.router)
-app.include_router(report_schedules.router)
-
-# ── tracing 链路追踪域 ──
-app.include_router(traces.router)
-app.include_router(traces_api.router)
-app.include_router(trace_anomaly.router)
-app.include_router(trace_ingest.router)
-app.include_router(trace_ingest.standard_router)
-app.include_router(trace_rca.router)
-app.include_router(trace_view.router)
-app.include_router(dtw.router)
-app.include_router(pagerank_rca.router)
-app.include_router(log_rca.router)
-app.include_router(log_anomaly.router)
-app.include_router(logs.router)
-
-# ── platform 平台与集成域 ──
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(roles.router)
-app.include_router(settings.router)
-app.include_router(system.router)
-app.include_router(system_posture.router)
-app.include_router(audit.router)
-app.include_router(menu.router)
-app.include_router(license.router)
-app.include_router(tenant_management.router)
-app.include_router(tokens.router)
-app.include_router(secrets_vault.router)
-app.include_router(skills.router)
-app.include_router(marketplace.router)
-app.include_router(multicluster.router)
-app.include_router(upgrade.router)
-app.include_router(network.router)
-app.include_router(mcp.router)
-app.include_router(git_knowledge.router)
-app.include_router(ws.router)
-app.include_router(api_v1.router)
-app.include_router(mobile.router)
-app.include_router(health_map.router)
-app.include_router(network_test.router)
-app.include_router(datasources.router)
-app.include_router(es_integration.router)
-app.include_router(event_sources.router)
-app.include_router(events.router)
-app.include_router(kafka_pipeline.router)
-app.include_router(netflow.router)
-app.include_router(feature_store.router)
-app.include_router(ci_models.router)
-app.include_router(drain.router)
-app.include_router(granger.router)
-app.include_router(idice.router)
-app.include_router(trend_prediction.router)
-app.include_router(prediction_models.router)
-app.include_router(predictions.router)
-app.include_router(predictions_enhanced.router)
-app.include_router(pcadr.router)
-app.include_router(metrics.router)
-app.include_router(notifications.router)
-app.include_router(notification_templates.router)
-app.include_router(correlation.router)
-app.include_router(observability_correlation.router)
-app.include_router(script_exec.router)
-app.include_router(ansible.router)
-app.include_router(change_workflow.router)
-app.include_router(workflow.router)
-app.include_router(chatops.router)
-app.include_router(discovery.router)
-app.include_router(diagnostic_tools.router)
-
-# ── admin 系统管理路由（领域清单 + 背景任务看板，P1 任务#4/#6）──
-app.include_router(admin.router)
-# ── P2 任务#9 告警收敛闭环 / P2 任务#10 RAG 检索质量评估 ──
-app.include_router(alert_correlation.router)
-app.include_router(rag_eval.router)
-# ── 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线）──
-app.include_router(security_audit.router)
-# ── AI 洞察引擎（指标/日志/链路三页统一增强）──
-app.include_router(ai_insight.router)
+from app.bootstrap import register_routers as _register_routers
+_register_routers(app)
 
 
 def _collect_all_menu_keys():
@@ -1354,6 +1201,12 @@ async def prom_metrics():
         lines.append("# HELP aiops_network_device_count Number of network devices")
         lines.append("# TYPE aiops_network_device_count gauge")
         lines.append(f"aiops_network_device_count {devices}")
+    except Exception:
+        pass
+    # D2 增强: HTTP 应用级请求/错误/延迟指标
+    try:
+        from app.services.http_metrics import render_http_metrics
+        lines = render_http_metrics(lines)
     except Exception:
         pass
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")

@@ -315,6 +315,112 @@ def call_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Di
         return {"error": str(e)}
 
 
+def stream_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[Dict]] = None,
+               timeout_override: Optional[int] = None, max_tokens_override: Optional[int] = None):
+    """OpenAI-compatible 流式生成: 逐 token yield 增量文本(delta).
+
+    仅输出文本增量用于"真流式显示"; 工具调用(需完整 arguments)不在本生成器解出，
+    交由上层在识别到 tool_calls 后回退阻塞 call_llm。返回 dict 需含 reset 语义。
+    """
+    if not provider or not provider.is_enabled:
+        yield {"error": "Provider not available"}
+        return
+
+    api_key = provider.get_api_key()
+    base_url = provider.base_url.rstrip("/")
+    model = provider.default_model or "gpt-4o"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": provider.temperature,
+        "max_tokens": max_tokens_override if max_tokens_override is not None else min(provider.max_tokens or 4096, 4096),
+        "stream": True,
+    }
+    if tools:
+        payload["tools"] = tools
+
+    from app.services.ai_provider_health import get_breaker
+    breaker = get_breaker(provider.id)
+    allowed, reason = breaker.allow_call()
+    if not allowed:
+        yield {"error": f"Provider 已熔断: {reason}"}
+        return
+
+    import time as _t
+    _t0 = _t.time()
+    # 累积: 文本全文 + tool_calls(按 index 聚合 delta)
+    full_text: List[str] = []
+    tool_calls_acc = {}  # index -> {id, name, arguments}
+    try:
+        session = _get_llm_session()
+        with session.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=timeout_override or provider.timeout_seconds,
+                proxies={"http": None, "https": None},
+                stream=True,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                chunk = line[len("data:"):].strip()
+                if chunk == "[DONE]":
+                    break
+                try:
+                    import json as _json
+                    obj = _json.loads(chunk)
+                except Exception:
+                    continue
+                choices = obj.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    full_text.append(content)
+                    yield {"token": content}
+                # tool_calls 增量: OpenAI 流式下是增量片段, 需按 index 拼接
+                for tc in delta.get("tool_calls") or []:
+                    idx = tc.get("index", 0)
+                    acc = tool_calls_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                    if tc.get("id"):
+                        acc["id"] = tc["id"]
+                    if tc.get("function", {}).get("name"):
+                        acc["name"] += tc["function"]["name"]
+                    if tc.get("function", {}).get("arguments"):
+                        acc["arguments"] += tc["function"]["arguments"]
+        breaker.record_success((_t.time() - _t0) * 1000)
+    except requests.RequestException as e:
+        breaker.record_failure(str(e))
+        yield {"error": str(e)}
+        return
+    except Exception as e:
+        breaker.record_failure(str(e))
+        yield {"error": str(e)}
+        return
+    # 流结束 flush 完整结果(供上层工具闭环/最终回复)
+    tool_calls = []
+    for idx in sorted(tool_calls_acc):
+        tc = tool_calls_acc[idx]
+        if tc.get("name"):
+            call_args = tc["arguments"]
+            try:
+                call_args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+            except Exception:
+                pass
+            tool_calls.append({"id": tc["id"], "type": "function", "function": {
+                "name": tc["name"], "arguments": json.dumps(call_args, ensure_ascii=False) if not isinstance(call_args, str) else call_args}})
+    yield {"complete": {"content": "".join(full_text), "tool_calls": tool_calls}}
+
+
 # MiniMax 等模型把工具调用编码在 content 文本标签里（非标准 OpenAI tool_calls 结构）：
 #   <minimax:tool_call>
 #   <invoke name="propose_action">

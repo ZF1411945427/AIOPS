@@ -39,6 +39,15 @@ export function useAgentSSE() {
       streamingStatus.value = data.content
     })
 
+    // token 真流式: 逐字追加到 streamingContent(B 改造)
+    eventSource.addEventListener('token', (e) => {
+      const data = JSON.parse(e.data)
+      if (data.token) {
+        streamingContent.value += data.token
+        streamingStatus.value = ''
+      }
+    })
+
     eventSource.addEventListener('task_card', (e) => {
       const data = JSON.parse(e.data)
       streamingTask.value = {

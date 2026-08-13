@@ -92,6 +92,10 @@
               <option value="anomaly">anomaly · 统计偏离（均值 ± z·σ）</option>
               <option value="forecast">forecast · 趋势预测（外推未来点是否穿越阈值）</option>
               <option value="burn_rate">burn_rate · 燃尽率（错误预算消耗速率）</option>
+              <option value="trace_latency">trace_latency · 链路延迟(avg/p99 per service)</option>
+              <option value="trace_error_rate">trace_error_rate · 链路错误率(per service)</option>
+              <option value="log_match">log_match · 日志关键字命中数</option>
+              <option value="log_volume">log_volume · 日志量突增(前后窗口倍数)</option>
             </select>
           </div>
           <div class="form-group">
@@ -273,7 +277,9 @@ function severityLabel(s) {
 }
 
 function kindLabel(k) {
-  return { metric_raw: 'metric_raw', anomaly: 'anomaly', forecast: 'forecast', burn_rate: 'burn_rate' }[k] || k
+  return { metric_raw: 'metric_raw', anomaly: 'anomaly', forecast: 'forecast', burn_rate: 'burn_rate',
+           trace_latency: 'trace_latency', trace_error_rate: 'trace_error_rate',
+           log_match: 'log_match', log_volume: 'log_volume' }[k] || k
 }
 
 function goAnomaly() {

@@ -1026,21 +1026,37 @@ def _advance_run(db: Session, run_id: int):
             completed_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_COMPLETED}
             failed_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_FAILED}
             skipped_deps = {d for d in deps if nr_map.get(d) and nr_map[d].status == AgentWorkflowNodeRun.STATUS_SKIPPED}
+            terminated = completed_deps | failed_deps | skipped_deps
 
-            if failed_deps:
-                nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
-                nr.completed_at = _now()
-                db.commit()
-                continue
-            if skipped_deps and not completed_deps:
-                nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
-                nr.completed_at = _now()
-                db.commit()
-                continue
-            if skipped_deps and completed_deps:
-                pass
-            elif not deps.issubset(completed_deps):
-                continue
+            # C 补齐: 支持 OR-join(任一前置成功即执行) / 默认 AND-join(全部成功)
+            node_cfg = node_data_map.get(nid, {}).get("data") or nr.get_config() or {}
+            join_type = (node_cfg.get("join") or "and").strip().lower()
+
+            if join_type == "or":
+                if completed_deps:
+                    pass  # 有成功前置 → 就绪
+                elif terminated == deps:
+                    # 所有前置已终结但没有成功 → 跳过(无成功路径)
+                    nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+                    nr.completed_at = _now()
+                    db.commit()
+                    continue
+                else:
+                    continue  # 等待首个成功
+            else:
+                # AND-join(默认)
+                if failed_deps:
+                    nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+                    nr.completed_at = _now()
+                    db.commit()
+                    continue
+                if skipped_deps and not completed_deps:
+                    nr.status = AgentWorkflowNodeRun.STATUS_SKIPPED
+                    nr.completed_at = _now()
+                    db.commit()
+                    continue
+                if not deps.issubset(completed_deps):
+                    continue
 
             # 条件分支路由检查
             condition_branch_match = True
@@ -1078,11 +1094,14 @@ def _advance_run(db: Session, run_id: int):
                 except Exception as e:
                     logger.warning(f"fan-out 任务异常: {e}")
 
-        # 合并并行节点输出到 runtime_context
+        # 合并并行节点输出到 runtime_context(含 error port: failed 节点的 error)
         node_runs = db.query(AgentWorkflowNodeRun).filter(AgentWorkflowNodeRun.run_id == run_id).all()
         for nr in node_runs:
+            runtime_context.setdefault("nodes", {}).setdefault(nr.node_id, {})
             if nr.status == AgentWorkflowNodeRun.STATUS_COMPLETED:
-                runtime_context.setdefault("nodes", {})[nr.node_id] = {"output": nr.get_output()}
+                runtime_context["nodes"][nr.node_id]["output"] = nr.get_output()
+            if nr.status == AgentWorkflowNodeRun.STATUS_FAILED:
+                runtime_context["nodes"][nr.node_id]["error"] = getattr(nr, "error", "") or "failed"
         run = db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id == run_id).first()
         run.runtime_context = json.dumps(runtime_context, ensure_ascii=False)
         db.commit()

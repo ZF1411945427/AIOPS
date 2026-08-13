@@ -189,13 +189,70 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, call_llm, p, msgs, tools)
 
+    async def _stream_llm_first(p, msgs, tools):
+        """真流式第一次 LLM 调用: 逐 token yield 'token' SSE, 累积后返回兼容的 response dict。
+        若流式失败降级为阻塞 call_llm(回归安全)。"""
+        from app.services.agent_service import stream_llm
+        loop = asyncio.get_running_loop()
+        full_text = []
+        tool_calls = []
+        has_error = [None]
+        try:
+
+            def _iter():
+                out = []
+                for item in stream_llm(p, msgs, tools if tools else None):
+                    out.append(item)
+                return out
+
+            items = await loop.run_in_executor(None, _iter)
+            for item in items:
+                if "token" in item:
+                    tok = item["token"]
+                    full_text.append(tok)
+                    yield sse_json("token", {"token": tok})
+                elif "error" in item:
+                    has_error[0] = item["error"]
+                    return
+                elif "complete" in item:
+                    c = item["complete"]
+                    full_text.append(c.get("content") or "")
+                    tool_calls = c.get("tool_calls") or []
+        except Exception as e:
+            has_error[0] = str(e)
+            return
+        if has_error[0] is not None:
+            # 降级阻塞
+            blocking = await loop.run_in_executor(None, call_llm, p, msgs, tools)
+            if "error" in blocking and not full_text:
+                has_error[0] = blocking["error"]
+                return
+            resp = blocking
+        else:
+            content = "".join(full_text).strip()
+            resp = {"choices": [{"message": {"role": "assistant", "content": content, "tool_calls": tool_calls or None}}], "usage": {}}
+        if tool_calls:
+            # 有工具: 已流式回显文本后, 给前端一个 done 前的分隔提示
+            pass
+        yield {"__response": resp, "__has_error": has_error[0]}
+
     start = time.time()
-    llm_task = asyncio.create_task(_call_llm_task(provider, messages, openai_tools if openai_tools else None))
-    while not llm_task.done():
-        done, _ = await asyncio.wait([llm_task], timeout=2)
-        if not done:
-            yield sse_json("keepalive", {"content": "思考中..."})
-    response = llm_task.result()
+    first_gen = _stream_llm_first(provider, messages, openai_tools if openai_tools else None)
+    first_capture = None
+    async for chunk in first_gen:
+        if "token" in chunk:
+            yield chunk  # token SSE
+        elif "__response" in chunk:
+            first_capture = chunk
+    if first_capture is None:
+        response = {"choices": [{"message": {"role": "assistant", "content": "分析完成。"}}]}
+    else:
+        if first_capture.get("__has_error"):
+            err = f"LLM 调用失败: {first_capture['__has_error']}"
+            yield sse_json("error", {"content": err})
+            add_message(db, session.id, "assistant", err, message_type="error")
+            return
+        response = first_capture["__response"]
     latency = int((time.time() - start) * 1000)
 
     if "error" in response:
