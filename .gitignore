@@ -138,7 +138,9 @@ models/
 # ===== 运行时数据（VictoriaMetrics 等）=====
 data/victoriametrics/
 
-# ===== 大型二进制工具（可单独下载，不入库）=====
+# ===== 部署: 备份目录与本地 .env（含敏感配置，不入库）=====
+backups/
+.env
 bin/helm
 bin/helm.exe
 bin/victoria-metrics-prod
@@ -183,6 +185,6 @@ data/license_state.json
 data/victoriametrics/
 
 
-# ===== Milvus ����������ʱ���ݣ�����⣩ =====
+# ===== Milvus ����������ʱ���ݣ�����⣩ =====
 db/milvus/
 

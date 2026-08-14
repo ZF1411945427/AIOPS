@@ -9,6 +9,19 @@
 - **内容**: ①改造总览(架构巡检图 FireMapView + 拓扑视图 TopologyView 双页定位) ②架构巡检图服务调用连线面板(分层着色/边按错误率) ③拓扑视图三 Tab(资产/网络/服务调用)+自动刷新(30s) ④后端端点清单 ⑤验证/通过标准 ✓(服务调用边、健康着色、边宽=调用量、边色=错误率、自动刷新) ⑥**已知缺口**: T2 Blast Radius/N 跳影响面❌未实现、`topology-path` 孤儿页无菜单。
 - **关键事实(已核实)**: 服务调用拓扑 `build_service_call_topo`(topology_service.py:299) 按 trace_id+parent_span_id 聚合跨服务调用;`TopologyView.vue` Tab3 时间窗口 1h/6h/24h/7d/全部,`svcNodeColor`(817)与`svcEdgeColor`(823)按错误率(<5%/5~30%/≥30%)着色,边宽=调用量(879);自动刷新 ref=autoRefresh 间隔 30s(961/970);`connectedNodes`(411)只做**单跳**;后端无 blast-radius/expand(**T2 缺失**)。
 
+### 2026-08-14: 可部署性改造(D1/D4 对标 ongrid deploy/)——重写 Dockerfile+compose + 一键安装/升级/卸载
+
+- **目标**: 用户确认"可部署性"=软件自身交付能力(非 AI 部署功能); 对标 ongrid `deploy/install.sh+upgrade+uninstall+compose+prom/grafana provisioning`。用户判断旧 `docker-build/` 已无用可删。
+- **改动**:
+  - 重写根目录 `Dockerfile`(多阶段: node:20 构建 vite 前端 + python:3.11-slim 后端; torch CPU 单独索引装; 移除了原 docker-build 的移动端 H5 构建以减小镜像/降风险; 修前端 NODE_OPTIONS 为 Linux 语法 `NODE_OPTIONS=... npm run build` 而非 Windows `set NODE_OPTIONS=...&&`; HEALTHCHECK 用 /healthz)
+  - 重写根目录 `docker-compose.yml`(aiops 单服务, 卷挂 db/logs/license, 可选 `--profile monitoring` 带 prometheus+grafana; 对标 ongrid 自带监控栈) + `deploy/prometheus/prometheus.yml`(抓取 aiops:8000/metrics)
+  - 新增部署脚本(deploy/lib.sh 公共: 颜色/require_cmds 预检/backup 带时间戳到 backups/ 保留10份/wait_healthy) + `deploy/install.sh [--monitoring]` + `deploy/upgrade.sh [--rollback|--no-git|--monitoring]`(备份→git pull→重建→滚动重启) + `deploy/uninstall.sh [--purge|--backup]` + `deploy/README.md`
+  - `docker-build/` 已删除; .gitignore 加 `backups/` 和 `.env`
+- **验证**: Git bash `bash -n` 4 脚本语法全 OK; `docker compose config --quiet` 与 `--profile monitoring config` 全 OK(注意系统 bash 走 WSL 会失败, 用 Git bash 路径); Docker Desktop 引擎未运行故未做实际 build(compose 已能 parse); 后端 healthz 200 无副作用。
+- **评分**: 可部署性 5.5→8.0; 含安全 8.32, 剔安全 8.58 vs ongrid 8.64(差 0.06, 基本打平)。仅差架构工程化/H2、代码质量/H3。
+- **文件**: `Dockerfile`, `docker-compose.yml`, `.env.example`, `deploy/{lib,install,upgrade,uninstall}.sh`, `deploy/README.md`, `deploy/prometheus/prometheus.yml`, `.gitignore`, `docs/本系统与ongrid-main能力评分对比.md`。
+- **坑**: PowerShell 不支持 `&&`; 系统 `bash`=`wsl`(未装真 bash)→ 用 `C:\Users\zhuming\AppData\Local\hermes\git\bin\bash.exe -n` 校验 shell 语法; mobile 的 build:h5 是 uni 命令且 uni-app 在 Docker 复杂 → 从部署镜像剔除(移动端可单独部署), 前端仅 vite web。
+
 ### 2026-08-14: 再赶超on-grid(告警kind补全8类 / token真流式 / 工作流OR-join / metrics计数 / H4 bootstrap / H1契约)
 
 - **目标**: 用户要求"除安全鉴权外其余项赶超 ongrid", 并对 6 项改造直接开工(融入现有页, 不新建页)+ 功能测试 + 再评分。on-grid(Go/DDD) vs 本系统(Python/FastAPI)。

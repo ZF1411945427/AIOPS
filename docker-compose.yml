@@ -1,0 +1,64 @@
+# ===== AIOps 一键编排 =====
+# 用法: cp .env.example .env && docker compose up -d --build
+# 携带可选监控栈(prometheus + grafana)对标 ongrid, 默认关闭(profile=monitoring)
+# 启动: docker compose --profile monitoring up -d --build
+
+name: aiops
+
+services:
+  aiops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aiops:latest
+    container_name: aiops
+    ports:
+      - "${AIOPS_PORT:-8000}:8000"
+    volumes:
+      - ./db:/app/db                # SQLite 数据库(持久化)
+      - ./logs:/app/logs            # 日志
+      - ./license.lic:/app/license.lic:ro   # 许可证(可选)
+    environment:
+      - TZ=Asia/Shanghai
+      - APP_ENV=${APP_ENV:-prod}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+
+  # ── 可选: Prometheus 抓取本系统 /metrics(profile=monitoring) ──
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aiops-prometheus
+    profiles: ["monitoring"]
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # ── 可选: Grafana 可视化(profile=monitoring) ──
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aiops-grafana
+    profiles: ["monitoring"]
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
