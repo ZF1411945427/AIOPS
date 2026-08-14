@@ -1,8 +1,7 @@
-import json
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, Integer, Float
-from app.models import AgentEvaluation, ChatSession, ChatMessage, ToolInvocation
+from app.models import AgentEvaluation, ChatSession, ToolInvocation
 from app.services.mcp_registry import get_mcp_tool
 
 

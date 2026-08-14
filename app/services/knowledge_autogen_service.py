@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models import (
     Alert, Asset, KnowledgeBase, KnowledgeDraft, AlertKbLink, KbDocument,
-    AIProvider, Incident, IncidentAlert,
+    AIProvider, IncidentAlert,
 )
 
 logger = logging.getLogger(__name__)

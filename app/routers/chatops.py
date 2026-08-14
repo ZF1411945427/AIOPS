@@ -1,10 +1,10 @@
 import shlex
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Alert, AlertRule, Asset, ChangeRequest, Report, MetricRecord, K8sEvent
+from app.models import Alert, Asset, ChangeRequest
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/chatops", tags=["chatops"])

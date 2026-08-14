@@ -305,7 +305,6 @@ def build_service_call_topo(db: Session, hours: int = 168, min_calls: int = 1):
     hours=0 表示不限时间范围。
     """
     from datetime import datetime, timedelta
-    from sqlalchemy import func
     from collections import defaultdict
     from app.models import Span
 
@@ -590,7 +589,7 @@ def build_network_topo(db: Session, mode: str = "devices"):
                     资产为叶子，呈现网段→资产的隶属关系。
     """
     if mode == "subnets":
-        assets = db.query(Asset).filter(Asset.ip != None, Asset.ip != "").all()
+        assets = db.query(Asset).filter(Asset.ip.isnot(None), Asset.ip != "").all()
         subnet_nodes = {}  # subnet -> {"id": "subnet:xxx", "name": xxx, "items": [...]}
         node_id_seq = 0
         graph_nodes = []

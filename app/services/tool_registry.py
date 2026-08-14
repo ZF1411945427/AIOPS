@@ -16,7 +16,6 @@ def query_assets(db=None, user_id=None, **kwargs):
 使用方式二：直接在 `@register_mcp_tool(...)` 里传 timeout_seconds / ratelimit_per_minute /
 audit_enabled / review_gate（两者等价）。
 """
-from typing import Optional
 
 
 def tool_timeout(seconds: int):

@@ -2,10 +2,9 @@ import asyncio
 import concurrent.futures
 import json
 import queue
-import threading
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 

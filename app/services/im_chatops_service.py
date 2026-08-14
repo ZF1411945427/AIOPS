@@ -19,15 +19,14 @@
 import json
 import hashlib
 import hmac
-import time
 import threading
 import urllib.request
 from datetime import datetime
-from typing import Optional, Dict, Any, Tuple
+from typing import Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import NotificationChannel, ImIncomingMessage, ChatSession, ChatMessage, User, Alert
+from app.models import NotificationChannel, ImIncomingMessage, ChatSession, Alert
 from app.services.agent_service import call_llm, get_mcp_manifest, call_mcp_tool, add_message, get_message_history
 from app.services.sub_agent_service import route_sub_agent, get_sub_agent, filter_tools_by_sub_agent, get_sub_agent_prompt
 from app.logger import logger
@@ -110,7 +109,7 @@ def call_agent_for_im(db: Session, session: ChatSession, message: str, sub_agent
 
     不走 SSE，直接调用 call_llm + call_mcp_tool，最多 10 轮。
     """
-    from app.models import AgentConfig, AIProvider, PendingAction
+    from app.models import AgentConfig, AIProvider
 
     config = db.query(AgentConfig).filter(AgentConfig.name == "default").first()
     provider = None

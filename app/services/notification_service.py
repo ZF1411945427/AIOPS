@@ -1,7 +1,6 @@
 import json
 import smtplib
 from email.mime.text import MIMEText
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 from app.models import NotificationChannel, NotificationLog, Alert

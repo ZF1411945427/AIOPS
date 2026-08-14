@@ -1,8 +1,7 @@
-import json
 from datetime import datetime, timedelta
 import numpy as np
 from sqlalchemy.orm import Session
-from app.models import Asset, MetricRecord, Alert, Incident
+from app.models import MetricRecord, Alert, Incident
 
 
 def run_pcadr(db: Session, incident_id: int = None, asset_id: int = None, hours: int = 6):
@@ -27,7 +26,7 @@ def run_pcadr(db: Session, incident_id: int = None, asset_id: int = None, hours:
         # Auto-analyze: pick assets with recent alerts
         recent = db.query(Alert).filter(
             Alert.created_at >= datetime.now() - timedelta(hours=hours),
-            Alert.asset_id != None,
+            Alert.asset_id.isnot(None),
         ).all()
         asset_ids = list(set(a.asset_id for a in recent))
         inc_title = f"Auto PCADR Analysis (last {hours}h)"

@@ -140,7 +140,7 @@ def _step_pip_install(ssh):
     if "Successfully installed" in out or "already satisfied" in out:
         log("pip install done")
     else:
-        log(f"[WARN] pip install may have issues. Last output:")
+        log("[WARN] pip install may have issues. Last output:")
         log(out[-500:])
 
     code, out, err = _run(
@@ -154,7 +154,7 @@ def _step_pip_install(ssh):
 def _step_restart(ssh):
     """重启后端 — 轮询等待模型加载完成"""
     log("restarting backend ...")
-    _run(ssh, f"pkill -f '[p]ython.*run\\.py' 2>/dev/null", timeout=5)
+    _run(ssh, "pkill -f '[p]ython.*run\\.py' 2>/dev/null", timeout=5)
     time.sleep(2)
 
     transport = ssh.get_transport()

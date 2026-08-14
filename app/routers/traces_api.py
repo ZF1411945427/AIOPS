@@ -1,6 +1,5 @@
 import json
 import re
-from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -8,6 +7,7 @@ from sqlalchemy import desc, func
 from app.database import get_db
 from app.models import Span, Asset
 from app.services.health_engine import _extract_domains, _normalize_service_name
+from app.services.tempo_query_service import is_tempo_enabled, search_traces, get_trace as tempo_get_trace, _TEMPO_QUERY_URL
 
 router = APIRouter(prefix="/api/traces", tags=["api_traces"])
 
@@ -119,6 +119,18 @@ def list_traces(
     domain: str = Query(""),
     db: Session = Depends(get_db)):
     """查询调用链列表"""
+    # Tempo 深度接线: 配置 AIOPS_TEMPO_QUERY_URL 且参数可用时优先查 Tempo
+    if is_tempo_enabled() and not keyword:
+        try:
+            tempo_res = search_traces(
+                _TEMPO_QUERY_URL, service=service, limit=limit,
+                operation=operation, status=status, min_dur=min_dur, max_dur=max_dur,
+            )
+            # 回退: Tempo 无数据且本系统 SQLite 有 span 时仍走 SQLite
+            if tempo_res["traces"]:
+                return JSONResponse(tempo_res)
+        except Exception:
+            pass
     subq = db.query(
         Span.trace_id,
         func.count(Span.id).label("span_count"),
@@ -182,6 +194,14 @@ def list_traces(
 @router.get("/{trace_id}")
 def get_trace(trace_id: str, db: Session = Depends(get_db)):
     """获取单个调用链的完整 Span 详情"""
+    # Tempo 深度接线: 配置后优先从 Tempo 拉取, SQLite 兜底
+    if is_tempo_enabled():
+        try:
+            tempo_data = tempo_get_trace(_TEMPO_QUERY_URL, trace_id)
+            if tempo_data:
+                return JSONResponse(tempo_data)
+        except Exception:
+            pass
     spans = db.query(Span).filter(Span.trace_id == trace_id).order_by(Span.started_at).all()
     if not spans:
         return JSONResponse({"spans": []})

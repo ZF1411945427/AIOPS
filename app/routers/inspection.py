@@ -19,8 +19,8 @@
 from fastapi import APIRouter, Query, Body
 
 from app.services.inspection_service import (
-    list_templates, get_template, create_template, update_template, delete_template,
-    list_tasks, get_task, create_task, update_task, delete_task,
+    list_templates, create_template, update_template, delete_template,
+    list_tasks, create_task, update_task, delete_task,
     run_inspection, list_records, get_record, get_inspection_stats,
     browse_assets, seed_builtin_templates, trigger_by_alert,
 )

@@ -1,7 +1,6 @@
 import json
 import re
 from datetime import datetime, timedelta
-from sqlalchemy import func
 from app.models import Asset, Alert, AssetRelation
 from app.database import get_session_for, get_db_mode
 
@@ -442,7 +441,7 @@ def fetch_domains(db_session=None):
                     matched = _match_service_names_in_memory(a.name, all_svc)
                     if matched:
                         service_names_by_asset[a.id] = matched
-            all_matched = list(set(s for svcs in service_names_by_asset.values() for svcs in svcs))
+            all_matched = list(set(s for svcs in service_names_by_asset.values() for s in svcs))
             if all_matched:
                 spans_by_service = _prefetch_spans_by_service(db_session, all_matched, cutoff)
 

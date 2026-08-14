@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, Body
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/drain", tags=["drain"])

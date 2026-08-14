@@ -1,9 +1,8 @@
-import os
 import uuid
 import base64
 import json
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -12,13 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    User, Asset, Alert, OnCallSchedule, WorkflowRun, AgentWorkflowRun,
+    User, Asset, OnCallSchedule, WorkflowRun, AgentWorkflowRun,
     MobileDevice, PushRecord, AIProvider, AgentConfig,
 )
 from app.services.mobile_push_service import (
-    register_device, unregister_device, send_push,
-    issue_biometric_token, verify_biometric_token,
-    issue_login_token, verify_login_token,
+    register_device, unregister_device, issue_biometric_token, verify_biometric_token,
+    verify_login_token,
 )
 from app.services.agent_service import call_llm
 

@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aiops.fullname" . }}
+  labels:
+    {{- include "aiops.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "aiops.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aiops.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.serviceAccount }}
+      serviceAccountName: {{ include "aiops.serviceAccountName" $ }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- range .Values.extraEnv }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          envFrom:
+            {{- if .Values.existingSecret }}
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+            {{- else if .Values.secret.LLM_API_KEY }}
+            - secretRef:
+                name: {{ include "aiops.fullname" . }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.livenessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readinessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: db
+              mountPath: /app/db
+            {{- end }}
+            {{- if .Values.volumes.models.enabled }}
+            - name: models
+              mountPath: /app/models
+            {{- end }}
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: db
+          persistentVolumeClaim:
+            claimName: {{ include "aiops.fullname" . }}-db
+        {{- end }}
+        {{- if .Values.volumes.models.enabled }}
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "aiops.fullname" . }}-models
+        {{- end }}
+        - name: logs
+          persistentVolumeClaim:
+            claimName: {{ include "aiops.fullname" . }}-logs
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

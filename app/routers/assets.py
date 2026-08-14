@@ -7,7 +7,7 @@ from app.database import get_db
 from app.template_utils import get_templates
 from app.services import asset_service
 from app.services.connection_service import ConnectionTester
-from app.models import Asset, DataSource, AssetLifecycle, ChatSession, ChatMessage, AssetSessionLink
+from app.models import Asset, DataSource, AssetLifecycle, AssetSessionLink
 from app.services.agent_service import get_or_create_session, add_message
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -312,7 +312,7 @@ def api_asset_update(asset_id: int, payload: dict, db: Session = Depends(get_db)
         if not cfg:
             try:
                 cfg = json.loads(data.get("connection_config", "{}")) if isinstance(data.get("connection_config"), str) else data.get("connection_config", {})
-            except:
+            except Exception:
                 cfg = {}
         if cfg.get("k8s_api_server") and cfg.get("k8s_token"):
             _sync_k8s_datasource(db, asset, cfg)
@@ -348,10 +348,6 @@ def api_asset_detail(asset_id: int, db: Session = Depends(get_db)):
         "k8s_token": "***" if config.get("k8s_token") else "",
         "has_k8s_token": bool(config.get("k8s_token")),
         "k8s_namespace": config.get("k8s_namespace", ""),
-        "http_url": config.get("http_url", ""),
-        "http_auth": config.get("http_auth", ""),
-        "http_credential": "***" if config.get("http_credential") else "",
-        "has_http_credential": bool(config.get("http_credential")),
         "db_type": config.get("db_type", "mysql"),
         "db_port": config.get("db_port", 3306),
         "db_user": config.get("db_user", "root"),
@@ -396,7 +392,7 @@ def test_connection(
     connection_config: str = Form("{}")):
     try:
         config = json.loads(connection_config) if connection_config else {}
-    except:
+    except Exception:
         config = {}
     result = ConnectionTester.test(connection_type, host, config)
     return JSONResponse(result)

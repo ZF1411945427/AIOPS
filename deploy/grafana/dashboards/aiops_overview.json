@@ -1,0 +1,58 @@
+{
+  "title": "AIOps 系统概览",
+  "uid": "aiops-overview",
+  "version": 1,
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "title": "系统健康",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "aiops_healthz", "legendFormat": "健康" }],
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 }
+    },
+    {
+      "id": 2,
+      "title": "运行时间",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "aiops_app_up", "legendFormat": "秒" }],
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 3,
+      "title": "MCP 工具数",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "aiops_mcp_tool_count", "legendFormat": "工具" }],
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 }
+    },
+    {
+      "id": 4,
+      "title": "数据库状态",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "aiops_db_alive", "legendFormat": "DB" }],
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 }
+    },
+    {
+      "id": 5,
+      "title": "告警规则数",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "aiops_alert_rule_count", "legendFormat": "规则" }],
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 }
+    },
+    {
+      "id": 6,
+      "title": "告警趋势",
+      "type": "graph",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "rate(aiops_alert_rule_count[5m])", "legendFormat": "告警" }],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 }
+    }
+  ]
+}

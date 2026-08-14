@@ -1,10 +1,9 @@
 """域模型: k8s (H2 models 拆分) - 各域模型, 无跨文件循环引用(全字符串FK)。"""
 
-import json
 
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 
 from app.database import Base
 
@@ -97,6 +96,9 @@ class K8sClusterPlan(Base):
     image_repository = Column(String(256), default="")
     bundle_id = Column(Integer, ForeignKey("offline_repo_bundles.id"), nullable=True)
     registry_id = Column(Integer, ForeignKey("offline_registries.id"), nullable=True)
+    http_proxy = Column(String(256), default="")  # 在线部署代理（如 http://192.168.100.2:7897）
+    https_proxy = Column(String(256), default="")  # 同上，HTTPS 用
+    no_proxy = Column(String(512), default="127.0.0.1,localhost,.local")  # 不走代理的地址
     nodes_json = Column(Text, default="[]")  # 节点定义（见 CONTRACT 13.3）
     status = Column(String(32), default="draft")
     current_step = Column(Integer, default=0)

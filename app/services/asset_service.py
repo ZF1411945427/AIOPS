@@ -100,7 +100,9 @@ def probe_assets(db: Session):
     assets = db.query(Asset).all()
     changed = []
 
-    _probe_db_factory = lambda: get_session_for(get_db_mode())()
+    def _probe_db_factory():
+        return get_session_for(get_db_mode())()
+
     _lock = threading.Lock()
 
     def _probe_middleware_port(ip, port, timeout=5):

@@ -188,3 +188,11 @@ data/victoriametrics/
 # ===== Milvus ����������ʱ���ݣ�����⣩ =====
 db/milvus/
 
+
+# ===== 运行时生成架构图 / 覆盖率数据(不入库) =====
+/generated/
+/coverage/
+.coverage
+
+# ===== 本地虚机明文凭据(含 IP/root 密码, 禁止入库) =====
+/deploy/本地虚机

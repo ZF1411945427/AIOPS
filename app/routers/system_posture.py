@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/system/posture", tags=["system_posture"])
 def _build_systems(db):
     systems = []
     clusters = [c[0] for c in db.query(distinct(Asset.k8s_cluster)).filter(
-        Asset.k8s_cluster != "", Asset.k8s_cluster != None).all() if c[0]]
+        Asset.k8s_cluster != "", Asset.k8s_cluster.isnot(None)).all() if c[0]]
     for cluster in clusters:
         systems.append({
             "system_key": "k8s_" + cluster,
@@ -23,7 +23,7 @@ def _build_systems(db):
             "filter": {"k8s_cluster": cluster},
         })
     types = db.query(Asset.ci_type, func.count(Asset.id).label("cnt")).filter(
-        (Asset.k8s_cluster == "") | (Asset.k8s_cluster == None)
+        (Asset.k8s_cluster == "") | (Asset.k8s_cluster.is_(None))
     ).group_by(Asset.ci_type).having(func.count(Asset.id) >= 2).order_by(text("cnt desc")).all()
     domain_map = {
         "server": "基础设施", "virtual_machine": "基础设施", "vm": "基础设施",

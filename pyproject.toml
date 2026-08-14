@@ -1,0 +1,44 @@
+[tool.ruff]
+# 对齐 ongrid .golangci.yml 的工程纵深：真实静态检查（此前 CI 仅 py_compile + 临时脚本守卫）
+target-version = "py311"
+line-length = 120
+src = ["app", "tests", "tools", "deploy", "scripts"]
+
+[tool.ruff.lint]
+# 生产可落地的阻断规则集——只保留"抓真实缺陷/能跑绿"的规则：
+#   F    = pyflakes(未用导入/未定义名/重定义等，最能抓真实 bug)
+#   E4   = import 相关(模块级 import 顺序/尾部 import)
+#   E7,E9 = 可能出 bug 的语句/空语法规格
+#   B    = bugbear(部分子类，见 ignore)
+# 关闭：F841/B905/B007/E741/E701/E702 等"低价值高噪音"项(多为副作用赋值丢弃返回值/风格偏好)，
+#      避免在 270 文件单体里造成海量噪音而失去信号。
+select = [
+  "F",                        # pyflakes：未用导入/未定义名/重定义/未绑定
+  "E4", "E7", "E9",           # 真实语法缺陷类
+  "B",                        # bugbear
+]
+ignore = [
+  "B008",                     # FastAPI Depends() 默认值惯用法
+  "B904",                     # raise ... from(项目大量裸 raise，先不强制)
+  "B017",                     # assert False
+  "B024",                     # 抽象基类
+  "B027",                     # 空 pass
+  "B007",                     # 未用循环变量(惯用法，降噪)
+  "B905",                     # zip strict 参数(项目 zip 长度均相配，降噪)
+  "B023",                     # 闭包捕获循环变量(已人工核查：agent_workflow 真 bug 已修，
+                              #   deploy 并行组 pool.map 同步阻塞故安全，无需激进重构)
+  "UP035",                    # deprecated-import
+  "UP006",                    # non-pep585 类型标注(改动面大)
+  "UP045",                    # non-pep604 类型标注(改动面大)
+  "E402",                     # module-import-not-at-top(项目有延迟导入惯用法)
+  "E712",                     # SQLAlchemy filter(Model.field == True) 合法惯用写法
+  "F841",                     # 未使用变量(多为副作用调用丢弃返回值,非缺陷)
+  "E741",                     # 模糊变量名 l/O(惯用法)
+  "E701", "E702",             # 单行多语句(风格偏好，可读性无关性)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["F401"]
+"app/static/**" = ["F401"]
+# FastAPI 路由里 `payload: dict = {}` 是 body 参数标记(每请求解析,非经典可变默认 bug)，属误报
+"app/routers/*.py" = ["B006"]

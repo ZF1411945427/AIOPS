@@ -1,11 +1,9 @@
 """
 租户服务
 """
-import json
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 from app.models import Tenant
 from app.services.config_service import get_config
 

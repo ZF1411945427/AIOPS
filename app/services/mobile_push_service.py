@@ -1,11 +1,10 @@
-import os
 import json
 import time
 import hmac
 import base64
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 import requests
@@ -135,7 +134,7 @@ def send_push(db: Session, user_id: int, title: str, body: str, payload_dict: Op
     devices = db.query(MobileDevice).filter(
         MobileDevice.user_id == user_id,
         MobileDevice.push_token != "",
-        MobileDevice.push_token != None,
+        MobileDevice.push_token.isnot(None),
     ).all()
     if not devices:
         logger.info("用户 %s 无可用推送设备，跳过推送: %s", user_id, title)
@@ -247,7 +246,7 @@ def issue_biometric_token(user_id: int, device_id: str) -> str:
     }
     h = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     p = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signing_input = f"{h}.{p}".encode("utf-8")
+    signing_input = f"{h}.{p}".encode()
     sig = hmac.new(_BIOMETRIC_SECRET.encode("utf-8"), signing_input, hashlib.sha256).digest()
     s = _b64url_encode(sig)
     return f"{h}.{p}.{s}"
@@ -257,7 +256,7 @@ def verify_biometric_token(token: str) -> Optional[Dict[str, Any]]:
     if not token or token.count(".") != 2:
         return None
     h, p, s = token.split(".")
-    signing_input = f"{h}.{p}".encode("utf-8")
+    signing_input = f"{h}.{p}".encode()
     expected_sig = hmac.new(_BIOMETRIC_SECRET.encode("utf-8"), signing_input, hashlib.sha256).digest()
     try:
         provided_sig = _b64url_decode(s)
@@ -286,7 +285,7 @@ def issue_login_token(user_id: int, username: str) -> str:
     }
     h = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     p = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signing_input = f"{h}.{p}".encode("utf-8")
+    signing_input = f"{h}.{p}".encode()
     sig = hmac.new(_BIOMETRIC_SECRET.encode("utf-8"), signing_input, hashlib.sha256).digest()
     s = _b64url_encode(sig)
     return f"{h}.{p}.{s}"
@@ -296,7 +295,7 @@ def verify_login_token(token: str) -> Optional[Dict[str, Any]]:
     if not token or token.count(".") != 2:
         return None
     h, p, s = token.split(".")
-    signing_input = f"{h}.{p}".encode("utf-8")
+    signing_input = f"{h}.{p}".encode()
     expected_sig = hmac.new(_BIOMETRIC_SECRET.encode("utf-8"), signing_input, hashlib.sha256).digest()
     try:
         provided_sig = _b64url_decode(s)

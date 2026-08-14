@@ -69,9 +69,9 @@
       </div>
 
       <div v-if="total > 0" class="pagination">
-        <button :disabled="page <= 1" @click="prevPage">上一页</button>
+        <button class="btn btn-sm" :disabled="page <= 1" @click="prevPage">上一页</button>
         <span>{{ page }} / {{ Math.ceil(total / perPage) }}</span>
-        <button :disabled="page >= Math.ceil(total / perPage)" @click="nextPage">下一页</button>
+        <button class="btn btn-sm" :disabled="page >= Math.ceil(total / perPage)" @click="nextPage">下一页</button>
       </div>
     </div>
 
@@ -560,6 +560,17 @@ onMounted(() => { loadBundles(1) })
 .page-header h1 { font-size: 20px; margin: 0; }
 .page-header p { color: #909399; font-size: 12px; margin: 4px 0 0; }
 .btn-guide { cursor: pointer; }
+
+.btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; text-decoration: none; display: inline-block; transition: all 0.2s; }
+.btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+.btn-primary:hover { background: var(--accent-hover, #4f46e5); }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+.btn-sm + .btn-sm { margin-left: 4px; }
+.btn-delete { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.btn-delete:hover { background: #fecaca; }
 
 .cfg-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e4e7ed; margin-bottom: 12px; }
 .cfg-tabs .tab { padding: 8px 16px; border: none; background: transparent; cursor: pointer; font-size: 14px; color: #606266; border-bottom: 2px solid transparent; }

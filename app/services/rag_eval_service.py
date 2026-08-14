@@ -22,12 +22,12 @@ from __future__ import annotations
 import math
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
 from app.logger import logger
-from app.models import KnowledgeBase, KbDocument, KbChunk
+from app.models import KnowledgeBase, KbDocument
 
 
 # ── 评估结果缓存 ──

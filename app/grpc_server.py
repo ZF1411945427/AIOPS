@@ -1,5 +1,5 @@
 """gRPC OTLP TraceService 服务器 — 接收微服务 gRPC OTLP 流量并入库。"""
-import threading
+import os
 from concurrent.futures import ThreadPoolExecutor
 import grpc
 from app.database import get_db_mode, get_session_for
@@ -7,7 +7,7 @@ from app.services.trace_ingest_service import ingest_otlp_protobuf
 from app.logger import logger
 
 _GRPC_HOST = "0.0.0.0"
-_GRPC_PORT = 4317
+_GRPC_PORT = int(os.environ.get("AIOPS_OTLP_GRPC_PORT", "14317"))
 _server = None
 
 

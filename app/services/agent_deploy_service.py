@@ -10,15 +10,12 @@
 """
 import json
 import os
-import secrets
 import time
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy.orm import Session
 
 from app.database import get_session_for, get_db_mode
-from app.models import Asset, BackgroundJob, EdgeSession, EdgeCommandLog
+from app.models import Asset, BackgroundJob, EdgeSession
 from app.logger import logger
 from app.services.background_task import _remote_exec_ssh
 
@@ -30,7 +27,7 @@ EDGE_AGENT_SOURCE = os.path.join(
 
 
 def _read_agent_script() -> str:
-    with open(EDGE_AGENT_SOURCE, "r", encoding="utf-8") as f:
+    with open(EDGE_AGENT_SOURCE, encoding="utf-8") as f:
         return f.read()
 
 

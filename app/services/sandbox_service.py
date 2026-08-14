@@ -11,7 +11,7 @@
 """
 import json
 import re
-from datetime import datetime, time
+from datetime import datetime
 
 from app.database import get_session_for, get_db_mode
 from app.models import SandboxConfig, SandboxPolicy, SandboxExecutionLog
@@ -88,7 +88,7 @@ def update_config(data: dict, db=None) -> dict:
                 except (TypeError, ValueError):
                     pass
         if "max_risk_level" in data and data["max_risk_level"] in RISK_ORDER:
-            setattr(cfg, "max_risk_level", data["max_risk_level"])
+            cfg.max_risk_level = data["max_risk_level"]
         for key in ("execution_window_start", "execution_window_end"):
             if key in data:
                 setattr(cfg, key, str(data[key])[:5])

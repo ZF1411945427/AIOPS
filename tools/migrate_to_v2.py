@@ -72,7 +72,7 @@ def main():
     # 最终统计
     final_stats = vector_store.get_stats()
     print("\n" + "=" * 60)
-    print(f"迁移完成！")
+    print("迁移完成！")
     print(f"  成功: {success_count}")
     print(f"  失败: {fail_count}")
     print(f"  Milvus 总切片数: {final_stats.get('total_chunks', 0)}")

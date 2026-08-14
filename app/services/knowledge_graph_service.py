@@ -1,7 +1,7 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Asset, AssetRelation, Alert, KnowledgeBase, AlertKbLink, Runbook
+from app.models import Asset, AssetRelation, Alert, KnowledgeBase, Runbook
 
 
 # CI type → color mapping for the dependency graph

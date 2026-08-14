@@ -56,10 +56,10 @@ class ConnectionTester:
             if private_key:
                 try:
                     pkey = paramiko.RSAKey.from_private_key(StringIO(private_key))
-                except:
+                except Exception:
                     try:
                         pkey = paramiko.ECDSAKey.from_private_key(StringIO(private_key))
-                    except:
+                    except Exception:
                         pkey = paramiko.Ed25519Key.from_private_key(StringIO(private_key))
 
             result = test_and_register_ssh(
@@ -143,7 +143,7 @@ class ConnectionTester:
             if kubeconfig:
                 try:
                     k8s_config.load_kube_config_from_dict(json.loads(kubeconfig))
-                except:
+                except Exception:
                     return {"ok": False, "message": "Kubeconfig 格式错误"}
             elif api_server and token:
                 try:

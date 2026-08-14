@@ -2,7 +2,6 @@ import json
 import re
 import subprocess
 from datetime import datetime
-from typing import Optional
 
 from app.models import DataSource
 
@@ -201,7 +200,7 @@ def _collect_cert_files(ssh_host, ssh_user, ssh_password, ssh_port, distro_key, 
                 cert_files.append(line)
 
     if not cert_files:
-        return [], f"未找到证书文件。请确认集群类型和证书路径。"
+        return [], "未找到证书文件。请确认集群类型和证书路径。"
     return cert_files, None
 
 
@@ -333,7 +332,8 @@ def _inspect_via_api(ds: DataSource, cfg: dict) -> dict:
                 continue
             if "BEGIN CERTIFICATE" not in pem_text:
                 continue
-            import tempfile, os
+            import tempfile
+            import os
             tmpf = tempfile.NamedTemporaryFile(mode="w", suffix=".crt", delete=False)
             try:
                 tmpf.write(pem_text)

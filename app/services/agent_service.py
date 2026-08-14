@@ -1,7 +1,6 @@
 import json
 import re
 import time
-import hashlib
 import threading
 import logging
 import requests
@@ -12,12 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AIProvider, AgentConfig, ChatSession, ChatMessage,
-    PendingAction, ToolInvocation, MCPServer, Asset, ABTestConfig,
+    PendingAction, ToolInvocation, Asset, ABTestConfig,
 )
 from app.services.mcp_registry import get_mcp_manifest, call_mcp_tool, get_mcp_tool
 from app.services import ab_test_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
 from app.database import get_session_for, get_db_mode
+
+logger = logging.getLogger("agent_service")
 
 # confirm 接口同步等待后台线程完成用
 _execution_events: Dict[int, threading.Event] = {}
@@ -767,9 +768,9 @@ def process_chat_message(
     messages.append({"role": "user", "content": user_message})
 
     # Build MCP tools manifest for LLM
-    mcp_tools = get_mcp_manifest()
+    manifest = get_mcp_manifest()
     openai_tools = []
-    for t in mcp_tools:
+    for t in manifest:
         openai_tools.append({
             "type": "function",
             "function": {
@@ -1222,7 +1223,6 @@ def process_chat_message(
         db.commit()
     except Exception as _eval_err:
         # 记录异常到日志，不再静默吞掉，便于排查 record_evaluation 接入问题
-        import logging
         logging.getLogger("agent_eval").exception(
             "record_evaluation failed: %s", _eval_err
         )

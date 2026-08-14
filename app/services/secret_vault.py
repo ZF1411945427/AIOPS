@@ -6,7 +6,6 @@
 """
 import base64
 import hashlib
-import json
 import re
 
 from app.config import VAULT_ENCRYPT_SEED

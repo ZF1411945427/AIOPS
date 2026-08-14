@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Role, RoleMenu
+from app.models import RoleMenu
 
 router = APIRouter(prefix="/api/menu", tags=["menu"])
 
 _config_path = os.path.join(os.path.dirname(__file__), "menu_config.json")
 if os.path.exists(_config_path):
-    with open(_config_path, "r", encoding="utf-8") as f:
+    with open(_config_path, encoding="utf-8") as f:
         DEFAULT_MENU = json.load(f)
 else:
     DEFAULT_MENU = []

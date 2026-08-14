@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -16,7 +16,7 @@ def auto_link(db: Session = Depends(get_db)):
     recent = datetime.now() - timedelta(hours=2)
     alerts = db.query(Alert).filter(
         Alert.created_at >= recent,
-        Alert.asset_id != None).all()
+        Alert.asset_id.isnot(None)).all()
     events = db.query(K8sEvent).filter(
         K8sEvent.last_seen_at >= recent).all()
 

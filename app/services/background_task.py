@@ -6,14 +6,11 @@ LLM 通过 get_task_status 轮询任务进度。
 
 import uuid
 import json
-import time
 import threading
-import subprocess
 from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Optional
 
-from sqlalchemy.orm import Session
 
 from app.database import get_session_for, get_db_mode
 from app.models import BackgroundJob, Asset
@@ -177,18 +174,18 @@ def _exec_steps(job_id: str, ip: str, user: str, password: str, port: int,
             es_url = f"https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-{version}-linux-x86_64.tar.gz"
             install_cmds = [
                 f"cd /tmp && wget -q '{es_url}' -O elasticsearch.tar.gz",
-                f"tar -xzf /tmp/elasticsearch.tar.gz -C /opt/",
+                "tar -xzf /tmp/elasticsearch.tar.gz -C /opt/",
                 f"mv {es_dir} {es_short}",
-                f"useradd -M -s /sbin/nologin elasticsearch 2>/dev/null || true",
+                "useradd -M -s /sbin/nologin elasticsearch 2>/dev/null || true",
                 f"chown -R elasticsearch:elasticsearch {es_short}",
                 f"mkdir -p {es_short}/data {es_short}/logs",
                 f"chown elasticsearch:elasticsearch {es_short}/data",
             ]
             rollback_cmds = [
-                f"systemctl stop elasticsearch 2>/dev/null || true",
+                "systemctl stop elasticsearch 2>/dev/null || true",
                 f"rm -rf {es_short}",
-                f"rm -f /tmp/elasticsearch.tar.gz",
-                f"userdel elasticsearch 2>/dev/null || true",
+                "rm -f /tmp/elasticsearch.tar.gz",
+                "userdel elasticsearch 2>/dev/null || true",
             ]
         else:
             es_dir = f"/opt/elasticsearch-{version}"
@@ -196,17 +193,17 @@ def _exec_steps(job_id: str, ip: str, user: str, password: str, port: int,
             es_url = f"https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-{version}-linux-x86_64.tar.gz"
             install_cmds = [
                 f"cd /tmp && wget -q '{es_url}' -O elasticsearch.tar.gz",
-                f"tar -xzf /tmp/elasticsearch.tar.gz -C /opt/",
+                "tar -xzf /tmp/elasticsearch.tar.gz -C /opt/",
                 f"mv {es_dir} {es_short}",
-                f"useradd -M -s /sbin/nologin elasticsearch 2>/dev/null || true",
+                "useradd -M -s /sbin/nologin elasticsearch 2>/dev/null || true",
                 f"chown -R elasticsearch:elasticsearch {es_short}",
                 f"mkdir -p {es_short}/data {es_short}/logs",
             ]
             rollback_cmds = [
-                f"systemctl stop elasticsearch 2>/dev/null || true",
+                "systemctl stop elasticsearch 2>/dev/null || true",
                 f"rm -rf {es_short}",
-                f"rm -f /tmp/elasticsearch.tar.gz",
-                f"userdel elasticsearch 2>/dev/null || true",
+                "rm -f /tmp/elasticsearch.tar.gz",
+                "userdel elasticsearch 2>/dev/null || true",
             ]
 
         ok, err = _run_cmds(install_cmds, "下载安装ES")

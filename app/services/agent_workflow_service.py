@@ -19,10 +19,9 @@ from sqlalchemy.orm import Session
 from app.database import get_session_for, get_db_mode
 from app.models import (
     AgentWorkflow, AgentWorkflowRun, AgentWorkflowNodeRun,
-    AIProvider, ChatSession, PendingAction, SystemConfig, WorkflowAuditLog,
+    AIProvider, PendingAction, SystemConfig, WorkflowAuditLog,
 )
-from app.services.mcp_registry import call_mcp_tool, get_internal_tools
-from app.services.mcp_tools import _get_db  # 复用 db helper
+from app.services.mcp_registry import call_mcp_tool
 
 # 智能体工作流节点参数模板（渲染 JSON/字符串数据，非 HTML），autoescape=True 会破坏数据
 # 安全性由 _render_value 的输入白名单与节点配置校验保障，故标记 nosec B701
@@ -190,7 +189,7 @@ def _eval_condition(expr: str, runtime_context: Dict) -> bool:
         except Exception:
             return False
     # eq / ne / gt / lt
-    for op, pyop in [(" eq ", " == "), (" ne ", " != "), (" gt ", " > "), (" lt ", " < "),
+    for op, pyop in [(" eq ", "=="), (" ne ", "!="), (" gt ", ">"), (" lt ", "<"),
                      ("==", "=="), ("!=", "!="), (">", ">"), ("<", "<")]:
         if op in expr:
             parts = expr.split(op)
@@ -869,12 +868,12 @@ def resume_unfinished_runs(db: Session):
         _run_id = r.id
         _db_mode = get_db_mode()
 
-        def _bg():
-            bg_db = get_session_for(_db_mode)()
+        def _bg(_rid=_run_id, _dmode=_db_mode):
+            bg_db = get_session_for(_dmode)()
             try:
-                _advance_run(bg_db, _run_id)
+                _advance_run(bg_db, _rid)
             except Exception as e:
-                logger.warning(f"[workflow-resume] run#{_run_id} 恢复执行异常: {e}")
+                logger.warning(f"[workflow-resume] run#{_rid} 恢复执行异常: {e}")
             finally:
                 bg_db.close()
 
@@ -910,7 +909,6 @@ def _execute_node_isolated(
 
     返回 {node_id, status, output, error, pending_action_id}。
     """
-    from app.logger import logger
 
     bg_db = get_session_for(db_mode)()
     try:

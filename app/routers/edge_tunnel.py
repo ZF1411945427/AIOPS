@@ -12,7 +12,6 @@
 """
 import json
 import asyncio
-import hashlib
 import secrets
 from datetime import datetime
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, Depends, Query
@@ -22,10 +21,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import EdgeSession, EdgeCommandLog, Asset, User
 from app.services.edge_tunnel_service import (
-    register_online, unregister_online, get_online_ws, is_agent_online,
+    register_online, is_agent_online,
     register_or_update_session, update_heartbeat, mark_offline, list_sessions,
-    execute_command_via_tunnel, resolve_exec_future, start_heartbeat_monitor,
-    get_outgoing_queue, send_to_agent, get_pending_commands,
+    execute_command_via_tunnel, resolve_exec_future, get_outgoing_queue, get_pending_commands,
     save_latest_metrics, get_latest_metrics,
 )
 from app.logger import logger
@@ -84,7 +82,7 @@ async def edge_tunnel_connect(websocket: WebSocket):
             # 2. 从 incoming 队列读取消息（带短 timeout 以便及时处理 outgoing）
             try:
                 raw = await asyncio.wait_for(incoming_queue.get(), timeout=0.3)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
             if raw is None:  # reader 退出哨兵

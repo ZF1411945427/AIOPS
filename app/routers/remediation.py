@@ -83,7 +83,6 @@ def api_remediation_create(
     params_command: str = Form(""),
     db: Session = Depends(get_db)):
     """创建自愈规则 JSON API."""
-    import json as _json
     params = {"target": params_target}
     if action_type == "restart":
         params["service"] = params_target

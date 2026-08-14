@@ -78,4 +78,6 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, _signal_handler)
 
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run("app.main:app", host=host, port=port, reload=False)

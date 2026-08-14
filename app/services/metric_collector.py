@@ -1,9 +1,6 @@
 """SSH 指标采集器 - 通过 SSH 连接资产执行命令采集真实系统指标"""
 import json
-import socket
-import paramiko
 from datetime import datetime
-from sqlalchemy.orm import Session
 from app.models import MetricRecord, Asset
 
 

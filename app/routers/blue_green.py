@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import BlueGreenDeploy, BlueGreenSwitchRecord, DataSource, Asset
+from app.models import BlueGreenDeploy, BlueGreenSwitchRecord, DataSource
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/blue-green", tags=["blue-green"])

@@ -11,7 +11,7 @@ from sqlalchemy import text as _sa_text
 from app.database import get_db
 from app.template_utils import get_templates, parse_json_config
 from app.models import Asset, DataSource
-from app.services import asset_service, topology_service, pod_health_service
+from app.services import topology_service, pod_health_service
 from app.services.mobile_push_service import verify_login_token
 
 router = APIRouter(prefix="/containers", tags=["containers"])
@@ -202,11 +202,10 @@ async def pod_terminal_ws(websocket: WebSocket, asset_id: int):
         else:
             config.load_kube_config()
 
-        import subprocess, asyncio, threading
+        import asyncio
 
         v1 = client.CoreV1Api()
         exec_url = f"/api/v1/namespaces/{ns}/pods/{name}/exec?command=/bin/sh&command=-c&command=if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi&stdin=true&stdout=true&stderr=true&tty=true"
-        import urllib.parse
         exec_url_compat = f"/api/v1/namespaces/{ns}/pods/{name}/exec"
         params = "command=bash&stdin=true&stdout=true&stderr=true&tty=true"
         try:

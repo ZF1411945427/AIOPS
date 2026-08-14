@@ -21,7 +21,7 @@
             <span class="agg-badge">{{ aggregateLabel }}</span>
             <span :style="valueStyle">{{ latest ? formatValue(latest) : '加载中' }}</span>
             <span class="unit" v-if="latest?.unit">{{ latest.unit }}</span>
-            <span class="count-badge" v-if="latest?.count > 0">({{ latest.count }} 台)</span>
+            <span class="count-badge" v-if="latest?.count > 0" :title="assetNames.length ? '资产: ' + assetNames.join('、') : ''">({{ latest.count }} 台)</span>
           </template>
           <template v-else>
             <span :style="valueStyle">{{ latest ? formatValue(latest) : '加载中' }}</span>
@@ -49,6 +49,7 @@ const props = defineProps({
   label: String,
   icon: { type: String, default: '📊' },
   latest: Object,
+  assets: { type: Array, default: () => [] },
   isAggregate: Boolean,
   aggregateLabel: { type: String, default: '' },
   isOffline: Boolean,
@@ -67,6 +68,19 @@ const statusClass = computed(() => {
   const v = props.latest
   if (!v) return null
   return metricStatus(props.name, v)
+})
+
+const assetNames = computed(() => {
+  const labels = props.latest?.asset_labels
+  if (!labels || !labels.length) return []
+  return labels.map(a => {
+    if (a.asset_id) {
+      const found = props.assets.find(asset => asset.id === a.asset_id)
+      return found ? found.name : `资产#${a.asset_id}`
+    }
+    if (a.target) return a.target
+    return '未知'
+  })
 })
 
 const valueStyle = computed(() => {

@@ -1,6 +1,5 @@
 import json
 import re
-import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -60,7 +59,6 @@ def probe_environment(db: Session, plan_id: int) -> dict:
 
 def _collect_env_probes(client, plan: DeployPlan) -> dict:
     """执行全套环境探查命令，返回结构化结果。"""
-    import time as _time
     def _run(cmd, timeout=15):
         try:
             _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
@@ -230,7 +228,6 @@ def stop_execution(db: Session, plan_id: int, rollback: bool = True) -> dict:
     默认 rollback=True：停止后自动执行一次回滚清理（停容器 + 清理产物 + 重置为 planned），
     避免卡死/中断后目标机残留容器或半成品。
     rollback=False 时仅断连重置状态（兼容旧行为）。"""
-    import paramiko
     plan = db.query(DeployPlan).filter(DeployPlan.id == plan_id).first()
     if not plan:
         return {"error": "计划不存在"}
@@ -824,7 +821,6 @@ def detect_artifact_source(url: str) -> str:
 
 def _run_ssh(asset, cmd: str, timeout: int = 300):
     """在目标机上执行命令，返回 (exit_status, stdout_text)。"""
-    import paramiko
     client = None
     try:
         client, host = _ssh_connect(asset)
@@ -1812,7 +1808,7 @@ def _ai_health_gate(provider, client, asset_map: dict, step: DeployStep, strateg
         pct = o.read().decode(errors="replace").strip().rstrip("%")
         disk_ok = int(pct) < 85 if pct.isdigit() else True
         checks.append({"name": "磁盘使用率", "passed": disk_ok, "detail": f"{pct}%" if pct.isdigit() else "未知"})
-    except Exception as e:
+    except Exception:
         checks.append({"name": "磁盘使用率", "passed": True, "detail": "检查失败"})
     # 3. 关键端口（如果已知）
     target_port = asset_map.get("TARGET_PORT", "")
@@ -1865,18 +1861,6 @@ def _ai_dynamic_scheduling(provider, plan: DeployPlan, step_results: list, strat
     except Exception:
         pass
     return {"adjust": "none", "reason": "默认继续", "parallelism": "keep"}
-    """把 AI 自主决策/重排追加到 plan.ai_decision_log_json（最多 200 条）。"""
-    try:
-        log = json.loads(plan.ai_decision_log_json) if isinstance(plan.ai_decision_log_json, str) and plan.ai_decision_log_json not in ("[]", "") else []
-    except Exception:
-        log = []
-    if not isinstance(log, list):
-        log = []
-    entry.setdefault("ts", datetime.now().isoformat())
-    log.append(entry)
-    if len(log) > 200:
-        log = log[-200:]
-    plan.ai_decision_log_json = json.dumps(log, ensure_ascii=False)
 
 
 def _ai_plan_step_autonomous(provider, step: DeployStep, plan: DeployPlan, probe: dict, env_context: dict) -> dict:
@@ -1957,7 +1941,6 @@ def _ai_resource_check(provider, plan: DeployPlan, steps: list, assets: list, pr
         return {"passed": False, "checks": [{"name": "SSH连接", "passed": False, "detail": "无目标资产"}],
                 "recommendation": "block", "summary": "无目标资产，无法部署"}
 
-    import time as _t
     asset = assets[0]
     try:
         client, host = _ssh_connect(asset)
@@ -2072,7 +2055,6 @@ def _ai_resource_check(provider, plan: DeployPlan, steps: list, assets: list, pr
                 {"role": "user", "content": user_prompt},
             ], timeout_override=15)
             if not resp.get("error"):
-                import json as _jj
                 content = resp["choices"][0]["message"]["content"]
                 ai = _extract_json(content) or {}
                 if ai.get("summary"):
@@ -2567,7 +2549,7 @@ def _ai_stream_execute(db: Session, plan_id: int, user_id: int = 0, decision_que
                                                     db.commit()
                                                     asset_failed = False
                                                     continue
-                                        yield {"type": "output", "line": f"⛔ 校验失败，AI 已决策回滚..."}
+                                        yield {"type": "output", "line": "⛔ 校验失败，AI 已决策回滚..."}
                                         yield from _ai_stream_rollback(client, steps, step, asset_map, _cwd, _provider, plan)
                                         continue
                                 except Exception as ve:
@@ -2725,7 +2707,6 @@ def stream_rollback_cleanup(db: Session, plan_id: int):
     """手动一键清理回滚：部署完成后（succeeded/failed/rolled_back），
     逆序回滚所有已执行的步骤，并重置计划状态为 planned 以便重新部署。
     产出流式事件供 WS 实时显示。"""
-    import time as _time
     plan = db.query(DeployPlan).filter(DeployPlan.id == plan_id).first()
     if not plan:
         yield {"type": "error", "message": "计划不存在"}
@@ -2859,7 +2840,6 @@ def _ai_step_failure(db, provider, decision_queue, step: DeployStep, output: str
 
 def _run_fix_commands(client, fix_commands: list, _cwd: str, asset_map: dict) -> None:
     """执行 AI 建议的修复命令（带 cwd 前缀）。"""
-    import time as _time
     for fc in fix_commands or []:
         fc = _resolve_command(fc, asset_map)
         if _cwd and not re.match(r'^cd\s', fc.strip()):
@@ -3632,7 +3612,7 @@ def download_report(db: Session, plan_id: int, fmt: str = "docx") -> dict:
 def _report_to_docx(report: dict) -> bytes:
     """将部署报告生成为专业 Word .docx 文档，返回 bytes。"""
     from docx import Document
-    from docx.shared import Inches, Pt, Cm, RGBColor
+    from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml.ns import qn

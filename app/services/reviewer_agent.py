@@ -10,7 +10,7 @@
 - 现有 propose_action 已标 review_gate=True（后续工具可自行扩展）
 """
 import json
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 

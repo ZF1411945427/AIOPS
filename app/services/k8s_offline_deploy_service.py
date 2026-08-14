@@ -10,12 +10,11 @@
 """
 import json
 import os
-import re
 import time
 import tarfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
@@ -85,6 +84,9 @@ def _plan_to_dict(p: K8sClusterPlan, include_kubeconfig: bool = False) -> dict:
         "image_repository": p.image_repository or "",
         "bundle_id": p.bundle_id,
         "registry_id": p.registry_id,
+        "http_proxy": p.http_proxy or "",
+        "https_proxy": p.https_proxy or "",
+        "no_proxy": p.no_proxy or "",
         "status": p.status or "draft",
         "current_step": p.current_step or 0,
         "kubeconfig": p.kubeconfig or "" if include_kubeconfig else "",
@@ -176,6 +178,9 @@ def create_plan(db: Session, payload: dict, user_id: int = 0) -> dict:
         image_repository=payload.get("image_repository", "").strip(),
         bundle_id=payload.get("bundle_id"),
         registry_id=payload.get("registry_id"),
+        http_proxy=(payload.get("http_proxy") or "").strip(),
+        https_proxy=(payload.get("https_proxy") or "").strip(),
+        no_proxy=(payload.get("no_proxy") or "").strip() or "127.0.0.1,localhost,.local",
         nodes_json=json.dumps(nodes, ensure_ascii=False),
         status="draft",
         created_by=user_id,
@@ -249,6 +254,12 @@ def update_plan(db: Session, plan_id: int, payload: dict) -> Optional[dict]:
         p.bundle_id = payload["bundle_id"] or None
     if "registry_id" in payload:
         p.registry_id = payload["registry_id"] or None
+    if "http_proxy" in payload:
+        p.http_proxy = (payload.get("http_proxy") or "").strip()
+    if "https_proxy" in payload:
+        p.https_proxy = (payload.get("https_proxy") or "").strip()
+    if "no_proxy" in payload:
+        p.no_proxy = (payload.get("no_proxy") or "").strip() or "127.0.0.1,localhost,.local"
     # 节点更新：整体替换
     if payload.get("nodes"):
         db.query(K8sClusterNode).filter(K8sClusterNode.plan_id == plan_id).delete()
@@ -473,11 +484,37 @@ def _set_hostname(client, node, label, p, db) -> str:
     return hn
 
 
+def _proxy_env_script(p: K8sClusterPlan) -> str:
+    """生成 export http_proxy/https_proxy/no_proxy 的 shell 片段。
+    任何需要 curl/wget/apt/yum 联网的命令前都应注入。空=无代理。"""
+    http_p = (p.http_proxy or "").strip()
+    https_p = (p.https_proxy or http_p or "").strip()
+    no_proxy_p = (p.no_proxy or "127.0.0.1,localhost,.local").strip()
+    if not http_p:
+        return ""
+    return (
+        f"export http_proxy='{http_p}'; "
+        f"export https_proxy='{https_p}'; "
+        f"export HTTP_PROXY='{http_p}'; "
+        f"export HTTPS_PROXY='{https_p}'; "
+        f"export no_proxy='{no_proxy_p}'; "
+        f"export NO_PROXY='{no_proxy_p}'; "
+    )
+
+
 def _install_preflight_deps(client, label, p, db, yield_event=None) -> None:
     """安装 kubeadm preflight 依赖：conntrack/ethtool/socat/crictl(cri-tools 可选)。"""
-    # 预配 apt 代理(环境变量可能未设置，走内置代理)以提升在线源可用性
-    proxy_conf = "cat /etc/apt/apt.conf.d/95proxies 2>/dev/null | grep -q 'Acquire' || " \
-                 """printf 'Acquire::http::Proxy "http://192.168.31.76:7897";\\nAcquire::https::Proxy "http://192.168.31.76:7897";\\n' > /etc/apt/apt.conf.d/95proxies; """
+    # 预配 apt 代理(plan.http_proxy)以提升在线源可用性
+    http_p = p.http_proxy or ""
+    https_p = p.https_proxy or http_p or ""
+    proxy_conf = ""
+    if http_p:
+        # 写入 /etc/apt/apt.conf.d/95proxies (幂等：已存在则跳过)
+        proxy_conf = (
+            "cat /etc/apt/apt.conf.d/95proxies 2>/dev/null | grep -q 'Acquire::http::Proxy' || "
+            f"printf 'Acquire::http::Proxy \"{http_p}\";\\nAcquire::https::Proxy \"{https_p or http_p}\";\\n' "
+            "> /etc/apt/apt.conf.d/95proxies; "
+        )
     script = (
         proxy_conf +
         "which conntrack ethtool socat >/dev/null 2>&1 && echo HAVE || "
@@ -555,8 +592,8 @@ def _install_containerd(client, ctx, label, p, db, yield_event=None) -> None:
             installed = True
     if yield_event: yield_event({"type": "log", "node": label, "message": "containerd 离线安装中..."})
     if not installed:
-        # 走包源安装（deb/rpm）
-        _run_remote(client, "apt-get install -y containerd >/dev/null 2>&1 || yum install -y containerd.io >/dev/null 2>&1; echo rc=$?", timeout=600)
+        # 走包源安装（deb/rpm）；如 plan 配置代理则注入环境变量
+        _run_remote(client, _proxy_env_script(p) + "apt-get install -y containerd >/dev/null 2>&1 || yum install -y containerd.io >/dev/null 2>&1; echo rc=$?", timeout=600)
     # 生成 containerd 配置
     _run_remote(client, _containerd_config_script(p, ctx), timeout=180)
     r = _run_remote(client, "containerd --version 2>/dev/null || echo FAIL", timeout=60)
@@ -605,7 +642,7 @@ def _install_k8s_binaries(client, ctx, label, p, db, yield_event=None) -> None:
         for b in list(missing):
             url = f"https://dl.k8s.io/{kv}/bin/linux/amd64/{b}"
             r = _run_remote(client,
-                            f"export http_proxy=${{http_proxy:-}}; export https_proxy=${{https_proxy:-}}; "
+                            _proxy_env_script(p) +
                             f"curl -fsSL -A 'curl/8.4' '{url}' -o /usr/local/bin/{b} && chmod +x /usr/local/bin/{b} && echo OK || echo FAIL",
                             timeout=900)
             if "OK" in r["stdout"]:
@@ -614,9 +651,10 @@ def _install_k8s_binaries(client, ctx, label, p, db, yield_event=None) -> None:
                 missing.remove(b)
             else:
                 _append_log(p, {"type": "warn", "node": label, "message": f"在线下载 {b} 失败，尝试包源"}, db)
-        # 2) 退化：包源安装 kubeadm 全家桶
+        # 2) 退化：包源安装 kubeadm 全家桶（注入代理）
         if missing:
             _run_remote(client,
+                        _proxy_env_script(p) +
                         "apt-get install -y kubeadm kubelet kubectl >/dev/null 2>&1 || "
                         "yum install -y kubeadm kubelet kubectl >/dev/null 2>&1; echo rc=$?", timeout=900)
     # 启用 kubelet(确保 systemd unit 存在，二进制安装时不会自动生成)
@@ -709,7 +747,7 @@ def _write_imagetar_jobs(client, ctx, label, p, db) -> None:
     for f in sorted(img_dir.iterdir()):
         if not f.is_file() or not f.name.endswith((".tar", ".tar.gz", ".tgz")):
             continue
-        _run_remote(client, f"mkdir -p /tmp/k8s-images && echo ok", timeout=60)
+        _run_remote(client, "mkdir -p /tmp/k8s-images && echo ok", timeout=60)
         try:
             _sftp_put(client, f, f"/tmp/k8s-images/{f.name}", 0o644)
         except Exception as e:
@@ -936,7 +974,7 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
                                 timeout=60)
         if cni_exist["stdout"].strip():
             _append_log(p, {"type": "ok", "node": labels[first_master.id], "message": f"CNI 已安装({p.cni})，跳过"}, db)
-            yield {"type": "log", "node": labels[first_master.id], "message": f"CNI 已安装，跳过 apply"}
+            yield {"type": "log", "node": labels[first_master.id], "message": "CNI 已安装，跳过 apply"}
         else:
             xdir = ctx.get("extract_dir")
             cni_manifest = ""
@@ -961,6 +999,7 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
                 if url:
                     # 先下载独立文件，下载失败立即报错(不落到旧残留文件)；成功后再 apply
                     r = _run_remote(fclient,
+                                    _proxy_env_script(p) +
                                     f"rm -f /root/k8s-cni-download.yaml; "
                                     f"curl -fsSL '{url}' -o /root/k8s-cni-download.yaml 2>&1; echo CURL_RC=$?; "
                                     f"if [ -s /root/k8s-cni-download.yaml ]; then "

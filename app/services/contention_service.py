@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from app.models import MetricRecord, K8sEvent, Alert
+from app.models import K8sEvent, Alert
 
 
 def detect_contention(db: Session):

@@ -2,8 +2,6 @@
 WebSocket 连接管理器
 支持房间/频道模式，前端按 room 订阅实时消息
 """
-import asyncio
-import json
 from typing import Dict, Set
 from fastapi import WebSocket
 from app.logger import logger

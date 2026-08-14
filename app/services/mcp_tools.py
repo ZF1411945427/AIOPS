@@ -1,15 +1,13 @@
-import json
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
 from app.database import get_session_for, get_db_mode
-from app.models import Alert, AlertRule, Asset, ChatSession, MetricRecord, K8sEvent, Incident, KnowledgeBase
+from app.models import Alert, Asset, MetricRecord, K8sEvent, Incident, KnowledgeBase
 from app.services.mcp_registry import register_mcp_tool, get_internal_tools, get_mcp_tool
 from app.services import remediation_service, alert_service, incident_service, asset_service, rag_service
-from app.routers.observability_correlation import run_correlation_analysis, format_correlation_for_llm
 from app.services.promql_parser import parse_promql, promql_to_dict
 
 
@@ -987,6 +985,7 @@ def query_correlation_analysis(db: Optional[Session] = None, user_id: Optional[i
         db = _get_db()
         close_db = True
     try:
+        from app.routers.observability_correlation import run_correlation_analysis, format_correlation_for_llm
         hours = int(kwargs.get("hours", 1))
         service = kwargs.get("service", "")
         asset_id = int(kwargs.get("asset_id", 0))
@@ -1902,7 +1901,7 @@ def switch_sub_agent(db: Optional[Session] = None, user_id: Optional[int] = None
     sub_agent_name = kwargs.get("sub_agent_name", "").strip()
     if not sub_agent_name:
         return {"status": "error", "message": "缺少 sub_agent_name"}
-    from app.services.sub_agent_service import get_sub_agent, list_sub_agents
+    from app.services.sub_agent_service import list_sub_agents
     valid = [sa.name for sa in list_sub_agents(db, enabled_only=True)] if db else []
     if sub_agent_name not in valid:
         return {"status": "error", "message": f"无效子智能体 '{sub_agent_name}'，可用: {', '.join(valid)}"}
@@ -2945,4 +2944,5 @@ def execute_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, *
 
 # 技能工具在文件尾部注册, 避免与 _get_db 的循环导入
 from app.services import skill_mcp_tools  # noqa: E402,F401 — 注册 list_skills/use_skill
+from app.services import toolbag_mcp_tools  # noqa: E402,F401 — 注册 search_tools/load_tool_schema
 

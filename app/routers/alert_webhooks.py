@@ -1,8 +1,7 @@
 import json
 import urllib.request
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter
 from sqlalchemy.orm import Session
-from app.database import get_db
 from app.models import AlertWebhook
 from app.template_utils import get_templates
 from app.security import validate_url_scheme

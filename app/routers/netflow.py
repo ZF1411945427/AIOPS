@@ -1,9 +1,8 @@
-from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Form
+from datetime import datetime
+from fastapi import APIRouter, Depends, Form
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
 from app.database import get_db
-from app.models import NetFlowRecord, NetFlowCollector
+from app.models import NetFlowRecord
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/netflow", tags=["netflow"])

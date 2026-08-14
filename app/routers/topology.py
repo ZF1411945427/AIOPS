@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services import topology_service
-from app.models import Asset, AssetRelation
+from app.models import Asset
 
 router = APIRouter(prefix="/topology", tags=["topology"])
 

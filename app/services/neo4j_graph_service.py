@@ -2,7 +2,6 @@
 Neo4j 知识图谱服务层
 支持真实图数据库连接，从 PostgreSQL 数据同步到 Neo4j
 """
-import json
 import os
 from typing import Optional
 
@@ -50,7 +49,6 @@ def sync_asset_graph(db_session):
         return 0
 
     from app.models import Asset, AssetRelation, Alert, Runbook
-    from sqlalchemy.orm import Session
 
     assets = db_session.query(Asset).all()
     relations = db_session.query(AssetRelation).all()
@@ -102,7 +100,7 @@ def sync_asset_graph(db_session):
             session.run(cypher_nodes, nodes=nodes)
             session.run(cypher_rels, rels=rels)
         return len(assets)
-    except Exception as e:
+    except Exception:
         return 0
 
 

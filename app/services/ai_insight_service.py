@@ -258,9 +258,9 @@ def cross_domain_rca(db: Session, provider, metric_name: str, asset_id: int,
     ).limit(1).all()
     asset_name = asset.name if asset else f"asset#{asset_id}"
     # 组装 LLM 输入
-    lines = [f"=== 跨域 RCA 分析 ===", f"目标资产: {asset_name} (ID={asset_id})", f"异常指标: {metric_name}", f"时间窗口: {hours}小时", f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ""]
+    lines = ["=== 跨域 RCA 分析 ===", f"目标资产: {asset_name} (ID={asset_id})", f"异常指标: {metric_name}", f"时间窗口: {hours}小时", f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ""]
     # 指标
-    lines.append(f"--- 指标时序 ---")
+    lines.append("--- 指标时序 ---")
     lines.append(f"趋势: {TREND_CN.get(trend.get('trend', ''), 'unknown')} (rel_change={trend.get('rel_change_pct', 0)}%)")
     lines.append(f"波动率: {trend.get('volatility', 0)} | 突刺: {'是' if trend.get('spike') else '否'}")
     if metric_data:

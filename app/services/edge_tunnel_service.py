@@ -22,7 +22,7 @@ import asyncio
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, List
 from fastapi import WebSocket
 
 from sqlalchemy.orm import Session
@@ -290,7 +290,7 @@ async def execute_command_via_tunnel(
             "status": log.status,
             "log_id": log.id,
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         duration_ms = int((time.time() - start) * 1000)
         log.status = EdgeCommandLog.STATUS_TIMEOUT
         log.duration_ms = duration_ms
@@ -321,20 +321,13 @@ def register_exec_future(log_id: int, future: asyncio.Future):
         _EXEC_FUTURES[log_id] = future
 
 
-def resolve_exec_future(log_id: int, result: dict):
-    with _EXEC_LOCK:
-        future = _EXEC_FUTURES.pop(log_id, None)
-    if future and not future.done():
-        future.set_result(result)
-
-
 async def _await_exec_result(log_id: int, timeout: int) -> dict:
     loop = asyncio.get_event_loop()
     future = loop.create_future()
     register_exec_future(log_id, future)
     try:
         return await asyncio.wait_for(future, timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         with _EXEC_LOCK:
             _EXEC_FUTURES.pop(log_id, None)
         raise

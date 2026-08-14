@@ -21,6 +21,9 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - APP_ENV=${APP_ENV:-prod}
+      - AIOPS_DB_URL=${AIOPS_DB_URL:-}
+      - AIOPS_TEMPO_OTLP_URL=http://tempo:4318/v1/traces
+      - AIOPS_TEMPO_QUERY_URL=http://tempo:3200
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
@@ -28,6 +31,23 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
+
+  # ── 可选: 生产数据库 Postgres(profile=postgres)──
+  # 启用: docker compose --profile postgres up -d
+  # 同时设置 .env 的 AIOPS_DB_URL 指向 postgres 服务
+  postgres:
+    image: postgres:16-alpine
+    container_name: aiops-postgres
+    profiles: ["postgres"]
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-aiops}
+      - POSTGRES_USER=${POSTGRES_USER:-aiops}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-aiops-secret}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    restart: unless-stopped
 
   # ── 可选: Prometheus 抓取本系统 /metrics(profile=monitoring) ──
   prometheus:
@@ -54,11 +74,86 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
       - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ── 可选: Loki 日志聚合(profile=monitoring) ──
+  loki:
+    image: grafana/loki:latest
+    container_name: aiops-loki
+    profiles: ["monitoring"]
+    volumes:
+      - ./deploy/loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/config.yml
+    restart: unless-stopped
+
+  # ── 可选: Tempo 分布式追踪(profile=monitoring) ──
+  tempo:
+    image: grafana/tempo:latest
+    container_name: aiops-tempo
+    profiles: ["monitoring"]
+    volumes:
+      - ./deploy/tempo/config.yml:/etc/tempo/config.yml:ro
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    command: -config.file=/etc/tempo/config.yml
+    restart: unless-stopped
+
+# ── 可选: HTTPS 反向代理 + Let's Encrypt 自动证书(profile=https)──
+  # 启用: DOMAIN=ops.example.com docker compose --profile https up -d
+  nginx:
+    image: nginx:alpine
+    container_name: aiops-nginx
+    profiles: ["https"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf.tpl:/etc/nginx/nginx.conf.tpl:ro
+      - ./deploy/nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      - certbot-www:/var/www/certbot
+      - certbot-conf:/etc/letsencrypt
+    environment:
+      - DOMAIN=${DOMAIN:?DOMAIN 必填, 如 ops.example.com}
+    command: /bin/sh /docker-entrypoint.sh
+    depends_on:
+      - aiops
+    restart: unless-stopped
+
+  # Let's Encrypt 证书签发 + 自动续签(每 12h 检测)
+  certbot:
+    image: certbot/certbot
+    container_name: aiops-certbot
+    profiles: ["https"]
+    volumes:
+      - certbot-www:/var/www/certbot
+      - certbot-conf:/etc/letsencrypt
+    entrypoint: >
+      sh -c "certbot certonly --webroot -w /var/www/certbot
+      --email $${CERTBOT_EMAIL:-admin@${DOMAIN}}
+      -d ${DOMAIN} --agree-tos --non-interactive
+      && echo '证书申请成功, 定期续签中...'
+      && trap exit TERM; while true; do
+      certbot renew --quiet; sleep 12h & wait $${!}; done"
     restart: unless-stopped
 
 volumes:
   prometheus-data:
   grafana-data:
+  loki-data:
+  tempo-data:
+  postgres-data:
+  certbot-www:
+  certbot-conf:

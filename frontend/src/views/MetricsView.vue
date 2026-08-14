@@ -64,6 +64,7 @@
           :label="getMetricLabel(name)"
           :icon="getMetricIcon(name).icon"
           :latest="latestValues[name]"
+          :assets="assets"
           :is-aggregate="isAggregateMode"
           :aggregate-label="aggregateLabel"
           :is-offline="isMetricOffline(name)"
@@ -80,17 +81,6 @@
         </div>
       </template>
     </div>
-
-    <CustomDashboard
-      ref="customDashRef"
-      :cards="customCards"
-      :loading="customLoading"
-      @add="openCustomModal"
-      @edit="editCustomCard"
-      @delete="deleteCustomCard"
-      @reorder="reorderCustomCards"
-      @resize="resizeCustomCard"
-    />
 
     <div v-if="showHistory" class="modal-overlay" @click.self="closeHistory">
       <div class="modal-box" style="width:680px;max-height:80vh;overflow-y:auto">
@@ -181,6 +171,7 @@
       :icon="getMetricIcon(detailName).icon"
       :unit="detailUnit"
       :latest="detailLatest"
+      :assets="assets"
       :chart-data="detailChartData"
       :color="getMetricColor(detailName)"
       :is-aggregate="isAggregateMode"
@@ -233,7 +224,6 @@ import request from '@/api/request'
 import * as echarts from 'echarts'
 import MetricCard from './metrics/MetricCard.vue'
 import MetricDetailModal from './metrics/MetricDetailModal.vue'
-import CustomDashboard from './metrics/CustomDashboard.vue'
 import { formatValue, formatTime, formatAxisTime, TIME_RANGES, THRESHOLDS, metricStatus, statusColor } from './metrics/metricsUtils.js'
 
 const CATEGORIES = [
@@ -264,6 +254,9 @@ const METRIC_LABELS = {
   ssh_connections: 'SSH 连接数', open_files: '打开文件数',
   process_count: '进程数', zombie_process: '僵尸进程数',
   svc_up: '服务在线状态', uptime_seconds: '运行时长',
+  synthetic_api_healthz_latency_ms: 'API 健康检查延迟', synthetic_api_healthz_up: 'API 健康检查状态', synthetic_api_healthz_status: 'API 健康检查响应码',
+  synthetic_api_readyz_latency_ms: 'API 就绪检查延迟', synthetic_api_readyz_up: 'API 就绪检查状态', synthetic_api_readyz_status: 'API 就绪检查响应码',
+  synthetic_victoria_metrics_latency_ms: 'VictoriaMetrics 延迟', synthetic_victoria_metrics_up: 'VictoriaMetrics 状态', synthetic_victoria_metrics_status: 'VictoriaMetrics 响应码',
 }
 
 function getMetricLabel(name) { return METRIC_LABELS[name] || name }

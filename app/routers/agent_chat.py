@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
 from app.database import get_db
-from app.models import ChatSession, ChatMessage, PendingAction, ToolInvocation, AgentConfig, Alert, Asset, AlertSessionLink, AssetSessionLink, AIProvider
+from app.models import ChatSession, ChatMessage, PendingAction, ToolInvocation, AgentConfig, Alert, Asset, AIProvider
 from app.services.agent_service import (
     process_chat_message, confirm_pending_action, cancel_pending_action, add_message)
 from app.services.mcp_registry import _MCP_TOOLS

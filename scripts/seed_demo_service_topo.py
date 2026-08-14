@@ -1,7 +1,8 @@
 """架构巡检图 + 服务调用拓扑 演示数据播种脚本
 幂等运行: 检测到已有数据则跳过。
 """
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timedelta
 import random

@@ -1329,6 +1329,9 @@ draft → planned → running → succeeded → (post-verify → report)
 | image_repository | String(256) | "" | 控制面镜像仓库（默认用离线默认 Registry） |
 | bundle_id | Integer FK(offline_repo_bundles.id) | nullable | 关联离线包（可空，联调/在线模式不要求） |
 | registry_id | Integer FK(offline_registries.id) | nullable | 关联私有 Registry（加载镜像用） |
+| http_proxy | String(256) | "" | 在线部署代理 URL（如 `http://192.168.100.2:7897`），留空=不走代理 |
+| https_proxy | String(256) | "" | HTTPS 代理 URL（留空=用 http_proxy） |
+| no_proxy | String(512) | "127.0.0.1,localhost,.local" | 不走代理的地址列表 |
 | nodes_json | Text | "[]" | 节点定义 JSON（见 13.3 节点对象结构） |
 | status | String(32) | "draft" | draft/planned/running/succeeded/failed/rolled_back |
 | current_step | Integer | 0 | 当前执行步骤序号（编排阶段） |
@@ -1651,7 +1654,7 @@ def xxx(db=None, user_id=None, **kwargs): ...
 | keywords | Text | JSON list |
 | tools_required | Text | JSON list（依赖 MCP 工具名） |
 | content | Text | SKILL.md 全文（frontmatter + 正文） |
-| source | String(32) | `builtin`(skills/ 目录) / `upload`(JSON 安装) / `marketplace`(zip 导入) |
+| source | String(32) | `builtin`(skills/ 目录) / `upload`(JSON 安装) / `marketplace`(zip 导入) / `remote`(远程 GitHub 仓库安装) |
 | file_path | String(512) | builtin 相对路径，其余为空 |
 | enabled | Boolean | 默认 True；false 时不出现在 Agent 工具清单 |
 | usage_count | Integer | 被 `use_skill` 调用次数（审计计数） |
@@ -1698,6 +1701,14 @@ def xxx(db=None, user_id=None, **kwargs): ...
 | POST | `/api/marketplace/publish` | 发布技能到市场（{skill_id}） |
 | POST | `/api/marketplace/install` | 从市场安装（{package}） |
 | DELETE | `/api/marketplace/packages/{package}` | 删除市场包 |
+| GET | `/api/marketplace/remote/presets` | 预设社区技能仓库（skills.sh 生态） |
+| GET | `/api/marketplace/remote/repos/{owner}/{repo}/skills?branch=` | 列出远程仓库 skills/ 技能 |
+| GET | `/api/marketplace/remote/repos/{owner}/{repo}/skills/{skill}` | 预览单个远程技能（元数据+正文） |
+| POST | `/api/marketplace/remote/install` | 从远程仓库安装（{owner,repo,skill,branch?}），source=remote |
+| GET | `/api/marketplace/remote/token` | 查询 GitHub Token 是否配置（返回值=***+has_value+source，不等明文） |
+| POST | `/api/marketplace/remote/token` | 设置 GitHub Token（{token}；空=不修改；{clear:true}=清除） |
+
+远程源 GitHub Token **系统层可配置**：存于 `SystemConfig` key=`github_api_token`（`system_configs`表），运行时由 `skill_remote.resolve_github_token` 解析（优先级：入参 > 系统配置 > 环境变量 `GITHUB_TOKEN`）。该 key 属于 `config_service.SENSITIVE_KEYS`，**通用配置列表 `get_all_configs` 完全跳过、不回显**（避免设置页全量回写 `***` 覆盖真实值）；仅技能市场页专用 token API（GET 查询/POST 设置/clear 清除）可读写。
 
 ---
 

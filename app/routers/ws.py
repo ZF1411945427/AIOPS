@@ -72,7 +72,7 @@ async def ws_correlation(websocket: WebSocket, token: str = Query("")):
                 action = payload.get("action", "")
                 if action == "ping":
                     await websocket.send_json({"type": "pong", "ts": datetime.now().isoformat()})
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await websocket.send_json({
                     "type": "heartbeat",
                     "ts": datetime.now().isoformat(),

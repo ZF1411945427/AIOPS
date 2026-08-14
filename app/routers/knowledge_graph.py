@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, Body
 from fastapi.responses import JSONResponse
-from typing import List, Optional
+from typing import Optional
 
 from app.database import get_db
 from app.services import knowledge_graph_service

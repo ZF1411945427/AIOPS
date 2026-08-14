@@ -190,7 +190,6 @@ def test_and_register_ssh(host: str, port: int = 22, username: str = "root",
     2. 连接成功后保存指纹到 known_hosts
     3. 后续操作使用 RejectPolicy + 已录入的指纹
     """
-    from io import StringIO
 
     # 先测试端口可达
     import socket
@@ -239,7 +238,7 @@ def test_and_register_ssh(host: str, port: int = 22, username: str = "root",
         result = stdout.read().decode().strip()
         client.close()
         if result == "ok":
-            return {"ok": True, "message": f"连接成功，指纹已录入", "fingerprint": fingerprint}
+            return {"ok": True, "message": "连接成功，指纹已录入", "fingerprint": fingerprint}
         else:
             return {"ok": False, "message": "命令执行异常"}
     except Exception as e:

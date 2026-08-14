@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request, Form, UploadFile, File, HTTPException, Body
+from fastapi import APIRouter, Depends, Request, Form, UploadFile, File, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 

@@ -6,6 +6,7 @@ Trace 数据接入路由
 - GET  /api/v1/traces/ingest-status  获取接入状态
 """
 import json
+import os
 from fastapi import APIRouter, Depends, Request, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -106,8 +107,8 @@ def agent_guide():
     return JSONResponse({
         "otlp_endpoint": "/v1/traces",
         "otlp_base": "http://<AIOps-IP>:8000",
-        "warning": "协议说明：本平台同时支持两种 OTLP 接收方式——① gRPC：端口 4317（SDK 默认协议，直接配置 http://<AIOps-IP>:4317 即可，无需改协议）；② HTTP：端口 8000，端点 /v1/traces（需显式设置 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf，Java 用 -Dotel.exporter.otlp.protocol=http/protobuf）。"
-                   "⚠️ 注意：若用 HTTP(8000) 接入但未设置协议，OTel SDK 默认会走 gRPC 去连 8000 端口，报错 StatusCode.UNAVAILABLE / transient error，链路数据无法上报。建议优先用 gRPC(4317) 接入，最省事。",
+        "warning": "协议说明：本平台同时支持两种 OTLP 接收方式——① gRPC：端口 14317（默认；可用 AIOPS_OTLP_GRPC_PORT 覆盖，SDK 默认协议直接配置 http://<AIOps-IP>:14317 即可，无需改协议）；② HTTP：端口 8000，端点 /v1/traces（需显式设置 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf，Java 用 -Dotel.exporter.otlp.protocol=http/protobuf）。"
+                   f"⚠️ 注意：若用 HTTP(8000) 接入但未设置协议，OTel SDK 默认会走 gRPC 去连 8000 端口，报错 StatusCode.UNAVAILABLE / transient error，链路数据无法上报。建议优先用 gRPC({os.environ.get('AIOPS_OTLP_GRPC_PORT', '14317')}) 接入，最省事。",
         "guides": {
             "java": {
                 "title": "Java (Spring Boot / JAR)",

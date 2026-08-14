@@ -9,8 +9,7 @@ from app.models import (
     AlertRule, Alert, Incident, IncidentAlert, AlertSuppression,
     AlertSilenceSchedule, AlertWebhook,
     K8sEvent, MetricRecord, Span,
-    ChatSession, ChatMessage, ToolInvocation, PendingAction,
-    ChangeRequest, ChangeTask,
+    ChatSession, ChatMessage, ToolInvocation, ChangeRequest, ChangeTask,
     KnowledgeBase, Runbook,
     NotificationLog, NotificationTemplate, NotificationChannel,
     DataSource, SystemPostureRecord, NetFlowRecord, ScriptTask,
@@ -19,9 +18,8 @@ from app.models import (
     KafkaPipeline, FeatureStoreItem, PredictionModel,
     DashboardCardConfig, ReportSchedule, ApiToken,
     AIProvider, AgentConfig, ServiceMeshConfig, NetFlowCollector,
-    TagCategory, Tag, SecurityBaselineTemplate,
+    TagCategory, SecurityBaselineTemplate,
 )
-from app.services import config_service
 
 
 def seed_baseline_templates(db):
@@ -180,8 +178,12 @@ def seed_all():
         db.delete(marker)
 
     now = datetime.now()
-    days_ago = lambda d: now - timedelta(days=d)
-    hours_ago = lambda h: now - timedelta(hours=h)
+
+    def days_ago(d):
+        return now - timedelta(days=d)
+
+    def hours_ago(h):
+        return now - timedelta(hours=h)
 
     # ── Users ──
     demo_users = []

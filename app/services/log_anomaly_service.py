@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from app.models import LogAnomalyRule, Alert, Asset, DataSource
+from app.models import LogAnomalyRule, Alert, DataSource
 
 
 def check_log_anomalies(db: Session):

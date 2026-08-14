@@ -22,7 +22,7 @@ def cron_next_runs(db: Session = Depends(get_db)):
 @router.post("/api/cron/preview")
 def cron_preview(payload: dict):
     from croniter import croniter
-    from datetime import datetime, timedelta
+    from datetime import datetime
     try:
         cron = payload.get("cron", "").strip()
         if not cron:

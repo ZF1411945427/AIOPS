@@ -125,6 +125,13 @@
             <div class="stat-label">离线</div>
           </div>
         </div>
+        <button class="fm-arch-btn" @click="openArchDialog" title="生成该业务域的系统架构图">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 3h2v4H9zM9 13h2v4H9zM3 9h4v2H3zM13 9h4v2h-4z"/>
+            <path d="M5 5l2 2M15 5l-2 2M5 15l2-2M15 15l-2-2"/>
+          </svg>
+          生成架构图
+        </button>
       </div>
 
       <!-- Search bar -->
@@ -157,6 +164,7 @@
           <span class="lg-dot" style="background:#E6A23C"></span>警告
           <span class="lg-dot" style="background:#ef4444"></span>严重
           <span class="lg-dot" style="background:#94a3b8"></span>离线
+          <span class="lg-note">卡片边框/圆点=健康状态</span>
           <span class="lg-label" style="margin-left:16px">调用:</span>
           <span class="lg-line" style="background:#94a3b8"></span>低错误
           <span class="lg-line" style="background:#E6A23C"></span>警告
@@ -164,6 +172,71 @@
         </div>
       </div>
     </template>
+
+<!-- 生成架构图配置弹窗 -->
+    <el-dialog v-model="archDialogVisible" title="生成系统架构图" width="520px" class="fm-arch-dialog">
+      <div class="arch-dialog-body">
+        <div class="arch-dialog-tip">根据当前业务域 <b>{{ currentDomain.name }}</b> 的资产与依赖关系，自动生成 draw.io 架构图（分层 + 父子归属 + 依赖连线）。</div>
+        <div v-if="archMeta" class="arch-dialog-meta">
+          <span>资产 {{ archMeta.asset_count }} 个</span>
+          <span class="sep">|</span>
+          <span>关系 {{ archMeta.relation_count }} 条</span>
+          <span class="sep">|</span>
+          <span>{{ archMeta.message }}</span>
+        </div>
+        <div class="arch-field">
+          <label>导出格式</label>
+          <el-select v-model="archFormat" style="width:100%">
+            <el-option value="drawio" label=".drawio（可编辑源文件）" />
+            <el-option value="png" label="PNG 图片" />
+            <el-option value="svg" label="SVG 矢量图" />
+            <el-option value="pdf" label="PDF 文档" />
+          </el-select>
+        </div>
+        <div class="arch-field">
+          <label class="arch-ai-toggle">
+            <el-switch v-model="archAiLayout" size="small" />
+            <span>AI 智能布局</span>
+            <span class="arch-ai-badge">NEW</span>
+          </label>
+          <div class="arch-field-hint">AI 分析资产关系后优化节点排序，减少连线交叉。需 AI provider 在线。</div>
+        </div>
+        <div class="arch-field">
+          <label>draw.io 本地安装路径</label>
+          <el-input v-model="archDrawioPath" placeholder="如 D:\Apps\draw.io\draw.io.exe">
+            <template #append>
+              <el-button @click="browseDrawioPath">浏览</el-button>
+            </template>
+          </el-input>
+          <div class="arch-field-hint">实时绘制、导出 PNG/SVG/PDF 都需要此路径。未填则仅生成 .drawio 文件。</div>
+          <input ref="drawioFileInput" type="file" accept=".exe,.cmd,.bat" style="display:none" @change="onDrawioFilePick" />
+        </div>
+        <div class="arch-field">
+          <label class="arch-ai-toggle">
+            <el-switch v-model="archLiveDraw" size="small" :disabled="!archDrawioPath" />
+            <span>实时绘制到 draw.io</span>
+            <span class="arch-live-badge">LIVE</span>
+          </label>
+          <div class="arch-field-hint">启动 draw.io 桌面版，AI 逐步绘制节点和连线，您可实时观看绘制过程。</div>
+        </div>
+        <div v-if="archResult" class="arch-result" :class="{ error: !archResult.ok }">
+          <template v-if="archResult.ok && archResult.drawio_download">
+            <a :href="archResult.drawio_download" target="_blank" class="arch-dl">下载 .drawio</a>
+            <a v-if="archResult.export_download" :href="archResult.export_download" target="_blank" class="arch-dl">下载导出文件</a>
+          </template>
+          <span>{{ archResult.message }} {{ archResult.export_message || '' }}</span>
+          <div v-if="archResult.ai_analysis" class="arch-ai-result">
+            <span class="arch-ai-label">AI 分析:</span> {{ archResult.ai_analysis }}
+            <span v-if="archResult.ai_suggestions" class="arch-ai-sug">· {{ archResult.ai_suggestions }}</span>
+          </div>
+          <div v-if="archResult.ai_error" class="arch-ai-error">{{ archResult.ai_error }}</div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="archDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="archGenerating" @click="doGenerateArch">生成架构图</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Entity detail drawer -->
     <el-drawer
@@ -378,6 +451,17 @@ const drawerLoading = ref(false)
 const drawerError = ref('')
 const detail = ref(null)
 
+// ====== 生成架构图对话框 ======
+const archDialogVisible = ref(false)
+const archGenerating = ref(false)
+const archFormat = ref('drawio')
+const archDrawioPath = ref('')
+const archMeta = ref(null)
+const archResult = ref(null)
+const archAiLayout = ref(true)  // AI 智能布局开关(默认开启)
+const archLiveDraw = ref(false)  // 实时绘制到 draw.io 桌面版
+const drawioFileInput = ref(null)  // 文件选择器 ref
+
 // ====== 架构拓扑(ECharts 分层卡片 + 调用连线) ======
 const svcNodes = ref([])
 const svcEdges = ref([])
@@ -398,6 +482,14 @@ function _edgeColor(er) {
   if (er >= 30) return '#ef4444'
   if (er >= 5) return '#E6A23C'
   return '#94a3b8'
+}
+
+function _healthColor(hs) {
+  const h = (hs || '').toLowerCase()
+  if (h === 'red' || h === 'critical') return '#ef4444'
+  if (h === 'warning' || h === 'warn') return '#E6A23C'
+  if (h === 'gray' || h === 'offline' || h === 'offline' || h === 'down') return '#94a3b8'
+  return '#67C23A'
 }
 
 function _nameMatch(name) {
@@ -512,6 +604,7 @@ function renderDomainGraph() {
   const graphNodes = finalEntities.map(e => {
     const pos = layerXMap[e.id] || { x: chartW / 2, y: 100 }
     const style = LAYER_STYLE[e.layerKey] || LAYER_STYLE['4']
+    const healthC = _healthColor(e.health_status)
     return {
       id: String(e.id),
       name: e.name,
@@ -523,8 +616,8 @@ function renderDomainGraph() {
           { offset: 0, color: '#ffffff' },
           { offset: 1, color: style.bg },
         ]),
-        borderColor: style.border,
-        borderWidth: 1.5,
+        borderColor: healthC,
+        borderWidth: 2,
         borderRadius: 10,
         shadowBlur: 6,
         shadowOffsetY: 2,
@@ -532,10 +625,14 @@ function renderDomainGraph() {
       },
       label: {
         show: true, position: 'inside',
-        formatter: `{name|${_truncate(e.name, 16)}}\n{type|${_truncate(e.ci_type || '', 14)}}`,
+        formatter: `{dot|●} {name|${_truncate(e.name, 13)}}\n{type|${_truncate(e.ci_type || '', 14)}}`,
         rich: {
-          name: { fontSize: 11, fontWeight: 700, color: '#1e293b', lineHeight: 17, width: 130, overflow: 'truncate' },
-          type: { fontSize: 9, color: '#64748b', lineHeight: 13, width: 130, overflow: 'truncate' },
+          dot: {
+            fontSize: 10, color: healthC, width: 14, height: 16,
+            align: 'left', verticalAlign: 'middle', padding: [0, 0, 0, 2],
+          },
+          name: { fontSize: 11, fontWeight: 700, color: '#1e293b', lineHeight: 17, width: 118, overflow: 'truncate' },
+          type: { fontSize: 9, color: '#64748b', lineHeight: 13, width: 118, overflow: 'truncate', padding: [0, 0, 0, 16] },
         },
       },
       raw: e,
@@ -555,6 +652,7 @@ function renderDomainGraph() {
       source: String(srcId), target: String(tgtId),
       lineStyle: { color: _edgeColor(edge.error_rate || 0), width: 2, curveness: 0.25, opacity: 0.85 },
       label: { show: edge.call_count > 3, formatter: `{c|${edge.call_count}次}`, rich: { c: { fontSize: 9, color: '#64748b', padding: [1, 4] } } },
+      raw: edge,
     })
   }
 
@@ -568,7 +666,10 @@ function renderDomainGraph() {
           return html
         }
         if (p.dataType === 'edge') {
-          return `<b>${p.data.source} → ${p.data.target}</b><br/>调用 ${p.data.call_count} 次, 错误 ${p.data.error_count} 次`
+          const e = p.data.raw || {}
+          const errRate = (e.error_rate != null ? e.error_rate : 0) + '%'
+          const avgMs = e.avg_duration_ms != null ? e.avg_duration_ms + 'ms' : '-'
+          return `<b>${e.source || p.data.source} → ${e.target || p.data.target}</b><br/>调用 ${e.call_count ?? 0} 次 · 错误 ${e.error_count ?? 0} 次<br/>错误率 ${errRate} · 平均 ${avgMs}`
         }
         return ''
       },
@@ -711,6 +812,50 @@ function formatTime(ts) {
   } catch {
     return ts
   }
+}
+
+async function openArchDialog() {
+  archDialogVisible.value = true
+  archGenerating.value = false
+  archResult.value = null
+  archMeta.value = null
+  try {
+    const data = await request.get('/api/arch-diagram/meta', { params: { domain: currentDomain.value.name } })
+    archMeta.value = data
+  } catch (e) {
+    archMeta.value = { message: '加载域信息失败: ' + (e.message || '') }
+  }
+}
+
+async function doGenerateArch() {
+  archGenerating.value = true
+  archResult.value = null
+  try {
+    archResult.value = await request.post('/api/arch-diagram/generate', {
+      domain: currentDomain.value.name,
+      drawio_path: archDrawioPath.value || null,
+      format: archFormat.value,
+      ai_layout: archAiLayout.value,
+      live_draw: archLiveDraw.value,
+    })
+  } catch (e) {
+    archResult.value = { ok: false, message: '生成失败: ' + (e.message || '') }
+  } finally {
+    archGenerating.value = false
+  }
+}
+
+function browseDrawioPath() {
+  const el = drawioFileInput.value
+  if (el) el.click()
+}
+
+function onDrawioFilePick(e) {
+  const file = e.target.files && e.target.files[0]
+  if (file) {
+    archDrawioPath.value = file.path || file.name
+  }
+  e.target.value = ''
 }
 
 onMounted(loadDomains)
@@ -1547,4 +1692,79 @@ html[data-theme="dark"] .arch-topo-wrap {
 .lg-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .lg-line { width: 14px; height: 2px; display: inline-block; }
 .lg-label { font-weight: 500; color: var(--text-secondary, #64748b); }
+.lg-note { font-size: 0.68rem; color: var(--text-tertiary, #94a3b8); margin-left: 2px; }
+
+/* ── 生成架构图按钮 ── */
+.fm-arch-btn {
+  margin-left: 10px;
+  padding: 6px 14px;
+  border: 1px solid rgba(99,102,241,0.4);
+  border-radius: 8px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.25);
+}
+.fm-arch-btn:hover { filter: brightness(1.08); box-shadow: 0 4px 12px rgba(99,102,241,0.35); }
+.fm-arch-btn:active { transform: translateY(1px); }
+
+/* ── 生成架构图弹窗 ── */
+.fm-arch-dialog :deep(.el-dialog__body) { padding: 18px 20px 8px; }
+.arch-dialog-body { display: flex; flex-direction: column; gap: 14px; }
+.arch-dialog-tip {
+  font-size: 0.8rem; line-height: 1.6; color: var(--text-secondary, #64748b);
+  background: rgba(99,102,241,0.06);
+  border: 1px solid rgba(99,102,241,0.18);
+  border-radius: 8px; padding: 10px 12px;
+}
+.arch-dialog-tip b { color: var(--text, #1e293b); }
+.arch-dialog-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 0.78rem; color: var(--text-secondary, #64748b);
+}
+.arch-dialog-meta .sep { color: var(--text-tertiary, #94a3b8); }
+.arch-field { display: flex; flex-direction: column; gap: 6px; }
+.arch-field label { font-size: 0.78rem; font-weight: 600; color: var(--text, #1e293b); }
+.arch-field-hint { font-size: 0.7rem; color: var(--text-tertiary, #94a3b8); }
+.arch-result {
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 0.78rem; color: var(--success-text, #059669);
+  background: rgba(5,150,105,0.06);
+  border: 1px solid rgba(5,150,105,0.2);
+  border-radius: 8px; padding: 10px 12px;
+}
+.arch-result.error { color: var(--danger-text, #dc2626); background: rgba(220,38,38,0.06); border-color: rgba(220,38,38,0.2); }
+.arch-dl { color: #6366f1; font-weight: 600; text-decoration: none; }
+.arch-dl:hover { text-decoration: underline; }
+
+/* ── AI 智能布局 ── */
+.arch-ai-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.arch-ai-badge {
+  display: inline-block; font-size: 0.6rem; font-weight: 700;
+  padding: 1px 6px; border-radius: 4px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff; letter-spacing: 0.3px;
+}
+.arch-live-badge {
+  display: inline-block; font-size: 0.6rem; font-weight: 700;
+  padding: 1px 6px; border-radius: 4px;
+  background: linear-gradient(135deg, #ef4444, #f97316);
+  color: #fff; letter-spacing: 0.3px;
+  animation: arch-pulse 1.5s ease-in-out infinite;
+}
+@keyframes arch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.arch-ai-result {
+  margin-top: 6px; padding: 8px 10px;
+  background: rgba(99,102,241,0.06); border-radius: 6px;
+  font-size: 0.75rem; line-height: 1.5; color: var(--text-secondary, #64748b);
+}
+.arch-ai-label { font-weight: 600; color: #6366f1; }
+.arch-ai-sug { color: var(--text-tertiary, #94a3b8); }
+.arch-ai-error { margin-top: 4px; font-size: 0.72rem; color: #dc2626; }
 </style>

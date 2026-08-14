@@ -3,9 +3,7 @@
 使用 Milvus Lite（本地文件存储），部署到 Linux 时可无缝切换到 Milvus Standalone。
 """
 import os
-import json
 from typing import Dict, List, Optional
-from pathlib import Path
 
 from pymilvus import MilvusClient, DataType
 

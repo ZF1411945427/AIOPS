@@ -30,7 +30,7 @@ pQIDAQAB
 -----END PUBLIC KEY-----"""
 
 if os.path.exists(_PUB_KEY_FILE):
-    with open(_PUB_KEY_FILE, "r", encoding="utf-8") as _f:
+    with open(_PUB_KEY_FILE, encoding="utf-8") as _f:
         _PUBLIC_KEY_PEM = _f.read().strip()
 else:
     _PUBLIC_KEY_PEM = _PUBLIC_KEY_PEM_HARDCODED
@@ -83,7 +83,7 @@ def _collect_cpu():
         pass
     if os.name == "posix":
         try:
-            with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+            with open("/proc/cpuinfo", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     if line.lower().startswith("model name"):
                         return line.split(":", 1)[1].strip()
@@ -165,7 +165,7 @@ def parse_license(license_text: str) -> dict:
 def _read_state() -> dict:
     try:
         if os.path.exists(STATE_FILE):
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with open(STATE_FILE, encoding="utf-8") as f:
                 return json.load(f)
     except Exception:
         pass
@@ -227,7 +227,7 @@ def check_license() -> dict:
         return result
 
     try:
-        with open(LICENSE_FILE, "r", encoding="utf-8") as f:
+        with open(LICENSE_FILE, encoding="utf-8") as f:
             license_text = f.read()
     except Exception as e:
         result = {**base, "status": "invalid", "reason": f"授权文件读取失败: {e}"}

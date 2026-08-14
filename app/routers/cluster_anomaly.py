@@ -1,11 +1,8 @@
-import re
 from datetime import datetime, timedelta
-from collections import defaultdict
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
 from app.database import get_db
-from app.models import K8sEvent, ClusterAnomalyEvent, Alert
+from app.models import K8sEvent
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/cluster-anomaly", tags=["cluster-anomaly"])

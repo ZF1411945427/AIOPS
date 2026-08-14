@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Asset, SecurityBaselineTemplate, AssetBaselineCheck
+from app.models import Asset, SecurityBaselineTemplate
 from app.services.baseline_service import (
     get_baseline_templates,
     run_check,

@@ -1,9 +1,6 @@
-import json
 import socket
 import concurrent.futures
-from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from app.models import DiscoverySchedule, DiscoveryResult
 
 
@@ -106,7 +103,7 @@ def _parse_target_range(target_range: str) -> list:
                     s1, s2, s3, s4 = start_ip.rsplit(".", 3)
                     for i in range(int(s4), int(end.split(".")[-1]) + 1):
                         hosts.append(f"{s1}.{s2}.{s3}.{i}")
-            except:
+            except Exception:
                 hosts.append(start_ip)
         else:
             hosts.append(part)

@@ -1,10 +1,8 @@
-import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from app.database import get_db
-from app.models import MetricRecord, Asset, Alert, PredictionModel
+from app.models import MetricRecord
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/predictions-enhanced", tags=["predictions_enhanced"])

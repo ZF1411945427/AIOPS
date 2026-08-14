@@ -1,10 +1,9 @@
-import hashlib
 
 from pathlib import Path
 
 import json
 
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from slowapi import Limiter
@@ -79,9 +78,6 @@ def product_intro_vue(request: Request):
 def user_guide(request: Request):
     return _serve_vue()
 
-@router.get("/product/overview", response_class=HTMLResponse)
-def product_overview(request: Request):
-    return templates.TemplateResponse("product_overview.html", {"request": request})
 @router.post("/login")
 @_limiter.limit("10/minute")
 async def login(request: Request, db: Session = Depends(get_db)):

@@ -116,6 +116,25 @@
             </div>
           </div>
 
+          <details class="proxy-block">
+            <summary>🌐 网络代理(可选，仅在线部署需要)</summary>
+            <div class="form-grid" style="margin-top: 8px">
+              <div class="form-row">
+                <label>HTTP 代理</label>
+                <input v-model="form.http_proxy" placeholder="如 http://192.168.100.2:7897" />
+              </div>
+              <div class="form-row">
+                <label>HTTPS 代理</label>
+                <input v-model="form.https_proxy" placeholder="留空=用 HTTP 代理" />
+              </div>
+              <div class="form-row">
+                <label>NO_PROXY</label>
+                <input v-model="form.no_proxy" placeholder="127.0.0.1,localhost,.local" />
+              </div>
+            </div>
+            <div class="hint">设置后会注入到 apt/curl/wget 等所有联网步骤。NAT 模式下填宿主机代理 IP（如 VMware 网关 192.168.100.2:7897）</div>
+          </details>
+
           <div class="node-head">
             <h4>节点列表 <span class="req">*</span></h4>
             <button class="btn sm" @click="addNode">＋ 添加节点</button>
@@ -245,6 +264,7 @@ const phases = ['预检', '环境准备', '运行时/二进制', 'kubeadm配置'
 function emptyForm() {
   return { name: '', kubernetes_version: '', runtime: 'containerd', cni: 'calico',
            pod_cidr: '', service_cidr: '', image_repository: '', bundle_id: null, registry_id: null,
+           http_proxy: '', https_proxy: '', no_proxy: '127.0.0.1,localhost,.local',
            nodes: [{ host_role: 'master', asset_id: null, ip: '', hostname: '', username: 'root', password: '', ssh_port: 22 }] }
 }
 
@@ -467,6 +487,10 @@ input, select { width: 100%; border: 1px solid #dcdfe6; border-radius: 4px; padd
 .node-head { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; }
 .node-head h4 { margin: 0; font-size: 14px; }
 .node-head .req { color: #f56c6c; }
+
+.proxy-block { border: 1px dashed #dcdfe6; border-radius: 4px; padding: 8px 12px; margin: 12px 0; background: #fafbfc; }
+.proxy-block summary { cursor: pointer; font-size: 13px; color: #606266; user-select: none; }
+.proxy-block summary:hover { color: #409eff; }
 .nodes { display: flex; flex-direction: column; gap: 6px; }
 .node-row { display: flex; gap: 6px; align-items: center; }
 .node-row select, .node-row input { width: auto; }

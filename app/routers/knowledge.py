@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Body, Query
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
-from app.services import knowledge_service, rag_service
+from app.services import knowledge_service
 from app.models import KnowledgeBase, KbDocument, Runbook
 from sqlalchemy.orm import Session
 from sqlalchemy import or_

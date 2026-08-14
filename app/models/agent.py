@@ -1,10 +1,11 @@
 """域模型: agent (H2 models 拆分) - 各域模型, 无跨文件循环引用(全字符串FK)。"""
 
 import json
+import uuid
 
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text
 
 from app.database import Base
 
@@ -31,7 +32,8 @@ class AIProvider(Base):
 
     def set_api_key(self, value):
         from cryptography.fernet import Fernet
-        import hashlib, base64
+        import hashlib
+        import base64
         from app.config import PROVIDER_ENCRYPT_SEED
         value = (value or "").strip()
         if not value:
@@ -46,7 +48,8 @@ class AIProvider(Base):
             return ""
         try:
             from cryptography.fernet import Fernet
-            import hashlib, base64
+            import hashlib
+            import base64
             from app.config import PROVIDER_ENCRYPT_SEED
             seed = PROVIDER_ENCRYPT_SEED.encode("utf-8")
             key = base64.urlsafe_b64encode(hashlib.sha256(seed).digest())

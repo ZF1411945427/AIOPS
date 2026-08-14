@@ -1,13 +1,12 @@
 from app.template_utils import parse_json_config
 import json
-import random
 import re
 import time
 from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.models import DataSource, MetricRecord, Asset, K8sEvent, Alert
+from app.models import DataSource, MetricRecord, Asset, K8sEvent
 from sqlalchemy import text as _sa_text
 
 
@@ -179,7 +178,7 @@ def test_source(db: Session, source_id: int) -> tuple:
     elif source.type == "otel":
         success, msg = (True, "OTLP endpoint ready at /api/v1/traces/otlp")
     else:
-        return (False, f"数据源连接失败")
+        return (False, "数据源连接失败")
 
     source.last_status = "online" if success else "error"
     source.last_error = "" if success else msg
@@ -190,7 +189,6 @@ def test_source(db: Session, source_id: int) -> tuple:
 
 def _test_ssh(source: DataSource) -> tuple:
     try:
-        import paramiko
         cfg = _source_auth(source)
         from app.services.ssh_helper import connect_ssh
         client = connect_ssh(
@@ -247,7 +245,7 @@ def _test_docker(source: DataSource) -> tuple:
         info = client.info()
         containers = client.containers.list(all=True)
         client.close()
-        return (True, f"docker ok")
+        return (True, "docker ok")
     except Exception as e:
         return (False, f"Docker 连接失败: {str(e)}")
 
@@ -604,7 +602,6 @@ def _sync_docker_asset_via_ssh(db: Session, host: str, container_id: str, name: 
 
 
 def _scrape_ssh(db: Session, source: DataSource) -> tuple:
-    import paramiko
     cfg = _source_auth(source)
     host = source.endpoint
     port = int(cfg.get("ssh_port", cfg.get("port", 22)))
@@ -1052,7 +1049,7 @@ def _scrape_docker(db: Session, source: DataSource) -> tuple:
 
         source.last_status = "online"
         source.last_error = ""
-        msg = f"采集完成"
+        msg = "采集完成"
     finally:
         client.close()
 

@@ -585,34 +585,42 @@
   },
   {
     "key": "aiops",
-    "label": "AI运维智能体",
+    "label": "Agent 管理",
     "icon": "Cpu",
-    "description": "AI运营者：AI助手、Agent管理",
+    "description": "AI运营者：AI助手、Agent运维管控",
     "items": [
       {
-        "key": "ai-assistant",
+        "key": "ai-ops-assistant",
         "label": "AI 助手",
-        "items": [
-          {
-            "key": "agent-chat",
-            "label": "智能助手",
-            "type": "vue",
-            "icon": "ChatDotRound",
-            "path": "/agent-chat"
-          },
-          {
-            "key": "pending-actions",
-            "label": "待确认动作",
-            "type": "vue",
-            "icon": "Clock",
-            "path": "/agent/pending"
-          }
-        ]
+        "type": "vue",
+        "icon": "ChatDotRound",
+        "path": "/ai-ops-assistant"
       },
       {
-        "key": "agent-management",
-        "label": "Agent 管理",
+        "key": "agent-ops",
+        "label": "Agent 运维",
         "items": [
+          {
+            "key": "agent-deploy",
+            "label": "Agent 下发监控",
+            "type": "vue",
+            "icon": "Promotion",
+            "path": "/agent-deploy"
+          },
+          {
+            "key": "agent-autonomous",
+            "label": "Agent 自主巡检",
+            "type": "vue",
+            "icon": "Odometer",
+            "path": "/agent-autonomous"
+          },
+          {
+            "key": "ai-deploy",
+            "label": "AI 自动部署",
+            "type": "vue",
+            "icon": "Upload",
+            "path": "/ai-deploy"
+          },
           {
             "key": "agent-workflow-editor",
             "label": "智能体编排",
@@ -654,6 +662,20 @@
             "type": "vue",
             "icon": "Finished",
             "path": "/agent-eval"
+          },
+          {
+            "key": "skills",
+            "label": "技能中心",
+            "type": "vue",
+            "icon": "MagicStick",
+            "path": "/skills"
+          },
+          {
+            "key": "sandbox-overview",
+            "label": "沙盒管控",
+            "type": "vue",
+            "icon": "Lock",
+            "path": "/sandbox"
           }
         ]
       }
@@ -732,20 +754,6 @@
      "path": "/secret-vault"
     },
     {
-     "key": "skills",
-     "label": "技能库",
-     "type": "vue",
-     "icon": "MagicStick",
-     "path": "/skills"
-    },
-    {
-     "key": "skill-market",
-     "label": "技能市场",
-     "type": "vue",
-     "icon": "Shop",
-     "path": "/skill-market"
-    },
-    {
      "key": "multicluster",
      "label": "多集群管理",
      "type": "vue",
@@ -799,54 +807,6 @@
             "type": "vue",
             "icon": "Document",
             "path": "/api/v1/docs"
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "key": "sandbox",
-    "label": "AI Agent 管控",
-    "icon": "Cpu",
-    "description": "AI Agent 全生命周期管控：一键下发到节点、在线监控、远程命令隧道、沙盒安全策略（自主执行作用范围控制）",
-    "items": [
-      {
-        "key": "agent-management",
-        "label": "Agent 管理",
-        "items": [
-          {
-            "key": "agent-deploy",
-            "label": "Agent 下发与监控",
-            "type": "vue",
-            "icon": "Promotion",
-            "path": "/agent-manage"
-          },
-          {
-            "key": "agent-autonomous",
-            "label": "Agent 自主巡检",
-            "type": "vue",
-            "icon": "Odometer",
-            "path": "/agent-autonomous"
-          },
-          {
-            "key": "ai-deploy",
-            "label": "AI 自动部署",
-            "type": "vue",
-            "icon": "Upload",
-            "path": "/ai-deploy"
-          }
-        ]
-      },
-      {
-        "key": "sandbox-management",
-        "label": "沙盒策略",
-        "items": [
-          {
-            "key": "sandbox-overview",
-            "label": "沙盒管理",
-            "type": "vue",
-            "icon": "Setting",
-            "path": "/sandbox"
           }
         ]
       }

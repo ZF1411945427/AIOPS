@@ -1,4 +1,3 @@
-import json
 import os
 
 from fastapi import APIRouter, UploadFile, File
@@ -8,7 +7,6 @@ from app.services.license_service import (
     get_status,
     save_license,
     get_machine_fingerprint,
-    check_license,
     parse_license,
     LICENSE_FILE,
     STATE_FILE,

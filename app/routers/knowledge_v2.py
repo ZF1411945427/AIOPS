@@ -25,7 +25,6 @@ router = APIRouter(prefix="/knowledge/v2", tags=["knowledge_v2"])
 
 def _bg_index_document(doc_id: int, mode: str):
     """后台索引文档（在独立线程中运行）"""
-    import traceback
     from app.database import get_session_for, get_db_mode
     _Session = get_session_for(get_db_mode())
     _db = _Session()

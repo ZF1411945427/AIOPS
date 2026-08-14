@@ -8,7 +8,7 @@
 """
 import json
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -696,7 +696,7 @@ def _generate_rule_report(task, template, assets, item_results, score) -> str:
 
     lines = [
         f"## 巡检报告 — {template.name}",
-        f"",
+        "",
         f"**巡检时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"**巡检资产**: {len(assets)} 个 | **健康评分**: {score}/100",
         f"**正常**: {len(assets) - len(critical_assets) - len(warning_assets)} | "

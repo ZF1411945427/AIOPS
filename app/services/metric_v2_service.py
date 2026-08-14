@@ -112,38 +112,61 @@ def query_latest_aggregated(aggregate: str = "avg") -> dict:
     """查询各指标跨所有资产的聚合最新值(Grafana 风格).
 
     aggregate: avg / sum / max / min
-    返回 {name: {value, count, unit, aggregate}},count 为参与聚合的资产数
+    返回 {name: {value, count, unit, aggregate, asset_labels}},
+    asset_labels 为 [{asset_id}|{target}] 列表，用于前端展示具体资产名
     """
     agg_fn = aggregate if aggregate in ("avg", "sum", "max", "min") else "avg"
     try:
-        result = query_promql(f'{agg_fn} by (__name__) ({{__name__=~".+"}})')
+        result = query_promql('{__name__=~".+"}')
         if result.get("status") != "success":
             return {}
-        out = {}
+        groups = {}
         for item in result.get("data", {}).get("result", []):
             metric = item.get("metric", {})
             name = metric.get("__name__", "")
-            value = item.get("value")
-            if value is not None and name:
-                ts = value[0]
-                out[name] = {
-                    "value": float(value[1]),
-                    "unit": metric.get("unit", ""),
-                    "count": 0,
-                    "aggregate": agg_fn,
-                    "timestamp": datetime.fromtimestamp(ts).isoformat() if ts else "",
-                }
-        # 补充每个指标的资产数
-        try:
-            cnt_result = query_promql(f'count by (__name__) ({{__name__=~".+"}})')
-            if cnt_result.get("status") == "success":
-                for item in cnt_result.get("data", {}).get("result", []):
-                    name = item.get("metric", {}).get("__name__", "")
-                    val = item.get("value")
-                    if name in out and val is not None:
-                        out[name]["count"] = int(float(val[1]))
-        except Exception:
-            pass
+            val = item.get("value")
+            if val is None or not name:
+                continue
+            if name not in groups:
+                groups[name] = {"values": [], "assets": [], "unit": metric.get("unit", ""), "ts": 0}
+            groups[name]["values"].append(float(val[1]))
+            groups[name]["ts"] = max(groups[name]["ts"], float(val[0]))
+            aid = metric.get("asset_id")
+            target = metric.get("target")
+            if aid:
+                groups[name]["assets"].append({"asset_id": int(aid)})
+            elif target:
+                groups[name]["assets"].append({"target": target})
+        out = {}
+        for name, g in groups.items():
+            vals = g["values"]
+            if not vals:
+                continue
+            if agg_fn == "avg":
+                agg_val = sum(vals) / len(vals)
+            elif agg_fn == "sum":
+                agg_val = sum(vals)
+            elif agg_fn == "max":
+                agg_val = max(vals)
+            elif agg_fn == "min":
+                agg_val = min(vals)
+            else:
+                agg_val = sum(vals) / len(vals)
+            seen = set()
+            unique_assets = []
+            for a in g["assets"]:
+                key = tuple(sorted(a.items()))
+                if key not in seen:
+                    seen.add(key)
+                    unique_assets.append(a)
+            out[name] = {
+                "value": round(agg_val, 2),
+                "unit": g["unit"],
+                "count": len(vals),
+                "aggregate": agg_fn,
+                "timestamp": datetime.fromtimestamp(g["ts"]).isoformat() if g["ts"] else "",
+                "asset_labels": unique_assets,
+            }
         return out
     except Exception:
         return {}

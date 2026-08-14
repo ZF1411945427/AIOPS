@@ -1,0 +1,99 @@
+# ===== AIOps Helm Chart 默认值 =====
+# 生产覆盖见 values.prod.yaml; 常用参数:
+#   helm install aiops ./deploy/helm/aiops -f deploy/helm/aiops/values.prod.yaml
+
+replicaCount: 1
+
+image:
+  repository: aiops
+  tag: latest
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# 后端核心配置(对应 .env)
+env:
+  AIOPS_DB_URL: ""          # 留空 = SQLite(需 PVC); 生产设 Postgres, 如 postgresql://aiops:pass@postgres:5432/aiops
+  AIOPS_LOG_DIR: "/app/logs"
+  AIOPS_PORT: "8000"
+  AIOPS_TOOLBAG: ""         # "1" 启用 ToolBag 二级延迟加载
+  TZ: "Asia/Shanghai"
+
+# 额外环境变量(secret 引用等), 追加到 deployment env
+extraEnv: []
+
+# 密钥(明文值; 生产建议用 existingSecret)
+existingSecret: ""
+secret:
+  # 用于 LLM/数据源等敏感配置, 以 AIOPS_ 前缀注入
+  LLM_API_KEY: ""
+  DB_PASSWORD: ""
+
+# 持久化: SQLite 模式需要; Postgres 模式可将 PVC 关掉
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 10Gi
+  accessMode: ReadWriteOnce
+
+# 内置 Postgres(可选, 生产建议用托管 RDS / 外部实例)
+postgres:
+  enabled: false
+  image: postgres:16-alpine
+  auth:
+    database: aiops
+    username: aiops
+    password: "aiops-secret"
+  persistence:
+    enabled: true
+    size: 20Gi
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+# BGE 模型 / 数据库 / 日志 数据卷
+volumes:
+  models:
+    enabled: true
+    size: 2Gi
+  logs:
+    enabled: true
+    size: 1Gi
+
+livenessProbe:
+  path: /healthz
+  initialDelaySeconds: 60
+  periodSeconds: 30
+
+readinessProbe:
+  path: /healthz
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+ingress:
+  enabled: false
+  className: nginx
+  host: aiops.example.com
+  annotations: {}
+  # tls:
+  #   - hosts:
+  #     - aiops.example.com
+  #     secretName: aiops-tls
+
+serviceAccount:
+  create: true
+  name: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

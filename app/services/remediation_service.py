@@ -1,5 +1,4 @@
 import json
-import random
 import re
 from datetime import datetime
 from typing import Optional
@@ -7,7 +6,7 @@ from typing import Optional
 import paramiko
 from sqlalchemy.orm import Session
 
-from app.models import AutoRemediation, RemediationLog, Alert, AlertRule, Asset, PendingAction, AIProvider, RemediationWorkflow, DataSource, DiagnosisReport, KbDocument
+from app.models import AutoRemediation, RemediationLog, Alert, Asset, PendingAction, AIProvider, RemediationWorkflow, DataSource, DiagnosisReport, KbDocument
 
 # 关联分析短时缓存：同一 asset_id 60 秒内复用，避免每次 AI 分析都重复查询
 _CORRELATION_CACHE = {}
@@ -803,7 +802,7 @@ def _k8s_exec_command(command: str, core_v1, asset: "Asset", extra_hint: str = "
             if _r.returncode == 0:
                 return (True, f"{extra_hint} 执行完成: {_r.stdout[:500]}")
             return (False, f"{extra_hint} 执行失败: {_r.stderr[:300]}")
-    except Exception as e:
+    except Exception:
         pass
     return (False, f"{extra_hint} 执行失败（无法在 K8s pod 内执行命令: {command[:80]}")
 

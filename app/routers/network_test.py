@@ -10,14 +10,13 @@ import re
 import ssl
 import json
 import socket
-import struct
 import subprocess
 import time
 import platform
 import urllib.request
 import urllib.error
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -351,8 +350,8 @@ def tls_cert_check(req: TlsCertRequest):
         for ext in cert_dict.get("subjectAltName", []):
             san_list.append(f"{ext[0]}: {ext[1]}")
         try:
-            expire_dt = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
+            expire_dt = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+            now = datetime.now(UTC)
             days_left = (expire_dt - now).days
         except Exception:
             days_left = None
@@ -382,7 +381,7 @@ def tls_cert_check(req: TlsCertRequest):
             "not_before": not_before,
             "not_after": not_after,
         }
-    except socket.timeout:
+    except TimeoutError:
         return {"success": False, "output": "连接超时"}
     except socket.gaierror:
         return {"success": False, "output": "域名解析失败"}

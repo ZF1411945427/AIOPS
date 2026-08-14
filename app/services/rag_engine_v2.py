@@ -14,8 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import KbDocument, KbChunk
-from app.services import rag_service
+from app.models import KbDocument
 from app.services import embedding_service
 from app.services import vector_store
 
@@ -475,7 +474,6 @@ def get_reranker_status() -> Dict:
 
     if _aurorax_model is not None:
         aurorax_available = True
-        import torch
         device = "cuda" if next(_aurorax_model.parameters()).device.type == "cuda" else "cpu"
     elif _aurorax_checked:
         aurorax_available = False

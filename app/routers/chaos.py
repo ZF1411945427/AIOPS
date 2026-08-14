@@ -3,14 +3,14 @@ import re
 import threading
 import random
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 try:
     import paramiko
 except ImportError:
     paramiko = None
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -202,7 +202,7 @@ def _build_fault_command(fault_type: str, params: dict, duration: int, exp_id: i
             f"nohup python3 -c \"import time; x=b'0'*({fill_mb}*1024*1024); time.sleep({hold})\" "
             f">/tmp/{tag}.log 2>&1 & echo INJECT_PID=$!"
         )
-        cleanup = f"pkill -f 'x=b' 2>/dev/null"
+        cleanup = "pkill -f 'x=b' 2>/dev/null"
         return inject, cleanup
 
     if fault_type == "disk-fill":
@@ -222,8 +222,8 @@ def _build_fault_command(fault_type: str, params: dict, duration: int, exp_id: i
         latency_ms = _validate_int(params.get("latency_ms", 200), "latency_ms", 1, 5000) if fault_type == "network-delay" else 0
         loss_percent = _validate_int(params.get("loss_percent", 30), "loss_percent", 1, 100) if fault_type == "network-loss" else 0
         inject = (
-            f"nohup bash -c '"
-            f"tc qdisc add dev eth0 root netem "
+            "nohup bash -c '"
+            "tc qdisc add dev eth0 root netem "
             + (f"delay {latency_ms}ms" if fault_type == "network-delay" else f"loss {loss_percent}%")
             + f" && sleep {hold} && tc qdisc del dev eth0 root 2>/dev/null' "
             f">/tmp/{tag}.log 2>&1 & echo INJECT_PID=$!"
@@ -419,7 +419,7 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
         exp.result = "passed" if passed else "failed"
         exp.finished_at = datetime.now()
         db.commit()
-    except Exception as e:
+    except Exception:
         try:
             db.rollback()
             exp = db.query(ChaosExperiment).filter(ChaosExperiment.id == exp_id).first()

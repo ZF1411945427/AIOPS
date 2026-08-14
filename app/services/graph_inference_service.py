@@ -13,15 +13,17 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 import logging
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.models import (
-    Asset, AssetRelation, Alert, KnowledgeBase, Runbook, AlertKbLink,
+    Asset, AssetRelation, Alert, KnowledgeBase, Runbook,
 )
+
+if TYPE_CHECKING:
+    import networkx as nx
 
 logger = logging.getLogger("graph_inference")
 
@@ -38,7 +40,7 @@ SEVERITY_SCORE = {"critical": 3.0, "warning": 2.0, "info": 1.0, "high": 3.0, "me
 # ─────────────────────────────────────────────────────────
 # 图构建 - 从 PostgreSQL 构建 networkx 有向图
 # ─────────────────────────────────────────────────────────
-def _build_nx_graph(db: Session) -> Tuple["nx.DiGraph", Dict[int, Asset]]:
+def _build_nx_graph(db: Session) -> Tuple[nx.DiGraph, Dict[int, Asset]]:
     """从 PostgreSQL 构建有向图 (parent -> child 表示依赖方向)."""
     import networkx as nx
 
@@ -223,7 +225,6 @@ def infer_root_cause(
         根因候选列表 + 推理依据 + 拓扑路径
     """
     import networkx as nx
-    import numpy as np
 
     G, asset_map = _build_nx_graph(db)
     if len(asset_map) == 0:
@@ -462,7 +463,7 @@ def recommend_knowledge(
                 "category": rb.category or "",
                 "asset_type": rb.asset_type or "",
                 "severity": rb.severity or "",
-                "steps_count": len((rb.steps or "")) if rb.steps else 0,
+                "steps_count": len(rb.steps or "") if rb.steps else 0,
             })
 
     # ── 推理链 2: 告警 metric_name/symptom -> KnowledgeBase ──
@@ -502,7 +503,6 @@ def recommend_knowledge(
     G, asset_map = _build_nx_graph(db)
     upstream_assets: Set[int] = set()
     downstream_assets: Set[int] = set()
-    import networkx as nx
     for pred in G.predecessors(target_asset.id):
         upstream_assets.add(pred)
     for succ in G.successors(target_asset.id):

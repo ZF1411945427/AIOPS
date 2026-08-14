@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Form
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
 from app.database import get_db
 from app.models import Span
 from app.template_utils import get_templates

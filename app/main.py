@@ -1,11 +1,8 @@
-import hashlib
 import json
 import mimetypes
 import os as _os
 import threading
 import time
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Windows 上 Python 默认把 .js 映射为 text/plain，导致浏览器拒绝执行 module script
 mimetypes.add_type("text/javascript", ".js")
@@ -18,13 +15,15 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
 from fastapi import Request
-from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pathlib import Path
 
 from app.logger import logger
+from app.middleware import PUBLIC_PATHS, TraceIdMiddleware, AuthMiddleware
+from app.startup import (_security_startup_check, _scan_builtin_skills,
+                         background_loop)
 
 
 class _MultiStaticFiles(_FastStaticFiles):
@@ -48,55 +47,26 @@ from app.database import Base, get_all_engines, get_session_for, get_db_mode, se
 from app import config as _config
 # ── 全量路由导入（按 9 个业务域归类，详见 app/domains/registry.py）──
 # assets 资产管理域
-from app.routers import assets, asset_changes, asset_discovery, lifecycle, topology, topology_path, topo_graph, tags, ext_cmdb
 # alerts 告警监控域
-from app.routers import alerts, alert_console, alert_events, alert_silence, alert_storm, alert_webhooks, anomaly, cluster_anomaly, hotspot
 # k8s 容器编排域
-from app.routers import k8s_monitor, k8s_resources, k8s_cert, containers, helm, blue_green, service_mesh
 # ai 智能体域
-from app.routers import ai_providers, agent_chat, agent_sse, agent_workflow, agent_eval, agent_ground_truth, ab_test, anomaly_eval, sub_agents, im_chatops, edge_tunnel, webssh
 # sre 可靠性工程域
-from app.routers import sre, chaos, inspection, baseline, remediation, remediation_workflow, remediation_effect, runbooks
 # knowledge 知识管理域
-from app.routers import knowledge, knowledge_documents, knowledge_v2, knowledge_graph, knowledge_autogen, smart_recommend
 # incident 故障运营域
-from app.routers import incidents, dashboard, dashboard_config, ops_analytics, reports, report_schedules
 # tracing 链路追踪域
-from app.routers import traces, traces_api, trace_anomaly, trace_ingest, trace_rca, trace_view, dtw, pagerank_rca, log_rca, log_anomaly, logs
 # platform 平台与集成域
-from app.routers import auth, users, roles, settings, system, system_posture, audit, menu, license, tenant_management, tokens, ws, api_v1, mobile, health_map, network_test, datasources, es_integration, event_sources, events, kafka_pipeline, netflow, feature_store, ci_models, drain, granger, idice, trend_prediction, prediction_models, predictions, predictions_enhanced, pcadr, metrics, notifications, notification_templates, correlation, observability_correlation, script_exec, ansible, change_workflow, workflow, chatops, discovery, diagnostic_tools, agent_deploy, agent_autonomous
 # admin 系统管理路由（领域清单 + 背景任务看板，P1 任务#4/#6）
-from app.routers import admin
-from app.routers import sandbox
-from app.routers import deploy
 # 离线部署(Offline Repo) — 对标 Pixiu builder serve
-from app.routers import offline_repo
 # K8S 离线集群部署 — 对标 Pixiu 一键建集群
-from app.routers import k8s_offline_deploy
 # P2 任务#9 告警收敛闭环 / P2 任务#10 RAG 检索质量评估
-from app.routers import alert_correlation, rag_eval
 # 安全自查（SAST / 依赖 CVE / License 合规 / 配置基线，打磨期 P0）
-from app.routers import security_audit
-from app.routers import secrets_vault
-from app.routers import skills, marketplace
-from app.routers import multicluster, upgrade, network
-from app.routers import mcp
-from app.routers import git_knowledge
 # AI 洞察引擎 — 统一指标/日志/链路三页 AI 增强
-from app.routers import ai_insight
-from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule
-from app.services import metric_service, alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service, trace_anomaly_service
 from app.services import mcp_tools  # noqa: F401 — register MCP tools on import
 from app.services import agent_workflow_service  # noqa: F401 — 工作流告警自动触发 / run 恢复
 from app.services import workflow_cron_scheduler  # noqa: F401 — 工作流 cron 定时调度
 from app.services import auto_investigator  # noqa: F401 — 告警自动调查闭环(C1/C2/C3)
 from app.services import skill_registry  # noqa: F401 — F1/F2 技能注册表与市场
-_scan_builtin_skills = skill_registry.scan_builtin_skills
-from app.services.synthetic_monitor import check_all_synthetics
-from app.services.report_service import generate_report
 from app.services.license_service import LicenseMiddleware
-from app.seed_data import seed_all
-from app.routers.chaos import seed_chaos_scenarios
 
 # 两个库都建表
 for _mode, _eng in get_all_engines().items():
@@ -216,6 +186,11 @@ _MIGRATIONS = {
     "chat_messages": [
         "sub_agent VARCHAR(64) DEFAULT ''",
     ],
+    "k8s_cluster_plans": [
+        "http_proxy VARCHAR(256) DEFAULT ''",
+        "https_proxy VARCHAR(256) DEFAULT ''",
+        "no_proxy VARCHAR(512) DEFAULT ''",
+    ],
 }
 for _eng in get_all_engines().values():
     with _eng.connect() as _conn:
@@ -322,104 +297,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
 import time as _time_import
 _APP_START_TIME = _time_import.time()  # 进程启动时间（/metrics 用）
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox", "/agent", "/edge/metrics", "/metrics"}
-
-
-class TraceIdMiddleware(BaseHTTPMiddleware):
-    """为每个请求生成/透传 trace_id，绑定到 logger，实现全链路日志串联(D3)。"""
-    def __init__(self, app, logger):
-        super().__init__(app)
-        self._logger = logger
-
-    async def dispatch(self, request: Request, call_next):
-        trace_id = request.headers.get("x-request-id") or request.headers.get("trace-id")
-        if not trace_id:
-            import uuid
-            trace_id = uuid.uuid4().hex[:16]
-        request.state.trace_id = trace_id
-        request.headers._list.append((b"x-request-id", trace_id.encode()))
-        with self._logger.contextualize(trace_id=trace_id):
-            return await call_next(request)
-
-
-class AuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        if not any(path.startswith(p) for p in PUBLIC_PATHS):
-            user_id = request.session.get("user_id")
-            if not user_id:
-                auth = request.headers.get("authorization", "")
-                if auth.startswith("Bearer "):
-                    from app.services.mobile_push_service import verify_login_token
-                    payload = verify_login_token(auth[7:])
-                    if payload:
-                        request.session["user_id"] = payload.get("user_id")
-                        request.session["username"] = payload.get("username", "")
-                        return await call_next(request)
-                return RedirectResponse(url="/login", status_code=303)
-            # RBAC: viewer 角色禁止写操作
-            request.state.user_id = user_id
-            from app.database import get_session_for, get_db_mode
-            from app.models import User as _User
-            _db = get_session_for(get_db_mode())()
-            try:
-                _user = _db.query(_User).filter(_User.id == user_id).first()
-                if _user and _user.role == "viewer":
-                    _method = request.method
-                    if _method in ("POST", "PUT", "PATCH", "DELETE"):
-                        _db.close()
-                        return JSONResponse(
-                            {"error": "权限不足：viewer 角色只读"},
-                            status_code=403,
-                        )
-                # admin-only 路径：非 admin 禁止写操作
-                _ADMIN_WRITE_PREFIXES = (
-                    "/ai/providers", "/helm/api", "/api/chaos", "/api/users",
-                    "/script/api", "/system/db-switch",
-                )
-                if _user and _user.role != "admin":
-                    _method = request.method
-                    if _method in ("POST", "PUT", "PATCH", "DELETE"):
-                        for _pfx in _ADMIN_WRITE_PREFIXES:
-                            if path.startswith(_pfx):
-                                _db.close()
-                                return JSONResponse(
-                                    {"error": "权限不足：需要管理员权限"},
-                                    status_code=403,
-                                )
-                # admin-only 路径：非 admin 禁止任何方法（含 GET）
-                _ADMIN_ONLY_PREFIXES = (
-                    "/incidents/api/approval-settings",
-                )
-                if _user and _user.role != "admin":
-                    for _pfx in _ADMIN_ONLY_PREFIXES:
-                        if path.startswith(_pfx):
-                            _db.close()
-                            return JSONResponse(
-                                {"error": "权限不足：需要管理员权限"},
-                                status_code=403,
-                            )
-                # ── E1: 资源级 RBAC（Casbin 策略矩阵）──
-                # 写/执行/删除操作走 permission_service 二次判定；
-                # superuser 完全绕过，策略未配置的角色最小只读。
-                # 仅对能映射到资源且非 superuser 的请求生效，失败 fail-open(不拦截)
-                # 以兼容存量角色（菜单级可见性仍由前端 + role_menus 控制）。
-                _method = request.method
-                if _method in ("POST", "PUT", "PATCH", "DELETE"):
-                    if _user is None:
-                        _db.close()
-                        return JSONResponse({"error": "用户不存在"}, status_code=401)
-                    from app.services.permission_service import check_path_permission
-                    _allowed = check_path_permission(_db, user_id, path, _method)
-                    if _allowed is False:
-                        _db.close()
-                        return JSONResponse(
-                            {"error": "权限不足：当前角色无此资源操作权限"},
-                            status_code=403,
-                        )
-            finally:
-                _db.close()
-        return await call_next(request)
+# 中间件定义移至 app/middleware.py
 
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -639,439 +517,13 @@ from app.bootstrap import register_routers as _register_routers
 _register_routers(app)
 
 
-def _collect_all_menu_keys():
-    """从 menu_config.json 收集所有菜单 key"""
-    _p = _os.path.join(_os.path.dirname(__file__), "routers", "menu_config.json")
-    if _os.path.exists(_p):
-        with open(_p, encoding="utf-8") as _f:
-            _menu = json.load(_f)
-    else:
-        _menu = []
-    _keys = set()
-    for _g in _menu:
-        _keys.add(_g["key"])
-        for _i in _g.get("items", []):
-            _keys.add(_i["key"])
-            for _s in _i.get("items", []):
-                _keys.add(_s["key"])
-    return list(_keys)
+
+# 启动函数移至 app/startup.py
 
 
-def init_admin():
-    db = get_session_for(get_db_mode())()
-    _admin_role = None
-    # ── 种子角色（幂等）──
-    from app.models import Role as _Role, RoleMenu as _RoleMenu
-    _preset_roles = [
-        {"name": "admin", "description": "系统管理员，拥有全部权限", "is_system": True, "sort_order": 0},
-        {"name": "operator", "description": "运维工程师，可执行操作", "is_system": True, "sort_order": 1},
-        {"name": "viewer", "description": "只读用户，仅可查看", "is_system": True, "sort_order": 2},
-    ]
-    try:
-        for _pr in _preset_roles:
-            _existing = db.query(_Role).filter(_Role.name == _pr["name"]).first()
-            if not _existing:
-                db.add(_Role(**_pr))
-        db.commit()
-        _admin_role = db.query(_Role).filter(_Role.name == "admin").first()
-    except Exception:
-        import logging
-        logging.getLogger(__name__).warning("init_admin 种子角色失败(DB 忙/锁), 跳过本次: ", exc_info=True)
-        db.rollback()
-        _admin_role = db.query(_Role).filter(_Role.name == "admin").first()
-    user = db.query(User).filter(User.username == "admin").first()
-    if not user:
-        from app.security import hash_password
-        default_pwd = _os.environ.get("AIOPS_ADMIN_PASSWORD", "admin123")
-        admin = User(
-            username="admin",
-            password_hash=hash_password(default_pwd),
-            role="admin",
-            role_id=_admin_role.id if _admin_role else None,
-        )
-        db.add(admin)
-        db.commit()
-        # admin 角色默认拥有所有菜单权限
-        if _admin_role:
-            _existing_menus = db.query(_RoleMenu).filter(_RoleMenu.role_id == _admin_role.id).count()
-            if _existing_menus == 0:
-                _all_keys = _collect_all_menu_keys()
-                for _k in _all_keys:
-                    db.add(_RoleMenu(role_id=_admin_role.id, menu_key=_k))
-                db.commit()
-    # 确保新菜单 key 被 admin 角色拥有（幂等，用于已有数据库的增量更新）
-    if _admin_role:
-        _existing_admin_keys = set(_k for _k, in db.query(_RoleMenu.menu_key).filter(_RoleMenu.role_id == _admin_role.id).all())
-        for _new_key in _collect_all_menu_keys():
-            if _new_key not in _existing_admin_keys:
-                db.add(_RoleMenu(role_id=_admin_role.id, menu_key=_new_key))
-        db.commit()
-    # E1: admin/superuser 角色补全资源级全权限策略（幂等）
-    try:
-        from app.services.permission_service import sync_admin_full_permissions
-        sync_admin_full_permissions(db)
-    except Exception as _perm_e:
-        import logging as _perm_logging
-        _perm_logging.getLogger(__name__).warning(f"sync_admin_full_permissions 失败: {_perm_e}")
-    log_channel = db.query(NotificationChannel).filter(NotificationChannel.type == "log").first()
-    if not log_channel:
-        db.add(NotificationChannel(name="系统日志", type="log", channel_config="{}", enabled=True))
-        db.commit()
-    config_service.init_configs(db)
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE anomaly_configs ADD COLUMN algorithm VARCHAR(32) DEFAULT 'sigma'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE anomaly_configs ADD COLUMN period INTEGER DEFAULT 12"))
-    except Exception:
-        pass
-    try:
-        seed_chaos_scenarios(db)
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE chaos_scenarios ADD COLUMN target_layer VARCHAR(32) DEFAULT 'host'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE chaos_experiments ADD COLUMN target_layer VARCHAR(32) DEFAULT 'host'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE assets ADD COLUMN connection_type VARCHAR(32) DEFAULT 'ssh'"))
-        db.execute(text("ALTER TABLE assets ADD COLUMN connection_config TEXT DEFAULT '{}'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE assets DROP COLUMN ssh_user"))
-        db.execute(text("ALTER TABLE assets DROP COLUMN ssh_password"))
-        db.execute(text("ALTER TABLE assets DROP COLUMN ssh_port"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text as _t
-        db.execute(_t("ALTER TABLE deploy_plans ADD COLUMN doc_file_name VARCHAR(256) DEFAULT ''"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text as _t
-        db.execute(_t("ALTER TABLE deploy_plans ADD COLUMN asset_ids TEXT DEFAULT '[]'"))
-        db.commit()
-    except Exception:
-        pass
-    if not db.query(AnomalyConfig).first():
-        for metric in ["cpu_usage", "memory_usage", "disk_usage"]:
-            db.add(AnomalyConfig(
-                name=f"{metric} 3sigma jiance", metric_name=metric,
-                sensitivity=3.0, window_size=20, enabled=True,
-            ))
-        db.commit()
-    from app.models import AIProvider, AgentConfig
-    if not db.query(AgentConfig).filter(AgentConfig.name == "default").first():
-        first_provider = db.query(AIProvider).filter(AIProvider.is_enabled == True).first()
-        default_config = AgentConfig(
-            name="default",
-            default_provider_id=first_provider.id if first_provider else None,
-            is_enabled=True,
-        )
-        db.add(default_config)
-        db.commit()
-    db.close()
 
 
-BACKGROUND_INTERVAL = 10
-_last_probe_time = 0
-_last_collect_time = 0.0
-_last_archive_time = 0.0
-_last_scrape_time = 0.0
-_last_autonomous_time = 0.0
-METRIC_RETENTION_DAYS = int(_os.environ.get("AIOPS_METRIC_RETENTION_DAYS", "90"))
 
-
-# P1 任务#6: 后台任务监控器初始化
-def _init_background_task_monitor():
-    """注册所有后台任务到监控器（仅一次）"""
-    from app.services.background_task_monitor import init_task_monitor
-    init_task_monitor([
-        {"name": "alert_check", "fn": alert_service.check_rules, "description": "告警规则检查"},
-        {"name": "alert_escalate", "fn": alert_service.escalate_alerts, "description": "告警升级"},
-        {"name": "k8s_event_alert", "fn": alert_service.check_k8s_events, "description": "K8s 事件告警"},
-        {"name": "anomaly_detect", "fn": anomaly_service.detect_anomalies, "description": "异常检测"},
-        {"name": "incident_correlate", "fn": incident_service.correlate_alerts, "description": "故障关联"},
-        {"name": "remediation", "fn": remediation_service.check_and_remediate, "description": "自愈执行"},
-        {"name": "datasource_scrape", "fn": datasource_service.scrape_all_sources, "description": "数据源采集"},
-        {"name": "pod_health", "fn": pod_health_service.check_pod_anomalies, "description": "Pod 健康检查"},
-        {"name": "log_anomaly", "fn": log_anomaly_service.check_log_anomalies, "description": "日志异常检测"},
-        {"name": "trace_anomaly", "fn": trace_anomaly_service.check_trace_anomalies, "description": "链路异常检测"},
-        {"name": "contention", "fn": contention_service.detect_contention, "description": "资源竞争检测"},
-        {"name": "synthetic_monitor", "fn": check_all_synthetics, "description": "拨测探测"},
-        {"name": "workflow_alert_trigger", "fn": agent_workflow_service.check_alert_triggers, "description": "工作流告警自动触发"},
-        {"name": "workflow_cron_trigger", "fn": workflow_cron_scheduler.check_cron_triggers, "description": "工作流 cron 定时调度"},
-        {"name": "auto_investigate", "fn": auto_investigator.auto_investigate_new_incidents, "description": "告警自动调查闭环"},
-        {"name": "asset_probe", "fn": asset_service.probe_assets, "description": "资产健康探测"},
-        {"name": "metric_collect", "fn": metric_collector.collect_all_metrics, "description": "指标采集"},
-        {"name": "metric_archive", "fn": None, "description": "指标归档（删除超期记录）"},
-        {"name": "report_schedule", "fn": None, "description": "报表调度"},
-    ])
-
-
-def _run_bg_service(name: str, fn, db_mode: str):
-    """在独立线程中运行后台服务，使用独立 DB session（线程安全）"""
-    from app.services.background_task_monitor import task_monitor
-    # P1 任务#6: 暂停的任务跳过执行
-    if not task_monitor.is_enabled(name):
-        task_monitor.record_skip(name, "paused")
-        return
-    _t0 = time.time()
-    task_monitor.record_start(name)
-    _db = get_session_for(db_mode)()
-    try:
-        fn(_db)
-        _elapsed = time.time() - _t0
-        task_monitor.record_success(name, _elapsed * 1000)
-        if _elapsed > 30:
-            logger.warning(f"后台服务 {name} 耗时过长: {_elapsed:.1f}s")
-        elif _elapsed > 5:
-            logger.info(f"后台服务 {name} 完成: {_elapsed:.1f}s")
-    except Exception as e:
-        _elapsed = time.time() - _t0
-        task_monitor.record_failure(name, _elapsed * 1000, str(e))
-        logger.warning(f"后台服务 {name} 异常({_elapsed:.1f}s): {e}")
-    finally:
-        _db.close()
-
-
-def background_loop():
-    # P1 任务#6: 首次启动注册任务清单
-    _init_background_task_monitor()
-    from app.services.background_task_monitor import task_monitor
-    while True:
-        _mode = get_db_mode()
-        # ── 核心服务并发执行（每个独立 session，最多 5 线程）──
-        _services = [
-            ("alert_check", alert_service.check_rules),
-            ("alert_escalate", alert_service.escalate_alerts),
-            ("k8s_event_alert", alert_service.check_k8s_events),
-            ("anomaly_detect", anomaly_service.detect_anomalies),
-            ("incident_correlate", incident_service.correlate_alerts),
-            ("remediation", remediation_service.check_and_remediate),
-            ("pod_health", pod_health_service.check_pod_anomalies),
-            ("log_anomaly", log_anomaly_service.check_log_anomalies),
-            ("trace_anomaly", trace_anomaly_service.check_trace_anomalies),
-            ("contention", contention_service.detect_contention),
-            ("synthetic_monitor", check_all_synthetics),
-            ("workflow_alert_trigger", agent_workflow_service.check_alert_triggers),
-            ("workflow_cron_trigger", workflow_cron_scheduler.check_cron_triggers),
-            ("auto_investigate", auto_investigator.auto_investigate_new_incidents),
-        ]
-        _pool = ThreadPoolExecutor(max_workers=5)
-        futures = {_pool.submit(_run_bg_service, name, fn, _mode): name
-                   for name, fn in _services}
-        try:
-            for f in as_completed(futures, timeout=120):
-                try:
-                    f.result()
-                except Exception as e:
-                    logger.warning(f"后台服务 {futures[f]} 异常: {e}")
-        except TimeoutError:
-            _pending = [futures[f] for f in futures if not f.done()]
-            logger.warning(f"后台服务超时(120s), 未完成: {_pending}")
-            for f in futures:
-                if not f.done():
-                    f.cancel()
-        except Exception as e:
-            import traceback
-            logger.error(f"Background services error: {e}")
-            traceback.print_exc()
-        finally:
-            _pool.shutdown(wait=False)
-
-        # ── 辅助任务（独立计时器，主线程执行）──
-        try:
-            db = get_session_for(_mode)()
-            try:
-                global _last_probe_time, _last_collect_time, _last_archive_time, _last_scrape_time, _last_autonomous_time
-                _now = time.time()
-                # 资产健康探测
-                try:
-                    from app.services import config_service
-                    _probe_enabled = config_service.get_config(db, "asset_probe_enabled", "true").lower() == "true"
-                    _probe_interval = int(config_service.get_config(db, "asset_probe_interval", "60") or "60")
-                except Exception:
-                    _probe_enabled = True
-                    _probe_interval = 60
-                if _probe_enabled and task_monitor.is_enabled("asset_probe") and _now - _last_probe_time >= _probe_interval:
-                    _last_probe_time = _now
-                    _t0 = time.time()
-                    task_monitor.record_start("asset_probe")
-                    try:
-                        changed = asset_service.probe_assets(db)
-                        task_monitor.record_success("asset_probe", (time.time() - _t0) * 1000)
-                        if changed:
-                            logger.info(f"资产状态变更: {len(changed)} 条")
-                    except Exception as pe:
-                        task_monitor.record_failure("asset_probe", (time.time() - _t0) * 1000, str(pe))
-                        logger.warning(f"资产探测异常: {pe}")
-                elif not task_monitor.is_enabled("asset_probe"):
-                    task_monitor.record_skip("asset_probe", "paused")
-                # 指标采集
-                try:
-                    _collect_enabled = config_service.get_config(db, "metric_collect_enabled", "true").lower() == "true"
-                    _collect_interval = int(config_service.get_config(db, "metric_collect_interval", "60") or "60")
-                except Exception:
-                    _collect_enabled = True
-                    _collect_interval = 60
-                if _collect_enabled and task_monitor.is_enabled("metric_collect") and _now - _last_collect_time >= _collect_interval:
-                    _last_collect_time = _now
-                    _t0 = time.time()
-                    task_monitor.record_start("metric_collect")
-                    try:
-                        summary = metric_collector.collect_all_metrics(db)
-                        task_monitor.record_success("metric_collect", (time.time() - _t0) * 1000)
-                        if summary["metrics_collected"] > 0:
-                            logger.info(f"指标采集: {summary['success']}成功/{summary['failed']}失败, 采集{summary['metrics_collected']}条指标")
-                    except Exception as ce:
-                        task_monitor.record_failure("metric_collect", (time.time() - _t0) * 1000, str(ce))
-                        logger.warning(f"指标采集异常: {ce}")
-                elif not task_monitor.is_enabled("metric_collect"):
-                    task_monitor.record_skip("metric_collect", "paused")
-                # ── metric_records 归档：定期删除超期数据 ──
-                _ARCHIVE_INTERVAL = 3600
-                if task_monitor.is_enabled("metric_archive") and _now - _last_archive_time >= _ARCHIVE_INTERVAL:
-                    _last_archive_time = _now
-                    _t0 = time.time()
-                    task_monitor.record_start("metric_archive")
-                    try:
-                        from sqlalchemy import text as _arch_text
-                        _cutoff = datetime.now() - timedelta(days=METRIC_RETENTION_DAYS)
-                        _result = db.execute(_arch_text(
-                            "DELETE FROM metric_records WHERE timestamp < :cutoff"
-                        ), {"cutoff": _cutoff})
-                        db.commit()
-                        task_monitor.record_success("metric_archive", (time.time() - _t0) * 1000)
-                        if _result.rowcount and _result.rowcount > 0:
-                            logger.info(f"指标归档: 删除 {_result.rowcount} 条超期记录 (>{METRIC_RETENTION_DAYS}天)")
-                    except Exception as ae:
-                        task_monitor.record_failure("metric_archive", (time.time() - _t0) * 1000, str(ae))
-                        logger.warning(f"指标归档异常: {ae}")
-                elif not task_monitor.is_enabled("metric_archive"):
-                    task_monitor.record_skip("metric_archive", "paused")
-                # ── 数据源采集（独立执行，不受 120s 超时限制）──
-                _SCRAPE_INTERVAL = 60
-                if task_monitor.is_enabled("datasource_scrape") and _now - _last_scrape_time >= _SCRAPE_INTERVAL:
-                    _last_scrape_time = _now
-                    _t0 = time.time()
-                    task_monitor.record_start("datasource_scrape")
-                    try:
-                        _scrape_results = datasource_service.scrape_all_sources(db)
-                        _scrape_ok = sum(1 for r in _scrape_results if r.get("is_success"))
-                        _scrape_fail = len(_scrape_results) - _scrape_ok
-                        task_monitor.record_success("datasource_scrape", (time.time() - _t0) * 1000)
-                        _elapsed_s = time.time() - _t0
-                        if _elapsed_s > 30:
-                            logger.warning(f"数据源采集耗时过长: {_elapsed_s:.1f}s (成功{_scrape_ok}/失败{_scrape_fail})")
-                        elif _scrape_results:
-                            logger.info(f"数据源采集: {_scrape_ok}成功/{_scrape_fail}失败, 耗时{_elapsed_s:.1f}s")
-                    except Exception as se:
-                        task_monitor.record_failure("datasource_scrape", (time.time() - _t0) * 1000, str(se))
-                        logger.warning(f"数据源采集异常: {se}")
-                elif not task_monitor.is_enabled("datasource_scrape"):
-                    task_monitor.record_skip("datasource_scrape", "paused")
-                # ── 自主 AI Agent 巡检闭环（独立执行）──
-                _AUTONOMOUS_INTERVAL = 300
-                if task_monitor.is_enabled("autonomous_cycle") and _now - _last_autonomous_time >= _AUTONOMOUS_INTERVAL:
-                    _last_autonomous_time = _now
-                    logger.info("触发自主 AI Agent 巡检闭环...")
-                    try:
-                        from app.services.agent_autonomous import run_autonomous_cycle
-                        run_autonomous_cycle()
-                        logger.info("自主 AI Agent 巡检闭环完成")
-                    except Exception as ae:
-                        logger.warning(f"自主巡检异常: {ae}")
-                # 报表调度
-                if task_monitor.is_enabled("report_schedule"):
-                    now = datetime.now()
-                    schedules = db.query(ReportSchedule).filter(ReportSchedule.enabled == True).all()
-                    for s in schedules:
-                        try:
-                            parts = s.cron_expr.split()
-                            if len(parts) >= 5:
-                                cron_min = int(parts[0])
-                                cron_hour = int(parts[1])
-                                if now.minute == cron_min and now.hour == cron_hour:
-                                    _t0 = time.time()
-                                    task_monitor.record_start("report_schedule")
-                                    report = generate_report(db, s.report_type)
-                                    s.last_run_at = now
-                                    db.commit()
-                                    task_monitor.record_success("report_schedule", (time.time() - _t0) * 1000)
-                        except Exception as re:
-                            task_monitor.record_failure("report_schedule", 0, str(re))
-                else:
-                    task_monitor.record_skip("report_schedule", "paused")
-            finally:
-                db.close()
-        except Exception as e:
-            import traceback
-            logger.error(f"Error in background loop (aux): {e}")
-            traceback.print_exc()
-        time.sleep(BACKGROUND_INTERVAL)
-
-
-# 两个库都初始化 admin 账号
-init_admin()
-set_db_mode("real")
-init_admin()
-set_db_mode("demo")
-# 只对 demo 库灌入种子数据
-seed_all()
-
-# P2: 启动 edge agent 心跳监控（后台线程，扫描超时会话）
-from app.services.edge_tunnel_service import start_heartbeat_monitor as _start_edge_hb
-_start_edge_hb()
-logger.info("Edge agent 心跳监控已启动")
-
-# ── 安全启动检查：默认密钥/弱密码检测 ──
-def _security_startup_check():
-    """启动时检测安全风险：默认密钥、弱密码 admin"""
-    _risks = []
-    # 1. 检测 SECRET_KEY 是否为默认值
-    _DEFAULT_KEY = "aiops-dev-secret-change-in-production-please"
-    if _config.SECRET_KEY == _DEFAULT_KEY:
-        _risks.append("SECRET_KEY 仍为默认值，生产环境必须设置 AIOPS_SECRET_KEY 环境变量")
-    if _config.MOBILE_JWT_SECRET == "aiops-mobile-secret-dev":
-        _risks.append("MOBILE_JWT_SECRET 仍为默认值，建议设置环境变量")
-    # 2. 检测 admin 是否使用弱密码
-    try:
-        _db = get_session_for("demo")()
-        try:
-            _admin = _db.query(User).filter(User.username == "admin").first()
-            if _admin and verify_password("admin123", _admin.password_hash):
-                _risks.append("admin 账户使用默认密码 admin123，请尽快修改")
-        finally:
-            _db.close()
-    except Exception:
-        pass
-    if _risks:
-        for _r in _risks:
-            logger.warning(f"[安全检查] {_r}")
-        logger.warning(f"[安全检查] 共发现 {len(_risks)} 项安全风险，详见上方警告")
-    else:
-        logger.info("[安全检查] 启动安全检查通过，未发现默认密钥/弱密码风险")
 
 _security_startup_check()
 # 两个库都播种 SOP 工作流模板（幂等，按 name 去重）
@@ -1104,7 +556,6 @@ for _mode in ("demo", "real"):
             pass
         # 给已有种子工作流的 tool 节点补 execution_mode: auto（向后兼容）
         from app.models import AgentWorkflow
-        from sqlalchemy import text as _sa_text2
         _preset_names = [p["name"] for p in _get_agent_presets()]
         for _wf in _seed_db.query(AgentWorkflow).filter(AgentWorkflow.name.in_(_preset_names)).all():
             _nodes = _wf.get_nodes()
@@ -1185,7 +636,6 @@ async def prom_metrics():
         "# TYPE python_gc_objects_collected counter",
     ]
     try:
-        from app.services import skill_registry
         import sqlite3
         con = sqlite3.connect("db/aiops.db")
         rules = con.execute("select count(*) from alert_rules").fetchone()[0]

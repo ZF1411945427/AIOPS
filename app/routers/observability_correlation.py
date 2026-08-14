@@ -454,23 +454,23 @@ def format_correlation_for_llm(data: dict) -> str:
 
     traces = data.get("trace_anomalies", {})
     if traces.get("total_traces", 0) > 0:
-        lines.append(f"## 🔗 链路追踪")
+        lines.append("## 🔗 链路追踪")
         lines.append(f"- 总调用链：{traces.get('total_traces', 0)} 条")
         lines.append(f"- P95 耗时：{traces.get('duration_p95_ms', 0)} ms")
         lines.append(f"- 错误率：{traces.get('error_rate_pct', 0)}%")
         slow = traces.get("slow_traces", [])
         if slow:
-            lines.append(f"  - 慢调用链（前 5 条）：")
+            lines.append("  - 慢调用链（前 5 条）：")
             for t in slow[:5]:
                 lines.append(f"    - {t.get('service_name','')}/{t.get('operation_name','')} 耗时 {t.get('duration_ms','')}ms Z={t.get('z_score','')}")
         err = traces.get("error_traces", [])
         if err:
-            lines.append(f"  - 错误调用链（前 5 条）：")
+            lines.append("  - 错误调用链（前 5 条）：")
             for t in err[:5]:
                 lines.append(f"    - {t.get('service_name','')}/{t.get('operation_name','')} 状态={t.get('status','')}")
         high_err = traces.get("high_error_services", [])
         if high_err:
-            lines.append(f"  - 高错误率服务：")
+            lines.append("  - 高错误率服务：")
             for t in high_err[:5]:
                 lines.append(f"    - {t.get('service_name','')} 错误率={t.get('error_rate','')}% ({t.get('error_count','')}/{t.get('total_count','')})")
         lines.append("")
@@ -485,7 +485,7 @@ def format_correlation_for_llm(data: dict) -> str:
 
     rca = data.get("rca_suggestions", [])
     if rca:
-        lines.append(f"## 💡 系统预判（RCA 建议）")
+        lines.append("## 💡 系统预判（RCA 建议）")
         for r in rca:
             lines.append(f"- [{r.get('confidence','')}] [{r.get('type','')}] {r.get('message','')}")
         lines.append("")
@@ -730,7 +730,7 @@ def list_correlatable_assets(
 
     # 优先从 Alert 表查有告警的资产
     for row in db.query(Alert.asset_id).filter(
-        Alert.created_at >= since, Alert.asset_id != None
+        Alert.created_at >= since, Alert.asset_id.isnot(None)
     ).distinct():
         if row[0]:
             asset_ids.add(row[0])

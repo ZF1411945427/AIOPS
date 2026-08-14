@@ -1,10 +1,8 @@
 """自主 AI Agent 闭环 API — 巡检历史、手动触发、状态查询。"""
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User
 from app.services.agent_autonomous import run_autonomous_cycle, get_cycle_history
 
 router = APIRouter(prefix="/agent/autonomous", tags=["agent-autonomous"])

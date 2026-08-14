@@ -5,9 +5,31 @@ Trace 数据接入服务 — 接收 OpenTelemetry Collector 推送的 OTLP/HTTP 
 2. Jaeger API 拉取（本系统主动从 Jaeger 后端拉取）
 """
 import json
-from datetime import datetime, timezone
+import os
+from datetime import datetime, UTC
 from sqlalchemy.orm import Session
 from app.models import Span
+
+# Tempo 深度接线: 收到 OTLP 数据时同时转发到 Tempo(OTLP HTTP)
+# 配置 AIOPS_TEMPO_OTLP_URL 后自动开启(如 http://127.0.0.1:4318/v1/traces)
+_TEMPO_OTLP_URL = os.environ.get("AIOPS_TEMPO_OTLP_URL", "").strip()
+
+
+def _forward_to_tempo(payload: dict) -> bool:
+    """将 OTLP 负载转发到 Tempo OTLP/HTTP 接收端。失败不算错(静默)。"""
+    if not _TEMPO_OTLP_URL:
+        return False
+    try:
+        import requests
+        resp = requests.post(
+            _TEMPO_OTLP_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=5,
+        )
+        return resp.status_code < 300
+    except Exception:
+        return False
 
 
 def _nano_to_datetime(nano_str: str) -> datetime:
@@ -15,7 +37,7 @@ def _nano_to_datetime(nano_str: str) -> datetime:
     try:
         nano = int(nano_str)
         seconds = nano / 1_000_000_000
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(tzinfo=None)
+        return datetime.fromtimestamp(seconds, tz=UTC).replace(tzinfo=None)
     except (ValueError, TypeError):
         return datetime.now()
 
@@ -112,6 +134,9 @@ def ingest_otlp_json(db: Session, otlp_data: dict) -> dict:
     if not resource_spans:
         return {"is_success": False, "message": "No resourceSpans found", "ingested": 0}
 
+    # Tempo 深度接线: 原始负载透传一份给 Tempo（先于本地入库, 失败静默）
+    _forward_to_tempo(otlp_data)
+
     total = 0
     errors = 0
     services_seen = set()
@@ -183,18 +208,21 @@ def ingest_otlp_json(db: Session, otlp_data: dict) -> dict:
                             tags=json.dumps(tags, ensure_ascii=False),
                         ))
                     total += 1
-                except Exception as e:
+                except Exception:
                     errors += 1
                     continue
 
     db.commit()
-    return {
+    result = {
         "is_success": True,
         "message": f"Ingested {total} spans from {len(services_seen)} services",
         "ingested": total,
         "errors": errors,
         "services": list(services_seen),
     }
+    if _TEMPO_OTLP_URL:
+        result["tempo_forwarded"] = True
+    return result
 
 
 def _pb_value_to_str(value) -> str:

@@ -1,6 +1,130 @@
+﻿
+### 2026-08-14: 技能市场预览接口加 LLM 调用防崩 + 菜单 AI 助手缺失修复
+- **预览 500 根因**: `preview_remote_skill()` 翻译 body_zh / 描述时若 LLM 连接被中断(ConnectionAbortedError 10053),异常会从 `_llm_call` 的 `except Exception: return ""` 之外冒到 FastAPI。**正文翻译的内容截断 8000 字符 + 4096 token max_tokens 在长 SKILL.md 下容易超时被服务器断连**
+- **修复**: ①`skill_remote.py` preview_remote_skill 每个 LLM 调用独立 try-except, 失败降级到原文不阻塞 ②`marketplace.py` api_remote_repo_skill_preview 加 `except Exception` 返回 `{"ok":False,"error":...}` 友好提示(原只捕获 ValueError) ③加 `logger.exception` 写日志便于排查
+- **菜单修复**: admin 用户 role=1 的 role_menus 表存的是旧 key(`ai-assistant`、`agent-chat`),新菜单的 `ai-ops-assistant` 是 leaf 无子项,被过滤掉。直接 INSERT 给 role_id=1 加 `ai-ops-assistant`。验证: GET /api/menu 现在返回 ['ai-ops-assistant', 'agent-ops'] 都在 ✅
+- 文件: app/services/skill_remote.py, app/routers/marketplace.py, db/aiops.db(role_menus)
+
+### 2026-08-14: 技能库/技能市场 合并为"技能中心"功能页（分 tab 展示）
+- 背景: 技能库和技能市场本是两个独立页面（SkillsView.vue + MarketplaceView.vue）、两个菜单项，但它们本质是同一功能域的两个视图
+- 改动: 新建 `SkillCenterView.vue`（el-tabs + 两个 tab-pane "🧩 技能库"/"🛍️ 技能市场"），分别嵌入 SkillsView/MarketplaceView 子组件；菜单只保留一个入口「技能中心」(key=skills, label="技能中心")，不再有独立「技能市场」菜单项
+- 兼容: AppLayout 中 `activeView === 'skills'` 和 `'skill-market'` 都渲染 SkillCenterView（这样旧角色 role_menus 中 `skill-market` 权限仍可访问，不丢页）
+- 文件: frontend/src/views/SkillCenterView.vue（新建）, frontend/src/layout/AppLayout.vue, app/routers/menu_config.json
+- 验证: 前端 npm build 通过; 后端重启后 GET /api/menu 只返回一个技能中心入口; 登录态可访问
+
+### 2026-08-14: 远程技能源 GitHub Token 系统层可配置(不再依赖硬编码环境变量)
+- **背景**: 技能市场远程源拉取非精选仓库目录时依赖 GitHub API, 未认证 60/时易 403; 原有方案只认环境变量 GITHUB_TOKEN, 用户没法在界面填
+- **实现**: ①`skill_remote.resolve_github_token(db, fallback)` 三源解析(入参 fallback > SystemConfig `github_api_token` > 环境变量 GITHUB_TOKEN), 请求头 `_headers(token)` 每请求注入 ②`config_service` 增 `SENSITIVE_KEYS={"github_api_token"}` 并让 `get_all_configs` **完全跳过**该键(否则 SettingsView 全量回写会把 `***` 覆盖真实值——已排查确认 SettingsView.save 提交整个 form) ③marketplace.py 增 GET/POST `/api/marketplace/remote/token`: GET 返回 `{has_value,value:"***",source:system|env|none}` 不回显明文; POST `{token}` 空=不修改、`{clear:true}` 清除 ④前端 MarketplaceView 加「🔑 GitHub Token」行(el-input password + 保存/清除 + 状态指示)
+- **验证**: 登录态 API 全链路通过——初始 GET none → SET → GET has_value:true/value:***/source:system → settings 列表不含 github_api_token → CLEAR → GET none; 服务层 update_config 写值后 resolve_github_token(db) 读出真值 ✅; 前端 npm build 通过; 后端 healthz 200
+- 文件: app/services/skill_remote.py, app/services/config_service.py, app/routers/marketplace.py, frontend/src/views/MarketplaceView.vue, CONTRACT.md
+
+### 2026-08-14: 技能库/市场菜单归位 AI运维智能体 + 远程技能源对接 skills.sh 生态
+- **菜单归位**: 技能库(skills)/技能市场(skill-market)原本误放在「系统配置→系统管理」下, 与运维配置类挤在一起; 但它们本质是 Agent 生态能力, 已移到「AI运维智能体(aiops)→Agent 管理(agent-management)」分组下(与智能体编排/Agent能力中心/子智能体管理/Agent评测中心并列)。验证: 登录后 GET /api/menu 确认 技能库+技能市场 出现在 AI运维智能体/Agent 管理 下 ✅。改动: `app/routers/menu_config.json`(需重启后端生效, 本次已重启)
+- **新增远程技能源(对接 skills.sh 社区开源生态)**: 新增 `app/services/skill_remote.py`——远程市场本质 = 公开 GitHub 仓库 `skills/<name>/SKILL.md`(与 skills.sh / Anthropic Agent Skills 标准完全同格式, 也是本系统 skill_registry 的格式)。列表用 GitHub Contents API(`/contents/skills`), 抓取用 raw.githubusercontent.com(不限流)
+- **GitHub API 限流坑**: 服务端出网未认证 GitHub API 常被 403(60/时), 已做三层兜底: ①支持 `GITHUB_TOKEN` env 提升到 5000/时 ②内置精选目录 `_CURATED`(仅 anthropics/skills 已核实 17 技能, 避免假条目)在 API 403 时用 raw 兜底 ③未收录仓库限流时给明确提示(设 token 或改用 anthropics/skills)。microsoft/azure-skills 等把 author/version 嵌套在 `metadata:` 下 → `_meta_value()` 兼容读取
+- **API**: `GET /api/marketplace/remote/presets`(预设 5 仓库: anthropics/skills、microsoft/azure-skills、vercel-labs/agent-skills、obra/superpowers、supabase/agent-skills)、`GET /api/marketplace/remote/repos/{owner}/{repo}/skills?branch=`、`GET .../skills/{skill}`(预览)、`POST /api/marketplace/remote/install`(安装 source=remote)
+- **前端**: MarketplaceView.vue 顶部加「🌐 远程技能源」面板(preset 仓库 chips + 自定义 owner/repo + 分支 + 列表卡片 + 👁️预览弹框(显示 SKILL.md 指令) + ⬇️安装), 保留原私服市场/发布逻辑
+- **契约**: CONTRACT.md 19.2 `Skill.source` 增 `remote`; 19.5 增 4 个 remote API
+- **验证**: 服务层 list(preview/install) 通过(anthropics 17 技能、azure-messaging 嵌套 metadata 解析、install source=remote); 后端 healthz 200 + 登录态 API 全链路(presets/list/install 均 200, pdf 技能 source=remote 安装后清理); 前端 npm run build 通过
+- 文件: app/services/skill_remote.py, app/routers/marketplace.py, app/routers/menu_config.json, CONTRACT.md, frontend/src/views/MarketplaceView.vue
+
+### 2026-08-14: 架构图生成接入 AI + draw.io MCP 实时打开(借鉴 auto_sw_config 方案)
+- 新增 `app/services/drawio_live_drawer.py`: 基于 auto_sw_config 项目的 MCPClient 方案，子进程启动 node `server.mjs`，通过 JSON-RPC over stdio 调用 `drawio_open` 工具在 draw.io 桌面版中打开生成的架构图
+- 复制 `skills/drawio/` 目录(含 server.mjs/live-server.mjs/drawio-path.mjs) 从 auto_sw_config 到 project08
+- 新增 `app/services/drawio_ai_planner.py`: 调用 LLM (GPUStack deepseek-v4-flash) 分析资产关系, 输出 node_order 排序分数, 用于优化布局
+- 路由: `POST /api/arch-diagram/generate` 新增 `ai_layout:bool`(默认true) 和 `live_draw:bool` 参数
+- 前端: 弹窗路径输入框始终显示 + 浏览按钮 + 「实时绘制到 draw.io」开关(配置路径后可用)
+- 实测: live_draw=True → AI分析 → 生成.drawio → 打开 draw.io 桌面版 ✅
+- 前端已构建, 后端重启验证通过
+- 文件: app/services/drawio_ai_planner.py(新), app/services/drawio_live_drawer.py(新), skills/drawio/(新), app/routers/arch_diagram.py, frontend/src/views/FireMapView.vue
+
+### 2026-08-14: 架构图生成布局增强(障碍物规避路由器 + 平行边锚点分化)
+- 新功能背景: 在架构巡检图(FireMapView)点进某业务域后加「生成架构图」按钮, 生成该业务域资产的分层+父子归属+依赖连线架构图。后端: `app/services/drawio_generator.py`(build_drawio_xml → mxGraph XML) + `app/routers/arch_diagram.py`(GET /meta /list /file POST /generate)
+- **问题**: 用户反映"线重叠/穿节点", 分析确认: default 域 2 处边穿过节点 + 3 组平行边(6 条同向边)完全重合
+- **改进 ① 拓扑排序**: 同层节点按上下游关系评分排序(上游多靠左/下游多靠右), 替代原字母排序, 减少跨层连线交叉
+- **改进 ② 平行边锚点分化**: 同源多条边分配不同 exitY/entryY 槽位(0.2~0.8), 垂直方向边分配不同 exitX/entryX 槽位, 消除完全同锚点平行边
+- **改进 ③ 方向感知锚点**: 目标在右→exitX=1(右侧出), 目标在左→exitX=0(左侧出), 避免边横穿中间层
+- **改进 ④ BFS 障碍物规避路由器**: 在稀疏网格上运行 Dijkstra 最短路, 为每条边计算避开所有节点矩形的正交路径, 显式路径点写入 drawio XML `mxGeometry Array`。兜底异常时退化直线
+- **验证**: default 域 10 边 38 路径点, 0 穿节点 ✅; K8s 域 26 资产 21 边, 0 穿节点 ✅; 无完全同锚点平行边 ✅
+- 文件: app/services/drawio_generator.py, app/routers/arch_diagram.py, app/bootstrap.py, docs/架构图自动生成_任务接管文档.md
+
+### 2026-08-14: 修复架构巡检图 FireMapView 拓扑卡片缺失健康状态着色
+- 问题: 拓扑图中节点卡片只按分层(layer)着色, 底部图例"健康/警告/严重/离线"在卡片上无体现
+- 根因: 节点 itemStyle.color/borderColor 全用 LAYER_STYLE 分层色(FireMapView.vue), health_status 未参与渲染; 后端 health_engine.py 仅三态 green/gray/red(HEALTH_GREEN=green/HEALTH_GRAY=gray/HEALTH_RED=red)
+- 修复: 新增 _healthColor() 映射(绿/橙/红/灰); 节点卡片 borderColor 改健康色加粗2px + 内部保留分层淡底色(双重编码); label 富文本加健康色状态圆点; 图例补注"卡片边框/圆点=健康状态"
+- 文件: frontend/src/views/FireMapView.vue, 前端已 build
+
+### 2026-08-14: 修复架构巡检图 FireMapView 调用连线 tooltip 显示 undefined
+- 问题: 架构巡检图(firemap, FireMapView.vue)鼠标悬停调用连线显示"调用 undefined次, 错 undefined次"
+- 根因: ECharts graph 构造 edge 时只传 source/target/lineStyle/label, 丢弃后端 build_service_call_topo(topology_service.py:380)返回的 call_count/error_count/error_rate/avg_duration_ms → tooltip formatter p.data.call_count=undefined; 且 tooltip 顶行显示节点 ID 数字而非服务名
+- 修复: ①graphEdges 补 raw: edge 挂原始数据(FireMapView.vue:554) ②edge tooltip formatter 改读 p.data.raw, 显示 服务名→服务名 / 调用N次·错误M次 / 错误率X%·平均Yms(FireMapView.vue:570), 前端已 build
+- 文件: frontend/src/views/FireMapView.vue
 # AIOps 项目记忆
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
+
+### 2026-08-14: K8S 集群部署在线模式代理可配置 + test111 失败排查
+- **test111 失败根因**: 在线部署模式（无离线包）需访问外网（dl.k8s.io + apt 源 + registry.k8s.io），目标虚机 192.168.100.129 无外网连通性
+- **代码 bug**: `app/services/k8s_offline_deploy_service.py:478` 写死代理 `http://192.168.31.76:7897`，curl 那行 `${http_proxy:-}` 是空（line 607），根本没生效
+- **改造方案（用户选：前端表单可选字段）**:
+  - 模型：`K8sClusterPlan` 加 `http_proxy`/`https_proxy`/`no_proxy` 三字段
+  - 迁移：`main.py:_MIGRATIONS` 加 `k8s_cluster_plans` 三列 ALTER TABLE（自动幂等）
+  - 服务：`_proxy_env_script(plan)` helper 生成 `export http_proxy/https_proxy/no_proxy` 片段，所有联网步骤（preflight apt / kubeadm 在线下载 / CNI 在线下载 / 包源安装）注入到脚本前
+  - 前端：表单加「🌐 网络代理」可折叠 details 区块（HTTP/HTTPS/NO_PROXY 三字段，留空=不走代理）
+  - 契约：CONTRACT.md 第十三章 13.1 表加 3 个字段
+- **验证**: 启动后端 ALTER 自动生效（demo+real 库都加上 3 列）；冒烟测创建带 proxy 的计划→API 返回 proxy 字段→老数据（test111）proxy 空兼容→删除正常；前端 npm build 通过
+- **文件**: `app/models/k8s.py`, `app/services/k8s_offline_deploy_service.py`, `app/main.py`, `frontend/src/views/K8sOfflineDeployView.vue`, `CONTRACT.md`
+
+### 2026-08-14: 赶超执行⑥main.py 拆解 + Tempo 深度接线
+
+- **main.py 拆解(1205→685行)**: 新建 `app/middleware.py`(PUBLIC_PATHS + TraceIdMiddleware + AuthMiddleware)和 `app/startup.py`(init_admin/_collect_all_menu_keys/_init_background_task_monitor/_run_bg_service/background_loop/_security_startup_check + 常量)。main.py 保留 app 创建/中间件注册/静态挂载/路由注册/启动初始化编排/healthz/readyz/metrics/gRPC。验证: `from app.main import app` OK、健康端点 200、核心测试 72 passed、ruff/arch 全绿。**坑**: main.py 里 `from app.logger import logger` 出现多次, edit 需带上下文; `_collect_all_menu_keys` 原版用 `_keys=set()+add` 非 list; `_scan_builtin_skills` 从 startup 导入; run.py 端口读 `PORT` env 不是位置参数(勿 `python run.py 8018`)。ruff 报未用 import → `--fix`。
+- **Tempo 深度接线(数据流)**: `trace_ingest_service.py` 新增 `_forward_to_tempo(payload)`——配置 `AIOPS_TEMPO_OTLP_URL`(如 `http://tempo:4318/v1/traces`)后, `ingest_otlp_json` 收到 OTLP 时**先把原始 load 转发一份给 Tempo**(requests.post 5s 超时, 失败静默), 再本地入库; 返回体加 `tempo_forwarded: true`。docker-compose aiops 服务加 `AIOPS_TEMPO_OTLP_URL=http://tempo:4318/v1/traces`; .env.example 补说明。**未做**: 前端 trace 查询改查 Tempo Query API(需 Tempo 在线 + 返回格式适配, 风险高且本地无法 e2e 验证; 用 SQLite 兜底已足够, 数据已真正流进 Tempo 达成核心目标)。新增 `tests/test_trace_ingest_tempo.py`(6 用例: URL 未设禁用/转发成功/失败静默/flag 标记/转发原始负载)。
+- **回归**: 重启后端(拆解后代码) healthz/login/overview 200; 真实 OTLP POST `/api/v1/traces` 404(standard_router 未注册, 真实端点是 `/api/v1/traces/otlp`)→ 用 `/api/v1/traces/otlp` 实测 200 Ingested 1 span; 单测验证 Tempo flag 三态(未设/设了但挂/设了且通)。ruff 全绿, arch 0 违规, docker-compose yaml 解析 OK。当前 140+6=146+ 用例。
+- **Tempo 查询代理(前端 Trace 页接 Tempo)**: 新建 `app/services/tempo_query_service.py`(配置 `AIOPS_TEMPO_QUERY_URL` 如 http://tempo:3200)。`search_traces` 调 Tempo `/api/search`(Jaeger 格式)→ 转前端 list 格式 `{"traces":[trace_id/span_count/total_duration_ms/root_service/root_operation/started_at/worst_status],"services","total"}`; `get_trace` 调 Tempo `/api/traces/{id}` → 转前端详情格式 `{"trace_id","total_spans","root_duration_ms","root_start","services","spans":[span_id/parent/service/operation/started_at/duration_ms/status/tags],"topology":{"services","edges"}}`。**traces_api.py** 的 list_traces(未带 keyword 时)与 get_trace 开头判断 `is_tempo_enabled()`, 优先 Tempo, **任何异常回退 SQLite**(向后兼容, 已端到端验证: Tempo 不在线时 /api/traces 200 返回 SQLite 数据)。docker-compose aiops 加 `AIOPS_TEMPO_QUERY_URL=http://tempo:3200`。新增 `tests/test_tempo_query_service.py`(5 用例: Jaeger→前端映射/查询失败抛异常/详情拓扑边/404→None/时间戳)。ruff 全绿(修 B011 assert False→raise AssertionError, F401 json 未用)。
+
+### 2026-08-14: 赶超执行①代码质量+②架构工程化(Node——用户要求"除安全鉴权外全部赶超 ongrid")
+
+- **背景**: 真实重评(剔安全 8.42 vs 8.44 打平)后,用户指令"安全鉴权除了这个其他都赶超"。得分短板:代码质量 5.5(最大沟)、架构 7.5、可观测 8.0、可部署 8.0。
+- **①代码质量 5.5→真实门禁(覆盖率 7%→24%)**: 实测真实覆盖率 7%(41762 语句仅 7%)。新增 4 个测试文件: `test_core_algorithms.py`(26 用例: sigma/ewma/mad 异常检测、DTW、告警规则 metric_raw/anomaly/forecast 评估、PromQL 解析)、`test_secret_vault.py`(17: Fernet 加解密往返/掩码输出/引用注入递归/resolve fail-open/create 校验)、`test_tenant_service.py`(11: 默认租户守卫/CRUD/序列化)、`test_slo_service.py`(7: 燃烧速率计算/VM 查询解析/状态机)、`test_rca_algos.py`(11: log_rca z-score/邻居资产、idice 相关性归因)。**关键突破**: 新增 `test_api_integration.py`(13 用例 TestClient 直接 import app.main + 真实路由调用),覆盖率 8.6%→**24%**(覆盖 0% 的 main.py 741 行 + 路由层 + 启动链服务)。**e2e 冒烟** `tests/e2e_smoke.py`(真实子进程起后端 + 登录 + 8 端点, 8/8 通过)。CI 门禁 `--cov-fail-under=0`→**20%**(本地实测 24.06% 通过)。新建 `requirements-ci.txt`(纯 ASCII 注释——中文注释被 Windows pip GBK 解码报 UnicodeDecodeError,为干净 CI 环境验证所需)。CI test job 改用完整 requirements-ci + pytest-cov。
+- **路径/端口坑**: `run.py` 原硬编码 8000 不读环境 → 加 `HOST`/`PORT` env 支持(部署友好)。**`python` 命令实际指向 hermes-agent venv 非项目 .venv**(bash 工具 PATH 配置),e2e 脚本强制 `_VENV_PY` 优先 .venv。**AuthMiddleware 拦截发现的假 bug 澄清**: `/api/auth/login` 返回 303→HTML 是**路径错误**(真实登录路径是 `POST /login`, 无 `/api` 前缀),非鉴权 bug;PUBLIC_PATHS 已含 `/login`。e2e 曾误用 `/api/auth/login` 校正为 `/login`。
+- **②架构工程化(对齐 go-arch-lint)**: 新建 `tools/arch_check.py`(AST 静态分析 app 依赖: 方向约束 routers→services→models + 顶层 import 循环检测)。首轮发现 **1 真实违规**: `app/services/mcp_tools.py` 顶层 import `app.routers.observability_correlation`(services 反向依赖 routers, 此前 ToolBag 遗留)——改为 `query_correlation_analysis` 函数内延迟 import。修复后 arch_check exit=0(**0 方向违规 0 循环依赖**)。CI 加 `backend-arch` job。**前端 vitest 接入**: frontend devDeps 加 vitest/@vue/test-utils/jsdom, 新建 `vitest.config.js` + `src/api/request.test.js`(7 用例: 拦截器 warning/错误提取/授权跳转) + `src/utils/websocket.test.js`(6 用例: WebSocket mockOPEN/消息分发/退订)。mock 需 `vi.hoisted`+`wsConstructor.OPEN=1`(stubGlobal 无静态枚举)。**13/13 通过 851ms**。CI 加 `frontend-test` job。
+- **现状**: 140 pytest(覆盖率 24.07%>20%) + 13 vitest + 8 e2e + ruff 全绿 + arch 全绿。下一项:③可观测性(Tempo/Jaeger 查询代理 + Grafana 预置)④可部署(Helm 实战 + 多架构发布)⑤校准评分文档(MEMORY 14 行仍记旧乐观值, 需按真重评 8.28/8.42 校准)。
+
+### 2026-08-14: 赶超执行③可观测性+④可部署+⑤评分校准(Node——本轮收尾)
+
+- **③可观测性(8.0→8.5)**: `deploy/grafana/provisioning/datasources/all.yml`(Prometheus/Loki/Tempo 三 datasource provisioning)+ `dashboards/aiops.yml`(provisioning provider)+ `dashboards/aiops_overview.json`(预置 AIOps 概览面板: healthz/运行时间/MCP工具/DB/告警规则)。`deploy/loki/config.yml` + `deploy/tempo/config.yml`。docker-compose monitoring profile 加 **loki**(3100)/**tempo**(3200/4317/4318)服务 + loki-data/tempo-data 卷, grafana 挂载 provisioning+dashboards 目录。**坑**: 本系统自建 gRPC OTLP 接收端口 4317 与 Tempo 4317 冲突 → `app/grpc_server.py` 改为 `AIOPS_OTLP_GRPC_PORT` env(默认 **14317**), `trace_ingest.py` agent-guide 文档同步可配置(docstring 里 os.environ 需运行时求值, 用 f-string)。docker compose config --quiet 通过; ruff/arch/140 测试全绿, e2e 8/8。
+- **④可部署性(8.0→8.5)**: 新增项目根 `Makefile`(对齐 ongrid): build/build-multi(`docker buildx --platform linux/amd64,arm64` 多架构发布)/build-postgres(WITH_POSTGRES=1)/test(覆盖率门禁 20)/test-frontend(vitest)/test-e2e/lint(ruff)/arch-check/compose-up(-pg)/clean/help。Helm chart `helm lint` 0 fail + `helm template` 渲染正常(此前已建)。.env.example 加 AIOPS_OTLP_GRPC_PORT。
+- **⑤评分文档校准(关键!推翻旧乐观值)**: 老文档记"8.75 vs 8.73 反超 0.42"是**过度乐观**(未核实 ongrid 318 测试/arch-lint/三支柱)。按真重评基数 + 本会话实际成果重算: 含安全 本 **8.48** vs ongrid **8.55**(差 0.07 仍略逊); 剔安全(归一)本 **8.64** vs ongrid **8.50**(小幅反超 +0.14)。维度变化: 代码质量 5.5→7.0、架构 7.5→8.0、可部署 8.0→8.5、可观测 8.0→8.5; e2e/vitest/TestClient/覆盖率门禁/arch_check/Makefile/Grafana-Loki-Tempo 均已纳入证据。文档新增"五、2026-08-14 本轮赶超已完成工作"章节。
+- **剩余差距**(下轮可继续): ①代码质量(318 vs 140 测试, 覆盖率 24% vs ongrid, 单 linter)②架构(main.py~1205 行/deploy_service 199KB 未拆)③可观测(Tempo/Loki 仅 compose 接入未深度接线)④可部署(Helm 未真集群实战, 多架构未实际发布)。
+- **关键文件**: `tools/arch_check.py`、`requirements-ci.txt`、`Makefile`、`deploy/grafana/{provisioning,dashboards}`、`deploy/loki/config.yml`、`deploy/tempo/config.yml`、`tests/{test_core_algorithms,test_secret_vault,test_tenant_service,test_slo_service,test_rca_algos,test_api_integration}.py`、`tests/e2e_smoke.py`、`frontend/{vitest.config.js,src/api/request.test.js,src/utils/websocket.test.js}`。
+
+### 2026-08-14: 真实重评(清空印象, 基于代码证据)——此前评分过度乐观, 剔安全实际仅打平
+
+- **起因**: 用户要求"忘掉之前操作, 重新基于平台和代码评估真实评分"。派 2 个 explore agent 并行深挖两边代码(本系统 323 py/145 vue, ongrid 881 go + **318 测试文件**)。
+- **真实评分(证据版)**: 本系统 Agent 9.0/工作流 8.5/架构 7.5/安全 7.0/生态 8.5/监控 9.0/功能 9.5/可部署 8.0/代码质量 5.5/可观测 8.0/产品 9.5; ongrid 8.5/8.0/9.5/9.0/8.0/8.5/8.0/9.0/9.0/9.0/7.0。
+- **加权合计**: 含安全本 8.28 vs ongrid 8.50(落后 0.22); 剔安全本 8.42 vs ongrid 8.44(差 0.02 **打平**)。
+- **推翻之前结论**: 之前记录的"剔安全 8.97/9.06 vs 8.64 反超"是**过度乐观**——未核实 ongrid 的 318 单测、go-arch-lint 三 BC 架构强制、Loki/Tempo/预置 Grafana 三支柱、edge Helm/systemd/多架构发布、golangci 12 linter 等真实工程资产。
+- **本系统真实优势**: 功能广度(131 路由/848 端点/117 视图 vs 22 模块/39 页面)、Agent SSE 真流式落地(ongrid token 流式仍 feature flag 门控)、RAG 深度(BGE+BM25 混合+双 rerank vs ongrid 纯向量)、移动端/部署引擎/产品覆盖。
+- **本系统真实短板**: ①代码质量 5.5 vs 9.0(最大沟: 55 用例、`--cov-fail-under=0` 门禁虚设、无前端单测、无 e2e) ②架构 7.5 vs 9.5(单体无强制边界, main.py 1205 行、deploy_service 199KB) ③可观测 8.0 vs 9.0(自研 metrics+trace_id 日志, 无真实 tracing 后端/预置面板) ④可部署 8.0 vs 9.0(Helm 未实战、无多架构发布)。
+- **待办方向(如需真反超)**: 前端单测(vitest)+ API e2e + 覆盖率真实门禁; 边界架构约束; 接 Tempo/Jaeger 查询代理 + Grafana 预置; Helm 实战验证 + 多架构镜像发布。
+- **文件**: `docs/本系统与ongrid-main能力评分对比.md`(分数需按本记录再校准, 勿沿用旧乐观值)。
+
+### 2026-08-14: opencode 配置合并——opencode.json 单文件双 provider(/models 可切换)
+
+- **变更**: `opencode1.json`(deepseek/思语AI)已合并入 `opencode.json`,删除原 `opencode1.json`。
+- **现状**: 单文件 `opencode.json` 含 2 个 provider(gpustack=内网 GPUStack `http://172.25.1.13:30088/v1`、deepseek=思语AI `https://siyu.site/v1`),各自 models 均含 `deepseek-v4-flash`;默认 `model=gpustack/deepseek-v4-flash`。`/models` 可切换两者。
+- **坑**: write 工具写出的 JSON 带 UTF-8 BOM,json.load 报错 → 需 `utf-8-sig` 或重写为无 BOM;已用 python 重写为无 BOM 并验证合法。
+
+### 2026-08-14: 全方位赶超 ongrid — ruff 门禁+55单测+20真实bug修复 / ToolBag 延迟加载 / Helm+Postgres
+
+- **目标**: 用户在重评分(代码证据版 O 8.72 vs 本 8.55, 最大差距=代码质量 6.0 vs 9.5)后选"全方位赶超"。完成工程可信度+Agent 内核+可部署三大块。
+- **H3+ 代码质量(8.0→9.0 打平)**: 新建 `pyproject.toml`(ruff select F/E4/E7/E9/B, ignore B008/B904/B023(部分)/UP035/UP045/E402/E712 等, per-file: tests=F401, static=F401, routers=B006(FastAPI dict 默认参误报))。`ruff check app tests tools deploy scripts` 全绿(exit=0)。**修复 20+ 真实 bug**: F811 重复函数(get_mcp_manifest 需防; edge_tunnel 重复 resolve_exec_future)、F821 未定义(main.py 缺 verify_password、system.py 缺 SystemConfig、models/agent.py 缺 uuid)、F601 字典重复键(assets.py 重复 http_url 等 4 键覆盖)、F811 路由重复(auth.py /product/overview)、E711 SQLAlchemy filter `!= None`→`.isnot(None)`(7 处, 生成 !=NULL 恒不匹配真 bug)、B023 线程闭包循环变量(agent_workflow 恢复未完成任务, 默认参数捕获修复; deploy 并行组安全已 ignore)、**工作流 ne/gt/lt 运算符失效**(pyop 带空格 `" != "` 与比较 `pyop=="!="` 永不匹配 → 去空格)、bare except→except Exception(6 处)、lambda→def(2 处)、死代码(health_engine for svcs in svcs)。CI 4 jobs: backend-lint(ruff)/backend-test(py_compile+pytest --cov-fail-under=0)/frontend-build/sanitize。requirements-dev 加 pytest-cov+ruff。
+- **测试 10→55**: 新增 `tests/test_workflow_logic.py`(topological_sort/_node_dependencies/_eval_condition/_render_value, 锁定 ne/gt/lt 修复)、`test_tool_registry.py`(装饰器链)、`test_ai_provider_health.py`(CircuitBreaker 状态机)、`test_toolbag.py`(8)、`test_database.py`(5, monkeypatch 而非 reload 避免驱动缺失)。全量 55 passed。
+- **Agent 内核 ToolBag(AIOPS_TOOLBAG=1 开关)**: `mcp_registry.py` 重构 `get_mcp_manifest(defer=None)`(默认全量不变; defer=True 时核心 13 工具全量 schema + 专业 22 工具降级紧凑摘要带 `deferred:true` 提示), 新增 `search_tools(query,limit)`/`get_deferred_tool_schema(name)`; 新建 `toolbag_mcp_tools.py` 注册 `search_tools`/`load_tool_schema` MCP 工具(mcp_tools.py 尾部导入)。验证: defer payload 22802→16899B(减 25.9%), agent_service.get_mcp_manifest() 在 AIOPS_TOOLBAG=1 时 13 全量+22 降级+search_tools 注入; 默认不设不变。对齐 ongrid toolbag.go 的 ToolSearch。
+- **可部署性(8.0→8.5 打平)**: `app/database.py` 支持 `AIOPS_DB_URL`(Postgres/MySQL 生产模式, SQLite 专属 connect_args/PRAGMA 仅 SQLite 生效, 驱动缺失抛清晰 RuntimeError `pip install psycopg2-binary`)。新建 **Helm chart** `deploy/helm/aiops/`(Chart.yaml/values.yaml/values.prod.yaml/templates: deployment/service/pvc/secret/ingress/serviceaccount/postgres StatefulSet; `helm lint` 0 fail, `helm template` 渲染正确)。docker-compose 加 `--profile postgres`(postgres:16-alpine + AIOPS_DB_URL 透传)。Dockerfile 加 `WITH_POSTGRES=1` ARG(psycopg2-binary)。.env.example 加 AIOPS_DB_URL/AIOPS_TOOLBAG 说明。**坑**: prod values 初版 AIOPS_DB_URL 用 `${DB_PASSWORD}` 占位 Helm 不替换 → 改直接值与 postgres.auth.password 一致。
+- **回归验证**: 杀残留 python 后新代码启动, healthz 200 + `/api/system/reload-menu` 200(**修复前必崩的 SystemConfig NameError 端点**)/assets list/detail/observability correlation analyze 全 200。
+- **评分更新**: Agent 9.5(补 ToolBag), 可部署 8.0→8.5(补 Helm+Postgres), 代码质量 8.0→9.0(ruff+55 测试)。**含安全 8.75 vs 8.73(反超 +0.02), 剔安全 9.06 vs 8.64(+0.42)**。用户此前已定 Casbin/多租户(E1/E4)暂缓。
+- **文件**: `pyproject.toml`(新), `.github/workflows/ci.yml`, `app/services/mcp_registry.py`, `app/services/toolbag_mcp_tools.py`(新), `app/services/mcp_tools.py`, `app/database.py`, `app/main.py`, `app/models/agent.py`, `app/routers/{auth,system,assets}.py`, `app/services/{agent_workflow,deploy,edge_tunnel,health_engine,graph_inference,agent_service,asset_service,connection_service,asset_discovery_service,topology_service,pcadr_service,mobile_push_service,agent_autonomous}.py`, `deploy/helm/aiops/`(新), `docker-compose.yml`, `Dockerfile`, `.env.example`, `tests/{test_toolbag,test_database}.py`(新) 等, `docs/本系统与ongrid-main能力评分对比.md`, `CONTRACT.md`(未动字段契约)。
 
 ### 2026-08-14: 必需反超 ongrid — Agent hoisting + 装饰器 metric/tenant_bind 补齐, 工作流对齐
 
@@ -1496,3 +1620,6 @@
 - 新增 Vue 页面需改 AppLayout+menu_config+role_menus 三处;catch-all 路由必须在 include_router 之后
 - 字段名全项目统一:时间 `_at` / 布尔 `is_`/`has_` / JSON 加业务前缀 / FK 统一 `user_id`
 - 文件路径禁止硬编码,用 `__file__`/`%~dp0` 动态计算
+
+
+

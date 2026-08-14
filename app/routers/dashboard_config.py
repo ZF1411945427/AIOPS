@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import DashboardLayout, DashboardCardConfig
+from app.models import DashboardLayout
 
 router = APIRouter(prefix="/dashboard-config", tags=["dashboard_config"])
 

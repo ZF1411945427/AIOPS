@@ -6,9 +6,9 @@ from app.template_utils import get_templates
 from datetime import datetime, timedelta
 
 from app.database import get_db
-from app.services import alert_service, rca_service
-from app.models import Alert, AlertSilence, AlertRule, RemediationWorkflow, RemediationLog, Asset, K8sEvent, AIProvider, AgentConfig, MetricRecord
-from app.models import ChatSession, AlertSessionLink, AssetSessionLink
+from app.services import alert_service
+from app.models import Alert, AlertSilence, RemediationWorkflow, RemediationLog, Asset, K8sEvent, AIProvider, AgentConfig, MetricRecord
+from app.models import AlertSessionLink
 from app.services.remediation_service import execute_action
 from app.services.agent_service import call_llm, get_or_create_session, add_message
 from sqlalchemy.orm import Session
@@ -214,8 +214,6 @@ def api_heal_alert(alert_id: int, db: Session = Depends(get_db)):
 @router.post("/api/{alert_id}/silence")
 def api_silence_alert(alert_id: int, request_body: dict = None, db: Session = Depends(get_db)):
     """静默指定告警：创建一条 AlertSilence 记录，使该告警规则在指定时间内不再触发."""
-    from app.models import AlertSilence
-    from fastapi import Request
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
     if not alert:
         return JSONResponse({"error": "告警不存在"}, status_code=404)
@@ -390,15 +388,15 @@ def _build_alert_report(alert, asset, root_candidates, related_alerts, k8s_event
     elif k8s_events:
         lines.append(f"> 告警与 K8S 事件 **{k8s_events[0].reason}** 相关，建议检查对应 Pod/Node 运行状态。")
     elif related_alerts:
-        lines.append(f"> 该资产近期有多条告警，可能存在持续性故障，建议全面检查资产健康状态。")
+        lines.append("> 该资产近期有多条告警，可能存在持续性故障，建议全面检查资产健康状态。")
     elif metric_history and len(metric_history) >= 3:
         vals = [m.value for m in metric_history]
         if vals[-1] > (sum(vals[:-1]) / max(len(vals)-1, 1)) * 2:
-            lines.append(f"> 指标出现突增，可能是瞬时突发流量或进程异常，建议关注资源使用情况。")
+            lines.append("> 指标出现突增，可能是瞬时突发流量或进程异常，建议关注资源使用情况。")
         else:
-            lines.append(f"> 指标持续偏高，建议检查对应服务负载和资源配置。")
+            lines.append("> 指标持续偏高，建议检查对应服务负载和资源配置。")
     else:
-        lines.append(f"> 当前数据不足以定位明确根因，建议使用 **AI 深度分析** 获取更详细的诊断。")
+        lines.append("> 当前数据不足以定位明确根因，建议使用 **AI 深度分析** 获取更详细的诊断。")
 
     return "\n".join(lines)
 
@@ -558,7 +556,7 @@ def open_assistant_from_alert(alert_id: int, request: Request, db: Session = Dep
     db.add(AlertSessionLink(
         alert_id=alert_id, 
         session_id=session.id,
-        context_summary=f"来自告警中心的关联会话"
+        context_summary="来自告警中心的关联会话"
     ))
     
     # 自动注入第一条系统消息作为上下文摘要
@@ -703,7 +701,6 @@ def api_rules_delete(rule_id: int, db: Session = Depends(get_db)):
 def api_rules_metrics(db: Session = Depends(get_db)):
     """返回当前已采集到的指标名列表（供前端规则表单下拉选择）。
     从 metric_records 取最近有数据的指标名，去重排序。"""
-    from sqlalchemy import distinct, func
     rows = db.query(MetricRecord.name).distinct().order_by(MetricRecord.name).all()
     return {"items": sorted({r[0] for r in rows if r[0]})}
 

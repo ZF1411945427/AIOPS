@@ -9,12 +9,9 @@
 所有端点要求 admin 角色或登录态，写操作仅限 admin。
 """
 
-from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Request
 
-from app.database import get_db
 from app.domains import DOMAIN_REGISTRY, DOMAIN_ORDER, get_domain_summary
 from app.logger import logger
 

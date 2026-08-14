@@ -10,7 +10,6 @@
 - trigger_type = "cron"
 - trigger_condition = {"cron": "<5字段cron>"}；cron 字段非法 → 跳过该工作流并告警日志
 """
-import json
 from datetime import datetime
 from typing import Dict, List, Optional
 

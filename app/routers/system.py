@@ -5,13 +5,14 @@ from sqlalchemy import func
 from datetime import datetime, timedelta
 
 from app.database import get_db
+from app.models import SystemConfig
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 
 @router.get("/overview")
 def system_overview(db: Session = Depends(get_db)):
-    from app.models import Asset, Alert, Incident, MetricRecord, K8sEvent, DataSource
+    from app.models import Asset, Alert, Incident, MetricRecord, DataSource
 
     total = db.query(func.count(Asset.id)).scalar() or 0
     online = db.query(func.count(Asset.id)).filter(Asset.status == "online").scalar() or 0

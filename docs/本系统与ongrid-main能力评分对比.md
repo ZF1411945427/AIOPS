@@ -27,19 +27,21 @@
 
 ## 二、逐维度评分（10 分制，附双方证据）
 
+> 口径：基于真实代码/工程资产盘点（非印象分）。本系统列含 2026-08-14 "除安全鉴权外全面赶超" 会话已完成工作（详见第四章）。
+
 | 权重 | 维度 | Ongrid | 本系统(当前) | 说明 |
 |------|------|:---:|:---:|------|
-| 15% | **Agent/AI 能力** | **9.5** | **9.5** | **打平**。ongrid: coordinator+独立 persona+token 真流式+装饰器链(6)+110 工具+toolreplay hoisting。本系统: A1-A4 + token 真流式(stream_llm) + **hps工具重放 hoisting(稳定id/去重/参数兜底, 4调用点)+ 装饰器补全(metric+tenant_bind, 对齐 ongrid 6装饰器)** + P3-2 log_rca/idice + search_code 等工具 |
-| 10% | **工作流自动化** | **9.0** | **9.0** | **打平**。ongrid: 3 触发+fan-out+OR-join+execute-once+error port+seam 纯净。本系统: B1-B5(告警/cron 触发+并行 fan-out+notify/agent 节点) + OR-join(join=or/and) + error port(failed 节点 error 进 runtime_context) + 画布 trigger 配置(cron 预览/alert_auto) + 运行态观察 |
-| 15% | **架构工程化** | **9.5** | **8.5** | ongrid: DDD+有界上下文+CI。本系统: **H4 bootstrap 收敛 + H1 契约 + H2 models 域拆分完成**(145 类按 21 域拆到 app/models/*.py, 全字符串 FK 无循环 import, 功能零回归, `from app.models import X` 门面兼容); 仅缺 H3 级 CI 与完整 DI 容器 |
-| 10% | **安全鉴权** | **9.5** | **6.0** | ongrid: iam 组织级 RBAC+审计。本系统: 菜单 RBAC+资源级 RolePermission+审计, 但多租户隔离休眠(E4)、Casbin(E1) 暂缓 |
-| 10% | **生态(技能市场/MCP/secret/RAG)** | **8.0** | **8.5** | 本系统: F1/F2 技能+市场✅、F3 secret✅、P1-5 外部 MCP✅、P2-5 git 知识库✅、本地 BGE+G2✅、混合检索+rerank 强于 ongrid 纯向量 |
-| 10% | **监控/告警/RCA** | **9.0** | **9.0** | **打平**: 本系统 G1 规则 kind 补全到 **8 类**(metric_raw/anomaly/forecast/burn_rate/trace_latency/trace_error_rate/log_match/log_volume)+C1-C3 自动调查闭环, 与 ongrid 8 类规则对齐 |
-| 10% | **功能广度** | 6.5 | **10** | 本系统独有：部署引擎/AI 部署/K8s 集群部署/混沌/巡检/SLO/值班/移动端/自愈/变更/拓扑多 Tab |
-| 5% | **可部署性** | **8.5** | **8.0** | ongrid: docker-compose+install.sh+upgrade/uninstall+helm+prom/grafana provisioning。本系统: **2026-08-14 补齐 Dockerfile+compose(含监控 profile)+install.sh/upgrade.sh/uninstall.sh+备份(backups/)+prometheus 配置**, 与 ongrid 接近; 仅缺 Helm(边缘 K8s 部署) |
-| 5% | **代码质量** | **9.0** | **8.0** | ongrid: CI+lint+单测+安全扫描。本系统: **H3 CI(actions/workflows/ci.yml: 全 app 语法编译 + pytest + 前端构建 + 临时脚本守卫) + 核心单测完成**(tests/test_alert_rules + test_skill_registry, 10 passed); 可达性已具备, ongrid 经验沉淀更足 |
-| 5% | **可观测性** | **9.0** | **9.0** | **打平**: 本系统 **D2 /metrics(HTTP 计数中间件)** + **D3 trace_id 全链路** + 结构化日志 + 自建 SSH 指标/双写 VM; ongrid 外接 Prometheus |
-| 5% | **产品覆盖(SRE/部署/移动端)** | 7.0 | **9.5** | 本系统独有部署引擎+移动端+SRE 套件 |
+| 15% | **Agent/AI 能力** | **8.5** | **9.0** | 本系统领先。ongrid: coordinator+persona+token 流式(仍 feature flag 门控)+6 装饰器+110 工具+toolreplay hoisting。本系统: SSE token 真流式落地 + hoisting(稳定id/去重/参数兜底)+装饰器(metric/tenant_bind)+ToolBag 延迟加载(AIOPS_TOOLBAG=1, payload -26%)。 |
+| 10% | **工作流自动化** | **8.0** | **8.5** | 本系统领先。ongrid: 3 触发+fan-out+OR-join+execute-once+error port。本系统: 告警/cron 触发+并行 fan-out+OR-join+error port+画布 trigger 配置+运行态观察+仪表盘。 |
+| 15% | **架构工程化** | **9.5** | **8.0** | ongrid 仍领先。ongrid: DDD 三有界上下文+**go-arch-lint 三 BC 强制**+依赖注入。本系统: H4 bootstrap 收敛+H1 契约+H2 models 21 域拆分(无循环 import)+**本次新增依赖边界检查 `tools/arch_check.py`(AST 方向约束+循环检测, CI job), 修复 services→routers 反向依赖**；仍为单体、无强制 BC、main.py ~1205 行。 |
+| 10% | **安全鉴权** | **9.0** | **7.0** | ongrid 领先(用户明确"安全鉴权除外"不赶超)。ongrid: iam 组织级 RBAC+审计。本系统: 菜单 RBAC+资源级 RolePermission+审计, 多租户/Casbin 未深度接入。 |
+| 10% | **生态(技能/MCP/secret/RAG)** | **8.0** | **8.5** | 本系统领先: F1/F2 技能市场+ F3 secret⚟+ 外部 MCP + git 知识库 + BGE/BM25 混合检索 + 双 rerank > ongrid 纯向量。 |
+| 10% | **监控/告警/RCA** | **8.5** | **9.0** | 本系统领先: 8 类规则(metric_raw/anomaly/forecast/burn_rate/trace_latency/trace_error_rate/log_match/log_volume)+C1-C3 自动调查闭环+**本次新增检测算法单测(sigma/ewma/mad/DTW/RCA/告警评估)**。 |
+| 10% | **功能广度** | **8.0** | **9.5** | 本系统独有部署引擎/AI 部署/K8s/混沌/巡检/SLO/值班/移动端/自愈/变更/拓扑多 Tab。 |
+| 5% | **可部署性** | **9.0** | **8.5** | ongrid 仍领先。ongrid: docker-compose+helm+**发布/升级/卸载脚本+多架构发布流程实战**。本系统: Dockerfile+compose(monitoring/postgres profile)+install/upgrade/uninstall+Helm chart(lint 0 fail)+AIOPS_DB_URL Postgres 生产模式+**本次新增 Makefile(build-multi 多架构/建带 Postgres 版)**；缺 Helm 真集群实战与镜像多架构已发布。 |
+| 5% | **代码质量** | **9.0** | **7.0** | ongrid 仍领先。ongrid: **318 测试文件**+e2e+vitest+golangci 12 linter+覆盖率门禁。本系统: **本次从 55 用例/7% 覆盖率/+0 虚设门禁 → 140 pytest(覆盖率 24.06%>真实门禁 20%)+13 vitest+8 项 e2e 冒烟+ruff(1 linter)**；测试数/覆盖率仍有差距。 |
+| 5% | **可观测性** | **9.0** | **8.5** | ongrid 仍领先。ongrid: Prom+Loki+Tempo+**预置 Grafana provisioning**。本系统: D2 /metrics+D3 trace_id 全链路+结构化日志+**本次新增 Grafana provisioning(3 datasource)+预置 AIOps 面板+ Loki/Tempo docker-compose+OTLP gRPC 端口可配置(AIOPS_OTLP_GRPC_PORT)**；缺真实 tracing 后端深度接入(自研入库). |
+| 5% | **产品覆盖(SRE/部署/移动端)** | 7.0 | **9.5** | 本系统独有部署引擎+移动端+SRE 套件。 |
 
 > 单项维度（非加权）参考：Agent 内核 9.5 vs 7.0 ↓已升 9.0；代码质量 9.0 vs 6.5；RAG 7.0 vs 8.5；监控本系统已由纯阈值升至 8 类规则与 ongrid 对齐。
 
@@ -49,23 +51,23 @@
 
 | 维度 | 权重 | 本系统 | 本系统×权重 | Ongrid | Ongrid×权重 |
 |------|:---:|:---:|:---:|:---:|:---:|
-| Agent/AI 能力 | 15% | 9.5 | 1.425 | 9.5 | 1.425 |
-| 工作流自动化 | 10% | 9.0 | 0.900 | 9.0 | 0.900 |
-| 架构工程化 | 15% | 8.5 | 1.275 | 9.5 | 1.425 |
-| 安全鉴权 | 10% | 6.0 | 0.600 | 9.5 | 0.950 |
+| Agent/AI 能力 | 15% | 9.0 | 1.350 | 8.5 | 1.275 |
+| 工作流自动化 | 10% | 8.5 | 0.850 | 8.0 | 0.800 |
+| 架构工程化 | 15% | 8.0 | 1.200 | 9.5 | 1.425 |
+| 安全鉴权 | 10% | 7.0 | 0.700 | 9.0 | 0.900 |
 | 生态 | 10% | 8.5 | 0.850 | 8.0 | 0.800 |
-| 功能广度 | 10% | 10 | 1.000 | 6.5 | 0.650 |
-| 监控/告警/RCA | 10% | 9.0 | 0.900 | 9.0 | 0.900 |
-| 可部署性 | 5% | 8.0 | 0.400 | 8.5 | 0.425 |
-| 代码质量 | 5% | 8.0 | 0.400 | 9.0 | 0.450 |
-| 可观测性 | 5% | 9.0 | 0.450 | 9.0 | 0.450 |
+| 监控/告警/RCA | 10% | 9.0 | 0.900 | 8.5 | 0.850 |
+| 功能广度 | 10% | 9.5 | 0.950 | 8.0 | 0.800 |
+| 可部署性 | 5% | 8.5 | 0.425 | 9.0 | 0.450 |
+| 代码质量 | 5% | 7.0 | 0.350 | 9.0 | 0.450 |
+| 可观测性 | 5% | 8.5 | 0.425 | 9.0 | 0.450 |
 | 产品覆盖 | 5% | 9.5 | 0.475 | 7.0 | 0.350 |
-| **合计** | **100%** | **—** | **8.68** | **—** | **8.73** |
+| **合计** | **100%** | **—** | **8.48** | **—** | **8.55** |
 
-**加权总分：本系统 ≈ 8.68 ｜ ongrid-main ≈ 8.73**
+**加权总分：本系统 ≈ 8.48 ｜ ongrid-main ≈ 8.55**（含安全，差 0.07）
 
-> **剔除安全鉴权后**（其余权重归一）：本系统 ≈ **8.97** vs ongrid ≈ 8.64（差 **+0.33，显著反超 ongrid**）。
-> 2026-08-14 完成 H1-H4 工程化 + token 真流式 + 工具重放 hoisting + 装饰器 metric/tenant_bind 补齐 + 告警 8 类 + 可部署套件后，本系统在**除安全鉴权外的每一维(Agent/工作流/架构/监控/可观测/可部署/生态/功能/产品)均达到或超过 ongrid**。唯一仍略逊仅"安全鉴权"(多租户 RBAC/Casbin，按决策未做)，导致含安全口径仍有 0.05 小幅差距。
+> **剔除安全鉴权后**（其余权重归一）：本系统 ≈ **8.64** vs ongrid ≈ **8.50**（差 **+0.14，小幅领先 ongrid**）。
+> 说明：本文件此前一度记录为"8.75 vs 8.73 / 剔安全反超 0.42"属**过度乐观**（未核实 ongrid 318 单测、go-arch-lint 强制、Loki/Tempo/预置 Grafana 等真实资产）。2026-08-14 重评（代码证据版）校准为：含安全本 8.28 vs ongrid 8.50；本会话完成"除安全外全面赶超"第一轮后，代码质量 5.5→7.0、架构 7.5→8.0、可部署 8.0→8.5、可观测 8.0→8.5，收敛为上述 8.48 vs 8.55 / 剔安全 8.64 vs 8.50。
 
 ---
 
@@ -73,9 +75,18 @@
 
 | 维度 | 谁领先 | 差距 |
 |------|:---:|------|
-| Agent / 工作流 | **打平** | 0.0 |
-| 监控 / 可观测 / 可部署 / 架构 | 打平或本系统领先 | ≤0.5~1.0 |
-| 安全鉴权 | ongrid 领先 | 3.0 |
-| RAG/生态 / 功能广度 / 产品覆盖 / 代码质量 | 本系统领先或对齐 | 0.5~3.5 |
+| Agent / 工作流 | **本系统领先** | 0.5 |
+| 监控 / 生态 / 功能 / 产品 | **本系统领先** | 0.1~1.5 |
+| 架构 / 可部署 / 代码质量 / 可观测 | **ongrid 领先** | 0.1~2.0 |
+| 安全鉴权 | ongrid 领先(不赶超) | 2.0 |
 
-**一句话**：本系统胜在**功能全栈 + 生态/知识/部署**（功能广度 10）且**全部工程化已补齐**（H1 契约/H2 21 域拆分/H3 CI 单测/H4 bootstrap + 工具装饰器 metric/tenant_bind + hoisting + token 真流式），ongrid 仅在**安全鉴权**（多租户 RBAC/Casbin，按决策未做）领先。2026-08-14 工程化收尾后：**除安全鉴权外本系统 8.97 显著反超 ongrid 8.64（+0.33）**；含安全鉴权 8.68 vs 8.73（差 0.05，仅因安全项未做）。
+**一句话**：本系统胜在**功能全栈+生态+产品纵深**（功能 9.5/产品 9.5），Agent/工作流/监控小幅领先；ongrid 在**工程纵深四项**（架构 9.5、代码质量 9.0(+)318 测试、可观测 9.0、可部署 9.0）仍领先。含安全口径 8.48 vs 8.55（差 0.07）；**剔除安全**（用户明确不赶超项）**8.64 vs 8.50，本系统小幅反超（+0.14）**。
+
+## 五、2026-08-14 本轮赶超（除安全外）已完成工作
+
+1. **代码质量（5.5→7.0）**：新增 5 个后端测试文件（核心算法 26 / secret_vault 17 / tenant 11 / SLO 7 / RCA 11），覆盖率真实门禁 `--cov-fail-under=0→20%`（实测 7%→24%）；新增 TestClient 集成测试 13 项（覆盖 main.py 路由层）；前端接入 vitest（request/websocket 13 项，854ms）；新增真实进程 e2e 冒烟（8 端点 8/8）；新增 `requirements-ci.txt` 纯净依赖验证。
+2. **架构工程化（7.5→8.0）**：新增 `tools/arch_check.py`（AST 依赖方向约束 + 循环检测，对齐 go-arch-lint），修 `services/mcp_tools` 反向依赖 routers；CI 加 `backend-arch` job。
+3. **可观测性（8.0→8.5）**：Grafana provisioning（Prometheus/Loki/Tempo 三 datasource + 预置 AIOps 概览面板）；docker-compose 加 loki/tempo/profile 与 data 卷；OTLP gRPC 端口可配置 `AIOPS_OTLP_GRPC_PORT`（默认 14317，避免与 Tempo 4317 冲突）。
+4. **可部署性（8.0→8.5）**：新增 `Makefile`（build-multi 多架构 `docker buildx --platform linux/amd64,arm64`、test/lint/arch-check/compose 编排）。
+
+> 仍领先 ongrid 的工程侧工作（下一轮可选）：① 代码质量再上探（e2e 入 CI、更多服务单测、覆盖率 24%→40%+）；② 架构拆主路径（main.py ~1205 行 / deploy_service 199KB 收敛）；③ 接入 Tempo 作为真实 tracing 后端 + Loki 日志采集；④ Helm 真集群部署验证。

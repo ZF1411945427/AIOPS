@@ -1,0 +1,50 @@
+# ===== AIOps 生产部署覆盖值 =====
+# 用法: helm install aiops ./deploy/helm/aiops -f deploy/helm/aiops/values.prod.yaml
+replicaCount: 2
+
+image:
+  repository: registry.example.com/aiops
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+env:
+  # 与下方 postgres.auth.password 保持一致; 生产请替换
+  AIOPS_DB_URL: "postgresql://aiops:change-me-in-production@aiops-postgres:5432/aiops"
+  AIOPS_TOOLBAG: "1"
+  TZ: "Asia/Shanghai"
+
+postgres:
+  enabled: true
+  auth:
+    database: aiops
+    username: aiops
+    password: "change-me-in-production"
+  persistence:
+    enabled: true
+    size: 50Gi
+
+persistence:
+  enabled: false    # Postgres 模式下数据存于 PG 卷
+
+volumes:
+  models:
+    enabled: true
+    size: 4Gi
+  logs:
+    enabled: true
+    size: 5Gi
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: aiops.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"

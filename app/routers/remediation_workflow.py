@@ -1,11 +1,9 @@
 import json
-from datetime import datetime
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import RemediationWorkflow, RemediationLog, Alert, Asset
-from app.services.remediation_service import get_remediation_logs
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/remediation-workflows", tags=["remediation_workflows"])

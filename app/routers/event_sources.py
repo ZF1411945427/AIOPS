@@ -1,7 +1,6 @@
-import json
 import requests
 from datetime import datetime
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Form
 from fastapi.responses import PlainTextResponse, JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db

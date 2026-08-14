@@ -2,9 +2,9 @@
 
 import json
 
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 
 from app.database import Base
 

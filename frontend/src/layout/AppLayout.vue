@@ -277,7 +277,7 @@
           <SystemPosture v-else-if="activeView === 'system-posture'" />
       <AgentAudit v-else-if="activeView === 'audit'" />
       <OperationAudit v-else-if="activeView === 'op-audit'" />
-      <AgentChatView v-else-if="activeView === 'agent-chat'" />
+      <AIOpsAssistantView v-else-if="activeView === 'ai-ops-assistant'" />
       <MenuConfig v-else-if="activeView === 'menu-config'" />
       <TraceView v-else-if="activeView === 'traces'" />
     <TraceAgentGuide v-else-if="activeView === 'discovery'" />
@@ -306,7 +306,7 @@
       <ScriptExecView v-else-if="activeView === 'script-exec'" />
       <BlueGreenView v-else-if="activeView === 'blue-green'" />
       <ChangeWorkflowView v-else-if="activeView === 'change-workflow'" />
-      <PendingActionsView v-else-if="activeView === 'pending-actions'" />
+
           <AiProvidersView v-else-if="activeView === 'ai-providers'" />
           <AgentCapabilitiesView v-else-if="activeView === 'agent-capabilities'" />
           <SubAgentsView v-else-if="activeView === 'sub-agents'" />
@@ -379,12 +379,10 @@
           <AuditMatrixView v-else-if="activeView === 'audit-matrix'" />
           <SecurityAuditView v-else-if="activeView === 'security-audit'" />
           <SecretsVaultView v-else-if="activeView === 'secret-vault'" />
-          <SkillsView v-else-if="activeView === 'skills'" />
-          <MarketplaceView v-else-if="activeView === 'skill-market'" />
+          <SkillCenterView v-else-if="activeView === 'skills' || activeView === 'skill-market'" />
           <MultiClusterView v-else-if="activeView === 'multicluster'" />
           <UpgradeJobsView v-else-if="activeView === 'upgrade-jobs'" />
           <NetworkDevicesView v-else-if="activeView === 'network-devices'" />
-          <SandboxView v-else-if="activeView === 'sandbox-overview'" />
           <AgentManageView v-else-if="activeView === 'agent-deploy'" />
           <AgentAutonomousView v-else-if="activeView === 'agent-autonomous'" />
           <DeployView v-else-if="activeView === 'ai-deploy'" />
@@ -396,6 +394,7 @@
     </div>
 
     <AIOpsChatWidget ref="chatWidgetRef" />
+    <FirstRunGuide :visible="showFirstRun" @close="showFirstRun = false" />
   </div>
 </template>
 
@@ -422,6 +421,7 @@ import {
   Suitcase, SuitcaseLine, Operation as OpIcon, Lock
 } from '@element-plus/icons-vue'
 import AIOpsChatWidget from '@/components/AIOpsChatWidget.vue'
+import FirstRunGuide from '@/components/FirstRunGuide.vue'
 const AgentAudit = defineAsyncComponent(() => import('@/views/AgentAudit.vue'))
 const OperationAudit = defineAsyncComponent(() => import('@/views/OperationAudit.vue'))
 const AgentChatView = defineAsyncComponent(() => import('@/views/AgentChatView.vue'))
@@ -518,11 +518,11 @@ const RagEvalView = defineAsyncComponent(() => import('@/views/RagEvalView.vue')
 const AuditMatrixView = defineAsyncComponent(() => import('@/views/AuditMatrixView.vue'))
 const SecurityAuditView = defineAsyncComponent(() => import('@/views/SecurityAuditView.vue'))
 const SecretsVaultView = defineAsyncComponent(() => import('@/views/SecretsVaultView.vue'))
-const SkillsView = defineAsyncComponent(() => import('@/views/SkillsView.vue'))
-const MarketplaceView = defineAsyncComponent(() => import('@/views/MarketplaceView.vue'))
+const SkillCenterView = defineAsyncComponent(() => import('@/views/SkillCenterView.vue'))
 const MultiClusterView = defineAsyncComponent(() => import('@/views/MultiClusterView.vue'))
 const UpgradeJobsView = defineAsyncComponent(() => import('@/views/UpgradeJobsView.vue'))
 const NetworkDevicesView = defineAsyncComponent(() => import('@/views/NetworkDevicesView.vue'))
+const AIOpsAssistantView = defineAsyncComponent(() => import('@/views/AIOpsAssistantView.vue'))
 const SandboxView = defineAsyncComponent(() => import('@/views/SandboxView.vue'))
 const AgentManageView = defineAsyncComponent(() => import('@/views/AgentManageView.vue'))
 const AgentAutonomousView = defineAsyncComponent(() => import('@/views/AgentAutonomousView.vue'))
@@ -539,11 +539,16 @@ const chatWidgetRef = ref(null)
 const _savedMenu = localStorage.getItem('aiops-active-menu')
 const menuLoading = ref(!!_savedMenu)  // 有待恢复的菜单时，显示 loading 遮罩
 // 兼容旧默认页 dashboard（已合并入 monitor-view）
-const _initialMenu = (_savedMenu === 'dashboard') ? 'monitor-view' : (_savedMenu || 'monitor-view')
+const _MENU_REDIRECT = {
+  'agent-chat': 'ai-ops-assistant',
+  'pending-actions': 'ai-ops-assistant',
+}
+const _initialMenu = _MENU_REDIRECT[_savedMenu] || (_savedMenu === 'dashboard' ? 'monitor-view' : (_savedMenu || 'monitor-view'))
 const activeView = ref('monitor-view')
 const activePath = ref(null)
 const currentTitle = ref(_savedMenu ? '' : '实时监控看板')
 const activeMenu = ref(_initialMenu)
+const showFirstRun = ref(false)
 const noticeCount = ref(0)
 const notifications = ref([])
 const userInfo = ref(null)
@@ -655,7 +660,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['roles-manage', 'agent-chat', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'pending-actions', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'k8s-cert-inspect', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
+const VUE_PAGES = new Set(['roles-manage', 'ai-ops-assistant', 'agent-deploy', 'agent-autonomous', 'ai-deploy', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'k8s-cert-inspect', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
 
 function _flattenItems(items) {
   const result = []
@@ -751,7 +756,7 @@ onMounted(async () => {
   marqueeTimer = setInterval(loadMarqueeAlerts, 15000)
 
   // 加载用户信息（含租户）
-  loadUserInfo()
+  await loadUserInfo()
 
   try {
     const data = await request.get('/api/menu')
@@ -775,6 +780,13 @@ onMounted(async () => {
     ElMessage.error('加载菜单失败: ' + e.message)
   } finally {
     menuLoading.value = false
+  }
+  // 首次体验引导: 按「用户名+版本」记录, 每个用户首次登录弹出一次
+  const _uname = (userInfo.value && userInfo.value.username) || 'guest'
+  const GUIDE_KEY = `aiops_first_run_guide_v1_${_uname}`
+  if (!localStorage.getItem(GUIDE_KEY)) {
+    showFirstRun.value = true
+    localStorage.setItem(GUIDE_KEY, '1')
   }
 })
 

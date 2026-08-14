@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Query
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 

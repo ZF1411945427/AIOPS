@@ -100,6 +100,7 @@ def register_routers(app):
     from app.routers.api_v1 import router as api_v1_router
     from app.routers.mobile import router as mobile_router
     from app.routers.health_map import router as health_map_router
+    from app.routers.arch_diagram import router as arch_diagram_router
     from app.routers.network_test import router as network_test_router
     from app.routers.datasources import router as datasources_router
     from app.routers.es_integration import router as es_integration_router
@@ -232,6 +233,7 @@ def register_routers(app):
     app.include_router(api_v1_router)
     app.include_router(mobile_router)
     app.include_router(health_map_router)
+    app.include_router(arch_diagram_router)
     app.include_router(network_test_router)
     app.include_router(datasources_router)
     app.include_router(es_integration_router)

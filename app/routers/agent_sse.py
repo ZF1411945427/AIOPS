@@ -5,7 +5,6 @@ StreamingResponse 逐步推送 AI 处理状态，前端 EventSource 实时显示
 import json
 import asyncio
 import time
-import re
 from datetime import datetime
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import StreamingResponse
@@ -13,13 +12,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import AIProvider
 from app.services.agent_service import call_llm, get_mcp_manifest, call_mcp_tool
-from app.services.agent_service import add_message, get_message_history, _parse_text_tool_calls, _strip_text_tool_call_tags
+from app.services.agent_service import add_message, _parse_text_tool_calls, _strip_text_tool_call_tags
 from app.services.mcp_registry import get_mcp_tool
 from app.services.sub_agent_service import (
-    route_sub_agent, get_sub_agent, filter_tools_by_sub_agent, get_sub_agent_prompt, sub_agent_to_dict
+    route_sub_agent, get_sub_agent, filter_tools_by_sub_agent, get_sub_agent_prompt
 )
 from app.services.ws_manager import ws_manager
-from app.logger import logger
 
 router = APIRouter(prefix="/agent", tags=["agent_sse"])
 
@@ -102,9 +100,7 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
     from app.services.agent_service import (
         get_or_create_session,
     )
-    from app.services.agent_service import DEFAULT_SYSTEM_PROMPT
-    from app.models import AgentConfig, Asset as AgentModel, PendingAction
-    from app.services.agent_service import ChatSession as ChatSessionModel
+    from app.models import AgentConfig, PendingAction
     import app.services.agent_service as _svc
 
     session = get_or_create_session(db, user_id, session_id)

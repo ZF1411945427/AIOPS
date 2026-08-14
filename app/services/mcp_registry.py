@@ -1,9 +1,10 @@
 import json
+import os
 import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -168,9 +169,62 @@ def register_mcp_tool(
     return decorator
 
 
-def get_mcp_manifest() -> List[Dict[str, Any]]:
-    return [
-        {
+def get_mcp_tool(name: str) -> Optional[MCPToolDef]:
+    return _MCP_TOOLS.get(name)
+
+# ─── ToolBag: 工具二级延迟加载(对齐 Ongrid tools/toolbag.go)───
+# 核心工具(高频通用)始终全量 schema 注入 LLM; 专业工具默认只暴露紧凑摘要,
+# 由 search_tools 按需搜索后返回完整 schema, 显著降低每次请求的 token 消耗。
+# 通过环境变量 AIOPS_TOOLBAG=1 开启; 默认关闭(全量), 不改变既有行为。
+
+# 核心工具集: 高频/通用, 全量 schema 注入
+_CORE_TOOL_NAMES = {
+    "query_assets", "query_alerts", "query_metrics", "query_logs",
+    "query_log_sources", "query_knowledge_rag", "query_runbook",
+    "query_incidents", "search_code", "query_topology", "list_skills",
+    "use_skill", "query_traces", "propose_action", "query_predictions",
+}
+
+
+def _toolbag_enabled() -> bool:
+    return os.environ.get("AIOPS_TOOLBAG", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _is_core_tool(name: str) -> bool:
+    return name in _CORE_TOOL_NAMES
+
+
+def _tool_summary(t: MCPToolDef) -> Dict[str, Any]:
+    """专业工具的紧凑摘要(不含完整 input_schema), 供降级注入。"""
+    return {
+        "name": t.name,
+        "display_name": t.display_name or t.name,
+        "description": t.description,
+        "risk_level": t.risk_level,
+        "location": t.location,
+        "category": t.category,
+        "safe": t.safe,
+        "read_only": t.read_only,
+        "deferred": True,
+        "hint": "使用 search_tools 可加载此工具的完整调用参数(JSON Schema)",
+    }
+
+
+def get_mcp_manifest(defer: Optional[bool] = None) -> List[Dict[str, Any]]:
+    """返回 LLM 可见工具清单。
+
+    默认全部工具全量 schema(维持既有行为)。
+    当 defer=True(或 AIOPS_TOOLBAG=1 时默认 defer): 核心工具全量,
+    专业工具降级为紧凑摘要, 由 search_tools 按需加载完整 schema。
+    外部 MCP 工具始终全量(数量有限, 由用户在 MCP 配置中显式声明)。
+    """
+    if defer is None:
+        defer = _toolbag_enabled()
+    builtin = []
+    for t in _MCP_TOOLS.values():
+        if not t.expose_to_llm:
+            continue
+        entry = {
             "name": t.name,
             "display_name": t.display_name or t.name,
             "description": t.description,
@@ -186,13 +240,53 @@ def get_mcp_manifest() -> List[Dict[str, Any]]:
             "audit_enabled": t.audit_enabled,
             "review_gate": t.review_gate,
         }
-        for t in _MCP_TOOLS.values()
-        if t.expose_to_llm
-    ] + get_external_manifest()
+        if defer and not _is_core_tool(t.name):
+            entry = _tool_summary(t)
+        builtin.append(entry)
+    return builtin + get_external_manifest()
 
 
-def get_mcp_tool(name: str) -> Optional[MCPToolDef]:
-    return _MCP_TOOLS.get(name)
+def get_deferred_tool_schema(name: str) -> Optional[Dict[str, Any]]:
+    """按名称返回工具完整 schema(供 search_tools / load_tool_schema 使用)。
+
+    未启用 ToolBag 时也有效——返回完整定义本身。
+    """
+    t = _MCP_TOOLS.get(name)
+    if not t or not t.expose_to_llm:
+        return None
+    return {
+        "name": t.name,
+        "display_name": t.display_name or t.name,
+        "description": t.description,
+        "input_schema": t.input_schema,
+        "risk_level": t.risk_level,
+        "location": t.location,
+        "category": t.category,
+        "safe": t.safe,
+        "read_only": t.read_only,
+    }
+
+
+def search_tools(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+    """按名称/描述/分类模糊搜索工具, 返回完整 schema。
+
+    用于 ToolBag 降级模式下, LLM 需要调用某个专业工具时先搜索其完整参数。
+    """
+    q = query.strip().lower()
+    scored = []
+    for t in _MCP_TOOLS.values():
+        if not t.expose_to_llm:
+            continue
+        hay = f"{t.name} {t.display_name or ''} {t.description} {t.category}".lower()
+        score = 0
+        if q and q in t.name.lower():
+            score += 100
+        if q and q in hay:
+            score += hay.count(q)
+        if score > 0 or not q:
+            scored.append((score, t))
+    scored.sort(key=lambda x: -x[0])
+    return [get_deferred_tool_schema(t.name) for _, t in scored[:limit]]
 
 
 def get_internal_tools() -> List[MCPToolDef]:
@@ -276,7 +370,7 @@ def call_mcp_tool(
             r = tool.handler(db=session, user_id=user_id, **arguments)
             _run_metric["lat_ms"] = (time.time() - _t0) * 1000
             return r
-        except Exception as e:
+        except Exception:
             _run_metric["ok"] = False
             _run_metric["lat_ms"] = (time.time() - _t0) * 1000
             raise

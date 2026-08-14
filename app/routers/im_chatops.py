@@ -9,7 +9,6 @@
 - GET  /im/channels                 查看已配置的双向通道
 """
 import json
-import time
 from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
@@ -18,7 +17,7 @@ from app.database import get_db
 from app.models import NotificationChannel, ImIncomingMessage
 from app.services.im_chatops_service import (
     verify_feishu_signature, verify_dingtalk_signature, verify_wecom_signature,
-    parse_command, process_im_message, start_async_processing,
+    start_async_processing,
 )
 from app.logger import logger
 

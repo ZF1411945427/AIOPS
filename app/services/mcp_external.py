@@ -6,7 +6,7 @@
 """
 import json
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.models import MCPServer
 

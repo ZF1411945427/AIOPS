@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 from app.models import SystemConfig
 
 
+# 敏感配置项: 前端列表一律掩码为 *** + has_<key>, 不回显明文
+SENSITIVE_KEYS = {"github_api_token"}
+
 DEFAULT_CONFIGS = {
     "background_interval": {"value": "10", "description": "后台采集间隔(秒)"},
     "data_retention_days": {"value": "30", "description": "指标数据保留天数"},
@@ -45,10 +48,14 @@ def get_config(db: Session, key: str, default: str = "") -> str:
 
 
 def get_all_configs(db: Session):
-    configs = db.query(SystemConfig).order_by(SystemConfig.id).all()
+    from app.models import SystemConfig as _SC
+    configs = db.query(_SC).order_by(_SC.id).all()
     result = {}
     for c in configs:
-        result[c.key] = {"value": c.config_value, "description": c.description}
+        if c.key in SENSITIVE_KEYS:
+            continue
+        result[c.key] = {"value": c.config_value, "has_value": bool(c.config_value),
+                         "description": c.description}
     return result
 
 

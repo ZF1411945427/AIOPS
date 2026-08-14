@@ -2,7 +2,8 @@
 多租户迁移脚本：创建 tenants 表 + 核心表加 tenant_id 字段
 用法: python app/migrations/add_tenant_tables.py
 """
-import os, sys
+import os
+import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.database import get_all_engines
@@ -37,7 +38,7 @@ def migrate():
                     )
                 """))
                 conn.commit()
-                print(f"  [OK] tenants table")
+                print("  [OK] tenants table")
             except Exception as e:
                 print(f"  [SKIP] tenants: {e}")
 
@@ -48,7 +49,7 @@ def migrate():
                     VALUES (1, '默认租户', 'default', 'active', 10000, 1000)
                 """))
                 conn.commit()
-                print(f"  [OK] default tenant")
+                print("  [OK] default tenant")
             except Exception as e:
                 print(f"  [SKIP] default tenant: {e}")
 

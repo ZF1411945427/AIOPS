@@ -1,6 +1,5 @@
-import json
 from datetime import datetime
-from fastapi import APIRouter, Depends, Request, Query, Body, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, Body, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
@@ -1279,7 +1278,6 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
             return
 
         from kubernetes import client
-        from app.services.connection_service import ConnectionTester
         cfg = parse_json_config(ds.auth_config)
 
         configuration = client.Configuration()

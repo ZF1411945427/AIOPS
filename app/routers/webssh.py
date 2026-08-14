@@ -11,12 +11,9 @@
   - 断线自动清理
 """
 import json
-import asyncio
 import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from sqlalchemy.orm import Session
 
-from app.database import get_db
 from app.models import EdgeSession, EdgeCommandLog, User
 from app.services.edge_tunnel_service import get_online_ws, is_agent_online, send_to_agent
 from app.routers.edge_tunnel import register_pty, unregister_pty
@@ -66,7 +63,7 @@ async def webssh_terminal(websocket: WebSocket, agent_id: str,
 
     edge_ws = get_online_ws(agent_id)
     if not edge_ws:
-        await websocket.send_text(f"\r\n❌ Edge agent 隧道未建立\r\n")
+        await websocket.send_text("\r\n❌ Edge agent 隧道未建立\r\n")
         await websocket.close()
         return
 

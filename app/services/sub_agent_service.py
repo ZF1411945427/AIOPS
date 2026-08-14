@@ -18,7 +18,6 @@ from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 
 from app.models import SubAgent
-from app.services.mcp_registry import get_mcp_manifest, _MCP_TOOLS
 
 
 # ─── 预置子专家定义 ───────────────────────────────────────────────

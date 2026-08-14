@@ -5,7 +5,6 @@ Synthetic Monitoring — 主动拨测服务
 import time
 import requests
 from datetime import datetime
-from typing import Optional
 
 from app.services.metric_v2_service import write_metrics_batch, is_vm_available
 

@@ -6,8 +6,7 @@
 import os
 import random
 import socket
-import struct
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ─── BER 编码 ────────────────────────────────────────────────────
 _TAG_BOOL = 0x01
@@ -225,7 +224,7 @@ class SnmpSession:
                     sock.sendto(msg, (self.host, self.port))
                     data, _ = sock.recvfrom(65535)
                     break
-                except socket.timeout:
+                except TimeoutError:
                     last = socket.timeout
             else:
                 raise last
@@ -239,7 +238,7 @@ class SnmpSession:
             if res["error_status"] not in (0, 2):  # 2 = noSuchName
                 raise SnmpError(f"SNMP error-status={res['error_status']}")
             return res
-        except socket.timeout:
+        except TimeoutError:
             raise SnmpError(f"SNMP 超时: {self.host}")
         except OSError as e:
             raise SnmpError(f"SNMP 通信失败: {e}")

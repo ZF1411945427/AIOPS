@@ -11,9 +11,8 @@ C3 - 回写:    报告回写聊天会话 + 启用双向的 IM 渠道（飞书/�
 """
 import json
 import threading
-import uuid
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict
 
 from sqlalchemy.orm import Session
 

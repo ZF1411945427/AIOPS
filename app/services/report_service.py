@@ -1,7 +1,6 @@
 import json
 import logging
 from datetime import datetime, timedelta
-from collections import defaultdict
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -114,7 +113,7 @@ def _rule_based_summary(stats, period_label):
     if stats["top_rules"]:
         lines.append(f"  ⚠ 指标「{stats['top_rules'][0][0]}」告警频次最高（{stats['top_rules'][0][1]} 次），建议关注相关资产健康度。")
     if stats["resolve_rate"] >= 80 and stats["critical_count"] == 0:
-        lines.append(f"  ✓ 系统整体运行状况良好，告警处理及时，继续保持。")
+        lines.append("  ✓ 系统整体运行状况良好，告警处理及时，继续保持。")
     return "\n".join(lines)
 
 

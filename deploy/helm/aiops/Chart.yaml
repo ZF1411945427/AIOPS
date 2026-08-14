@@ -1,0 +1,11 @@
+apiVersion: v2
+name: aiops
+description: AIOps 智能运维平台 (FastAPI + Vue SPA) - Kubernetes 生产部署
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/your-org/aiops
+maintainers:
+  - name: AIOps Team
+    email: dev@example.com
+dependencies: []

@@ -8,7 +8,6 @@
 """
 import json
 import math
-import os
 import re
 import threading
 from collections import Counter
@@ -27,13 +26,13 @@ def parse_document(file_path: str, file_ext: str) -> str:
     ext = (file_ext or "").lower().lstrip(".")
     try:
         if ext in ("txt", "md", "markdown", ""):
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(file_path, encoding="utf-8", errors="ignore") as f:
                 return f.read()
         if ext == "pdf":
             try:
                 from pypdf import PdfReader
             except ImportError:
-                return f"[解析失败：未安装 pypdf，无法解析 PDF。请运行 pip install pypdf 后重新上传]"
+                return "[解析失败：未安装 pypdf，无法解析 PDF。请运行 pip install pypdf 后重新上传]"
             reader = PdfReader(file_path)
             texts = []
             for page in reader.pages:
@@ -44,11 +43,11 @@ def parse_document(file_path: str, file_ext: str) -> str:
             try:
                 import docx
             except ImportError:
-                return f"[解析失败：未安装 python-docx，无法解析 Word。请运行 pip install python-docx 后重新上传]"
+                return "[解析失败：未安装 python-docx，无法解析 Word。请运行 pip install python-docx 后重新上传]"
             doc = docx.Document(file_path)
             return "\n".join(p.text for p in doc.paragraphs)
         # 未知扩展名按文本读
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(file_path, encoding="utf-8", errors="ignore") as f:
             return f.read()
     except Exception as e:
         return f"[解析异常: {e}]"

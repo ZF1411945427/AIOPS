@@ -1,8 +1,6 @@
-import json
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func, Integer, Float
-from app.models import AnomalyBenchmark, Asset, MetricRecord
+from app.models import AnomalyBenchmark, MetricRecord
 
 
 _ALGORITHM_META = {

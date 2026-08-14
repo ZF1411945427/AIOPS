@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from app.models import ABTestConfig, ABTestRecord, AIProvider
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,6 @@
-import json
 import requests
 from datetime import datetime
-from fastapi import APIRouter, Depends, Request, Body
+from fastapi import APIRouter, Depends, Body
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ExtCmdbConfig, Asset

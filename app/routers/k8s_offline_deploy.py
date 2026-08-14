@@ -2,16 +2,13 @@
 
 契约见 CONTRACT.md 第十三章。prefix=/k8s-offline/api，WS=/k8s-offline/ws。
 """
-import json
-from typing import Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, OfflineRepoBundle, OfflineRegistry, Asset, K8sClusterPlan
+from app.models import OfflineRepoBundle, OfflineRegistry, Asset, K8sClusterPlan
 from app.services import k8s_offline_deploy_service as svc
-from app.logger import logger
 
 router = APIRouter(prefix="/k8s-offline", tags=["k8s-offline"])
 
@@ -109,7 +106,7 @@ def api_get_kubeconfig(plan_id: int, db: Session = Depends(get_db)):
 def api_plan_to_assets(plan_id: int, db: Session = Depends(get_db)):
     """部署成功后，将集群注册为资产管理中的 K8s 资产（DataSource type=kubernetes）。
     幂等：已存在同名数据源则更新其 endpoint/auth_config，否则新建。"""
-    from app.models import K8sClusterNode, DataSource
+    from app.models import K8sClusterNode
     p = db.query(K8sClusterPlan).filter(K8sClusterPlan.id == plan_id).first()
     if not p:
         return {"ok": False, "message": "计划不存在"}

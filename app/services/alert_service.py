@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-import threading
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -192,7 +191,6 @@ def _eval_burn_rate(rule, latest, db):
     cfg = _load_config(rule)
     window_hours = float(cfg.get("window_hours", 1))
     budget = float(cfg.get("error_budget", rule.threshold if rule.threshold else 99.0))  # 目标可用性%
-    import math
     if budget <= 0 or budget >= 100:
         budget = 99.0
     error_budget_s = (100.0 - budget) / 100.0 * (window_hours * 3600)
@@ -232,7 +230,7 @@ def _eval_trace_latency(rule, db) -> tuple:
     rows = db.query(Span).filter(Span.service_name == svc, Span.started_at >= window).all() if svc else []
     if not rows:
         return False, 0.0, f"trace_latency[{svc}] 无样本"
-    durations = [float(getattr(s, "duration_ms") or 0) for s in rows]
+    durations = [float(s.duration_ms or 0) for s in rows]
     stat = cfg.get("stat", "p99")
     if stat == "avg":
         val = sum(durations) / len(durations)

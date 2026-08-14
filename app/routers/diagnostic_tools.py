@@ -6,9 +6,8 @@
 - Flexible 灵活受控工具：受限 shell（AST 白名单）、SQL 查询
 """
 import re
-import json
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -237,7 +236,7 @@ READ_ONLY_PREFIXES = {
     "journalctl", "dmesg", "rpm", "test", "pwd", "basename", "dirname",
     "realpath", "readlink", "md5sum", "sha256sum", "cksum", "cut", "tr",
     "sort", "uniq", "awk", "sed", "mysql", "redis-cli", "docker", "nginx",
-    "mysqldumpslow", "find",
+    "mysqldumpslow",
 }
 
 DANGEROUS_PATTERNS = [

@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 
 from app.database import get_db
-from app.models import Asset, Alert, AlertRule, Incident, DataSource, MetricRecord
+from app.models import Asset, Alert, AlertRule, Incident, DataSource
 from app.services.health_score_service import compute_health_score
-from app.services.metric_v2_service import query_range_data, query_latest_values, query_metric_names, is_vm_available
+from app.services.metric_v2_service import is_vm_available
 from app.template_utils import get_templates
 from app.cache import cached
 

@@ -6,10 +6,9 @@
 - 沙盒决策模拟（test/evaluate）
 - 沙盒执行日志查询
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from typing import Optional
 
-from app.database import get_db
 from app.services import sandbox_service
 
 router = APIRouter(prefix="/sandbox", tags=["sandbox"])

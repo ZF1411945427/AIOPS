@@ -1,0 +1,37 @@
+# CI lightweight deps - enough for app.main import + tests
+# No heavy ML libs (transformers/sentence-transformers/torch/faiss/milvus/etc)
+# Keep versions in sync with requirements.txt (snapshot 2026-08-14)
+
+fastapi>=0.115
+pydantic>=2.12
+SQLAlchemy>=2.0
+starlette>=0.41
+uvicorn>=0.34
+slowapi>=0.1
+loguru>=0.7
+requests>=2.34
+httpx>=0.28
+Jinja2>=3.1
+PyYAML>=6.0
+paramiko>=5.0
+cryptography>=44.0
+PyJWT>=2.13
+python-multipart>=0.0
+itsdangerous>=2.2
+bcrypt>=5.0
+grpcio>=1.82
+kubernetes>=36.0
+PyMySQL>=1.1
+psycopg2-binary>=2.9
+python-dotenv>=1.2
+sse-starlette>=2.1
+python-dateutil>=2.9
+cachetools>=7.1
+tenacity>=9.1
+orjson>=3.11
+pyarrow>=25.0
+numpy>=2.0
+pymilvus>=3.0
+pytest>=9
+pytest-asyncio>=0.21
+pytest-cov>=6

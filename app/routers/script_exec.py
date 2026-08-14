@@ -1,7 +1,6 @@
 import subprocess
 import paramiko
-import json
-from fastapi import APIRouter, Depends, Request, Form, HTTPException
+from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from slowapi import Limiter

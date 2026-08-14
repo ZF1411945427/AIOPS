@@ -10,14 +10,12 @@ import time
 import uuid
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
 from app.database import get_session_for, get_db_mode
 from app.models import Asset, Alert, MetricRecord, AutonomousCycle
-from app.logger import logger
-from app.services.health_engine import HEALTH_RED, HEALTH_GREEN, HEALTH_GRAY
 
 logger = logging.getLogger(__name__)
 

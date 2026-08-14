@@ -1,5 +1,7 @@
 """Hoisting(工具重放健壮化) 与 tool_metrics(metric 装饰器) 单元测试(H3[B])。"""
-import os, sys, json
+import json
+import os
+import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.agent_service import _hoist_tool_calls, _append_tool_results

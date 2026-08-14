@@ -1,8 +1,4 @@
-import json
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models import CiModel, CiAttribute, Asset
+from fastapi import APIRouter
 from app.template_utils import get_templates
 
 router = APIRouter(prefix="/ci-models", tags=["ci_models"])

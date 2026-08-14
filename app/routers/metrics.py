@@ -1,13 +1,12 @@
 import re
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Query
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, text, distinct
+from sqlalchemy import func
 from app.template_utils import get_templates
 
 from app.database import get_db
 from app.models import MetricRecord, MetricDashboardCard, AlertRule
-from app.services import metric_service, asset_service
 from app.services import metric_v2_service
 from sqlalchemy.orm import Session
 
@@ -284,7 +283,8 @@ def quick_create_rule(body: dict, db: Session = Depends(get_db)):
 @router.get("/api/export-csv")
 def export_metrics_csv(asset_id: int = 0, hours: int = 24, db: Session = Depends(get_db)):
     """导出指标数据为 CSV"""
-    import csv, io
+    import csv
+    import io
     from datetime import datetime, timedelta
     since = datetime.utcnow() - timedelta(hours=hours)
     MR = MetricRecord

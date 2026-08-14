@@ -4,7 +4,6 @@
 """
 import hashlib
 import re
-import os
 import bcrypt
 from fastapi import Request
 from app.config import DANGEROUS_PATTERNS, COMMAND_WHITELIST

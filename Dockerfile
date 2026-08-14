@@ -20,6 +20,10 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=Asia/Shanghai \
     PIP_NO_CACHE_DIR=1
 
+# 生产数据库驱动(默认关闭; 用 Postgres 时: docker build --build-arg WITH_POSTGRES=1 .)
+ARG WITH_POSTGRES=0
+RUN if [ "$WITH_POSTGRES" = "1" ]; then pip install --no-cache-dir psycopg2-binary; fi
+
 # 先装 torch CPU 版(单独索引源, 避免 PyPI 默认拉 GPU 版)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 

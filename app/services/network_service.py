@@ -2,7 +2,6 @@
 
 契约见 CONTRACT.md 第二十一章。SNMP 走 app/services/snmp_client.py(纯 Python + mock 模式)。
 """
-import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 

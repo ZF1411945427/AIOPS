@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session
 from app.database import get_session_for, get_db_mode
 from app.models import (
     WorkflowTemplate, WorkflowRun, WorkflowNodeRun,
-    PendingAction, ToolInvocation, ChatSession,
+    ToolInvocation,
 )
-from app.services.mcp_registry import call_mcp_tool, get_internal_tools, get_mcp_tool
+from app.services.mcp_registry import call_mcp_tool, get_internal_tools
 
 _rlock = threading.Lock()
 

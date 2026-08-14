@@ -1,5 +1,4 @@
-from datetime import datetime
-from fastapi import APIRouter, Depends, Body, Query
+from fastapi import APIRouter, Depends, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db

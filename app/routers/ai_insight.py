@@ -8,18 +8,16 @@ AI 洞察路由 — 统一指标/日志/链路三页的 AI 能力增强
 - DELETE /ai-insight/history/{id} — 删除历史
 - POST /ai-insight/rca       — 跨域根因分析
 """
-import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AIInsightRecord, AIProvider, AgentConfig, Asset, DataSource, Alert, Span
+from app.models import Span
 from app.services import metric_v2_service
 from app.services.agent_service import call_llm
-from app.services.ai_provider_health import select_healthy_provider
 from app.services.ai_insight_service import (
     _get_provider, analyze_trend, TREND_CN, cluster_logs,
     aggregate_traces, cross_domain_rca,

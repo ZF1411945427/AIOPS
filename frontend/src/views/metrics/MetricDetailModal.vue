@@ -20,7 +20,18 @@
       <div v-if="latest" class="detail-stats">
         <div class="d-stat"><span class="d-stat-label">当前值</span><span class="d-stat-val" :style="valueStyle">{{ formatValue(latest) }}</span></div>
         <div class="d-stat"><span class="d-stat-label">采集时间</span><span class="d-stat-val">{{ formatTime(latest.timestamp) }}</span></div>
-        <div v-if="latest?.count" class="d-stat"><span class="d-stat-label">资产数</span><span class="d-stat-val">{{ latest.count }} 台</span></div>
+        <div v-if="resolvedAssetNames.length" class="d-stat">
+          <span class="d-stat-label">资产数</span>
+          <span class="d-stat-val">
+            <template v-if="resolvedAssetNames.length === 1">{{ resolvedAssetNames[0] }}</template>
+            <template v-else>
+              <span class="asset-count">{{ latest.count }} 台</span>
+              <div class="asset-list">
+                <span v-for="an in resolvedAssetNames" :key="an" class="asset-chip">{{ an }}</span>
+              </div>
+            </template>
+          </span>
+        </div>
         <div v-if="threshold" class="d-stat"><span class="d-stat-label">阈值提醒</span><span class="d-stat-val" style="font-size:12px">{{ threshold.warn }} 预警 / {{ threshold.crit }} 严重</span></div>
       </div>
     </div>
@@ -39,6 +50,7 @@ const props = defineProps({
   icon: String,
   unit: String,
   latest: Object,
+  assets: { type: Array, default: () => [] },
   chartData: Object, // {labels, values, series}
   color: String,
 })
@@ -48,6 +60,19 @@ const chartEl = ref(null)
 let chart = null
 
 const threshold = computed(() => THRESHOLDS[props.name] || null)
+
+const resolvedAssetNames = computed(() => {
+  const labels = props.latest?.asset_labels
+  if (!labels || !labels.length) return []
+  return labels.map(a => {
+    if (a.asset_id) {
+      const found = props.assets.find(asset => asset.id === a.asset_id)
+      return found ? found.name : `资产#${a.asset_id}`
+    }
+    if (a.target) return a.target
+    return '未知'
+  })
+})
 
 const valueStyle = computed(() => {
   const sc = metricStatus(props.name, props.latest)
@@ -163,4 +188,7 @@ onBeforeUnmount(() => { if (chart) chart.dispose() })
 .d-stat { display: flex; flex-direction: column; gap: 2px; }
 .d-stat-label { font-size: 11px; color: var(--text-tertiary, #94a3b8); }
 .d-stat-val { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.asset-count { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.asset-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.asset-chip { font-size: 11px; font-weight: 500; padding: 2px 8px; background: rgba(99,102,241,0.08); border-radius: 4px; color: var(--primary, #6366f1); }
 </style>

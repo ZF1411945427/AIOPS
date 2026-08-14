@@ -1,4 +1,3 @@
-from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
