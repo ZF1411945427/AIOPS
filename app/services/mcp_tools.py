@@ -66,6 +66,7 @@ def search_code(db=None, user_id=None, **kwargs):
     display_name="查询告警",
     location="cloud",
     category="alert",
+    metric_enabled=True,
 )
 def query_alerts(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
     close_db = False

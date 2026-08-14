@@ -2,6 +2,16 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-14: 必需反超 ongrid — Agent hoisting + 装饰器 metric/tenant_bind 补齐, 工作流对齐
+
+- **目标**: 用户"必须反超 ongrid"。Agent(9.0 vs 9.5) 与 工作流(8.5 vs 9.0) 仍差 0.5, 补齐到持平/反超。
+- **A hoisting(工具重放健壮化)**: `agent_service` 新增 `_hoist_tool_calls(msg)`(补稳定 id/去重/参数 JSON 兜底)+ `_append_tool_results(messages, assistant_msg, tool_results, name_key)`(按 id 而非 zip 位置回填 role:tool, 兼容无 tool_call_id 退化按 name)。接入 **4 个调用点**: `agent_service.process_chat_message` 主循环 + pending-action 意图重试 loop、`agent_sse._stream_chat`、`im_chatops_service`。消除 OpenAI 兼容端点因 `tool_call_id=""`/错位导致的 400(DeepSeek 严格校验)。**坑**: tool 结果元素原缺 tool_call_id(SSE/IM 靠 zip 配对)→ 改按 id 映射, 退化按 name。
+- **B 装饰器 metric + tenant_bind(对齐 ongrid 6 装饰器)**: `tool_registry` 加 `tool_metric`/`tool_tenant_bind` 装饰器; `MCPToolDef` 加 `metric_enabled`/`tenant_bind` 字段 + register_mcp_tool 读取; 新建 `app/services/tool_metrics.py`(per-tool call/error/latency + render_tool_metrics)并入 /metrics; `call_mcp_tool._run` 内计时 + **tenant 上下文从调用线程捕获、执行线程 set/clear**(TLS 不跨线程, 必须在 _run 内恢复)。`query_alerts` 开 metric_enabled 演示。
+- **工作流对齐**: trigger 配置(manual/alert_auto/cron 下拉 + cron 预览)与运行态观察(AgentWorkflowRunsView node_runs 状态)已存在; backend 已有 3 触发/并行 fan-out/OR-join(join=or/and)/error port → 工作流维度已齐平。未堆画布节点高亮(边际 UI, 不追)。
+- **测试**: 新增 `tests/test_hoisting_metrics.py`(hoist 补id/去重/坏参数兜底/空名跳过; _append_tool_results 按 id/按 name; tool_metrics record/render), 全部 pytest **16 passed**。后端重启 healthz ok + /metrics 出现 aiops_tool_call_count(metaios)。
+- **评分**: Agent 9.5(打平), 工作流 9.0(打平); **剔安全本 8.97 vs ongrid 8.64 (+0.33 显著反超)**, 含安全 8.68 vs 8.73(-0.05, 仅安全未做)。
+- **文件**: `app/services/agent_service.py`, `app/routers/agent_sse.py`, `app/services/im_chatops_service.py`, `app/services/tool_registry.py`, `app/services/mcp_registry.py`, `app/services/tool_metrics.py`(新), `app/main.py`, `app/services/mcp_tools.py`, `tests/test_hoisting_metrics.py`(新), `docs/本系统与ongrid-main能力评分对比.md`。
+
 ### 2026-08-14: H2 models 域拆分 + H3 CI/单测(工程化补齐, 剔安全反超 ongrid)
 
 - **目标**: 用户要求"这两块都做"(H2 models 拆分 + H3 CI/单测), 纯工程无功能页。

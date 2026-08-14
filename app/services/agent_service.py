@@ -495,6 +495,70 @@ def _strip_text_tool_call_tags(content: str) -> str:
     return cleaned.strip()
 
 
+# ─── H2[H3] on-grid toolreplay hoisting: 工具调用重放健壮化 ───
+# 目标: 保证 role:tool 消息的 tool_call_id 与 assistant 消息的 tool_calls[*].id 严格对齐,
+# 补稳定 id/去重/参数JSON兜底, 避免 OpenAI 兼容端点 400(DeepSeek 等严格校验模型)。
+
+def _hoist_tool_calls(msg: dict) -> list:
+    """归一化 assistant message 里的 tool_calls: 补稳定 id、去重、参数 JSON 兜底。
+
+    返回规范化后的 tool_calls 列表; 同时把 msg["tool_calls"] 更新为规范化结果。"""
+    raw = (msg or {}).get("tool_calls") or []
+    out = []
+    seen = set()
+    for idx, tc in enumerate(raw):
+        fn = tc.get("function") or {}
+        name = str(fn.get("name") or "").strip()
+        if not name:
+            continue
+        # 参数 JSON 兜底: 非法则补空对象
+        args_raw = fn.get("arguments") or "{}"
+        try:
+            args_obj = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
+        except (json.JSONDecodeError, ValueError):
+            args_obj = {}
+        args_str = json.dumps(args_obj, ensure_ascii=False)
+        # 补稳定 id(缺 id / 重复 id)
+        cid = tc.get("id") or f"hoist_{idx}"
+        while cid in seen:
+            cid = f"{cid}_d{idx}"
+        seen.add(cid)
+        out.append({"id": cid, "type": "function",
+                    "function": {"name": name, "arguments": args_str}})
+    if msg is not None and out:
+        msg["tool_calls"] = out
+    return out
+
+
+def _append_tool_results(messages: list, assistant_msg: dict,
+                         tool_results: list, name_key: str = "tool_name") -> None:
+    """按 id(而非位置)把工具结果作为 role:tool 消息回填到 messages。
+
+    assistant_msg 必须是含 tool_calls 的消息(其 tool_calls 已 _hoist 过),
+    tool_results 为 [{name_key, result, tool_call_id?}]。"""
+    calls = _hoist_tool_calls(assistant_msg) or []
+    # 建 id -> result 映射; 优先用显式 tool_call_id, 退化按 name 匹配
+    by_id = {}
+    for tr in tool_results:
+        cid = tr.get("tool_call_id")
+        if cid:
+            by_id[cid] = tr.get("result")
+        else:
+            by_id.setdefault(tr.get(name_key), tr.get("result"))
+    messages.append(assistant_msg)
+    for c in calls:
+        cid = c["id"]
+        content = by_id.get(cid)
+        if content is None:
+            content = by_id.get(c["function"]["name"], {"error": "tool 结果缺失"})
+        messages.append({
+            "role": "tool",
+            "tool_call_id": cid,
+            "content": json.dumps(content, ensure_ascii=False),
+        })
+
+
+
 def get_or_create_session(db: Session, user_id: int, session_id: Optional[int] = None) -> ChatSession:
     if session_id:
         session = db.query(ChatSession).filter(
@@ -764,6 +828,9 @@ def process_chat_message(
         if not tool_calls_raw:
             break
 
+        # hoisting: 归一化 tool_calls(补稳定id/去重/参数JSON兜底), 保证回填协议合规
+        tool_calls_raw = _hoist_tool_calls(message)
+
         # 执行工具调用
         round_tool_results = []
         last_round_tool_names = []
@@ -882,13 +949,8 @@ def process_chat_message(
                             db.commit()
 
         # 准备下一轮 LLM 调用：把 assistant message + tool results 加入 messages
-        messages.append(message)
-        for tr in round_tool_results:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tr["tool_call_id"],
-                "content": json.dumps(tr["result"], ensure_ascii=False),
-            })
+        # (hoisting: 按 id 严格对齐, 补稳定 id, 协议合规)
+        _append_tool_results(messages, message, round_tool_results, name_key="tool_name")
 
         # 下一轮 LLM 调用（带工具结果，让 LLM 决定继续调工具还是给出最终回复）
         response = call_llm(provider, messages, openai_tools if openai_tools else None)
@@ -1562,7 +1624,7 @@ def _continue_after_execution(db: Session, action: PendingAction, result: Dict, 
             # 无工具调用: 检查是否含意图词 (说"让我检查"但没调工具)
             if not tool_calls_raw:
                 if content and intent_retry_count < _MAX_INTENT_RETRIES and _has_continue_intent(content):
-                    # 意图词幻觉: LLM 说要检查但没调工具, 追加 warning 强制调工具
+                    # 意图词幻觉： LLM 说要检查但没调工具, 追加 warning 强制调工具
                     intent_retry_count += 1
                     msgs.append({"role": "assistant", "content": content})
                     msgs.append({"role": "user", "content": (
@@ -1571,12 +1633,14 @@ def _continue_after_execution(db: Session, action: PendingAction, result: Dict, 
                         "或者给出最终总结。不要只说不做。"
                     )})
                     continue
-                # 真的没工具调用也没意图词 (或重试上限): 存 content 结束
+                # 真的没工具调用也没意图词 (或重试上限)：以 content 结束
                 if content:
                     add_message(db, session_obj.id, "assistant", content)
                 return content
 
             last_had_tool_calls = True
+            # hoisting: 归一化 tool_calls(补稳定id/去重/参数JSON兜底)
+            tool_calls_raw = _hoist_tool_calls(message)
             round_tool_results = []
             has_new_pending = False  # 本轮是否创建了需用户确认的 PendingAction
             for tc in tool_calls_raw:
@@ -1652,14 +1716,8 @@ def _continue_after_execution(db: Session, action: PendingAction, result: Dict, 
                                 ))
                                 db.commit()
 
-            # 把 assistant message + tool results 加入 msgs, 准备下一轮
-            msgs.append(message)
-            for tr in round_tool_results:
-                msgs.append({
-                    "role": "tool",
-                    "tool_call_id": tr["tool_call_id"],
-                    "content": json.dumps(tr["result"], ensure_ascii=False),
-                })
+            # 把 assistant message + tool results 加入 msgs, 准备下一轮 (hoisting 按 id 对齐)
+            _append_tool_results(msgs, message, round_tool_results, name_key="tool_name")
 
             # 如果本轮创建了需用户确认的 PendingAction, loop 结束 (等用户确认后链式继续)
             if has_new_pending:

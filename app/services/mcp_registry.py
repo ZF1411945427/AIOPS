@@ -28,6 +28,8 @@ class MCPToolDef:
     ratelimit_per_minute: Optional[int] = None  # 每分钟最大调用次数，None=不限流
     audit_enabled: bool = False  # 每次调用写 AuditLog
     review_gate: bool = False  # 写操作审查门：需经 reviewer/审批后执行
+    metric_enabled: bool = False  # 记录调用数/错误/延迟到 /metrics(H3[B] on-grid metric decorator)
+    tenant_bind: bool = False  # 传播调用线程 tenant id 到执行线程(H3[B] on-grid tenant_bind)
 
     @property
     def read_only(self) -> bool:
@@ -139,6 +141,8 @@ def register_mcp_tool(
     ratelimit_per_minute: Optional[int] = None,
     audit_enabled: bool = False,
     review_gate: bool = False,
+    metric_enabled: bool = False,
+    tenant_bind: bool = False,
 ):
     def decorator(func):
         # 兼容 tool_registry.py 装饰器在函数上附加的元数据（装饰器在 @register_mcp_tool 之下时生效）
@@ -156,6 +160,8 @@ def register_mcp_tool(
             ratelimit_per_minute=ratelimit_per_minute if ratelimit_per_minute is not None else getattr(func, "_tool_ratelimit_per_minute", None),
             audit_enabled=audit_enabled or bool(getattr(func, "_tool_audit", False)),
             review_gate=review_gate or bool(getattr(func, "_tool_review_gate", False)),
+            metric_enabled=bool(getattr(func, "_tool_metric", False)) or metric_enabled,
+            tenant_bind=bool(getattr(func, "_tool_tenant_bind", False)) or tenant_bind,
         )
         return func
 
@@ -234,6 +240,17 @@ def call_mcp_tool(
 
     timeout = timeout_override or tool.timeout
 
+    # H3[B]: tenant_bind —— 从调用线程捕获 tenant id, 传播进执行线程(TLS 不跨线程)
+    _captured_tenant = None
+    if tool.tenant_bind:
+        try:
+            from app.services.tenant_context import get_current_tenant
+            _captured_tenant = get_current_tenant()
+        except Exception:
+            _captured_tenant = None
+    _metric = tool.metric_enabled
+    _run_metric = {"ok": True, "lat_ms": 0.0}  # 供 _run 记录, 外层读取
+
     def _run():
         # 超时路径在独立线程中执行，为线程安全给工具一个独立的 DB session：
         # SQLAlchemy Session 非线程安全，不能跨线程共享调用方 session。
@@ -247,14 +264,39 @@ def call_mcp_tool(
                 close_session = True
             except Exception:
                 session = db
+        # tenant_bind: 在执行线程内恢复租户上下文
+        if tool.tenant_bind and _captured_tenant is not None:
+            try:
+                from app.services.tenant_context import set_current_tenant
+                set_current_tenant(_captured_tenant)
+            except Exception:
+                pass
+        _t0 = time.time()
         try:
-            return tool.handler(db=session, user_id=user_id, **arguments)
+            r = tool.handler(db=session, user_id=user_id, **arguments)
+            _run_metric["lat_ms"] = (time.time() - _t0) * 1000
+            return r
+        except Exception as e:
+            _run_metric["ok"] = False
+            _run_metric["lat_ms"] = (time.time() - _t0) * 1000
+            raise
         finally:
+            if tool.tenant_bind:
+                try:
+                    from app.services.tenant_context import clear_current_tenant
+                    clear_current_tenant()
+                except Exception:
+                    pass
             if close_session:
                 try:
                     session.close()
                 except Exception:
                     pass
+
+    def _record_metric():
+        if _metric:
+            from app.services.tool_metrics import record_tool
+            record_tool(name, _run_metric["lat_ms"], _run_metric["ok"])
 
     if timeout and timeout > 0:
         # ── 工具级超时（对齐 Ongrid agent.go:631 15s 超时）──
@@ -264,6 +306,8 @@ def call_mcp_tool(
             result = future.result(timeout=timeout)
         except FutureTimeout:
             executor.shutdown(wait=False)
+            _run_metric["ok"] = False
+            _record_metric()
             return {
                 "status": "error",
                 "message": f"Tool '{name}' 执行超时（>{timeout}s）",
@@ -272,6 +316,8 @@ def call_mcp_tool(
             }
         except Exception as e:
             executor.shutdown(wait=False)
+            _run_metric["ok"] = False
+            _record_metric()
             return {"status": "error", "message": str(e)}
         finally:
             executor.shutdown(wait=False)
@@ -279,7 +325,11 @@ def call_mcp_tool(
         try:
             result = _run()
         except Exception as e:
+            _run_metric["ok"] = False
+            _record_metric()
             return {"status": "error", "message": str(e)}
+
+    _record_metric()
 
     # ── 工具审计（audit decorator）──
     if tool.audit_enabled:

@@ -166,6 +166,10 @@ def call_agent_for_im(db: Session, session: ChatSession, message: str, sub_agent
             final_content = content or "分析完成。"
             break
 
+        # hoisting: 归一化 tool_calls(补稳定id/去重/参数JSON兜底)
+        from app.services.agent_service import _hoist_tool_calls, _append_tool_results
+        tool_calls = _hoist_tool_calls(msg)
+
         # 执行工具
         tool_results = []
         for tc in tool_calls:
@@ -177,10 +181,7 @@ def call_agent_for_im(db: Session, session: ChatSession, message: str, sub_agent
             t_result = call_mcp_tool(t_name, t_args, db=db, user_id=session.user_id, allow_internal=False)
             tool_results.append({"tool_name": t_name, "result": t_result})
 
-        messages.append(msg)
-        for tc_item, tr_item in zip(tool_calls, tool_results):
-            messages.append({"role": "tool", "tool_call_id": tc_item.get("id", ""),
-                             "content": json.dumps(tr_item.get("result", {}), ensure_ascii=False)})
+        _append_tool_results(messages, msg, tool_results, name_key="tool_name")
         final_content = content or ""
 
     # 记录 assistant 消息

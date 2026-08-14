@@ -283,6 +283,10 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
         if not tool_calls_raw:
             break
 
+        # hoisting: 归一化 tool_calls(补稳定id/去重/参数JSON兜底), 保证回填协议合规
+        from app.services.agent_service import _hoist_tool_calls
+        tool_calls_raw = _hoist_tool_calls(msg)
+
         cleaned = _strip_text_tool_call_tags(content) if (
             "<invoke" in content or "<parameter" in content) else content
         yield sse_json("status", {"content": f"执行工具 ({round_idx+1}/{max_rounds})..."})
@@ -375,9 +379,9 @@ async def _stream_chat(user_id: int, session_id: int, user_message: str, config_
                         "message": result_data.get("message", ""),
                     })
 
-        messages.append(msg)
-        for tc_item, tr_item in zip(tool_calls_raw, tool_results):
-            messages.append({"role": "tool", "tool_call_id": tc_item.get("id", ""), "content": json.dumps(tr_item.get("result", {}), ensure_ascii=False)})
+        # hoisting 回填: 按 id(退化按 name)把工具结果挂到 assistant tool_calls 后, 协议合规
+        from app.services.agent_service import _append_tool_results
+        _append_tool_results(messages, msg, tool_results, name_key="tool_name")
 
         llm_task = asyncio.create_task(_call_llm_task(provider, messages, openai_tools if openai_tools else None))
         while not llm_task.done():

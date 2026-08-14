@@ -1209,6 +1209,12 @@ async def prom_metrics():
         lines = render_http_metrics(lines)
     except Exception:
         pass
+    # H3[B]: 工具级调用/错误/延迟指标(metric decorator)
+    try:
+        from app.services.tool_metrics import render_tool_metrics
+        lines = render_tool_metrics(lines)
+    except Exception:
+        pass
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 

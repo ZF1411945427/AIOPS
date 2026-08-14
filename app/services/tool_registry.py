@@ -55,6 +55,30 @@ def tool_review_gate(enabled: bool = True):
     return decorator
 
 
+def tool_metric(enabled: bool = True):
+    """工具指标：标记该工具的调用数/错误/延迟进 /metrics(tool_metrics.py)。
+
+    对齐 on-grid tools/decorators/metric.go: 每次调用记录 call/latency/error，
+    在 call_mcp_tool 内强制执行。落位 MCPToolDef.metric_enabled。
+    """
+    def decorator(func):
+        func._tool_metric = bool(enabled)
+        return func
+    return decorator
+
+
+def tool_tenant_bind(note: str = ""):
+    """租户绑定(声明式标记)：标记该工具应在当前租户上下文内执行。
+
+    对齐 on-grid tools/decorators/tenant_bind.go。当前 enforce 层：
+    call_mcp_tool 会把调用线程的 tenant id 传播进执行线程。落位 MCPToolDef.tenant_bind。
+    """
+    def decorator(func):
+        func._tool_tenant_bind = True
+        return func
+    return decorator
+
+
 def apply_decorator_meta(func, **meta):
     """程序化附加装饰器元数据（等价于叠装饰器），供动态注册工具使用。"""
     for key, value in meta.items():
@@ -64,5 +88,5 @@ def apply_decorator_meta(func, **meta):
 
 __all__ = [
     "tool_timeout", "tool_ratelimit", "tool_audit",
-    "tool_review_gate", "apply_decorator_meta",
+    "tool_review_gate", "tool_metric", "tool_tenant_bind", "apply_decorator_meta",
 ]
