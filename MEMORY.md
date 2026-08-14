@@ -2,6 +2,14 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-14: H2 models 域拆分 + H3 CI/单测(工程化补齐, 剔安全反超 ongrid)
+
+- **目标**: 用户要求"这两块都做"(H2 models 拆分 + H3 CI/单测), 纯工程无功能页。
+- **H2 models 拆分(架构工程化)**: AST 分析确认 models.py 145 类**0 类间直接引用、105 ForeignKey 全字符串、0 relationship** → **物理拆分安全无循环 import**。脚本按语义域拆到 `app/models/` 包(21 域文件: agent/alert/asset/auth/dash/data/deliver/edge/infra/k8s/knowledge/metric/mobile/model/notify/ops/report/skill/sre/system/workflow), `__init__.py` 门面 `from .xxx import *`(兼容 `from app.models import X`)。删除原 models.py。**验证**: 145 类全可经 app.models 导入; app.main OK; 后端重启 healthz ok + 真实端点(/assets/api/list 等)200; pytest 10 passed。**坑**: 启发式分节会 core 落 71 类 → 改手工语义映射; 拆分安全前提=类间无直接引用(AST 验证)。
+- **H3 CI+单测(代码质量)**: 装 pytest 9.1.1+pytest-asyncio 1.4.0。`tests/test_alert_rules.py`(8 kind 评估纯函数,_FakeRule/_FakeDB 免 DB)+`tests/test_skill_registry.py`(frontmatter/roundtrip/损坏yaml); `.github/workflows/ci.yml`(3 jobs: backend py_compile+pytest / frontend build / 根目录临时脚本守卫)。**10 passed**。
+- **评分**: 架构 7.5→8.5, 代码质量 6.5→8.0; **剔安全本 8.83 vs ongrid 8.64(反超 -0.19)**, 含安全 8.55 vs 8.72(差0.17仅安全未做)。
+- **文件**: `app/models/*.py`+`__init__.py`(替 models.py), `tests/test_alert_rules.py`, `tests/test_skill_registry.py`, `.github/workflows/ci.yml`, `docs/本系统与ongrid-main能力评分对比.md`。
+
 ### 2026-08-14: 新建《Topology拓扑改造功能页与操作手册》文档
 
 - **原因**: 用户询问"是否有记录所有根据 Topology 改造新增的功能页和操作"——此前相关记录散在 `MEMORY.md`(服务调用拓扑条目)与赶超计划 `### F. Topology 专项对比`,无独立操作侧汇总。

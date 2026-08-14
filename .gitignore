@@ -130,7 +130,7 @@ projects/
 功能测试/
 
 # ===== 模型权重文件（体积过大，不入库）=====
-models/
+/models/
 
 # ===== opencode 工具配置（AI 工具技能，非项目代码）=====
 .opencode/skills/

@@ -1,0 +1,77 @@
+# ===== AIOps CI(H3) =====
+# 每次 push / PR 到 main 自动运行:
+#   1) 后端 python 语法编译检查(全 app + 关键脚本)
+#   2) 核心服务 pytest 单元测试
+#   3) 前端 vite 构建
+# 安全/依赖扫描为轻量示例; 后续可扩展 ruff/lint/bandit
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-test:
+    name: Backend syntax + pytest
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio
+
+      - name: Syntax check (all app + key files)
+        run: |
+          python -m py_compile $(find app -name '*.py')
+          python -m py_compile run.py
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/ -q
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install & build
+        run: |
+          npm ci --no-audit --no-fund --prefix frontend
+          NODE_OPTIONS=--max-old-space-size=2048 npm run build --prefix frontend
+
+  lint:
+    name: Style guard (compile-level, w/o external linters)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Reject stray debug/check temp scripts in root
+        run: |
+          if ls check_*.py debug_*.py fix_*.py force_alert.py 2>/dev/null; then
+            echo "::error::Found stray temp scripts in repo root (check_/debug_/fix_/force_alert). Please remove."
+            exit 1
+          fi
+          echo "Root temp-script guard passed."
