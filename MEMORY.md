@@ -63,6 +63,13 @@
 
 > 每次会话开始时读取。按时间倒序,最新在最上面。完整历史见 git log。
 
+### 2026-08-14: K8S 集群部署在线部署成功 + 三处修复(ignore-preflight/registry-HTTP/WS实时推送)
+
+- **test222 在线部署成功** 🎉：代理 `http://192.168.100.1:7897` 生效，kubeadm/kubelet/kubectl 通过代理下载成功，kubeadm init 通过（ignore-preflight 跳过 conntrack 检查），CNI 安装成功，节点就绪，已采集 kubeconfig 接入平台监控
+- **三处修复**：① kubeadm init 加 `--ignore-preflight-errors=FileExisting-conntrack,FileExisting-ethtool`（避免因 preflight 依赖未装而拒绝初始化）② `_configure_insecure_registry` 的 hosts.toml 去掉 `skip_verify = true`（containerd 曾误判为 HTTP+TLS 配置导致优先尝试 HTTPS 拉镜像失败）③ `pending_yields` 缓冲改为每个子步骤后立即 flush（阶段1/2的 WS 日志不再卡到整个节点跑完才推送，用户实时看到 containerd 安装/Registry 配置/下载进度）
+- **编辑按钮**：前端列表每行新增「编辑」按钮，可编辑已有计划（含 proxy 字段）
+- **文件**: `app/services/k8s_offline_deploy_service.py`(3处), `frontend/src/views/K8sOfflineDeployView.vue`(编辑按钮+openEdit)
+
 ### 2026-08-14: K8S 集群部署在线模式代理可配置 + test111 失败排查
 - **test111 失败根因**: 在线部署模式（无离线包）需访问外网（dl.k8s.io + apt 源 + registry.k8s.io），目标虚机 192.168.100.129 无外网连通性
 - **代码 bug**: `app/services/k8s_offline_deploy_service.py:478` 写死代理 `http://192.168.31.76:7897`，curl 那行 `${http_proxy:-}` 是空（line 607），根本没生效

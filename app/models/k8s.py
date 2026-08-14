@@ -106,6 +106,7 @@ class K8sClusterPlan(Base):
     kubeconfig = Column(Text, default="")  # 敏感：产出 kubeconfig
     join_token = Column(Text, default="")  # 敏感：worker 加入 token（临时）
     report_json = Column(Text, default="{}")  # 部署报告
+    untaint_master = Column(Boolean, default=False)  # 部署后是否去除 master 节点污点（允许 Pod 调度到 master）
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

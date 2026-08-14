@@ -190,6 +190,7 @@ _MIGRATIONS = {
         "http_proxy VARCHAR(256) DEFAULT ''",
         "https_proxy VARCHAR(256) DEFAULT ''",
         "no_proxy VARCHAR(512) DEFAULT ''",
+        "untaint_master BOOLEAN DEFAULT 0",
     ],
 }
 for _eng in get_all_engines().values():

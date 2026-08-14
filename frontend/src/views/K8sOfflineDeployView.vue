@@ -49,6 +49,7 @@
             <td class="muted">{{ p.updated_at }}</td>
             <td class="row-actions">
               <button class="btn sm" @click="openDetail(p.id)">部署/详情</button>
+              <button class="btn sm" @click="openEdit(p)">编辑</button>
               <button class="btn sm danger" @click="removePlan(p)">删除</button>
             </td>
           </tr>
@@ -134,6 +135,11 @@
             </div>
             <div class="hint">设置后会注入到 apt/curl/wget 等所有联网步骤。NAT 模式下填宿主机代理 IP（如 VMware 网关 192.168.100.2:7897）</div>
           </details>
+
+          <label class="checkbox-row" style="margin: 10px 0 6px">
+            <input type="checkbox" v-model="form.untaint_master" />
+            <span>去除主节点污点（允许 Pod 调度到 master）</span>
+          </label>
 
           <div class="node-head">
             <h4>节点列表 <span class="req">*</span></h4>
@@ -264,7 +270,7 @@ const phases = ['预检', '环境准备', '运行时/二进制', 'kubeadm配置'
 function emptyForm() {
   return { name: '', kubernetes_version: '', runtime: 'containerd', cni: 'calico',
            pod_cidr: '', service_cidr: '', image_repository: '', bundle_id: null, registry_id: null,
-           http_proxy: '', https_proxy: '', no_proxy: '127.0.0.1,localhost,.local',
+           http_proxy: '', https_proxy: '', no_proxy: '127.0.0.1,localhost,.local', untaint_master: false,
            nodes: [{ host_role: 'master', asset_id: null, ip: '', hostname: '', username: 'root', password: '', ssh_port: 22 }] }
 }
 
@@ -305,6 +311,39 @@ function openCreate() {
   form.value = emptyForm()
   showPw.value = {}
   showEdit.value = true
+}
+async function openEdit(p) {
+  try {
+    const res = await request.get(`/k8s-offline/api/plans/${p.id}`, { params: { include_kubeconfig: false } })
+    if (!res || !res.id) { ElMessage.error('加载计划详情失败'); return }
+    editId.value = p.id
+    form.value = {
+      name: res.name || '',
+      kubernetes_version: res.kubernetes_version || '',
+      runtime: res.runtime || 'containerd',
+      cni: res.cni || 'calico',
+      pod_cidr: res.pod_cidr || '',
+      service_cidr: res.service_cidr || '',
+      image_repository: res.image_repository || '',
+      bundle_id: res.bundle_id,
+      registry_id: res.registry_id,
+      http_proxy: res.http_proxy || '',
+      https_proxy: res.https_proxy || '',
+      no_proxy: res.no_proxy || '127.0.0.1,localhost,.local',
+      untaint_master: !!res.untaint_master,
+      nodes: (res.nodes || []).map(n => ({
+        host_role: n.host_role || 'worker',
+        asset_id: n.asset_id,
+        ip: n.ip || '',
+        hostname: n.hostname || '',
+        username: n.username || 'root',
+        password: '',
+        ssh_port: n.ssh_port || 22,
+      })),
+    }
+    showPw.value = {}
+    showEdit.value = true
+  } catch (e) { ElMessage.error(e.message) }
 }
 function addNode() { form.value.nodes.push({ host_role: 'worker', asset_id: null, ip: '', hostname: '', username: 'root', password: '', ssh_port: 22 }) }
 function closeEdit() { if (!saving.value) showEdit.value = false }
@@ -491,6 +530,9 @@ input, select { width: 100%; border: 1px solid #dcdfe6; border-radius: 4px; padd
 .proxy-block { border: 1px dashed #dcdfe6; border-radius: 4px; padding: 8px 12px; margin: 12px 0; background: #fafbfc; }
 .proxy-block summary { cursor: pointer; font-size: 13px; color: #606266; user-select: none; }
 .proxy-block summary:hover { color: #409eff; }
+
+.checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #606266; cursor: pointer; }
+.checkbox-row input[type="checkbox"] { width: auto; cursor: pointer; }
 .nodes { display: flex; flex-direction: column; gap: 6px; }
 .node-row { display: flex; gap: 6px; align-items: center; }
 .node-row select, .node-row input { width: auto; }

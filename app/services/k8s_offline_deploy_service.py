@@ -87,6 +87,7 @@ def _plan_to_dict(p: K8sClusterPlan, include_kubeconfig: bool = False) -> dict:
         "http_proxy": p.http_proxy or "",
         "https_proxy": p.https_proxy or "",
         "no_proxy": p.no_proxy or "",
+        "untaint_master": bool(p.untaint_master),
         "status": p.status or "draft",
         "current_step": p.current_step or 0,
         "kubeconfig": p.kubeconfig or "" if include_kubeconfig else "",
@@ -181,6 +182,7 @@ def create_plan(db: Session, payload: dict, user_id: int = 0) -> dict:
         http_proxy=(payload.get("http_proxy") or "").strip(),
         https_proxy=(payload.get("https_proxy") or "").strip(),
         no_proxy=(payload.get("no_proxy") or "").strip() or "127.0.0.1,localhost,.local",
+        untaint_master=bool(payload.get("untaint_master", False)),
         nodes_json=json.dumps(nodes, ensure_ascii=False),
         status="draft",
         created_by=user_id,
@@ -260,6 +262,8 @@ def update_plan(db: Session, plan_id: int, payload: dict) -> Optional[dict]:
         p.https_proxy = (payload.get("https_proxy") or "").strip()
     if "no_proxy" in payload:
         p.no_proxy = (payload.get("no_proxy") or "").strip() or "127.0.0.1,localhost,.local"
+    if "untaint_master" in payload:
+        p.untaint_master = bool(payload["untaint_master"])
     # 节点更新：整体替换
     if payload.get("nodes"):
         db.query(K8sClusterNode).filter(K8sClusterNode.plan_id == plan_id).delete()
@@ -767,35 +771,39 @@ def _configure_insecure_registry(client, ctx, label, p, db, yield_event=None) ->
     if not ru:
         return
     host = ru.split("/")[0]
-    # 1. 写 hosts.toml 支持 HTTP registry
+    # 1. 写 hosts.toml 支持 HTTP registry（纯 HTTP：不配 TLS，避免 containerd 误判走 HTTPS）
     hosts_script = (
         "mkdir -p /etc/containerd/certs.d/%(host)s; "
         "cat > /etc/containerd/certs.d/%(host)s/hosts.toml <<'EOF'\n"
         'server = "http://%(host)s"\n\n'
         '[host."http://%(host)s"]\n'
         '  capabilities = ["pull", "resolve", "push"]\n'
-        '  skip_verify = true\n'
         "EOF\n"
         "echo hosts_toml_ok"
     ) % {"host": host}
     _run_remote(client, hosts_script, timeout=60)
-    # 2. 写 configs.tls 配置
-    r = _run_remote(client, f"grep -q '{host}' /etc/containerd/config.toml && echo HAVE || echo NEED", timeout=60)
-    if "NEED" in r["stdout"]:
-        reg_block = (
-            '      [plugins."io.containerd.grpc.v1.cri".registry.configs."%s".tls]\n'
-            '        insecure_skip_verify = true\n'
-            '      [plugins."io.containerd.grpc.v1.cri".registry.configs."%s"]\n'
-            '        [plugins."io.containerd.grpc.v1.cri".registry.configs."%s".auth]\n'
-            '        username = ""\n        password = ""\n' % (host, host, host)
+    # 2. 清掉 config.toml 中旧的 insecure_skip_verify 块（曾导致 containerd 判定为 HTTP+TLS → 优先尝试 HTTPS）
+    _run_remote(client, "sed -i '/registry.configs/,\\$d' /etc/containerd/config.toml; echo cleaned", timeout=60)
+    # 3. 若 plan 配置了代理，为 containerd 写入 systemd proxy（CNI/coredns 镜像来自 docker.io，不走 HTTP_PROXY 拉不到）
+    http_p = (p.http_proxy or "").strip()
+    https_p = (p.https_proxy or http_p or "").strip()
+    no_proxy_p = (p.no_proxy or "127.0.0.1,localhost,.local").strip()
+    if http_p:
+        # 把私有 Registry 加入 NO_PROXY，避免 containerd 走代理拉内网镜像
+        if host not in no_proxy_p:
+            no_proxy_p = f"{no_proxy_p},{host}"
+        proxy_unit = (
+            "mkdir -p /etc/systemd/system/containerd.service.d; "
+            f"cat > /etc/systemd/system/containerd.service.d/http-proxy.conf <<'PVC'\n"
+            "[Service]\n"
+            f"Environment=\"HTTP_PROXY={http_p}\"\n"
+            f"Environment=\"HTTPS_PROXY={https_p}\"\n"
+            f"Environment=\"NO_PROXY={no_proxy_p}\"\n"
+            "PVC\n"
+            "systemctl daemon-reload; echo proxy_ok"
         )
-        script = (
-            "if ! grep -q 'registry.configs' /etc/containerd/config.toml; then "
-            "sed -i '/\\[plugins\\.\"io\\.containerd\\.grpc\\.v1\\.cri\".registry\\]\\]/a\\      [plugins.\"io.containerd.grpc.v1.cri\".registry.configs]' /etc/containerd/config.toml; fi; "
-            f"cat >> /etc/containerd/config.toml <<'EOF'\n{reg_block}EOF\n"
-            "echo configs_ok"
-        )
-        _run_remote(client, script, timeout=60)
+        _run_remote(client, proxy_unit, timeout=60)
+        _append_log(p, {"type": "info", "node": label, "message": f"containerd 已配置代理 {http_p}"}, db)
     _run_remote(client, "systemctl restart containerd >/dev/null 2>&1 || pkill containerd; sleep 2; echo ok", timeout=120)
     msg = f"containerd 已信任私有 Registry: {host}"
     _append_log(p, {"type": "info", "node": label, "message": msg}, db)
@@ -870,9 +878,9 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
             _disable_swap(client, label, p, db)
             _setup_kernel(client, label, p, db)
             _install_preflight_deps(client, label, p, db, yield_event=_emit)
-        for evt in pending_yields:
-            yield evt
-        pending_yields.clear()
+            for evt in pending_yields:
+                yield evt
+            pending_yields.clear()
         # /etc/hosts 全部集群节点映射
         all_nodes = [{"ip": _resolve_node_conn(db, x)["ip"], "hostname": x.hostname}
                      for x in nodes_db]
@@ -891,13 +899,19 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
             client = clients[n.id]
             yield {"type": "log", "node": label, "message": f"配置节点 {label}..."}
             _install_containerd(client, ctx, label, p, db, yield_event=_emit)
-            if ctx.get("registry_url"):
-                _configure_insecure_registry(client, ctx, label, p, db, yield_event=_emit)
-            _install_k8s_binaries(client, ctx, label, p, db, yield_event=_emit)
-            _write_imagetar_jobs(client, ctx, label, p, db)
             for evt in pending_yields:
                 yield evt
             pending_yields.clear()
+            if ctx.get("registry_url"):
+                _configure_insecure_registry(client, ctx, label, p, db, yield_event=_emit)
+                for evt in pending_yields:
+                    yield evt
+                pending_yields.clear()
+            _install_k8s_binaries(client, ctx, label, p, db, yield_event=_emit)
+            for evt in pending_yields:
+                yield evt
+            pending_yields.clear()
+            _write_imagetar_jobs(client, ctx, label, p, db)
             yield {"type": "log", "node": label, "message": f"节点 {label} 配置完成"}
         _append_log(p, {"type": "ok", "message": "运行时与二进制就绪"}, db)
         yield {"type": "log", "message": "运行时与二进制就绪"}
@@ -947,7 +961,8 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
                 already_init = {"stdout": "NO"}
         if not apiserver_ok:
             init_cmd = ("kubeadm init --config /etc/kubernetes/kubeadm-config.yaml "
-                        "--upload-certs")
+                        "--upload-certs "
+                        "--ignore-preflight-errors=FileExisting-conntrack,FileExisting-ethtool")
             for line, is_err in _iter_remote(fclient, init_cmd + " 2>&1; echo __KUBEADM_RC__=$?"):
                 if line.startswith("__KUBEADM_RC__="):
                     rc = line.split("=")[1].strip()
@@ -1100,6 +1115,20 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
             p.kubeconfig = kc["stdout"]
             _create_platform_datasource(db, p, first_ip)
             _append_log(p, {"type": "ok", "message": "已采集 kubeconfig 并接入平台监控"}, db)
+
+        # 若勾选"去除主节点污点"，在 master 上移除 NoSchedule 污点，允许 Pod 调度到 master
+        if p.untaint_master:
+            taint_cmd = (
+                "kubectl taint nodes --all node-role.kubernetes.io/control-plane-:NoSchedule- 2>/dev/null; "
+                "kubectl taint nodes --all node-role.kubernetes.io/master-:NoSchedule- 2>/dev/null; "
+                "echo taint_removed"
+            )
+            tr = _run_remote(fclient, taint_cmd, timeout=30)
+            if "taint_removed" in tr["stdout"]:
+                _append_log(p, {"type": "ok", "message": "已去除 master 节点污点，允许 Pod 调度到 master"}, db)
+                yield {"type": "log", "message": "已去除 master 节点污点"}
+            else:
+                _append_log(p, {"type": "warn", "message": "去除 master 污点失败: " + tr["stdout"][:100]}, db)
 
         p.status = "succeeded"
         p.report_json = json.dumps(_build_report(db, p), ensure_ascii=False)

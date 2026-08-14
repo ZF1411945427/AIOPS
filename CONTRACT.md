@@ -1339,6 +1339,7 @@ draft → planned → running → succeeded → (post-verify → report)
 | kubeconfig | Text | "" | **敏感：产出 kubeconfig 内容（后端列表不返回，详情按需返回）** |
 | join_token | Text | "" | **敏感：worker 加入 token（临时，仅执行期写入）** |
 | report_json | Text | "{}" | 部署报告（node 状态矩阵 + 关键信息） |
+| untaint_master | Boolean | False | 部署后是否去除 master 节点污点（允许 Pod 调度到 master） |
 | created_by | Integer FK(users.id) | nullable | 创建人 |
 | created_at | DateTime | now() | - |
 | updated_at | DateTime | now()/onupdate | - |
