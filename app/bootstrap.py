@@ -135,7 +135,13 @@ def register_routers(app):
     from app.routers.rag_eval import router as rag_eval_router
     from app.routers.security_audit import router as security_audit_router
     from app.routers.ai_insight import router as ai_insight_router
+    from app.routers.config_drift import router as config_drift_router
+    from app.routers.component_market import router as component_market_router
+    from app.routers.component_ops import router as component_ops_router
 
+    app.include_router(config_drift_router)
+    app.include_router(component_market_router)
+    app.include_router(component_ops_router)
     app.include_router(assets_router)
     app.include_router(asset_changes_router)
     app.include_router(asset_discovery_router)

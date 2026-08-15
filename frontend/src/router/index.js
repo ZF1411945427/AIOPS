@@ -16,6 +16,12 @@ const routes = [
       meta: { title: '产品介绍' },
     },
     {
+      path: '/product/showcase',
+      name: 'ProductShowcase',
+      component: () => import('../views/ProductShowcaseView.vue'),
+      meta: { title: '组件智能运维展示' },
+    },
+    {
       path: '/user-guide',
       name: 'UserGuide',
       component: () => import('../views/UserGuideView.vue'),

@@ -607,6 +607,112 @@
 
 ---
 
+### `config_baselines` — 配置基线（对标天穹「AI 智能化配置」）
+
+配置漂移检测的基础：记录资产某配置项的内容快照用于对比。采集命令走 SSH（路径基于资产 `connection_config`，遵守路径规范契约）。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| **`id`** | Integer PK | 主键 |
+| **`asset_id`** | Integer FK→assets.id | 所属资产 |
+| **`config_key`** | String(128) | 配置项唯一标识（如 `nginx.conf`/`sysctl.conf`/`my.cnf`） |
+| **`config_name`** | String(128) | 配置项显示名 |
+| **`category`** | String(32) | 分类：system/nginx/redis/mysql/k8s/app/custom |
+| **`source_command`** | Text | 采集该配置的 SSH 命令 |
+| **`content`** | Text | 基线内容快照 |
+| **`content_hash`** | String(64) | 内容 MD5 哈希（快速判等） |
+| **`version`** | Integer | 基线版本（每次更新 +1） |
+| **`baseline_at`** | DateTime | 首次建立基线时间 |
+| **`updated_at`** | DateTime | 最后更新时间 |
+
+### `config_drift_records` — 配置漂移记录
+
+一次检测发现基线与实际配置不一致的结果，含 AI 评估（根因/影响/推荐修正/变更风险）。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| **`id`** | Integer PK | 主键 |
+| **`asset_id`** | Integer FK→assets.id | 所属资产 |
+| **`baseline_id`** | Integer FK→config_baselines.id | 关联基线（可空） |
+| **`config_key`** | String(128) | 配置项标识（冗余，便于查询） |
+| **`config_name`** | String(128) | 配置项显示名 |
+| **`category`** | String(32) | 分类 |
+| **`baseline_content`** | Text | 基线内容 |
+| **`current_content`** | Text | 当前采集内容 |
+| **`drift_type`** | String(16) | content/added/removed |
+| **`diff_text`** | Text | 差异展示文本（- 减少 / + 新增） |
+| **`drift_count`** | Integer | 差异行数 |
+| **`severity`** | String(16) | low/medium/high/critical（AI 评估同步） |
+| **`status`** | String(16) | open/acknowledged/resolved/ignored |
+| **`ai_assessment`** | Text | AI 评估 JSON（root_cause/impact/recommendation/risk/change_action/summary/severity） |
+| **`detected_at`** | DateTime | 检测（漂移）时间 |
+| **`resolved_at`** | DateTime | 解决时间（可空） |
+| **`created_at`** | DateTime | 创建时间 |
+
+ **状态机**: `open → acknowledged → resolved|ignored`。`resolved` 记录 `resolved_at`。
+**AI 评估字段约定**（`ai_assessment` JSON）: `summary`/`root_cause`/`impact`/`severity`/`recommendation`/`risk`/`change_action`(apply|review|ignore)。无 AI provider 时用规则兜底（`ai_generated=false`），severity 依据 drift_type/drift_count 判定。
+
+---
+
+### `component_catalog` — 组件应用商店目录
+
+对标 Bitnami Catalog / Terraform Registry OOTB 组件目录。官方组件清单，每种支持多种部署方式。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| **`id`** | Integer PK | 主键 |
+| **`name`** | String(64) UNIQUE | 组件名（redis/mysql/kafka/nginx/es/rabbitmq/mongodb/postgresql） |
+| **`display_name`** | String(128) | 显示名（Redis/MySQL...） |
+| **`category`** | String(32) | database/middleware/cache/message/web/observability |
+| **`version`** | String(32) | 默认版本（image tag / chart version） |
+| **`description`** | String(512) | 组件描述 |
+| **`icon`** | String(16) | 图标 emoji |
+| **`docker_image`** | String(128) | docker 镜像 |
+| **`helm_chart`** | String(128) | helm chart（如 bitnami/redis） |
+| **`helm_repo`** | String(256) | helm 仓库 URL |
+| **`default_port`** | Integer | 默认端口 |
+| **`deploy_types`** | Text(JSON 数组) | 支持的部署方式 `["native","docker","helm","ha"]` |
+| **`native_script`** | Text | 传统部署脚本（yum/apt/命令） |
+| **`compose_yaml`** | Text | docker compose 内容 |
+| **`ha_config`** | Text(JSON) | 高可用配置 `{mode, replicas/brokers/nodes/members}` |
+| **`config_keys`** | Text | 关联 config_drift 配置项键（逗号分隔，如 `redis.conf`） |
+| **`complexity`** | String(16) | simple/medium/complex |
+| **`enabled`** | Boolean | 是否启用 |
+| **`sort_order`** | Integer | 排序 |
+| **`created_at`/`updated_at`** | DateTime | 时间戳 |
+
+### `component_installs` — 组件安装记录
+
+记录某资产上安装的组件实例及其状态与检查结果。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| **`id`** | Integer PK | 主键 |
+| **`component_id`** | Integer FK→component_catalog.id | 组件 |
+| **`component_name`** | String(64) | 冗余组件名 |
+| **`asset_id`** | Integer FK→assets.id | 目标机资产 |
+| **`deploy_type`** | String(16) | native/docker/helm/ha |
+| **`name_space`** | String(64) | helm 命名空间 |
+| **`release_name`** | String(128) | helm release 名 |
+| **`deploy_path`** | String(256) | compose/脚本部署路径 |
+| **`port`** | Integer | 实例端口 |
+| **`status`** | String(16) | deploying/running/failed/stopped |
+| **`config_check_status`** | String(16) | pending/pass/drift/error |
+| **`health_status`** | String(16) | healthy/degraded/unhealthy/unknown |
+| **`config_result`** | Text(JSON) | 配置优化检查结果 |
+| **`health_result`** | Text(JSON) | 高可用/健康检查结果 |
+| **`vuln_result`** | Text(JSON) | 漏洞检查结果（`scan_type`/`findings`/`safe`） |
+| **`ai_analysis`** | Text(JSON) | AI 健康分析（summary/health_score/issues/recommendations/severity） |
+| **`deploy_log`** | Text | 部署日志（截断） |
+| **`deploy_plan_id`** | Integer | 关联 deploy.plans（可空） |
+| **`created_at`/`updated_at`** | DateTime | 时间戳 |
+
+**部署方式约定**：`native`=传统 yum/apt/脚本；`docker`=docker compose；`helm`=K8S/Helm chart；`ha`=高可用（多副本/集群）。
+**漏洞扫描**：基础版为版本对比（`_MIN_CVE_RULES`），`safe=false` 表示命中；生产建议接 Trivy/Clair/Grype。
+**config/health 为空或失败**：`config_check_status`/`health_status` 反映最近一次检查，`pending` 表示未检查。
+
+---
+
 ## 第三章：跨表同语义字段长度统一
 
 | 字段名 | 统一长度 | 涉及表 |
@@ -1005,6 +1111,7 @@ ame | String(64) | - | 策略名 |
 | locked_tools | Text | "[]" | 禁止调用的工具黑名单（JSON 数组） |
 | llowed_commands | Text | "[]" | 允许的命令前缀白名单（JSON 数组，如 ["systemctl restart","df"]） |
 | locked_commands | Text | "[]" | 禁止的命令黑名单（JSON 数组，支持正则） |
+| allowed_workdir | Text | "[]" | 允许 AI 操作的工作目录/路径范围白名单（JSON 数组，如 ["/data/aiops","/tmp"]）。AI 命令 cd 到范围外或写绝对路径落到范围外 → 拒绝；空=不限路径 |
 | max_risk_level | String(16) | "critical" | 本策略允许的最大风险等级 |
 | max_actions_per_day | Integer | 0 | 本策略单日最大执行次数（0=继承全局） |
 | 

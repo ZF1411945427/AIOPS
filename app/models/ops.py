@@ -307,3 +307,96 @@ class DiscoveryResult(Base):
     services = Column(Text, default="")
     raw_output = Column(Text, default="")
     discovered_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class ConfigBaseline(Base):
+    """配置基线 — 记录资产某配置项的内容快照用于漂移检测"""
+    __tablename__ = "config_baselines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
+    config_key = Column(String(128), nullable=False)          # 配置项唯一标识(如 nginx.conf / max_connections)
+    config_name = Column(String(128), default="")             # 配置项显示名
+    category = Column(String(32), default="middleware")       # 分类: system/nginx/mysql/redis/k8s/app/custom
+    source_command = Column(Text, default="")                 # 采集该配置的 SSH 命令
+    content = Column(Text, default="")                        # 基线内容快照
+    content_hash = Column(String(64), default="")             # 内容哈希(快速判等)
+    version = Column(Integer, default=1)                      # 基线版本(每次更新+1)
+    baseline_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, nullable=True)
+
+
+class ConfigDriftRecord(Base):
+    """配置漂移记录 — 一次检测发现基线与实际配置不一致的结果"""
+    __tablename__ = "config_drift_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
+    baseline_id = Column(Integer, ForeignKey("config_baselines.id"), nullable=True)
+    config_key = Column(String(128), nullable=False)
+    config_name = Column(String(128), default="")
+    category = Column(String(32), default="middleware")
+    baseline_content = Column(Text, default="")               # 基线内容
+    current_content = Column(Text, default="")                # 当前采集内容
+    drift_type = Column(String(16), default="content")        # content/added/removed
+    diff_text = Column(Text, default="")                      # 差异展示文本
+    drift_count = Column(Integer, default=0)                  # 差异行数
+    severity = Column(String(16), default="medium")           # low/medium/high/critical
+    status = Column(String(16), default="open")               # open/acknowledged/resolved/ignored
+    ai_assessment = Column(Text, default="")                  # AI 评估(JSON: 根因/影响/推荐修正/风险)
+    resolved_at = Column(DateTime, nullable=True)
+    detected_at = Column(DateTime, default=lambda: datetime.now())
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class ComponentCatalog(Base):
+    """组件应用商店目录 — 官方中间件/组件清单(对标 Bitnami catalog / Terraform Registry)"""
+    __tablename__ = "component_catalog"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(64), nullable=False, unique=True)     # 组件名(如 redis/mysql/kafka)
+    display_name = Column(String(128), default="")             # 显示名(如 Redis)
+    category = Column(String(32), default="middleware")        # database/middleware/cache/message/web/observability
+    version = Column(String(32), default="")                   # 默认版本(tag/chart version)
+    description = Column(String(512), default="")
+    icon = Column(String(16), default="🐳")
+    docker_image = Column(String(128), default="")             # docker 镜像
+    helm_chart = Column(String(128), default="")               # helm chart(如 bitnami/redis)
+    helm_repo = Column(String(256), default="")                # helm 仓库
+    default_port = Column(Integer, default=0)
+    deploy_types = Column(Text, default="[]")                  # 支持的部署方式 ["native","docker","helm","ha"]
+    native_script = Column(Text, default="")                   # 传统部署脚本(yum/apt/命令)
+    compose_yaml = Column(Text, default="")                    # docker compose 内容
+    ha_config = Column(Text, default="{}")                     # 高可用配置(JSON: 副本/集群开关)
+    config_keys = Column(Text, default="")                     # 关联 config_drift 配置项键(逗号分隔)
+    complexity = Column(String(16), default="simple")          # simple/medium/complex
+    enabled = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class ComponentInstall(Base):
+    """组件安装/部署记录 — 记录某资产上安装的组件实例及其状态与检查结果"""
+    __tablename__ = "component_installs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    component_id = Column(Integer, ForeignKey("component_catalog.id"), nullable=False, index=True)
+    component_name = Column(String(64), default="")            # 冗余组件名
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
+    deploy_type = Column(String(16), default="docker")         # native/docker/helm/ha
+    name_space = Column(String(64), default="")                # helm 部署命名空间
+    release_name = Column(String(128), default="")             # helm release 名
+    deploy_path = Column(String(256), default="")              # compose/脚本部署路径
+    port = Column(Integer, default=0)                          # 实例端口
+    status = Column(String(16), default="deploying")           # deploying/running/failed/stopped
+    config_check_status = Column(String(16), default="pending")# pending/pass/drift/config error
+    health_status = Column(String(16), default="unknown")      # healthy/degraded/unhealthy
+    config_result = Column(Text, default="")                   # 配置优化检查结果(JSON)
+    health_result = Column(Text, default="")                   # 高可用/巡检结果(JSON)
+    vuln_result = Column(Text, default="")                     # 漏洞检查结果(JSON)
+    ai_analysis = Column(Text, default="")                     # AI 健康分析(JSON)
+    deploy_log = Column(Text, default="")                      # 部署日志(截断)
+    deploy_plan_id = Column(Integer, nullable=True)            # 关联 deploy.plans
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

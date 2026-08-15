@@ -1,0 +1,824 @@
+{
+  "mysql": {
+    "done": true,
+    "result": {
+      "component": "mysql",
+      "display": "MySQL",
+      "start": "16:55:55",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-mysql Up 6 seconds",
+        "image": "mysql:8.0",
+        "log": "ose up -d:\nNetwork mysql_default  Creating\n Network mysql_default  Created\n Container aiops-mysql  Creating\n Container aiops-mysql  Created\n Container aiops-mysql  Starting\n Container aiops-mysql  Started\n__RC__=0\n[deploy] 容器 aiops-mysql 已启动: aiops-mysql Up Less than a second\n[result] aiops-mysql Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": false,
+        "findings": [
+          "CVE-2016-6662"
+        ]
+      },
+      "ai": {
+        "generated": true,
+        "score": 70
+      },
+      "overall": "degraded"
+    }
+  },
+  "redis": {
+    "done": true,
+    "result": {
+      "component": "redis",
+      "display": "Redis",
+      "start": "16:56:22",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-redis Up 5 seconds",
+        "image": "redis:7",
+        "log": "ose up -d:\nNetwork redis_default  Creating\n Network redis_default  Created\n Container aiops-redis  Creating\n Container aiops-redis  Created\n Container aiops-redis  Starting\n Container aiops-redis  Started\n__RC__=0\n[deploy] 容器 aiops-redis 已启动: aiops-redis Up Less than a second\n[result] aiops-redis Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": false,
+        "findings": [
+          "CVE-2021-32761"
+        ]
+      },
+      "ai": {
+        "generated": true,
+        "score": 72
+      },
+      "overall": "degraded"
+    }
+  },
+  "kafka": {
+    "done": true,
+    "result": {
+      "component": "kafka",
+      "display": "Apache Kafka",
+      "start": "17:03:59",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "bitnami/kafka:latest",
+        "log": "ling \n kafka Error failed to resolve reference \"docker.io/bitnami/kafka:latest\": docker.io/bitnami/kafka:latest: not found\nError response from daemon: failed to resolve reference \"docker.io/bitnami/kafka:latest\": docker.io/bitnami/kafka:latest: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "rabbitmq": {
+    "done": true,
+    "result": {
+      "component": "rabbitmq",
+      "display": "RabbitMQ",
+      "start": "17:04:26",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-rabbitmq Up 5 seconds",
+        "image": "rabbitmq:3-management",
+        "log": "_default  Creating\n Network rabbitmq_default  Created\n Container aiops-rabbitmq  Creating\n Container aiops-rabbitmq  Created\n Container aiops-rabbitmq  Starting\n Container aiops-rabbitmq  Started\n__RC__=0\n[deploy] 容器 aiops-rabbitmq 已启动: aiops-rabbitmq Up Less than a second\n[result] aiops-rabbitmq Up"
+      },
+      "health": "unhealthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 45
+      },
+      "overall": "unhealthy"
+    }
+  },
+  "nginx": {
+    "done": true,
+    "result": {
+      "component": "nginx",
+      "display": "Nginx",
+      "start": "17:04:44",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-nginx Up 24 seconds",
+        "image": "nginx:latest",
+        "log": "ose up -d:\nNetwork nginx_default  Creating\n Network nginx_default  Created\n Container aiops-nginx  Creating\n Container aiops-nginx  Created\n Container aiops-nginx  Starting\n Container aiops-nginx  Started\n__RC__=0\n[deploy] 容器 aiops-nginx 已启动: aiops-nginx Up Less than a second\n[result] aiops-nginx Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": false,
+        "findings": [
+          "CVE-2021-23017"
+        ]
+      },
+      "ai": {
+        "generated": true,
+        "score": 60
+      },
+      "overall": "degraded"
+    }
+  },
+  "elasticsearch": {
+    "done": true,
+    "result": {
+      "component": "elasticsearch",
+      "display": "Elasticsearch",
+      "start": "17:05:21",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-elasticsearch Up 5 seconds",
+        "image": "docker.elastic.co/elasticsearch/elasticsearch:8.12.2",
+        "log": "h_default  Created\n Container aiops-elasticsearch  Creating\n Container aiops-elasticsearch  Created\n Container aiops-elasticsearch  Starting\n Container aiops-elasticsearch  Started\n__RC__=0\n[deploy] 容器 aiops-elasticsearch 已启动: aiops-elasticsearch Up Less than a second\n[result] aiops-elasticsearch Up"
+      },
+      "health": "unhealthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 45
+      },
+      "overall": "unhealthy"
+    }
+  },
+  "mongodb": {
+    "done": true,
+    "result": {
+      "component": "mongodb",
+      "display": "MongoDB",
+      "start": "17:05:38",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-mongodb Up 5 seconds",
+        "image": "mongo:7",
+        "log": " mongodb_default  Creating\n Network mongodb_default  Created\n Container aiops-mongodb  Creating\n Container aiops-mongodb  Created\n Container aiops-mongodb  Starting\n Container aiops-mongodb  Started\n__RC__=0\n[deploy] 容器 aiops-mongodb 已启动: aiops-mongodb Up Less than a second\n[result] aiops-mongodb Up"
+      },
+      "health": "unhealthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 35
+      },
+      "overall": "unhealthy"
+    }
+  },
+  "postgresql": {
+    "done": true,
+    "result": {
+      "component": "postgresql",
+      "display": "PostgreSQL",
+      "start": "17:06:19",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-postgresql Up 5 seconds",
+        "image": "postgres:16",
+        "log": "ng\n Network postgresql_default  Created\n Container aiops-postgresql  Creating\n Container aiops-postgresql  Created\n Container aiops-postgresql  Starting\n Container aiops-postgresql  Started\n__RC__=0\n[deploy] 容器 aiops-postgresql 已启动: aiops-postgresql Up Less than a second\n[result] aiops-postgresql Up"
+      },
+      "health": "unhealthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 65
+      },
+      "overall": "unhealthy"
+    }
+  },
+  "clickhouse": {
+    "done": true,
+    "result": {
+      "component": "clickhouse",
+      "display": "ClickHouse",
+      "start": "17:06:36",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-clickhouse Up 5 seconds",
+        "image": "clickhouse/clickhouse-server:24",
+        "log": "ng\n Network clickhouse_default  Created\n Container aiops-clickhouse  Creating\n Container aiops-clickhouse  Created\n Container aiops-clickhouse  Starting\n Container aiops-clickhouse  Started\n__RC__=0\n[deploy] 容器 aiops-clickhouse 已启动: aiops-clickhouse Up Less than a second\n[result] aiops-clickhouse Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 75
+      },
+      "overall": "healthy"
+    }
+  },
+  "tdengine": {
+    "done": true,
+    "result": {
+      "component": "tdengine",
+      "display": "TDengine",
+      "start": "17:07:35",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "tdengine/tdengine:3",
+        "log": "lling \n tdengine Error failed to resolve reference \"docker.io/tdengine/tdengine:3\": docker.io/tdengine/tdengine:3: not found\nError response from daemon: failed to resolve reference \"docker.io/tdengine/tdengine:3\": docker.io/tdengine/tdengine:3: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "memcached": {
+    "done": true,
+    "result": {
+      "component": "memcached",
+      "display": "Memcached",
+      "start": "17:07:58",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-memcached Up 5 seconds",
+        "image": "memcached:1.6",
+        "log": "  Creating\n Network memcached_default  Created\n Container aiops-memcached  Creating\n Container aiops-memcached  Created\n Container aiops-memcached  Starting\n Container aiops-memcached  Started\n__RC__=0\n[deploy] 容器 aiops-memcached 已启动: aiops-memcached Up Less than a second\n[result] aiops-memcached Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 75
+      },
+      "overall": "healthy"
+    }
+  },
+  "nacos": {
+    "done": true,
+    "result": {
+      "component": "nacos",
+      "display": "Nacos",
+      "start": "17:08:46",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-nacos Up 5 seconds",
+        "image": "nacos/nacos-server:v2.2.3",
+        "log": "s Pulled \n Network nacos_default  Creating\n Network nacos_default  Created\n Container aiops-nacos  Creating\n Container aiops-nacos  Created\n Container aiops-nacos  Starting\n Container aiops-nacos  Started\n__RC__=0\n[deploy] 容器 aiops-nacos 已启动: aiops-nacos Up Less than a second\n[result] aiops-nacos Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 70
+      },
+      "overall": "healthy"
+    }
+  },
+  "zookeeper": {
+    "done": true,
+    "result": {
+      "component": "zookeeper",
+      "display": "ZooKeeper",
+      "start": "17:09:53",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-zookeeper Up 5 seconds",
+        "image": "zookeeper:3.9",
+        "log": "  Creating\n Network zookeeper_default  Created\n Container aiops-zookeeper  Creating\n Container aiops-zookeeper  Created\n Container aiops-zookeeper  Starting\n Container aiops-zookeeper  Started\n__RC__=0\n[deploy] 容器 aiops-zookeeper 已启动: aiops-zookeeper Up Less than a second\n[result] aiops-zookeeper Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 78
+      },
+      "overall": "healthy"
+    }
+  },
+  "etcd": {
+    "done": true,
+    "result": {
+      "component": "etcd",
+      "display": "etcd",
+      "start": "17:10:30",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "bitnami/etcd:3.5",
+        "log": "e up -d:\netcd Pulling \n etcd Error failed to resolve reference \"docker.io/bitnami/etcd:3.5\": docker.io/bitnami/etcd:3.5: not found\nError response from daemon: failed to resolve reference \"docker.io/bitnami/etcd:3.5\": docker.io/bitnami/etcd:3.5: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "rocketmq": {
+    "done": true,
+    "result": {
+      "component": "rocketmq",
+      "display": "RocketMQ",
+      "start": "17:10:53",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "apache/rocketmq:5.1",
+        "log": "lling \n rocketmq Error failed to resolve reference \"docker.io/apache/rocketmq:5.1\": docker.io/apache/rocketmq:5.1: not found\nError response from daemon: failed to resolve reference \"docker.io/apache/rocketmq:5.1\": docker.io/apache/rocketmq:5.1: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "prometheus": {
+    "done": true,
+    "result": {
+      "component": "prometheus",
+      "display": "Prometheus",
+      "start": "17:11:35",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-prometheus Up 13 seconds",
+        "image": "prom/prometheus:v2.50.0",
+        "log": "ng\n Network prometheus_default  Created\n Container aiops-prometheus  Creating\n Container aiops-prometheus  Created\n Container aiops-prometheus  Starting\n Container aiops-prometheus  Started\n__RC__=0\n[deploy] 容器 aiops-prometheus 已启动: aiops-prometheus Up Less than a second\n[result] aiops-prometheus Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 70
+      },
+      "overall": "healthy"
+    }
+  },
+  "grafana": {
+    "done": true,
+    "result": {
+      "component": "grafana",
+      "display": "Grafana",
+      "start": "17:12:42",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-grafana Up 5 seconds",
+        "image": "grafana/grafana:10.4.0",
+        "log": " grafana_default  Creating\n Network grafana_default  Created\n Container aiops-grafana  Creating\n Container aiops-grafana  Created\n Container aiops-grafana  Starting\n Container aiops-grafana  Started\n__RC__=0\n[deploy] 容器 aiops-grafana 已启动: aiops-grafana Up Less than a second\n[result] aiops-grafana Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 75
+      },
+      "overall": "healthy"
+    }
+  },
+  "influxdb": {
+    "done": true,
+    "result": {
+      "component": "influxdb",
+      "display": "InfluxDB",
+      "start": "17:14:04",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-influxdb Up 9 seconds",
+        "image": "influxdb:2.7",
+        "log": "_default  Creating\n Network influxdb_default  Created\n Container aiops-influxdb  Creating\n Container aiops-influxdb  Created\n Container aiops-influxdb  Starting\n Container aiops-influxdb  Started\n__RC__=0\n[deploy] 容器 aiops-influxdb 已启动: aiops-influxdb Up Less than a second\n[result] aiops-influxdb Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 75
+      },
+      "overall": "healthy"
+    }
+  },
+  "kibana": {
+    "done": true,
+    "result": {
+      "component": "kibana",
+      "display": "Kibana",
+      "start": "17:15:01",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-kibana Up 8 seconds",
+        "image": "docker.elastic.co/kibana/kibana:8.12.2",
+        "log": "\n Network kibana_default  Creating\n Network kibana_default  Created\n Container aiops-kibana  Creating\n Container aiops-kibana  Created\n Container aiops-kibana  Starting\n Container aiops-kibana  Started\n__RC__=0\n[deploy] 容器 aiops-kibana 已启动: aiops-kibana Up Less than a second\n[result] aiops-kibana Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 72
+      },
+      "overall": "healthy"
+    }
+  },
+  "logstash": {
+    "done": true,
+    "result": {
+      "component": "logstash",
+      "display": "Logstash",
+      "start": "17:17:06",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-logstash Up 5 seconds",
+        "image": "docker.elastic.co/logstash/logstash:8.12.2",
+        "log": "_default  Creating\n Network logstash_default  Created\n Container aiops-logstash  Creating\n Container aiops-logstash  Created\n Container aiops-logstash  Starting\n Container aiops-logstash  Started\n__RC__=0\n[deploy] 容器 aiops-logstash 已启动: aiops-logstash Up Less than a second\n[result] aiops-logstash Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 70
+      },
+      "overall": "healthy"
+    }
+  },
+  "openvpn": {
+    "done": true,
+    "result": {
+      "component": "openvpn",
+      "display": "OpenVPN",
+      "start": "17:18:31",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-openvpn Up Less than a second",
+        "image": "kylemanna/openvpn:latest",
+        "log": "twork openvpn_default  Creating\n Network openvpn_default  Created\n Container aiops-openvpn  Creating\n Container aiops-openvpn  Created\n Container aiops-openvpn  Starting\n Container aiops-openvpn  Started\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: aiops-openvpn Restarting (0) Less than a second ago"
+      },
+      "health": "unhealthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 15
+      },
+      "overall": "unhealthy"
+    }
+  },
+  "gitlab": {
+    "done": true,
+    "result": {
+      "component": "gitlab",
+      "display": "GitLab",
+      "start": "17:19:19",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "gitlab/gitlab-ce:16.11.0",
+        "log": "or failed to resolve reference \"docker.io/gitlab/gitlab-ce:16.11.0\": docker.io/gitlab/gitlab-ce:16.11.0: not found\nError response from daemon: failed to resolve reference \"docker.io/gitlab/gitlab-ce:16.11.0\": docker.io/gitlab/gitlab-ce:16.11.0: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "activemq": {
+    "done": true,
+    "result": {
+      "component": "activemq",
+      "display": "ActiveMQ",
+      "start": "17:20:02",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "rmohr/activemq:5.18.0",
+        "log": "activemq Error failed to resolve reference \"docker.io/rmohr/activemq:5.18.0\": docker.io/rmohr/activemq:5.18.0: not found\nError response from daemon: failed to resolve reference \"docker.io/rmohr/activemq:5.18.0\": docker.io/rmohr/activemq:5.18.0: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "cassandra": {
+    "done": true,
+    "result": {
+      "component": "cassandra",
+      "display": "Cassandra",
+      "start": "17:20:32",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-cassandra Up 1 second",
+        "image": "cassandra:4.1",
+        "log": "  Creating\n Network cassandra_default  Created\n Container aiops-cassandra  Creating\n Container aiops-cassandra  Created\n Container aiops-cassandra  Starting\n Container aiops-cassandra  Started\n__RC__=0\n[deploy] 容器 aiops-cassandra 已启动: aiops-cassandra Up Less than a second\n[result] aiops-cassandra Up"
+      },
+      "health": "unhealthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 20
+      },
+      "overall": "unhealthy"
+    }
+  },
+  "hbase": {
+    "done": true,
+    "result": {
+      "component": "hbase",
+      "display": "HBase",
+      "start": "17:21:29",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "harisekhon/hbase:2.5",
+        "log": "ling \n hbase Error failed to resolve reference \"docker.io/harisekhon/hbase:2.5\": docker.io/harisekhon/hbase:2.5: not found\nError response from daemon: failed to resolve reference \"docker.io/harisekhon/hbase:2.5\": docker.io/harisekhon/hbase:2.5: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "neo4j": {
+    "done": true,
+    "result": {
+      "component": "neo4j",
+      "display": "Neo4j",
+      "start": "17:22:20",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-neo4j Up 12 seconds",
+        "image": "neo4j:5",
+        "log": "j Pulled \n Network neo4j_default  Creating\n Network neo4j_default  Created\n Container aiops-neo4j  Creating\n Container aiops-neo4j  Created\n Container aiops-neo4j  Starting\n Container aiops-neo4j  Started\n__RC__=0\n[deploy] 容器 aiops-neo4j 已启动: aiops-neo4j Up Less than a second\n[result] aiops-neo4j Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 75
+      },
+      "overall": "healthy"
+    }
+  },
+  "redis-cluster": {
+    "done": true,
+    "result": {
+      "component": "redis-cluster",
+      "display": "Redis Cluster",
+      "start": "17:23:33",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "bitnami/redis-cluster:7.0",
+        "log": "ailed to resolve reference \"docker.io/bitnami/redis-cluster:7.0\": docker.io/bitnami/redis-cluster:7.0: not found\nError response from daemon: failed to resolve reference \"docker.io/bitnami/redis-cluster:7.0\": docker.io/bitnami/redis-cluster:7.0: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "mysql-cluster": {
+    "done": true,
+    "result": {
+      "component": "mysql-cluster",
+      "display": "MySQL 高可用",
+      "start": "17:24:16",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "bitnami/mysql:8.0",
+        "log": " Pulling \n mysql-cluster Error failed to resolve reference \"docker.io/bitnami/mysql:8.0\": docker.io/bitnami/mysql:8.0: not found\nError response from daemon: failed to resolve reference \"docker.io/bitnami/mysql:8.0\": docker.io/bitnami/mysql:8.0: not found\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "mosquitto": {
+    "done": true,
+    "result": {
+      "component": "mosquitto",
+      "display": "Mosquitto(MQTT)",
+      "start": "17:24:46",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-mosquitto Up 40 seconds",
+        "image": "eclipse-mosquitto:2",
+        "log": "  Creating\n Network mosquitto_default  Created\n Container aiops-mosquitto  Creating\n Container aiops-mosquitto  Created\n Container aiops-mosquitto  Starting\n Container aiops-mosquitto  Started\n__RC__=0\n[deploy] 容器 aiops-mosquitto 已启动: aiops-mosquitto Up Less than a second\n[result] aiops-mosquitto Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 75
+      },
+      "overall": "healthy"
+    }
+  },
+  "doris": {
+    "done": true,
+    "result": {
+      "component": "doris",
+      "display": "Apache Doris",
+      "start": "17:27:16",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "apache/doris:2.1.0",
+        "log": ""
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "starrocks": {
+    "done": true,
+    "result": {
+      "component": "starrocks",
+      "display": "StarRocks",
+      "start": "17:27:52",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "starrocks/starrocks:3.2",
+        "log": ""
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "mariadb": {
+    "done": true,
+    "result": {
+      "component": "mariadb",
+      "display": "MariaDB",
+      "start": "17:28:43",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-mariadb Up 24 seconds",
+        "image": "mariadb:11",
+        "log": " mariadb_default  Creating\n Network mariadb_default  Created\n Container aiops-mariadb  Creating\n Container aiops-mariadb  Created\n Container aiops-mariadb  Starting\n Container aiops-mariadb  Started\n__RC__=0\n[deploy] 容器 aiops-mariadb 已启动: aiops-mariadb Up Less than a second\n[result] aiops-mariadb Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 75
+      },
+      "overall": "healthy"
+    }
+  },
+  "tidb": {
+    "done": true,
+    "result": {
+      "component": "tidb",
+      "display": "TiDB",
+      "start": "17:31:33",
+      "deploy": {
+        "ok": true,
+        "status": "aiops-tidb Up 24 seconds",
+        "image": "pingcap/tidb:v7.5.0",
+        "log": "ete \n tidb Pulled \n Network tidb_default  Creating\n Network tidb_default  Created\n Container aiops-tidb  Creating\n Container aiops-tidb  Created\n Container aiops-tidb  Starting\n Container aiops-tidb  Started\n__RC__=0\n[deploy] 容器 aiops-tidb 已启动: aiops-tidb Up Less than a second\n[result] aiops-tidb Up"
+      },
+      "health": "healthy",
+      "config": null,
+      "vuln": {
+        "safe": true,
+        "findings": []
+      },
+      "ai": {
+        "generated": true,
+        "score": 78
+      },
+      "overall": "healthy"
+    }
+  },
+  "dameng": {
+    "done": true,
+    "result": {
+      "component": "dameng",
+      "display": "达梦 DM",
+      "start": "17:35:52",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "dameng/dameng:8",
+        "log": "e up -d:\ndameng Pulling \n dameng Error pull access denied for dameng/dameng, repository does not exist or may require 'docker login'\nError response from daemon: pull access denied for dameng/dameng, repository does not exist or may require 'docker login'\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "kingbase": {
+    "done": true,
+    "result": {
+      "component": "kingbase",
+      "display": "人大金仓",
+      "start": "17:37:28",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "kingbase/kbase:v8",
+        "log": "d:\nkingbase Pulling \n kingbase Error pull access denied for kingbase/kbase, repository does not exist or may require 'docker login'\nError response from daemon: pull access denied for kingbase/kbase, repository does not exist or may require 'docker login'\n__RC__=0\n[deploy] 容器未启动, 部署失败\n[result] 容器状态: "
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  },
+  "opengauss": {
+    "done": true,
+    "result": {
+      "component": "opengauss",
+      "display": "openGauss",
+      "start": "17:38:58",
+      "deploy": {
+        "ok": false,
+        "status": "",
+        "image": "enmotech/opengauss:5.0",
+        "log": ""
+      },
+      "health": null,
+      "config": null,
+      "vuln": null,
+      "ai": null,
+      "overall": null
+    }
+  }
+}

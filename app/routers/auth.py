@@ -74,6 +74,10 @@ def product_overview(request: Request):
 def product_intro_vue(request: Request):
     return _serve_vue()
 
+@router.get("/product/showcase", response_class=HTMLResponse)
+def product_showcase(request: Request):
+    return _serve_vue()
+
 @router.get("/user-guide", response_class=HTMLResponse)
 def user_guide(request: Request):
     return _serve_vue()

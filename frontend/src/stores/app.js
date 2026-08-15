@@ -6,7 +6,7 @@ export const useAppStore = defineStore('app', () => {
     const sidebarCollapsed = ref(false)
     const theme = ref(localStorage.getItem('aiops-theme') || 'light')
     const colorScheme = ref(localStorage.getItem('aiops-color-scheme') || 'indigo')
-    const VALID_SKINS = ['', 'taste', 'frost']
+    const VALID_SKINS = ['', 'taste', 'frost', 'nebula']
     const rawSkin = localStorage.getItem('aiops-skin') || ''
     const skin = ref(VALID_SKINS.includes(rawSkin) ? rawSkin : '')
     const dbMode = ref(localStorage.getItem('aiops-db-mode') || 'demo')

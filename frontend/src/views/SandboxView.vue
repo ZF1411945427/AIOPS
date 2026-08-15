@@ -157,6 +157,10 @@
         <el-form-item label="禁止命令规则">
           <el-input v-model="policyForm.blocked_commands_str" placeholder="逗号分隔，支持正则" />
         </el-form-item>
+        <el-form-item label="允许目录范围">
+          <el-input v-model="policyForm.allowed_workdirs_str" placeholder="逗号分隔，如 /data/aiops,/tmp；空=不限路径" />
+          <span class="form-hint">AI 命令 cd 到范围外或写绝对路径落到范围外将被拦截（限制 AI 作用范围）</span>
+        </el-form-item>
         <el-form-item label="最大风险等级">
           <el-select v-model="policyForm.max_risk_level">
             <el-option v-for="l in riskLevels" :key="l" :label="l" :value="l" />
@@ -215,6 +219,7 @@ const policyForm = reactive({
   allowed_asset_ids_str: '', blocked_asset_ids_str: '',
   allowed_tools_str: '', blocked_tools_str: '',
   allowed_commands_str: '', blocked_commands_str: '',
+  allowed_workdirs_str: '',
   max_risk_level: 'critical', max_actions_per_day: 0,
   is_enabled: true,
 })
@@ -270,6 +275,7 @@ function editPolicy(row) {
   policyForm.blocked_tools_str = (row.blocked_tools || []).join(',')
   policyForm.allowed_commands_str = (row.allowed_commands || []).join(',')
   policyForm.blocked_commands_str = (row.blocked_commands || []).join(',')
+  policyForm.allowed_workdirs_str = (row.allowed_workdirs || []).join(',')
   policyForm.max_risk_level = row.max_risk_level
   policyForm.max_actions_per_day = row.max_actions_per_day
   policyForm.is_enabled = row.is_enabled
@@ -288,6 +294,7 @@ async function savePolicy() {
     blocked_tools: policyForm.blocked_tools_str ? policyForm.blocked_tools_str.split(',').map(s => s.trim()).filter(Boolean) : [],
     allowed_commands: policyForm.allowed_commands_str ? policyForm.allowed_commands_str.split(',').map(s => s.trim()).filter(Boolean) : [],
     blocked_commands: policyForm.blocked_commands_str ? policyForm.blocked_commands_str.split(',').map(s => s.trim()).filter(Boolean) : [],
+    allowed_workdirs: policyForm.allowed_workdirs_str ? policyForm.allowed_workdirs_str.split(',').map(s => s.trim()).filter(Boolean) : [],
     max_risk_level: policyForm.max_risk_level,
     max_actions_per_day: policyForm.max_actions_per_day,
     is_enabled: policyForm.is_enabled,

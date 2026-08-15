@@ -105,6 +105,7 @@
               <TaskProgressCard :steps="m._steps" :task="m._task" :default-collapsed="false" />
             </div>
             <div class="msg-bubble" :class="[m.role, m.message_type === 'error' ? 'error-bubble' : '']">
+              <div v-if="m.role === 'user' && m.expert" class="msg-expert">🧠 {{ m.expert }}已激活</div>
               <div class="msg-content" v-html="renderContent(m.content)"></div>
               <div class="msg-meta">
                 <span>{{ formatTime(m.created_at) }}</span>
@@ -672,8 +673,27 @@ async function pollSessionForNewMessage(sessionId, beforeCount) {
   return null
 }
 
-async function sendMessage() {
-  const message = inputMessage.value.trim()
+function detectExpert(text) {
+  const experts = [
+    { name: '数据库专家', kw: ['数据库','sql','慢查询','表','索引','主从','mysql','postgres','mongo','oracle','tidb','mariadb','达梦','金仓','死锁','表空间','dba'] },
+    { name: '缓存专家', kw: ['redis','缓存','热key','热 key','命中率','大key','valkey','memcached','雪崩','穿透'] },
+    { name: '消息队列专家', kw: ['kafka','rabbitmq','rocketmq','消息','消费','lag','延迟','堆积','topic','emqx','mqtt'] },
+    { name: '网络专家', kw: ['网络','交换机','路由器','lldp','接口','链路','丢包','带宽','防火墙','vlan'] },
+    { name: 'Kubernetes 专家', kw: ['k8s','kubernetes','pod','deployment','容器','节点','helm','docker','调度','ingress'] },
+    { name: '中间件/网关专家', kw: ['中间件','网关','nginx','haproxy','apisix','traefik','consul','nacos','zookeeper','etcd','vault','keycloak','代理'] },
+    { name: '可观测性专家', kw: ['监控','指标','prometheus','grafana','告警','日志','链路','trace','loki','jaeger','elasticsearch','kibana'] },
+    { name: '安全专家', kw: ['漏洞','cve','trivy','安全','扫描','审计','入侵','攻击','等保','补丁'] },
+  ]
+  const t = (text||'').toLowerCase()
+  let best = '', score = 0
+  for (const e of experts) {
+    const s = e.kw.filter(k => t.includes(k)).length
+    if (s > score) { score = s; best = e.name }
+  }
+  return score > 0 ? best : ''
+}
+
+async function sendMessage() {  const message = inputMessage.value.trim()
   if (!message || loading.value) return
   const sessionId = await ensureSession()
   if (!sessionId) return
@@ -681,7 +701,7 @@ async function sendMessage() {
   streamingDone.value = false
   streamingError.value = null
   if (!skipNextUserPush.value) {
-    messages.value.push({ role: 'user', content: message, created_at: new Date().toISOString() })
+    messages.value.push({ role: 'user', content: message, created_at: new Date().toISOString(), expert: detectExpert(message) })
     await nextTick(); scrollToBottom(true)
   }
   skipNextUserPush.value = false; inputMessage.value = ''; loading.value = true
@@ -748,17 +768,33 @@ function scrollToBottom(force = false) {
   if (force) requestAnimationFrame(() => { if (messagesRef.value) messagesRef.value.scrollTop = messagesRef.value.scrollHeight })
 }
 
+const pendingAiPrefill = ref(null)
 onMounted(async () => {
+  const queued = window._aiPrefillQueue
+  window._aiPrefillQueue = null
+  if (queued) pendingAiPrefill.value = queued
+  window._aiPrefill = (text) => { pendingAiPrefill.value = text || null }
   await loadSessions(); await loadShortcuts(); await loadProviders(); await loadSubAgents()
-  const pendingId = window._pendingAgentSessionId
-  if (pendingId) {
-    window._pendingAgentSessionId = null; pendingAutoSend.value = true; switchSession(pendingId)
-  } else if (sessions.value.length > 0) {
-    const lastId = localStorage.getItem(STORAGE_KEY)
-    const targetId = lastId && sessions.value.some(s => s.id == lastId) ? parseInt(lastId) : sessions.value[0].id
-    switchSession(targetId)
+  if (pendingAiPrefill.value) {
+    // 组件「问 AI」：强制新建会话，不走旧会话 switch（避免异步 loadMessages 把旧历史写回 messages）
+    newSession()
+    await ensureSession()
+    const text = pendingAiPrefill.value; pendingAiPrefill.value = null
+    inputMessage.value = text
+    await nextTick()
+    sendMessage()
+  } else {
+    const pendingId = window._pendingAgentSessionId
+    if (pendingId) {
+      window._pendingAgentSessionId = null; pendingAutoSend.value = true; switchSession(pendingId)
+    } else if (sessions.value.length > 0) {
+      const lastId = localStorage.getItem(STORAGE_KEY)
+      const targetId = lastId && sessions.value.some(s => s.id == lastId) ? parseInt(lastId) : sessions.value[0].id
+      switchSession(targetId)
+    }
   }
 })
+onUnmounted(() => { window._aiPrefill = null })
 
 onUnmounted(() => { stopSSE(); stopTypewriter() })
 </script>
@@ -917,6 +953,8 @@ onUnmounted(() => { stopSSE(); stopTypewriter() })
 .msg-content { line-height: 1.6; }
 .msg-meta { display: flex; gap: 8px; font-size: 0.7rem; color: #94a3b8; margin-top: 4px; }
 .msg-row.user .msg-meta { color: rgba(255,255,255,0.7); }
+.msg-expert { display: inline-block; font-size: 0.68rem; font-weight: 600; margin-bottom: 5px; padding: 2px 9px; border-radius: 10px; background: rgba(124,58,237,0.15); color: #a78bfa; border: 1px solid rgba(167,139,250,0.3); }
+.msg-row.user .msg-expert { background: rgba(255,255,255,0.14); color: #e9d5ff; border-color: rgba(255,255,255,0.25); }
 .tool-badge { cursor: help; }
 .streaming-indicator {
   display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: #64748b; font-size: 0.82rem;

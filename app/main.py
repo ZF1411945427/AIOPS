@@ -192,6 +192,9 @@ _MIGRATIONS = {
         "no_proxy VARCHAR(512) DEFAULT ''",
         "untaint_master BOOLEAN DEFAULT 0",
     ],
+    "sandbox_policies": [
+        "allowed_workdirs TEXT DEFAULT '[]'",
+    ],
 }
 for _eng in get_all_engines().values():
     with _eng.connect() as _conn:

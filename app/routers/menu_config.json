@@ -144,7 +144,7 @@
       },
       {
         "key": "change-release",
-        "label": "流程引擎",
+        "label": "变更发布",
         "items": [
           {
             "key": "workflow-runs",
@@ -157,8 +157,22 @@
             "key": "workflow-templates",
             "label": "工作流模板",
             "type": "vue",
-            "icon": "Document",
+            "icon": "Files",
             "path": "/workflow/templates"
+          },
+          {
+            "key": "blue-green",
+            "label": "蓝绿发布",
+            "type": "vue",
+            "icon": "Histogram",
+            "path": "/blue-green"
+          },
+          {
+            "key": "change-workflow",
+            "label": "变更审批",
+            "type": "vue",
+            "icon": "EditPen",
+            "path": "/change-workflow"
           }
         ]
       },
@@ -244,6 +258,13 @@
             "path": "/topology"
           },
           {
+            "key": "topology-path",
+            "label": "路径查询",
+            "type": "vue",
+            "icon": "Guide",
+            "path": "/topology-path"
+          },
+          {
             "key": "lifecycle",
             "label": "资产生命周期",
             "type": "vue",
@@ -263,6 +284,13 @@
             "type": "vue",
             "icon": "Box",
             "path": "/offline-repo"
+          },
+          {
+            "key": "config-drift",
+            "label": "配置漂移检测",
+            "type": "vue",
+            "icon": "SetUp",
+            "path": "/config-drift"
           }
         ]
       },
@@ -334,6 +362,33 @@
             "path": "/k8s-cluster-deploy"
           }
         ]
+      },
+      {
+        "key": "container-management",
+        "label": "容器管理",
+        "items": [
+          {
+            "key": "docker-overview",
+            "label": "容器总览",
+            "type": "vue",
+            "icon": "Box",
+            "path": "/docker-overview"
+          },
+          {
+            "key": "docker-list",
+            "label": "容器列表",
+            "type": "vue",
+            "icon": "Coin",
+            "path": "/docker-list"
+          },
+          {
+            "key": "helm-releases",
+            "label": "Helm Release",
+            "type": "vue",
+            "icon": "Operation",
+            "path": "/helm-releases"
+          }
+        ]
       }
     ]
   },
@@ -360,6 +415,13 @@
             "type": "vue",
             "icon": "Monitor",
             "path": "/k8s-monitor"
+          },
+          {
+            "key": "prediction-models",
+            "label": "容量预测",
+            "type": "vue",
+            "icon": "TrendCharts",
+            "path": "/prediction-models"
           }
         ]
       },
@@ -488,6 +550,13 @@
             "type": "vue",
             "icon": "DataBoard",
             "path": "/availability-report"
+          },
+          {
+            "key": "sla-agreement",
+            "label": "SLA 管理",
+            "type": "vue",
+            "icon": "DocumentChecked",
+            "path": "/sla-agreement"
           }
         ]
       },
@@ -713,10 +782,17 @@
         "items": [
           {
             "key": "settings",
-            "label": "系统配置",
+            "label": "系统设置",
             "type": "vue",
             "icon": "Setting",
             "path": "/settings"
+          },
+          {
+            "key": "license",
+            "label": "授权管理",
+            "type": "vue",
+            "icon": "Key",
+            "path": "/license"
           },
           {
             "key": "background-tasks",
@@ -738,6 +814,13 @@
             "type": "vue",
             "icon": "CircleCheck",
             "path": "/audit-matrix"
+          },
+          {
+            "key": "op-audit",
+            "label": "操作审计",
+            "type": "vue",
+            "icon": "Document",
+            "path": "/op-audit"
           },
     {
      "key": "security-audit",

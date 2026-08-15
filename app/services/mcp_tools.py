@@ -1132,6 +1132,7 @@ def run_preset_diagnosis(db: Optional[Session] = None, user_id: Optional[int] = 
         "required": ["service", "asset_id"],
     },
     risk_level="high",
+    review_gate=True,  # 高危写操作, 需审批
     display_name="重启服务",
     expose_to_llm=False,
     location="edge",
@@ -1187,6 +1188,7 @@ def execute_restart_service(db: Optional[Session] = None, user_id: Optional[int]
         "required": ["path", "asset_id"],
     },
     risk_level="high",
+    review_gate=True,  # 高危写操作, 需审批
     display_name="清理磁盘",
     expose_to_llm=False,
     location="edge",
@@ -1607,6 +1609,7 @@ def execute_update_alert_rule(db: Optional[Session] = None, user_id: Optional[in
         "required": ["rule_id"],
     },
     risk_level="high",
+    review_gate=True,  # 高危写操作, 需审批
     display_name="删除告警规则",
     expose_to_llm=False,
     location="cloud",
@@ -1738,6 +1741,7 @@ def execute_update_asset(db: Optional[Session] = None, user_id: Optional[int] = 
         "required": ["asset_id"],
     },
     risk_level="high",
+    review_gate=True,  # 高危写操作, 需审批
     display_name="删除资产",
     expose_to_llm=False,
     location="cloud",
@@ -2879,6 +2883,7 @@ def check_mysql_permissions(db: Optional[Session] = None, user_id: Optional[int]
     risk_level="high",
     display_name="执行 MySQL",
     expose_to_llm=False,
+    review_gate=True,  # 高危写操作, 需审批
     location="cloud",
     category="mysql",
 )
@@ -2942,7 +2947,233 @@ def execute_mysql(db: Optional[Session] = None, user_id: Optional[int] = None, *
             db.close()
 
 
+# ─── Redis Monitor Tool ─────────────────────────────────────
+
+@register_mcp_tool(
+    name="redis_monitor",
+    description="连接 Redis 实例执行监控类命令（INFO/CLIENT LIST/PING/CONFIG GET），返回运行状态、内存、连接数等监控信息。连接信息从资产 connection_config 中读取（redis_host/redis_port/redis_password）。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "asset_id": {"type": "integer", "description": "资产 ID（从 assets 表，需配置 redis 连接信息）"},
+            "command": {"type": "string", "description": "Redis 监控命令（只读）：PING/INFO/CLIENT LIST/CONFIG GET 参数，如 'INFO server'"},
+        },
+        "required": ["asset_id", "command"],
+    },
+    risk_level="read_only",
+    display_name="监控 Redis",
+    expose_to_llm=True,
+    location="cloud",
+    category="redis",
+)
+def redis_monitor(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    import json as _json
+    asset_id = kwargs.get("asset_id")
+    command = (kwargs.get("command") or "INFO").strip()
+    if not asset_id:
+        return {"error": "缺少必填参数: asset_id"}
+
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            return {"error": f"资产 {asset_id} 不存在"}
+        cfg = _json.loads(asset.connection_config) if asset.connection_config else {}
+        host = cfg.get("redis_host") or asset.ip
+        port = int(cfg.get("redis_port") or 6379)
+        password = cfg.get("redis_password") or ""
+        allowed = ["PING", "INFO", "CLIENT LIST", "CONFIG GET", "DBSIZE", "MEMORY"]
+        if not any(command.upper().startswith(a) for a in allowed):
+            return {"error": "仅允许只读监控命令: PING/INFO/CLIENT LIST/CONFIG GET/DBSIZE/MEMORY"}
+        try:
+            import redis as _redis
+        except ImportError:
+            return {"error": "缺少 redis 库, 无法执行 Redis 监控"}
+        try:
+            r = _redis.Redis(host=host, port=port, password=password or None,
+                             socket_connect_timeout=5, socket_timeout=10, decode_responses=True)
+            parts = command.split(" ", 1)
+            method = parts[0].lower()
+            arg = parts[1] if len(parts) > 1 else None
+            if method == "info":
+                return {"status": "success", "result": r.info(arg or "default"), "asset": asset.name, "host": host, "port": port}
+            elif method == "ping":
+                return {"status": "success", "ping": r.ping()}
+            elif method == "client":
+                return {"status": "success", "clients": list(r.client_list())}
+            elif method == "config":
+                return {"status": "success", "config": r.config_get(arg or "*")}
+            elif method == "dbsize":
+                return {"status": "success", "dbsize": r.dbsize()}
+            elif method == "memory":
+                return {"status": "success", "memory": r.memory_stats() if hasattr(r, "memory_stats") else str(r.execute_command("MEMORY", "STATS"))}
+            return {"status": "success", "result": str(r.execute_command(*command.split()))}
+        except Exception as e:
+            return {"error": f"Redis 监控失败: {e}", "host": host, "port": port}
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── Kafka Monitor Tool ─────────────────────────────────────
+
+@register_mcp_tool(
+    name="kafka_monitor",
+    description="连接 Kafka 集群执行监控类查询（通过 kafka-python）：集群元数据、Topic 列表、分区状态、消费组 Lag。连接信息从资产 connection_config 中读取（kafka_bootstrap_servers）。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "asset_id": {"type": "integer", "description": "资产 ID（从 assets 表，需配置 kafka_bootstrap_servers）"},
+            "action": {"type": "string", "description": "监控动作：topics / cluster / partitions / groups / lag", "default": "topics"},
+            "topic": {"type": "string", "description": "指定 Topic（action=partitions 或 lag 时使用）"},
+            "group": {"type": "string", "description": "指定消费组（action=lag 时使用）"},
+        },
+        "required": ["asset_id", "action"],
+    },
+    risk_level="read_only",
+    display_name="监控 Kafka",
+    expose_to_llm=True,
+    location="cloud",
+    category="kafka",
+)
+def kafka_monitor(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    import json as _json
+    asset_id = kwargs.get("asset_id")
+    action = (kwargs.get("action") or "topics").strip()
+    if not asset_id:
+        return {"error": "缺少必填参数: asset_id"}
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            return {"error": f"资产 {asset_id} 不存在"}
+        cfg = _json.loads(asset.connection_config) if asset.connection_config else {}
+        servers = cfg.get("kafka_bootstrap_servers") or (asset.ip and f"{asset.ip}:9092") or ""
+        if not servers:
+            return {"error": "未配置 kafka_bootstrap_servers 连接信息"}
+        try:
+            from kafka import KafkaAdminClient
+        except ImportError:
+            return {"error": "缺少 kafka-python 库, 无法执行 Kafka 监控"}
+        servers_list = [s.strip() for s in servers.split(",") if s.strip()]
+        try:
+            admin = KafkaAdminClient(bootstrap_servers=servers_list, request_timeout_ms=8000)
+            if action == "cluster":
+                return {"status": "success", "cluster": admin.describe_cluster()}
+            elif action == "topics":
+                topics = admin.list_topics()
+                return {"status": "success", "topics": sorted(list(topics)) if not isinstance(topics, str) else topics,
+                        "count": len(topics) if hasattr(topics, "__len__") else None}
+            elif action == "partitions":
+                if not kwargs.get("topic"):
+                    return {"error": "action=partitions 需要 topic 参数"}
+                tps = admin.describe_topics([kwargs.get("topic")])
+                topic_meta = tps[0] if tps else {}
+                partitions = topic_meta.get("partitions", [])
+                return {"status": "success", "topic": kwargs.get("topic"),
+                        "partitions": [{"id": p["partition"], "leader": p["leader"]} for p in partitions],
+                        "count": len(partitions)}
+            elif action == "groups":
+                groups = admin.list_consumer_groups()
+                group_ids = []
+                for g in groups:
+                    if isinstance(g, tuple):
+                        group_ids.append(g[0])
+                    elif hasattr(g, "group_id"):
+                        group_ids.append(g.group_id)
+                    elif isinstance(g, str):
+                        group_ids.append(g)
+                return {"status": "success", "consumer_groups": group_ids, "count": len(group_ids)}
+            elif action == "lag":
+                topic_name = kwargs.get("topic")
+                group_id = kwargs.get("group")
+                if not topic_name or not group_id:
+                    return {"error": "action=lag 需要 topic 与 group 参数"}
+                from kafka import KafkaConsumer, TopicPartition
+                consumer = KafkaConsumer(topic_name, group_id=group_id, bootstrap_servers=servers_list,
+                                         enable_auto_commit=False, auto_offset_reset="latest")
+                partitions = consumer.partitions_for_topic(topic_name) or set()
+                res = {}
+                for p in sorted(partitions):
+                    tp_obj = TopicPartition(topic_name, p)
+                    end_off = consumer.end_offsets([tp_obj]).get(tp_obj)
+                    pos = consumer.position(tp_obj) if tp_obj in consumer.assignment() else None
+                    res[p] = {"end_offset": end_off, "position": pos,
+                              "lag": (end_off - pos) if (end_off is not None and pos is not None) else None}
+                consumer.close()
+                return {"status": "success", "topic": topic_name, "group": group_id, "lag": res}
+            return {"error": f"未知 action: {action}"}
+        except Exception as e:
+            return {"error": f"Kafka 监控失败: {e}"}
+        finally:
+            try:
+                admin.close()
+            except Exception:
+                pass
+    finally:
+        if close_db:
+            db.close()
+
+
+# ─── Network Device Query Tool ─────────────────────────────
+
+@register_mcp_tool(
+    name="net_device_query",
+    description="查询网络设备信息（通过 SSH 执行只读命令）：运行状态/接口信息/LLDP 邻居。连接信息从资产 connection_config 中读取。",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "asset_id": {"type": "integer", "description": "网络设备资产 ID（从 assets 表）"},
+            "command": {"type": "string", "description": "只读查询命令，如 'show version'、'show interfaces summary'、'show lldp neighbors'（网络设备 CLI）"},
+        },
+        "required": ["asset_id", "command"],
+    },
+    risk_level="read_only",
+    display_name="查询网络设备",
+    expose_to_llm=True,
+    location="cloud",
+    category="network",
+)
+def net_device_query(db: Optional[Session] = None, user_id: Optional[int] = None, **kwargs) -> Dict:
+    import json as _json
+    asset_id = kwargs.get("asset_id")
+    command = (kwargs.get("command") or "show version").strip()
+    if not asset_id:
+        return {"error": "缺少必填参数: asset_id"}
+    if not command.lower().startswith(("show", "display", "get", "ping")):
+        return {"error": "仅允许只读查询命令（以 show/display/get 开头）"}
+    close_db = False
+    if db is None:
+        db = _get_db()
+        close_db = True
+    try:
+        asset = db.query(Asset).filter(Asset.id == int(asset_id)).first()
+        if not asset:
+            return {"error": f"资产 {asset_id} 不存在"}
+        try:
+            from app.services.remediation_service import _ssh_connect
+            ssh = _ssh_connect(asset, timeout=15)
+            stdin, stdout, stderr = ssh.exec_command(command, timeout=20)
+            out = stdout.read().decode(errors="ignore").strip()
+            err = stderr.read().decode(errors="ignore").strip()
+            ssh.close()
+            return {"status": "success", "command": command, "output": out,
+                    "error": err, "asset": asset.name, "ip": asset.ip}
+        except Exception as e:
+            return {"error": f"网络设备 SSH 查询失败: {e}"}
+    finally:
+        if close_db:
+            db.close()
+
+
 # 技能工具在文件尾部注册, 避免与 _get_db 的循环导入
 from app.services import skill_mcp_tools  # noqa: E402,F401 — 注册 list_skills/use_skill
 from app.services import toolbag_mcp_tools  # noqa: E402,F401 — 注册 search_tools/load_tool_schema
 
+from app.services import component_mcp_tools  # noqa: E402,F401 — 注册 12 个组件诊断工具(pg/mongo/nginx/es/rabbitmq/rocketmq/nacos/zk/etcd/oracle/clickhouse/memcached)

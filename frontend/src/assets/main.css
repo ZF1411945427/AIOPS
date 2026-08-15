@@ -120,6 +120,8 @@ html[data-skin="taste"] .logo-badge { filter: drop-shadow(0 2px 6px rgba(241,95,
 html[data-skin="taste"] .logo-badge:hover { filter: drop-shadow(0 4px 12px rgba(241,95,121,0.4)); }
 html[data-skin="frost"] .logo-badge { filter: drop-shadow(0 2px 6px rgba(6,182,212,0.3)); }
 html[data-skin="frost"] .logo-badge:hover { filter: drop-shadow(0 4px 12px rgba(6,182,212,0.4)); }
+html[data-skin="nebula"] .logo-badge { filter: drop-shadow(0 2px 8px rgba(139,92,246,0.4)); }
+html[data-skin="nebula"] .logo-badge:hover { filter: drop-shadow(0 4px 16px rgba(192,38,211,0.5)); }
 
 .brand-name {
   display: flex; flex-direction: column; align-items: flex-start;
@@ -139,6 +141,7 @@ html[data-skin="frost"] .logo-badge:hover { filter: drop-shadow(0 4px 12px rgba(
 }
 .skin-taste .brand-en { color: #f15f79; }
 .skin-frost .brand-en { color: #06b6d4; }
+.skin-nebula .brand-en { color: #a78bfa; }
 
 .sidebar.collapsed .brand-name { display: none; }
 
@@ -2042,6 +2045,7 @@ html[data-theme="dark"][data-color-scheme="fluorescent-green"] .el-select-dropdo
 .skin-opt.active { border-color: var(--primary); color: var(--text-primary); background: var(--sidebar-active); }
 .skin-opt.taste { font-weight: 500; }
 .skin-opt.frost { font-weight: 700; color: #06b6d4; }
+.skin-opt.nebula { font-weight: 700; color: #a78bfa; letter-spacing: 0.3px; }
 
 /* ============================================
    Guide Button 鈥?銆岎煋?鎿嶄綔璇存槑銆嶇粺涓€绮捐嚧鏍峰紡
@@ -2357,3 +2361,185 @@ html[data-skin="frost"][data-theme="dark-glass"] .chart-card,
 html[data-skin="frost"][data-theme="dark-glass"] .metric-card { backdrop-filter: blur(12px); }
 
 
+
+/* ═══════════════════════════════════════════════════════
+   Nebula 皮肤 — 动态星际极光 (与 taste/frost 形态不同的 high-end 皮肤)
+   · 动态极光流动背景 · 切角卡片造型 · 霓虹发光 hover
+   ═══════════════════════════════════════════════════════ */
+@keyframes nebula-aurora {
+  0%   { background-position: 0% 0%, 100% 0%, 50% 50%; }
+  50%  { background-position: 100% 100%, 0% 100%, 50% 50%; }
+  100% { background-position: 0% 0%, 100% 0%, 50% 50%; }
+}
+@keyframes nebula-twinkle {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+html[data-skin="nebula"] {
+  --content-bg: #070612;
+  --card-bg: rgba(14, 12, 34, 0.78);
+  --card-radius: 4px;                       /* 配合切角使用小圆角 */
+  --card-shadow: 0 14px 44px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,92,246,0.14);
+  --sidebar-bg: rgba(6, 5, 16, 0.9);
+  --sidebar-text: rgba(255,255,255,0.46);
+  --sidebar-text-active: #d8b4fe;
+  --sidebar-hover: rgba(139,92,246,0.09);
+  --sidebar-active: rgba(139,92,246,0.14);
+  --text-primary: #f1eeff;
+  --text-secondary: rgba(241,238,255,0.62);
+  --text-muted: rgba(241,238,255,0.36);
+  --brand-gradient: linear-gradient(135deg, #f0abfc 0%, #a78bfa 40%, #22d3ee 100%);
+  --border: rgba(167,139,250,0.16);
+  --border-strong: rgba(167,139,250,0.3);
+  --bg-hover: rgba(139,92,246,0.08);
+  --primary: #a78bfa;
+  --primary-soft: rgba(139,92,246,0.18);
+}
+/* ── 动态极光内容背景 ── */
+html[data-skin="nebula"] .content { position: relative; background: var(--content-bg); }
+html[data-skin="nebula"] .content::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(40% 60% at 20% 10%, rgba(124,58,237,0.5) 0%, transparent 60%),
+    radial-gradient(35% 55% at 100% 20%, rgba(192,38,211,0.35) 0%, transparent 60%),
+    radial-gradient(45% 65% at 70% 100%, rgba(34,211,238,0.25) 0%, transparent 60%),
+    radial-gradient(30% 40% at 45% 45%, rgba(139,92,246,0.22) 0%, transparent 60%);
+  background-size: 200% 200%, 200% 200%, 200% 200%, 200% 200%;
+  animation: nebula-aurora 26s ease-in-out infinite;
+}
+/* ── 闪烁星点 ── */
+html[data-skin="nebula"] .content::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(circle at 10% 20%, rgba(255,255,255,0.8) 0, rgba(255,255,255,0.8) 1px, transparent 1.6px),
+    radial-gradient(circle at 30% 70%, rgba(233,213,255,0.9) 0, rgba(233,213,255,0.9) 1.2px, transparent 1.8px),
+    radial-gradient(circle at 55% 30%, rgba(224,242,254,0.8) 0, rgba(224,242,254,0.8) 1px, transparent 1.6px),
+    radial-gradient(circle at 80% 60%, rgba(240,171,252,0.85) 0, rgba(240,171,252,0.85) 1.3px, transparent 1.9px),
+    radial-gradient(circle at 65% 85%, rgba(255,255,255,0.7) 0, rgba(255,255,255,0.7) 1px, transparent 1.6px),
+    radial-gradient(circle at 90% 15%, rgba(186,230,253,0.75) 0, rgba(186,230,253,0.75) 1px, transparent 1.6px);
+  background-size: 260px 260px, 340px 340px, 300px 300px, 400px 400px, 360px 360px, 280px 280px;
+  animation: nebula-twinkle 4s ease-in-out infinite;
+}
+html[data-skin="nebula"] .content-inner { position: relative; }
+html[data-skin="nebula"] .page-title {
+  background: linear-gradient(120deg, #f0abfc, #a78bfa, #22d3ee);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  letter-spacing: 0.4px;
+}
+/* ── 切角卡片造型 (形态区别于其他皮肤) ── */
+html[data-skin="nebula"] .stat-card,
+html[data-skin="nebula"] .chart-card,
+html[data-skin="nebula"] .metric-card {
+  background: var(--card-bg); border-radius: 4px;
+  border: none;
+  box-shadow: var(--card-shadow), inset 0 0 24px rgba(139,92,246,0.05);
+  backdrop-filter: blur(16px);
+  position: relative;
+  /* 左上/右下切角形成斜切科技感 */
+  clip-path: polygon(0 14px, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%);
+}
+html[data-skin="nebula"] .stat-card::before,
+html[data-skin="nebula"] .chart-card::before {
+  content: ''; position: absolute; left: 0; top: 0; width: 3px; height: 28px;
+  box-shadow: 0 0 14px 2px rgba(167,139,250,0.6);
+  background: linear-gradient(180deg, #a78bfa, #22d3ee);
+}
+html[data-skin="nebula"] .stat-card:hover,
+html[data-skin="nebula"] .chart-card:hover,
+html[data-skin="nebula"] .metric-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 52px rgba(124,58,237,0.34), 0 0 0 1px rgba(192,38,211,0.5), 0 0 34px rgba(139,92,246,0.22);
+}
+html[data-skin="nebula"] .chart-card .chart-title,
+html[data-skin="nebula"] .stat-card .stat-title { color: var(--text-primary); }
+html[data-skin="nebula"] .el-popover { border-color: rgba(167,139,250,0.25); }
+html[data-skin="nebula"] .skin-opt.nebula { color: #d8b4fe; }
+/* ── 侧栏发光 ── */
+html[data-skin="nebula"] .sidebar { background: var(--sidebar-bg); border-right: 1px solid rgba(167,139,250,0.12); }
+html[data-skin="nebula"] .sidebar-header { border-bottom: 1px solid rgba(167,139,250,0.1); }
+html[data-skin="nebula"] .sidebar .el-menu-item.is-active {
+  color: var(--sidebar-text-active); background: var(--sidebar-active);
+  box-shadow: inset 3px 0 0 #c084fc, inset 0 0 20px rgba(139,92,246,0.12);
+}
+html[data-skin="nebula"] .sidebar .el-menu-item:hover { color: #e9d5ff; }
+/* ── light: 浅色星际(保留切角与极光, 温和化) ── */
+html[data-skin="nebula"][data-theme="light"] {
+  --content-bg: #f6f3ff;
+  --card-bg: rgba(255,255,255,0.92);
+  --card-shadow: 0 10px 30px rgba(139,92,246,0.14), 0 0 0 1px rgba(139,92,246,0.12);
+  --sidebar-bg: rgba(250,248,255,0.92);
+  --sidebar-text: #5d4f96;
+  --sidebar-text-active: #7c3aed;
+  --sidebar-hover: rgba(124,58,237,0.09);
+  --sidebar-active: rgba(124,58,237,0.12);
+  --text-primary: #211a4d;
+  --text-secondary: #564c86;
+  --text-muted: #948ad2;
+  --border: rgba(124,58,237,0.14);
+  --border-strong: rgba(124,58,237,0.24);
+  --bg-hover: rgba(139,92,246,0.06);
+}
+html[data-skin="nebula"][data-theme="light"] .content::before {
+  background:
+    radial-gradient(40% 55% at 20% 10%, rgba(124,58,237,0.2) 0%, transparent 60%),
+    radial-gradient(35% 50% at 100% 20%, rgba(192,38,211,0.12) 0%, transparent 60%),
+    radial-gradient(45% 60% at 70% 100%, rgba(34,211,238,0.1) 0%, transparent 60%);
+  background-size: 200% 200%, 200% 200%, 200% 200%;
+  animation: nebula-aurora 26s ease-in-out infinite;
+}
+html[data-skin="nebula"][data-theme="light"] .content::after { opacity: 0.5; }
+html[data-skin="nebula"][data-theme="light"] .stat-card,
+html[data-skin="nebula"][data-theme="light"] .chart-card,
+html[data-skin="nebula"][data-theme="light"] .metric-card { box-shadow: var(--card-shadow); }
+/* ── dark-glass: 极致玻璃 ── */
+html[data-skin="nebula"][data-theme="dark-glass"] .sidebar { backdrop-filter: blur(30px) saturate(150%); background: rgba(6,5,16,0.55); }
+html[data-skin="nebula"][data-theme="dark-glass"] .stat-card,
+html[data-skin="nebula"][data-theme="dark-glass"] .chart-card,
+html[data-skin="nebula"][data-theme="dark-glass"] .metric-card { backdrop-filter: blur(22px) saturate(160%); }
+
+/* ── Nebula 硬覆盖: 确保穿透各页面 scoped 样式, 深空质感全局生效 ── */
+html[data-skin="nebula"] .stat-card,
+html[data-skin="nebula"] .chart-card,
+html[data-skin="nebula"] .metric-card,
+html[data-skin="nebula"] .tpl-card,
+html[data-skin="nebula"] .inst-card,
+html[data-skin="nebula"] .comp-card {
+  background: var(--card-bg) !important;
+  border: none !important;
+  border-radius: 4px !important;
+  box-shadow: var(--card-shadow) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+}
+html[data-skin="nebula"] .stat-card,
+html[data-skin="nebula"] .chart-card,
+html[data-skin="nebula"] .metric-card {
+  clip-path: polygon(0 14px, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%) !important;
+}
+html[data-skin="nebula"] .stat-card:hover,
+html[data-skin="nebula"] .chart-card:hover,
+html[data-skin="nebula"] .metric-card:hover {
+  transform: translateY(-3px) !important;
+  box-shadow: 0 18px 52px rgba(124,58,237,0.34), 0 0 0 1px rgba(192,38,211,0.5), 0 0 34px rgba(139,92,246,0.22) !important;
+  border-color: transparent !important;
+}
+/* 卡片标题/文字跟随皮肤 */
+html[data-skin="nebula"] .chart-card .chart-title,
+html[data-skin="nebula"] .chart-card-header,
+html[data-skin="nebula"] .stat-label,
+html[data-skin="nebula"] .metric-card .metric-name,
+html[data-skin="nebula"] .toolbar-title {
+  color: var(--text-primary) !important;
+}
+/* 侧栏选中发光(穿透) */
+html[data-skin="nebula"] .el-menu-item.is-active {
+  box-shadow: inset 3px 0 0 #c084fc, inset 0 0 20px rgba(139,92,246,0.12) !important;
+}
+/* 亮色降级: 柔化硬覆盖 */
+html[data-skin="nebula"][data-theme="light"] .stat-card,
+html[data-skin="nebula"][data-theme="light"] .chart-card,
+html[data-skin="nebula"][data-theme="light"] .metric-card {
+  background: rgba(255,255,255,0.94) !important;
+  border: 1px solid rgba(124,58,237,0.12) !important;
+  box-shadow: 0 10px 30px rgba(139,92,246,0.12) !important;
+}

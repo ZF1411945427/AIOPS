@@ -11,6 +11,12 @@
       <el-tab-pane label="🛍️ 技能市场" name="market">
         <MarketplaceView v-if="active === 'market'" />
       </el-tab-pane>
+      <el-tab-pane label="🛠️ 组件方案" name="components">
+        <ComponentOPSView v-if="active === 'components'" />
+      </el-tab-pane>
+      <el-tab-pane label="📦 组件商店" name="store">
+        <ComponentStoreView v-if="active === 'store'" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -19,11 +25,13 @@
 import { ref } from 'vue'
 import SkillsView from '@/views/SkillsView.vue'
 import MarketplaceView from '@/views/MarketplaceView.vue'
+import ComponentOPSView from '@/views/ComponentOPSView.vue'
+import ComponentStoreView from '@/views/ComponentStoreView.vue'
 
 const active = ref('skills')
 
 function onTabChange(name) {
-  if (name === 'skills' || name === 'market') active.value = name
+  if (['skills','market','components','store'].includes(name)) active.value = name
 }
 </script>
 

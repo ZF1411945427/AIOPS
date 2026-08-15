@@ -10,6 +10,7 @@
   黑名单(blocked) → 白名单(allowed) → 风险等级 → 执行配额
 """
 import json
+import os
 import re
 from datetime import datetime
 
@@ -126,6 +127,7 @@ def _policy_to_dict(p: SandboxPolicy) -> dict:
         "blocked_tools": p.get_blocked_tools(),
         "allowed_commands": p.get_allowed_commands(),
         "blocked_commands": p.get_blocked_commands(),
+        "allowed_workdirs": p.get_allowed_workdirs(),
         "max_risk_level": p.max_risk_level,
         "max_actions_per_day": p.max_actions_per_day,
         "require_second_approval": p.require_second_approval,
@@ -152,6 +154,7 @@ def create_policy(data: dict, db=None) -> dict:
             blocked_tools=json.dumps(data.get("blocked_tools", []), ensure_ascii=False),
             allowed_commands=json.dumps(data.get("allowed_commands", []), ensure_ascii=False),
             blocked_commands=json.dumps(data.get("blocked_commands", []), ensure_ascii=False),
+            allowed_workdirs=json.dumps(data.get("allowed_workdirs", []), ensure_ascii=False),
             max_risk_level=str(data.get("max_risk_level", "critical")),
             max_actions_per_day=int(data.get("max_actions_per_day", 0) or 0),
             require_second_approval=bool(data.get("require_second_approval", False)),
@@ -189,6 +192,7 @@ def update_policy(policy_id: int, data: dict, db=None) -> dict:
         _set_json_field(p, "blocked_tools", data)
         _set_json_field(p, "allowed_commands", data)
         _set_json_field(p, "blocked_commands", data)
+        _set_json_field(p, "allowed_workdirs", data)
         if "max_risk_level" in data and data["max_risk_level"] in RISK_ORDER:
             p.max_risk_level = data["max_risk_level"]
         if "max_actions_per_day" in data:
@@ -272,11 +276,15 @@ def evaluate_request(
             result["mode"] = "dry_run"
             result["reason"] = "全局干运行模式：仅记录不执行"
 
-        # 3. 匹配策略（session > user > role > global）
-        policy = _match_policy(db, session_id, user_id, role_id)
+        # 3. 匹配策略列表（session > user > role > global，同层多条全部生效）
+        policies = _match_policies(db, session_id, user_id, role_id)
+        primary = policies[0] if policies else None
 
-        # 4. 黑名单检查（优先级最高）
-        if policy:
+        # 4-7. 遍历所有命中策略，逐策略做黑名单/白名单/风险/二级审批判断。
+        #      任一策略拒绝 → 整体拒绝；风险上限取最严格者；二级审批标记 OR 合并。
+        effective_max = cfg.max_risk_level
+        for policy in policies:
+            # 4. 黑名单检查（优先级最高）
             blocked_assets = policy.get_blocked_asset_ids()
             if blocked_assets and asset_id in blocked_assets:
                 return _reject(result, "资产在策略黑名单中", policy.id)
@@ -293,8 +301,7 @@ def evaluate_request(
                         if pat in command:
                             return _reject(result, f"命令命中黑名单规则: {pat}", policy.id)
 
-        # 5. 白名单检查
-        if policy:
+            # 5. 白名单检查
             allowed_assets = policy.get_allowed_asset_ids()
             if allowed_assets and asset_id and asset_id not in allowed_assets:
                 return _reject(result, "资产不在策略白名单中", policy.id)
@@ -307,16 +314,31 @@ def evaluate_request(
                 if not ok:
                     return _reject(result, "命令不在策略白名单中", policy.id)
 
-        # 6. 风险等级检查（取全局与策略中更严格者）
-        effective_max = cfg.max_risk_level
-        if policy and policy.max_risk_level:
-            effective_max = _stricter(effective_max, policy.max_risk_level)
-        if risk_level and _risk_gt(risk_level, effective_max):
-            return _reject(result, f"风险等级 {risk_level} 超过允许上限 {effective_max}", policy.id if policy else 0)
+            # 5.1 允许目录范围检查（AI 作用范围限制）：cd 目标或绝对路径落到范围外 → 拒绝
+            workdirs = policy.get_allowed_workdirs()
+            if workdirs and command and not _path_in_allowed(command, workdirs):
+                return _reject(
+                    result,
+                    f"命令涉及路径超出允许工作目录范围 {workdirs}",
+                    policy.id,
+                )
 
-        # 7. 二级审批标记
-        if policy and policy.require_second_approval and risk_level in ("high", "critical"):
-            result["second_approval"] = True
+            # 6. 风险等级检查（取全局与所有命中策略中更严格者）
+            if policy.max_risk_level:
+                effective_max = _stricter(effective_max, policy.max_risk_level)
+
+        if risk_level and _risk_gt(risk_level, effective_max):
+            return _reject(
+                result,
+                f"风险等级 {risk_level} 超过允许上限 {effective_max}",
+                primary.id if primary else 0,
+            )
+
+        # 7. 二级审批标记（任一策略要求，且高危，即命中）
+        for policy in policies:
+            if policy.require_second_approval and risk_level in ("high", "critical"):
+                result["second_approval"] = True
+                break
 
         # 8. 执行窗口检查（写操作）
         if risk_level in ("medium", "high", "critical"):
@@ -325,33 +347,58 @@ def evaluate_request(
                 return _reject(
                     result,
                     f"当前不在执行窗口内（{cfg.execution_window_start}-{cfg.execution_window_end}）",
-                    policy.id if policy else 0,
+                    primary.id if primary else 0,
                 )
 
-        if policy:
-            result["policy_id"] = policy.id
+        if primary:
+            result["policy_id"] = primary.id
         return result
     finally:
         if own_session:
             db.close()
 
 
-def _match_policy(db, session_id, user_id, role_id):
-    """按作用范围匹配最具体策略。"""
+def _match_policies(db, session_id, user_id, role_id):
+    """按作用范围匹配策略列表。
+
+    优先级：session > user > role > global。
+    同一优先级下多条策略**全部生效**（如 global 可配多条，决策合并），
+    不再只取第一条（修复多 global 策略静默失效的问题）。
+    """
     enabled = db.query(SandboxPolicy).filter(SandboxPolicy.is_enabled == True)
     if session_id:
-        p = enabled.filter(SandboxPolicy.scope_type == "session", SandboxPolicy.scope_id == session_id).first()
-        if p:
-            return p
+        pl = (
+            enabled
+            .filter(SandboxPolicy.scope_type == "session", SandboxPolicy.scope_id == session_id)
+            .order_by(SandboxPolicy.id)
+            .all()
+        )
+        if pl:
+            return pl
     if user_id:
-        p = enabled.filter(SandboxPolicy.scope_type == "user", SandboxPolicy.scope_id == user_id).first()
-        if p:
-            return p
+        pl = (
+            enabled
+            .filter(SandboxPolicy.scope_type == "user", SandboxPolicy.scope_id == user_id)
+            .order_by(SandboxPolicy.id)
+            .all()
+        )
+        if pl:
+            return pl
     if role_id:
-        p = enabled.filter(SandboxPolicy.scope_type == "role", SandboxPolicy.scope_id == role_id).first()
-        if p:
-            return p
-    return enabled.filter(SandboxPolicy.scope_type == "global").first()
+        pl = (
+            enabled
+            .filter(SandboxPolicy.scope_type == "role", SandboxPolicy.scope_id == role_id)
+            .order_by(SandboxPolicy.id)
+            .all()
+        )
+        if pl:
+            return pl
+    return (
+        enabled
+        .filter(SandboxPolicy.scope_type == "global")
+        .order_by(SandboxPolicy.id)
+        .all()
+    )
 
 
 def _reject(result, reason, policy_id):
@@ -389,6 +436,88 @@ def _window_allowed(start, end):
         return now >= s or now <= e
     except Exception:
         return True
+
+
+def _posix_norm(p):
+    """POSIX 风格路径规范化（不受宿主平台影响，目标节点为 Linux）。
+
+    去引号/空白、折叠 //、解析 . 与 ..，保留正斜杠语义。
+    """
+    p = p.strip().strip("'\"").strip()
+    if not p:
+        return ""
+    # 朴素 POSIX 规范化：按 / 分段，处理 . 和 ..
+    parts = p.split("/")
+    stack = []
+    for seg in parts:
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if stack and stack[-1] != "..":
+                stack.pop()
+            else:
+                stack.append("..")
+        else:
+            stack.append(seg)
+    return "/" + "/".join(stack) if p.startswith("/") else "/".join(stack)
+
+
+def _normalize_path(p):
+    """规范化路径：去引号/空白/折叠分段，供目录判定。"""
+    return _posix_norm(p)
+
+
+def _cd_target(command):
+    """提取命令开头的 cd 目标目录（含 cd 与 cd /path 形式）。"""
+    m = re.match(r"^\s*cd\s+(\S+)", command)
+    if m:
+        return _normalize_path(m.group(1))
+    return ""
+
+
+def _absolute_paths(command):
+    """提取命令中的绝对路径（以 / 开头）。
+
+    排除开头单独的 cd（其目标由 _cd_target 单独处理），
+    也跳过文件系统盘符/路径判定无关的片段（如正则 /x/ 里的斜杠跳过）。
+    """
+    paths = []
+    # 去掉 cd 命令本身，避免与 _cd_target 重复
+    body = re.sub(r"^\s*cd\s+\S+", "", command)
+    for m in re.finditer(r"(?<![A-Za-z0-9_])/([A-Za-z0-9_./\-]+)", body):
+        raw = m.group(0).strip("'\"")
+        if raw and "/" in raw:
+            paths.append(_normalize_path(raw))
+    return paths
+
+
+def _within_any(path, allowed_workdirs):
+    """判断给定路径是否落在任一允许目录下（子目录或相等都算）。"""
+    if not path:
+        return True
+    path = path.rstrip("/") or "/"
+    for root in allowed_workdirs:
+        if not root:
+            continue
+        root = root.rstrip("/") or "/"
+        if path == root or path.startswith(root + "/"):
+            return True
+    return False
+
+
+def _path_in_allowed(command, allowed_workdirs):
+    """命令涉及的所有路径(含 cd 目标)是否都在允许目录内。空目录=不限。"""
+    if not allowed_workdirs:
+        return True
+    # cd 目标必须在范围内
+    cd = _cd_target(command)
+    if cd and not _within_any(cd, allowed_workdirs):
+        return False
+    # 绝对路径必须在范围内
+    for ap in _absolute_paths(command):
+        if ap and not _within_any(ap, allowed_workdirs):
+            return False
+    return True
 
 
 def log_execution(

@@ -95,6 +95,10 @@
             </el-button>
           </el-form>
 
+          <div class="showcase-entry">
+            <a href="/product/showcase" class="showcase-btn">🛒 组件智能运维展示</a>
+          </div>
+
           <div class="form-links">
             <a href="/product/overview" class="form-link">产品全景 →</a>
             <span class="form-link-sep">·</span>
@@ -111,17 +115,49 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
+import { useAppStore } from '@/stores/app'
 
 const router = useRouter()
 const route = useRoute()
+const appStore = useAppStore()
 const formRef = ref(null)
 const loading = ref(false)
 const errorMsg = ref(route.query.error || '')
 const year = new Date().getFullYear()
+
+/* ─── 皮肤联动: 品牌主题色与背景效果跟随全局皮肤 ─── */
+const brandColor = computed(() => {
+  const scheme = appStore.colorScheme
+  const palette = {
+    indigo: '#6366f1',
+    'terra-cotta': '#c7512e',
+    'fluorescent-green': '#22c55e',
+  }
+  if (appStore.skin === 'taste') return '#c84e89'
+  if (appStore.skin === 'frost') return '#06b6d4'
+  if (appStore.skin === 'nebula') return '#a78bfa'
+  return palette[scheme] || '#6366f1'
+})
+const brandGradient = computed(() => {
+  if (appStore.skin === 'nebula') return 'linear-gradient(120deg, #7c3aed, #c026d3, #22d3ee)'
+  if (appStore.skin === 'taste') return 'linear-gradient(135deg, #c84e89, #f15f79, #fcb045)'
+  if (appStore.skin === 'frost') return 'linear-gradient(135deg, #06b6d4, #22d3ee)'
+  return 'linear-gradient(135deg, #6366f1, #8b5cf6)'
+})
+const isDarkBrand = computed(() => appStore.theme !== 'light')
+const starBrandColor = computed(() => {
+  if (appStore.skin === 'nebula') return [167, 139, 250]
+  if (appStore.skin === 'taste') return [200, 78, 137]
+  if (appStore.skin === 'frost') return [6, 182, 212]
+  const scheme = appStore.colorScheme
+  if (scheme === 'terra-cotta') return [199, 81, 46]
+  if (scheme === 'fluorescent-green') return [34, 197, 94]
+  return [99, 102, 241]
+})
 
 /* ─── Starfield ─── */
 const starCanvas = ref(null)
@@ -146,7 +182,7 @@ function initStarfield() {
 
   const stars = []
   const STAR_COUNT = 200
-  const BRAND_COLOR = [199, 81, 46]
+  const BRAND_COLOR = starBrandColor.value
 
   for (let i = 0; i < STAR_COUNT; i++) {
     const useBrand = Math.random() < 0.12
@@ -288,6 +324,8 @@ async function handleLogin() {
 
 <style scoped>
 .login-page {
+  --brand: v-bind(brandColor);
+  --brand-grad: v-bind(brandGradient);
   position: relative;
   width: 100%;
   min-height: 100vh;
@@ -378,7 +416,7 @@ async function handleLogin() {
 .logo-mark {
   font-size: 28px;
   font-weight: 800;
-  color: #C7512E;
+  color: var(--brand);
   letter-spacing: -0.02em;
 }
 
@@ -405,7 +443,7 @@ async function handleLogin() {
 }
 
 .slogan-line-bottom {
-  color: #C7512E;
+  color: var(--brand);
   font-weight: 800;
 }
 
@@ -420,7 +458,7 @@ async function handleLogin() {
 .brand-divider {
   width: 48px;
   height: 3px;
-  background: #C7512E;
+  background: var(--brand);
   border-radius: 2px;
   margin-bottom: 32px;
 }
@@ -523,7 +561,7 @@ async function handleLogin() {
 }
 
 .login-form :deep(.el-input__wrapper.is-focus) {
-  border-color: #C7512E;
+  border-color: var(--brand);
   box-shadow: 0 0 0 3px rgba(199,81,46,0.08);
 }
 
@@ -553,8 +591,8 @@ async function handleLogin() {
 }
 
 .login-checkbox :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-  background: #C7512E;
-  border-color: #C7512E;
+  background: var(--brand);
+  border-color: var(--brand);
 }
 
 .forgot-link {
@@ -566,7 +604,7 @@ async function handleLogin() {
 }
 
 .forgot-link:hover {
-  color: #C7512E;
+  color: var(--brand);
 }
 
 .login-btn {
@@ -595,6 +633,35 @@ async function handleLogin() {
   font-size: 14px;
 }
 
+.showcase-entry {
+  margin-top: 20px;
+}
+.showcase-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 46px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--brand);
+  border: 1.5px solid var(--brand);
+  border-radius: 10px;
+  background: transparent;
+  transition: all 0.2s;
+  letter-spacing: 0.3px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.showcase-btn:hover {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--brand) 30%, transparent);
+  transform: translateY(-1px);
+}
+
 .form-links {
   display: flex;
   justify-content: center;
@@ -612,7 +679,7 @@ async function handleLogin() {
 }
 
 .form-link:hover {
-  color: #C7512E;
+  color: var(--brand);
 }
 
 .form-link-sep {

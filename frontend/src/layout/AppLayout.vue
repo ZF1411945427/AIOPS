@@ -35,6 +35,20 @@
             <circle cx="8" cy="20" r="2" fill="#fff" /><circle cx="36" cy="20" r="2" fill="#fff" />
             <circle cx="22" cy="20" r="3" fill="url(#lgA)" /><circle cx="22" cy="20" r="1.5" fill="#fff" />
           </svg>
+          <!-- Nebula 皮肤: 深空星云 -->
+          <svg v-else-if="appStore.skin === 'nebula'" viewBox="0 0 44 44" width="40" height="40">
+            <defs><linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7c3aed" /><stop offset="100%" stop-color="#c026d3" /></linearGradient>
+            <linearGradient id="lgB" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#22d3ee" /><stop offset="100%" stop-color="#818cf8" /></linearGradient></defs>
+            <rect x="8" y="6" width="4" height="32" rx="2" fill="url(#lgA)" /><rect x="32" y="6" width="4" height="32" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="6" width="28" height="4" rx="2" fill="url(#lgA)" /><rect x="8" y="34" width="28" height="4" rx="2" fill="url(#lgB)" />
+            <rect x="8" y="20" width="28" height="3" rx="1.5" fill="url(#lgA)" opacity="0.6" />
+            <line x1="8" y1="6" x2="36" y2="20" stroke="url(#lgA)" stroke-width="2.5" stroke-linecap="round" />
+            <line x1="8" y1="20" x2="36" y2="34" stroke="url(#lgB)" stroke-width="2.5" stroke-linecap="round" />
+            <circle cx="8" cy="6" r="2.5" fill="#fff" /><circle cx="36" cy="6" r="2.5" fill="#e9d5ff" />
+            <circle cx="8" cy="34" r="2.5" fill="#e0f2fe" /><circle cx="36" cy="34" r="2.5" fill="#fff" />
+            <circle cx="8" cy="20" r="2" fill="#fff" /><circle cx="36" cy="20" r="2" fill="#fff" />
+            <circle cx="22" cy="20" r="3" fill="url(#lgA)" /><circle cx="22" cy="20" r="1.5" fill="#fff" />
+          </svg>
           <!-- 默认皮肤: 蓝紫 -->
           <svg v-else viewBox="0 0 44 44" width="40" height="40">
             <defs><linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6366f1" /><stop offset="100%" stop-color="#8b5cf6" /></linearGradient>
@@ -199,6 +213,11 @@
                   :class="{ active: appStore.skin === 'frost' }"
                   @click="appStore.setSkin('frost')"
                 >Frost</span>
+                <span
+                  class="skin-opt nebula"
+                  :class="{ active: appStore.skin === 'nebula' }"
+                  @click="appStore.setSkin('nebula')"
+                >Nebula</span>
               </div>
             </div>
           </el-popover>
@@ -295,6 +314,7 @@
           <AlertsView v-else-if="activeView === 'alerts'" />
           <AlertRulesView v-else-if="activeView === 'alert-rules'" />
           <AssetsView v-else-if="activeView === 'asset-list'" />
+          <ConfigDriftView v-else-if="activeView === 'config-drift'" />
           <DatasourcesView v-else-if="activeView === 'datasources'" />
           <LogsView v-else-if="activeView === 'logs'" />
       <IncidentsView v-else-if="activeView === 'incident'" />
@@ -386,6 +406,7 @@
           <AgentManageView v-else-if="activeView === 'agent-deploy'" />
           <AgentAutonomousView v-else-if="activeView === 'agent-autonomous'" />
           <DeployView v-else-if="activeView === 'ai-deploy'" />
+          <SandboxView v-else-if="activeView === 'sandbox-overview'" />
           <OfflineRepoView v-else-if="activeView === 'offline-repo'" />
           <K8sOfflineDeployView v-else-if="activeView === 'k8s-cluster-deploy'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
@@ -443,6 +464,7 @@ const ChaosScenarioView = defineAsyncComponent(() => import('@/views/ChaosScenar
 const AlertsView = defineAsyncComponent(() => import('@/views/AlertsView.vue'))
 const AlertRulesView = defineAsyncComponent(() => import('@/views/AlertRulesView.vue'))
 const AssetsView = defineAsyncComponent(() => import('@/views/AssetsView.vue'))
+const ConfigDriftView = defineAsyncComponent(() => import('@/views/ConfigDriftView.vue'))
 const DatasourcesView = defineAsyncComponent(() => import('@/views/DatasourcesView.vue'))
 const LogsView = defineAsyncComponent(() => import('@/views/LogsView.vue'))
 const IncidentsView = defineAsyncComponent(() => import('@/views/IncidentsView.vue'))

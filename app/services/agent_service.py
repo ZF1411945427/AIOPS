@@ -691,6 +691,15 @@ def process_chat_message(
 
     # Build messages
     system_prompt = config.system_prompt or DEFAULT_SYSTEM_PROMPT
+
+    # 注入 AI 子专家路由(领域识别 + 组件工具引导)
+    try:
+        from app.services.expert_routing_service import build_expert_injection
+        _expert_ctx = build_expert_injection(user_message)
+        if _expert_ctx:
+            system_prompt += _expert_ctx
+    except Exception:
+        pass
     
     # 注入会话上下文（告警/资产关联）
     session_ctx = json.loads(session.context or "{}")

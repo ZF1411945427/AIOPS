@@ -131,6 +131,7 @@ class SandboxPolicy(Base):
     blocked_tools = Column(Text, default="[]")                               # JSON 数组
     allowed_commands = Column(Text, default="[]")                            # JSON 数组（命令前缀白名单）
     blocked_commands = Column(Text, default="[]")                            # JSON 数组（支持正则）
+    allowed_workdirs = Column(Text, default="[]")                            # JSON 数组（允许 AI 操作的目录范围，空=不限）
     max_risk_level = Column(String(16), default="critical")
     max_actions_per_day = Column(Integer, default=0)                         # 0=继承全局
     require_second_approval = Column(Boolean, default=False)                 # 高危操作是否需二级审批
@@ -155,6 +156,9 @@ class SandboxPolicy(Base):
 
     def get_blocked_commands(self):
         return self._parse_json(self.blocked_commands)
+
+    def get_allowed_workdirs(self):
+        return self._parse_json(self.allowed_workdirs)
 
     @staticmethod
     def _parse_json(raw):

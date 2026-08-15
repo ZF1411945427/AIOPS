@@ -136,6 +136,7 @@ zstandard==0.25.0
 # ===== 可选依赖（按需启用，代码中 try/except 守护）=====
 # psycopg2-binary  # PostgreSQL 数据源连接测试
 # redis            # Redis 数据源连接测试
+# kafka-python     # Kafka 监控工具（kafka_monitor, mcp_tools.py，运行时 try/except 守护）
 # prophet          # 时间序列预测（需 matplotlib）
 # croniter         # 告警 cron 表达式解析
 # python-docx      # Word 文档解析（RAG）
