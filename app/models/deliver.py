@@ -163,3 +163,18 @@ class OfflinePackageSource(Base):
     package_count = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class DeployProxy(Base):
+    """部署代理配置 - 在离线仓库页维护, 三个部署页下拉复用(仅供部署访问公网, 非仓库本身)。
+    契约见 CONTRACT.md。"""
+    __tablename__ = "deploy_proxies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    http_proxy = Column(String(256), default="")
+    https_proxy = Column(String(256), default="")
+    no_proxy = Column(String(512), default="")
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

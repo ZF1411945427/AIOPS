@@ -197,3 +197,10 @@ db/milvus/
 # ===== 本地虚机明文凭据(含 IP/root 密码, 禁止入库) =====
 /deploy/本地虚机
 db/check_vmware.py
+
+# temp diagnostic files
+_h.txt
+_menu.txt
+frontend/_measure*.cjs
+frontend/_shot_tmp.*
+frontend/_verify.cjs

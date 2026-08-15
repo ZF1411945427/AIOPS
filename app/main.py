@@ -169,6 +169,10 @@ _MIGRATIONS = {
         "deployment_feature_json TEXT DEFAULT '{}'",
         "artifact_download_path VARCHAR(512) DEFAULT ''",
         "artifact_auto_download BOOLEAN DEFAULT 1",
+        "use_offline BOOLEAN DEFAULT 0",
+        "http_proxy VARCHAR(256) DEFAULT ''",
+        "https_proxy VARCHAR(256) DEFAULT ''",
+        "no_proxy VARCHAR(512) DEFAULT ''",
     ],
     "deploy_steps": [
         "diagnosis TEXT DEFAULT ''",
@@ -194,6 +198,13 @@ _MIGRATIONS = {
     ],
     "sandbox_policies": [
         "allowed_workdirs TEXT DEFAULT '[]'",
+    ],
+    "component_installs": [
+        "report_json TEXT DEFAULT ''",
+        "deploy_params TEXT DEFAULT '{}'",
+    ],
+    "component_catalog": [
+        "param_schema TEXT DEFAULT '[]'",
     ],
 }
 for _eng in get_all_engines().values():

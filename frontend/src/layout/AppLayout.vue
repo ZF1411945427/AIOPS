@@ -305,6 +305,7 @@
           <BurnRateView v-else-if="activeView === 'burn-rate'" />
           <SloDashboardView v-else-if="activeView === 'slo-dashboard'" />
           <SLOConfigView v-else-if="activeView === 'slo-config'" />
+          <SLOView v-else-if="activeView === 'slo'" />
           <SLAView v-else-if="activeView === 'sla-agreement'" />
           <OnCallView v-else-if="activeView === 'oncall-schedule'" />
           <AvailabilityReportView v-else-if="activeView === 'availability-report'" />
@@ -343,6 +344,7 @@
           <ReportsView v-else-if="activeView === 'reports'" />
           <K8sOverviewView v-else-if="activeView === 'k8s-overview'" />
           <K8sMonitorView v-else-if="activeView === 'k8s-monitor'" />
+          <K8sResourceView v-else-if="activeView === 'k8s-resource'" />
           <K8sResourceListView v-else-if="activeView === 'k8s-statefulsets'" resource-type="statefulsets" />
           <K8sResourceListView v-else-if="activeView === 'k8s-daemonsets'" resource-type="daemonsets" />
           <K8sResourceListView v-else-if="activeView === 'k8s-services'" resource-type="services" />
@@ -409,6 +411,7 @@
           <SandboxView v-else-if="activeView === 'sandbox-overview'" />
           <OfflineRepoView v-else-if="activeView === 'offline-repo'" />
           <K8sOfflineDeployView v-else-if="activeView === 'k8s-cluster-deploy'" />
+          <ComponentStoreHostView v-else-if="activeView === 'middleware-store'" />
           <iframe v-else-if="activePath" :src="activePath" class="content-iframe" frameborder="0" />
         </div>
       </main>
@@ -456,6 +459,7 @@ const OnCallView = defineAsyncComponent(() => import('@/views/OnCallView.vue'))
 const BurnRateView = defineAsyncComponent(() => import('@/views/BurnRateView.vue'))
 const SLOConfigView = defineAsyncComponent(() => import('@/views/SLOConfigView.vue'))
 const SloDashboardView = defineAsyncComponent(() => import('@/views/SloDashboardView.vue'))
+const SLOView = defineAsyncComponent(() => import('@/views/SLOView.vue'))
 const SLAView = defineAsyncComponent(() => import('@/views/SLAView.vue'))
 const AvailabilityReportView = defineAsyncComponent(() => import('@/views/AvailabilityReportView.vue'))
 const ChaosExperimentView = defineAsyncComponent(() => import('@/views/ChaosExperimentView.vue'))
@@ -490,6 +494,7 @@ const ReportsView = defineAsyncComponent(() => import('@/views/ReportsView.vue')
 const K8sOverviewView = defineAsyncComponent(() => import('@/views/K8sOverviewView.vue'))
 const K8sMonitorView = defineAsyncComponent(() => import('@/views/K8sMonitorView.vue'))
 const K8sResourceListView = defineAsyncComponent(() => import('@/views/K8sResourceListView.vue'))
+const K8sResourceView = defineAsyncComponent(() => import('@/views/K8sResourceView.vue'))
 const ContainerTopologyView = defineAsyncComponent(() => import('@/views/ContainerTopologyView.vue'))
 const K8sPodsView = defineAsyncComponent(() => import('@/views/K8sPodsView.vue'))
 const K8sDeploymentsView = defineAsyncComponent(() => import('@/views/K8sDeploymentsView.vue'))
@@ -551,6 +556,7 @@ const AgentAutonomousView = defineAsyncComponent(() => import('@/views/AgentAuto
 const DeployView = defineAsyncComponent(() => import('@/views/DeployView.vue'))
 const OfflineRepoView = defineAsyncComponent(() => import('@/views/OfflineRepoView.vue'))
 const K8sOfflineDeployView = defineAsyncComponent(() => import('@/views/K8sOfflineDeployView.vue'))
+const ComponentStoreHostView = defineAsyncComponent(() => import('@/views/ComponentStoreHostView.vue'))
 const MonitorView = defineAsyncComponent(() => import('@/views/MonitorView.vue'))
 import request from '@/api/request'
 
@@ -682,7 +688,7 @@ function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['roles-manage', 'ai-ops-assistant', 'agent-deploy', 'agent-autonomous', 'ai-deploy', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'k8s-cert-inspect', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit'])
+const VUE_PAGES = new Set(['roles-manage', 'ai-ops-assistant', 'agent-deploy', 'agent-autonomous', 'ai-deploy', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'k8s-cert-inspect', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit', 'middleware-store'])
 
 function _flattenItems(items) {
   const result = []

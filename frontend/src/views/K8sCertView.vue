@@ -311,7 +311,6 @@ onMounted(loadClusters)
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: #409eff; border-color: #409eff; color: #fff; }
 .btn-warn { background: #e6a23c; border-color: #e6a23c; color: #fff; }
-.btn-guide { background: #fff; }
 .renew-tip { font-size: 13px; color: #606266; line-height: 1.7; }
 .renew-tip code { background: #f4f4f5; padding: 2px 6px; border-radius: 4px; }
 .checkbox-line { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #606266; margin-top: 12px; }

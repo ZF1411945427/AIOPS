@@ -279,13 +279,6 @@
             "path": "/asset-discovery"
           },
           {
-            "key": "offline-repo",
-            "label": "离线仓库",
-            "type": "vue",
-            "icon": "Box",
-            "path": "/offline-repo"
-          },
-          {
             "key": "config-drift",
             "label": "配置漂移检测",
             "type": "vue",
@@ -327,11 +320,11 @@
             "path": "/containers/deployments"
           },
           {
-            "key": "k8s-namespaces",
-            "label": "Namespace 命名空间",
+            "key": "k8s-resource",
+            "label": "资源列表",
             "type": "vue",
-            "icon": "Folder",
-            "path": "/k8s/namespaces"
+            "icon": "List",
+            "path": "/k8s/resources"
           },
           {
             "key": "k8s-hpa-recommend",
@@ -353,13 +346,6 @@
             "type": "vue",
             "icon": "Lock",
             "path": "/k8s/cert-inspect"
-          },
-          {
-            "key": "k8s-cluster-deploy",
-            "label": "K8s 集群部署",
-            "type": "vue",
-            "icon": "Promotion",
-            "path": "/k8s-cluster-deploy"
           }
         ]
       },
@@ -387,6 +373,41 @@
             "type": "vue",
             "icon": "Operation",
             "path": "/helm-releases"
+          }
+        ]
+      },
+      {
+        "key": "delivery-deploy",
+        "label": "交付部署",
+        "icon": "Promotion",
+        "items": [
+          {
+            "key": "k8s-cluster-deploy",
+            "label": "K8s 集群部署",
+            "type": "vue",
+            "icon": "Promotion",
+            "path": "/k8s-cluster-deploy"
+          },
+          {
+            "key": "middleware-store",
+            "label": "中间件部署",
+            "type": "vue",
+            "icon": "Box",
+            "path": "/middleware-store"
+          },
+          {
+            "key": "ai-deploy",
+            "label": "AI 自动部署",
+            "type": "vue",
+            "icon": "Upload",
+            "path": "/ai-deploy"
+          },
+          {
+            "key": "offline-repo",
+            "label": "离线仓库",
+            "type": "vue",
+            "icon": "Box",
+            "path": "/offline-repo"
           }
         ]
       }
@@ -469,8 +490,8 @@
         "key": "anomaly-detection",
         "label": "异常检测",
         "items": [
-            {
-              "key": "anomaly-benchmark",
+          {
+            "key": "anomaly-benchmark",
             "label": "异常检测基准",
             "type": "vue",
             "icon": "TrophyBase",
@@ -524,32 +545,11 @@
         "label": "SLO 管理",
         "items": [
           {
-            "key": "slo-config",
-            "label": "SLO 配置",
+            "key": "slo",
+            "label": "SLO 管理",
             "type": "vue",
             "icon": "Setting",
-            "path": "/slo-config"
-          },
-          {
-            "key": "error-budget",
-            "label": "错误预算",
-            "type": "vue",
-            "icon": "Coin",
-            "path": "/error-budget"
-          },
-          {
-            "key": "burn-rate",
-            "label": "预算消耗",
-            "type": "vue",
-            "icon": "TrendCharts",
-            "path": "/burn-rate"
-          },
-          {
-            "key": "availability-report",
-            "label": "可用性报表",
-            "type": "vue",
-            "icon": "DataBoard",
-            "path": "/availability-report"
+            "path": "/slo"
           },
           {
             "key": "sla-agreement",
@@ -684,13 +684,6 @@
             "path": "/agent-autonomous"
           },
           {
-            "key": "ai-deploy",
-            "label": "AI 自动部署",
-            "type": "vue",
-            "icon": "Upload",
-            "path": "/ai-deploy"
-          },
-          {
             "key": "agent-workflow-editor",
             "label": "智能体编排",
             "type": "vue",
@@ -822,41 +815,41 @@
             "icon": "Document",
             "path": "/op-audit"
           },
-    {
-     "key": "security-audit",
-     "label": "安全自查",
-     "type": "vue",
-     "icon": "Lock",
-     "path": "/security-audit"
-    },
-    {
-     "key": "secret-vault",
-     "label": "凭据保险库",
-     "type": "vue",
-     "icon": "Lock",
-     "path": "/secret-vault"
-    },
-    {
-     "key": "multicluster",
-     "label": "多集群管理",
-     "type": "vue",
-     "icon": "Coin",
-     "path": "/multicluster"
-    },
-    {
-     "key": "upgrade-jobs",
-     "label": "Edge 升级",
-     "type": "vue",
-     "icon": "Top",
-     "path": "/upgrade-jobs"
-    },
-    {
-     "key": "network-devices",
-     "label": "网络设备",
-     "type": "vue",
-     "icon": "Connection",
-     "path": "/network-devices"
-    },
+          {
+            "key": "security-audit",
+            "label": "安全自查",
+            "type": "vue",
+            "icon": "Lock",
+            "path": "/security-audit"
+          },
+          {
+            "key": "secret-vault",
+            "label": "凭据保险库",
+            "type": "vue",
+            "icon": "Lock",
+            "path": "/secret-vault"
+          },
+          {
+            "key": "multicluster",
+            "label": "多集群管理",
+            "type": "vue",
+            "icon": "Coin",
+            "path": "/multicluster"
+          },
+          {
+            "key": "upgrade-jobs",
+            "label": "Edge 升级",
+            "type": "vue",
+            "icon": "Top",
+            "path": "/upgrade-jobs"
+          },
+          {
+            "key": "network-devices",
+            "label": "网络设备",
+            "type": "vue",
+            "icon": "Connection",
+            "path": "/network-devices"
+          },
           {
             "key": "tenant-management",
             "label": "租户管理",

@@ -6,7 +6,7 @@
     </div>
 
     <div class="toolbar">
-      <button class="btn" @click="showLogic = true">逻辑说明</button>
+      <button class="btn btn-guide" @click="showLogic = true">📖 操作说明</button>
     </div>
 
     <div class="grid-2">
@@ -82,7 +82,7 @@
       </div>
     </div>
 
-    <el-dialog v-model="showLogic" title="特征仓库 - 逻辑说明" width="650px">
+    <GuideDrawer v-model="showLogic" title="📖 特征仓库 · 操作说明" :width="860">
       <div style="font-size:13px;line-height:1.8">
         <h4 style="margin:0 0 8px">一、什么是特征仓库？</h4>
         <p>特征仓库（Feature Store）是机器学习中用于存储和管理<strong>特征数据</strong>的系统。特征是从原始数据中提取的、用于训练和预测模型的数值化属性。</p>
@@ -132,13 +132,14 @@
           <strong>效果：</strong>当预测模型预测 cpu_usage 时，会自动读取这个特征作为上下文，知道"当前平均 CPU 是 50.26%"，从而给出更准确的预测
         </div>
       </div>
-    </el-dialog>
+    </GuideDrawer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import request from '@/api/request'
 
 const loading = ref(false)

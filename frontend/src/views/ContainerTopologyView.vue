@@ -274,7 +274,6 @@ onMounted(() => loadGraph())
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn-primary { background: var(--accent,#6366f1); color: #fff; border-color: var(--accent,#6366f1); }
 .btn-primary:hover { background: var(--accent-hover,#4f46e5); }
-.btn-guide { border-color: var(--accent,#6366f1); color: var(--accent,#6366f1); font-size: 0.8rem; }
 .loading, .error, .empty { text-align: center; padding: 60px 20px; color: var(--text-secondary,#64748b); font-size: 0.85rem; }
 .error { color: #ef4444; }
 .topo-layout { display: flex; gap: 14px; }

@@ -369,6 +369,7 @@ class ComponentCatalog(Base):
     compose_yaml = Column(Text, default="")                    # docker compose 内容
     ha_config = Column(Text, default="{}")                     # 高可用配置(JSON: 副本/集群开关)
     config_keys = Column(Text, default="")                     # 关联 config_drift 配置项键(逗号分隔)
+    param_schema = Column(Text, default="[]")                  # 组件级定制参数模板(JSON 数组, 见 CONTRACT.md)
     complexity = Column(String(16), default="simple")          # simple/medium/complex
     enabled = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
@@ -398,5 +399,8 @@ class ComponentInstall(Base):
     ai_analysis = Column(Text, default="")                     # AI 健康分析(JSON)
     deploy_log = Column(Text, default="")                      # 部署日志(截断)
     deploy_plan_id = Column(Integer, nullable=True)            # 关联 deploy.plans
+    deploy_params = Column(Text, default="{}")                 # 本次部署定制参数快照(JSON {key:value})
+    report_json = Column(Text, default="")                     # AI 可直接交付部署报告(JSON) — 落库持久化
+    events_json = Column(Text, default="")                     # 部署完整结构化事件(JSON数组, 供历史回放/续 AI 对话)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

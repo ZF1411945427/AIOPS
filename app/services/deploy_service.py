@@ -339,6 +339,22 @@ def _get_provider(db: Session):
     return provider
 
 
+def _build_offline_hint(db: Session) -> str:
+    """生成离线部署提示: 默认私有 Registry 地址 + 活跃本地包源(供 AI SOP 生成命令时遵守)。"""
+    lines = []
+    try:
+        from app.models import OfflineRegistry, OfflinePackageSource
+        reg = db.query(OfflineRegistry).filter(OfflineRegistry.is_default == True).first()  # noqa: E712
+        if reg and reg.registry_url:
+            lines.append(f"- 镜像私有仓库: {reg.registry_url} (insecure={not reg.is_secure})")
+        for s in db.query(OfflinePackageSource).filter(OfflinePackageSource.is_active == True).all():  # noqa: E712
+            if getattr(s, "source_url", ""):
+                lines.append(f"- 包源({getattr(s, 'os_type', '')}): {s.source_url}")
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+
 def _get_asset_ids(plan) -> List[int]:
     try:
         ids = json.loads(plan.asset_ids) if isinstance(plan.asset_ids, str) else (plan.asset_ids or [])
@@ -389,6 +405,10 @@ def create_plan(db: Session, payload: dict, user_id: int) -> dict:
         doc_raw=(payload.get("doc_raw") or "").strip(),
         doc_file_name=(payload.get("doc_file_name") or "").strip(),
         asset_ids=json.dumps(payload.get("asset_ids", []) if isinstance(payload.get("asset_ids"), list) else []),
+        use_offline=bool(payload.get("use_offline", False)),
+        http_proxy=(payload.get("http_proxy") or "").strip(),
+        https_proxy=(payload.get("https_proxy") or "").strip(),
+        no_proxy=(payload.get("no_proxy") or "").strip(),
         created_by=user_id,
     )
     db.add(plan)
@@ -448,6 +468,11 @@ def update_plan(db: Session, plan_id: int, payload: dict) -> Optional[dict]:
         plan.artifact_download_path = (payload.get("artifact_download_path") or "").strip()
     if "artifact_auto_download" in payload:
         plan.artifact_auto_download = bool(payload.get("artifact_auto_download"))
+    if "use_offline" in payload:
+        plan.use_offline = bool(payload.get("use_offline"))
+    for f in ("http_proxy", "https_proxy", "no_proxy"):
+        if f in payload:
+            setattr(plan, f, (payload.get(f) or "").strip())
     if "asset_ids" in payload and isinstance(payload["asset_ids"], list):
         plan.asset_ids = json.dumps(payload["asset_ids"])
     db.commit()
@@ -646,6 +671,16 @@ def ai_parse_manual(db: Session, plan_id: int) -> dict:
         "6. 识别可验证的检查点和可回滚的命令\n"
     )
     user_prompt = f"以下是部署手册内容：\n\n{doc_raw}\n{asset_info}\n\n请解析为结构化 SOP JSON。"
+
+    if plan.use_offline:
+        offline_hint = _build_offline_hint(db)
+        if offline_hint:
+            user_prompt += (
+                "\n\n【离线部署要求】本计划启用离线私有仓库，务必遵守：\n"
+                "- 一切 docker pull / 镜像引用必须改用私有仓库地址（docker login 后拉取），禁止从公网 Docker Hub 拉取。\n"
+                "- 系统包安装(yum/dnf/apt-get install)必须使用本地/内网包源，禁止使用公网软件源。\n"
+                f"- 离线资源：\n{offline_hint}"
+            )
 
     resp = call_llm(provider, [
         {"role": "system", "content": sys_prompt},
@@ -1021,6 +1056,61 @@ def _is_valid_shell_command(cmd: str) -> bool:
     if re.match(r'^(执行后|检查|确认|验证|显示|确保|等待)[：:\s，,，]', cmd):
         return False
     return True
+
+
+_OFFLINE_PUBLIC_IMAGES = ["docker.io", "registry.hub.docker.com", "index.docker.io", "hub.docker.com", "ghcr.io", "quay.io", "gcr.io", "docker.easypack.io", "registry.cn-hangzhou.aliyuncs.com", "mirror.ccs.tencentyun.com"]
+_PUBLIC_REPO_HINTS = ["archive.ubuntu.com", "security.ubuntu.com", "download.fedoraproject.org", "mirrors.aliyun.com", "repo.huaweicloud.com", "mirrors.tuna.tsinghua.edu.cn", "mirrors.cloud.tencent.com"]
+
+
+def _offline_blocked_reason(plan, cmd: str) -> str:
+    """离线模式二次强制校验: 命令含公网 docker 镜像拉取或公网软件源时, 返回拦截原因; 否则返回空串放行。
+    仅当 plan.use_offline=True 时启用。识别 docker pull/run/compose 的镜像引用、yum/apt 针对公网源的操作。"""
+    if not plan or not getattr(plan, "use_offline", False):
+        return ""
+    cmd = cmd or ""
+    low = cmd.lower()
+    # 明确公网镜像仓库引用
+    for img in _OFFLINE_PUBLIC_IMAGES:
+        if img in low:
+            return f"离线模式禁止拉取公网镜像仓库 {img} 的镜像(请改用离线私有 Registry)"
+    # docker pull / docker run 引用公网镜像: 仅当是"裸镜像名"(无仓库主机)或显式 docker.io 时拦截
+    # 带仓库主机(如 internal.registry/app/x)视为私有/内网仓库, 放行
+    if re.search(r'\bdocker\s+(pull|run|create)\b', low):
+        _rest = re.split(r'\bdocker\s+(?:pull|run|create)\b', cmd)[-1]
+        _cand = ""
+        for _t in _rest.split():
+            if _t.startswith('-') or _t in ('--','/dev/null'):
+                continue
+            _cand = _t
+            break
+        if _cand and ('/' not in _cand or _cand.startswith(('docker.io/', 'registry.hub.docker.com/', 'library/'))):
+            return f"离线模式禁止直接 docker pull/run 公网镜像 {_cand}(请改用离线私有 Registry 地址)"
+    # 公网软件源
+    for hint in _PUBLIC_REPO_HINTS:
+        if hint in low:
+            return f"离线模式禁止使用公网软件源 {hint}(请改用本地/内网包源)"
+    return ""
+
+
+def _assert_online_allowed(plan, cmd: str) -> str:
+    """通用: 在线/离线统一入口。离线时返回拦截原因, 在线返回空串。供执行前调用。"""
+    if not plan or not getattr(plan, "use_offline", False):
+        return ""
+    return _offline_blocked_reason(plan, cmd)
+
+
+def _proxy_env_prefix(plan) -> str:
+    """为计划生成代理环境变量导出前缀(供执行步骤注入 HTTP_PROXY/HTTPS_PROXY/NO_PROXY)。"""
+    if not plan:
+        return ""
+    parts = []
+    if getattr(plan, "http_proxy", ""):
+        parts.append("export HTTP_PROXY='%s' http_proxy='%s'" % (plan.http_proxy, plan.http_proxy))
+    if getattr(plan, "https_proxy", ""):
+        parts.append("export HTTPS_PROXY='%s' https_proxy='%s'" % (plan.https_proxy, plan.https_proxy))
+    if getattr(plan, "no_proxy", ""):
+        parts.append("export NO_PROXY='%s' no_proxy='%s'" % (plan.no_proxy, plan.no_proxy))
+    return " && ".join(parts)
 
 
 def _sync_env_mapping_from_sop(db: Session, plan: DeployPlan) -> None:
@@ -2257,6 +2347,9 @@ def _ai_stream_execute(db: Session, plan_id: int, user_id: int = 0, decision_que
                             p_cwd = p_cd_m.group(1).strip('"\'')
                         if not p_cd_m and p_cwd:
                             p_cmd = f"cd {p_cwd} && {p_cmd}"
+                        _ppx = _proxy_env_prefix(plan)
+                        if _ppx:
+                            p_cmd = f"{_ppx} && {p_cmd}"
                         try:
                             p_client, _ = _ssh_connect(asset)
                             _, p_stdout, p_stderr = p_client.exec_command(p_cmd, timeout=600)
@@ -2404,8 +2497,23 @@ def _ai_stream_execute(db: Session, plan_id: int, user_id: int = 0, decision_que
                             "risk": step.risk_level, "ai_risk": ai_risk_info, "ai_intent": ai_intent}
                         yield {"type": "cmd", "command": cmd}
 
+                        # ▼ 离线二次强制校验: 勾选 use_offline 后拦截公网拉取/公网源命令
+                        _offline_block = _offline_blocked_reason(plan, cmd)
+                        if _offline_block:
+                            step.status = "failed"
+                            step.output = (step.output or "") + f"\n⛔ {_offline_block}"
+                            db.commit()
+                            yield {"type": "output", "line": f"\r\n\x1b[31m⛔ {_offline_block}\x1b[0m"}
+                            yield {"type": "step_end", "step": step.step_order, "status": "failed", "note": _offline_block}
+                            failed = True
+                            continue
+
+                        # ▼ 代理环境注入(可选): 在真实命令前导出 HTTP_PROXY/HTTPS_PROXY/NO_PROXY
+                        _px = _proxy_env_prefix(plan)
+                        _exec_cmd = (f"{_px} && {cmd}") if _px else cmd
+
                         try:
-                            stdin, stdout, stderr = client.exec_command(cmd, timeout=60)
+                            stdin, stdout, stderr = client.exec_command(_exec_cmd, timeout=60)
                             _ch = stdout.channel
                             _ch.settimeout(0.05)
                             collected = []
@@ -3893,6 +4001,10 @@ def _plan_to_dict(p: DeployPlan) -> dict:
         "artifact_path": p.artifact_path or "",
         "artifact_download_path": p.artifact_download_path or "",
         "artifact_auto_download": bool(p.artifact_auto_download),
+        "use_offline": bool(p.use_offline),
+        "http_proxy": p.http_proxy or "",
+        "https_proxy": p.https_proxy or "",
+        "no_proxy": p.no_proxy or "",
         "doc_raw": p.doc_raw or "",
         "doc_file_name": p.doc_file_name or "",
         "asset_ids": _safe_json(p.asset_ids) if p.asset_ids else [],

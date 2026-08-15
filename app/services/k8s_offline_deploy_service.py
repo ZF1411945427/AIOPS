@@ -72,6 +72,39 @@ def _safe_json(val: str, default=None):
         return default if default is not None else {}
 
 
+def _k8s_ai_provider(db: Session):
+    """取启用的 AIProvider(与组件商店/部署页一致)。无则返回 None 走规则兜底。"""
+    try:
+        from app.models import AIProvider
+        return db.query(AIProvider).filter(AIProvider.is_enabled == True).first()  # noqa: E712
+    except Exception:
+        return None
+
+
+def _k8s_ai_call(db: Session, system: str, user: str, fallback: dict, timeout=60) -> dict:
+    """轻量 AI 调用(供预检建议/失败诊断/报告总结用)。AI 不可用或异常时返回 fallback。
+    只做建议/分析, 绝不自动执行命令(K8s 集群属最高危, 全程人工确认)。"""
+    provider = _k8s_ai_provider(db)
+    if not provider:
+        return fallback
+    try:
+        from app.services.agent_service import call_llm
+        resp = call_llm(provider, [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ], timeout_override=timeout)
+        if resp.get("error"):
+            return fallback
+        content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content:
+            return fallback
+        from app.services.component_catalog_service import safe_json_parse
+        parsed = safe_json_parse(content, {})
+        return parsed if isinstance(parsed, dict) else fallback
+    except Exception:
+        return fallback
+
+
 def _plan_to_dict(p: K8sClusterPlan, include_kubeconfig: bool = False) -> dict:
     d = {
         "id": p.id,
@@ -1143,6 +1176,15 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
     except Exception as e:
         p.status = "failed"
         _append_log(p, {"type": "error", "message": f"部署失败: {e}"}, db)
+        # ▼ AI 失败诊断(仅建议, K8s 集群高危不自动执行)
+        try:
+            _diag = _ai_failure_diagnosis(db, p, str(e))
+            _append_log(p, {"type": "ai", "message": f"AI 诊断: {_diag.get('root_cause','')} → {_diag.get('suggestion','fix')}"}, db)
+            yield {"type": "ai", "ai_generated": _diag.get("ai_generated", False), "stage": "failure",
+                   "root_cause": _diag.get("root_cause", ""), "suggestion": _diag.get("suggestion", "fix"),
+                   "advice": _diag.get("advice", "")}
+        except Exception:
+            pass
         db.commit()
         yield {"type": "error", "status": "failed", "message": str(e)}
         yield {"type": "complete", "status": "failed", "message": str(e)}
@@ -1155,9 +1197,30 @@ def _run_deploy_generator(db, p: K8sClusterPlan, plan_id: int, resume_step: int 
         _release_exec(plan_id)
 
 
+def _ai_failure_diagnosis(db: Session, p: K8sClusterPlan, error: str) -> dict:
+    """失败 AI 诊断: 汇总最近部署日志, 给出根因 + fix/retry/skip 建议(仅诊断, 不自动执行)。"""
+    fallback = {
+        "ai_generated": False, "root_cause": str(error)[:120],
+        "suggestion": "fix", "advice": "检查上方部署日志, 修复后重新部署或续传",
+    }
+    logs = _safe_json(p.logs_json, []) if p else []
+    recent = "\n".join(
+        f"{l.get('type') or ''}[{l.get('node') or ''}]: {l.get('message') or ''}" for l in (logs or [])[-40:])
+    system = ("你是资深 K8s 集群建设专家。kubeadm 离线建集群失败, 请根据最近日志给出一句话根因和处置建议。"
+              "只输出 JSON: {\"root_cause\":\"一句话根因(≤60字,中文)\",\"suggestion\":\"fix|retry|skip\","
+              "\"advice\":\"具体建议(含可执行修复要点, 但强调由人工确认后执行)\"}")
+    user = (f"集群: {p.name}; 版本: {p.kubernetes_version}; 当前阶段: {p.current_step};\n"
+            f"错误: {str(error)[:300]}\n最近部署日志:\n{recent[:2200]}")
+    res = _k8s_ai_call(db, system, user, fallback)
+    res.setdefault("ai_generated", True)
+    if res.get("suggestion") not in ("fix", "retry", "skip"):
+        res["suggestion"] = "fix"
+    return res
+
+
 def _build_report(db: Session, p: K8sClusterPlan) -> dict:
     nodes = db.query(K8sClusterNode).filter(K8sClusterNode.plan_id == p.id).all()
-    return {
+    report = {
         "cluster_name": p.name,
         "kubernetes_version": p.kubernetes_version,
         "runtime": p.runtime,
@@ -1167,6 +1230,25 @@ def _build_report(db: Session, p: K8sClusterPlan) -> dict:
         "master_count": sum(1 for n in nodes if n.host_role == "master"),
         "worker_count": sum(1 for n in nodes if n.host_role != "master"),
     }
+    report["ai_summary"] = _ai_report_summary(db, p, report)
+    return report
+
+
+def _ai_report_summary(db: Session, p: K8sClusterPlan, report: dict) -> dict:
+    """部署完成报告 AI 总结: 集群构成 + 一句话结论 + 后续建议(仅总结, 不执行)。"""
+    fallback = {"ai_generated": False,
+                "summary": f"集群 {report.get('cluster_name')} 状态 {report.get('status')}: {report.get('master_count')} master / {report.get('worker_count')} worker",
+                "recommendations": ["可用 kubectl get nodes 验证节点状态"]}
+    system = ("你是资深 K8s 专家。根据集群部署结果给出一句话结论和后续建议(离线环境)。"
+              "只输出 JSON: {\"summary\":\"一句话结论(≤50字,中文)\",\"recommendations\":[\"建议1\",\"建议2\"]}")
+    user = (f"集群: {report.get('cluster_name')}; 版本: {report.get('kubernetes_version')}; "
+            f"运行时: {report.get('runtime')}; CNI: {report.get('cni')}; 状态: {report.get('status')}; "
+            f"节点: {report.get('master_count')} master / {report.get('worker_count')} worker")
+    res = _k8s_ai_call(db, system, user, fallback, timeout=45)
+    res.setdefault("ai_generated", True)
+    if not isinstance(res.get("recommendations"), list):
+        res["recommendations"] = []
+    return res
 
 
 def _create_platform_datasource(db: Session, p: K8sClusterPlan, api_ip: str) -> Optional[DataSource]:
@@ -1301,5 +1383,29 @@ def precheck_plan(db: Session, plan_id: int, test_ssh: bool = True) -> dict:
             except Exception as e:
                 _add(f"SSH 校验 {label}", False, str(e))
                 ssh_results.append({"node": label, "ok": False, "message": str(e)})
-        return {"ok": not issues, "issues": issues, "checks": checks, "ssh": ssh_results}
-    return {"ok": not issues, "issues": issues, "checks": checks}
+        return {"ok": not issues, "issues": issues, "checks": checks, "ssh": ssh_results,
+                "ai_advice": _ai_precheck_advice(db, p, checks, issues)}
+    return {"ok": not issues, "issues": issues, "checks": checks,
+            "ai_advice": _ai_precheck_advice(db, p, checks, issues)}
+
+
+def _ai_precheck_advice(db: Session, p: K8sClusterPlan, checks: list, issues: list) -> dict:
+    """预检阶段 AI 建议: 汇总检查项, 给出一句话结论 + 可操作建议(仅建议, 不执行)。"""
+    fallback = {
+        "ai_generated": False,
+        "summary": f"预检完成: {len(checks)} 项检查" + (f", 发现 {len(issues)} 个问题" if issues else ", 通过"),
+        "recommendations": issues or ["检查通过, 可直接开始部署"],
+    }
+    ok_count = sum(1 for c in checks if c.get("ok"))
+    check_txt = "\n".join(
+        f"[{'通过' if c.get('ok') else '未通过'}] {c.get('name') or ''}: {c.get('message') or ''}" for c in checks)
+    provider_note = "AI 不可用, 以下为规则摘要" if not _k8s_ai_provider(db) else ""
+    system = ("你是资深 K8s 集群建设专家。根据预检项给出一句话结论和可操作部署建议(离线环境)。"
+              "只输出 JSON: {\"summary\":\"一句话结论(≤40字)\",\"recommendations\":[\"建议1\",\"建议2\"]}")
+    user = (f"集群: {p.name}; K8s 版本: {p.kubernetes_version}; 运行时: {p.runtime}; CNI: {p.cni};\n"
+            f"检查项({ok_count}/{len(checks)} 通过):\n{check_txt[:1800]}")
+    res = _k8s_ai_call(db, system, user, fallback)
+    res["ai_generated"] = res.get("ai_generated", True)
+    if not isinstance(res.get("recommendations"), list):
+        res["recommendations"] = issues or []
+    return res

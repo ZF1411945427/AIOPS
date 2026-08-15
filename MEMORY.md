@@ -4,9 +4,409 @@
 > 项目规则/路径规范/日志位置/前端 Vue 四步/移动端四坑等常驻约定见 AGENTS.md,此处不重复。
 > 字段命名唯一数据源为 **CONTRACT.md**,任何字段变更必须先改 CONTRACT 再同步前后端。
 
----
+## 2026-08-16
+
+### 修复: AI 体检弹窗标题 + 配置优化状态误显
+- 用户报 2 bug: ①点「AI 体检」弹窗标题却写「部署交付报告」 ②「配置优化检查」显示 pending 却像 pass。
+- **Bug①(前端 ComponentStoreView.vue)**: 报告弹窗头部标题/图标/loading 原来硬编码「部署交付报告」; 新增 `reportMode` ref('deploy'/'health'), `runHealthCheck` 设 'health'、`openReport` 设 'deploy'、`closeReport` 重置; 头部标题/图标(🏥/📄)/loading 按 reportMode 动态。
+- **Bug②(后端 component_catalog_service.py)**: `full_health_check` 把 config 状态存在顶层 `result["config_check_status"]`, 但 `generate_ai_health_report` 却读 `config.get("config_check_status")`(config dict 里没有)→ 恒回退 "pending"。修复: ①`generate_ai_health_report` 改读顶层 `res.get("config_check_status")` ②`full_health_check` overall 判定同样改顶层(原 `result["config"].get(...)` 恒 None→config_ok 判断错误) ③`check_config` 状态语义改为 pass/error/drift 分明(原来 error 也标 drift)。前端 statusText 增 drift/error, config badge 用 `ut()`+配色(pass绿/drift&degraded琥珀/error红)。
+- **验证**: install 34(kafka)config 状态从"pending"改为正确的"error", overall=unhealthy; 前端 build 通过; 后端已重启。
+- 学习话术: 把状态字段存 A 处却在 B 处读已异构字段= **Field-Lookup Mismatch(字段取值错位)**; 把"异常"标成"待定/漂移"掩盖真问题= **Status Masking(状态掩盖)**, 应如实呈现 error。
+
+## 2026-08-16
+
+### 部署代理: 离线仓库页维护「代理配置列表」+ 三个部署页下拉选用
+- 用户: "离线仓库要不要加代理配置, 三个部署功能页可以直接选择代理"。确认: 代理**给部署页用(访问公网)非仓库本身**; **离线仓库页维护列表 + 部署页下拉选**。
+- **模型/迁移**: 新表 `deploy_proxies`(`DeployProxy` in models/deliver.py: name/http_proxy/https_proxy/no_proxy/is_default/时间戳); `deploy_plans` 加 `http_proxy`/`https_proxy`/`no_proxy` 三列(models/k8s.py + main.py `_MIGRATIONS`)。
+- **后端**(offline_repo_service.py): `list_proxies`/`create_proxy`/`update_proxy`/`delete_proxy`/`set_default_proxy`(`is_default=True` 先清空其他默认; `_proxy_to_dict`)。离线仓库路由新增 `GET /api/proxies`、`POST /proxies/create|/{id}/update|/{id}/delete|/{id}/default`。
+- **AI 自动部署**(deploy_service.py): `DeployPlan` 支持代理三字段(create/update/_plan_to_dict); 新增 `_proxy_env_prefix(plan)`(生成 `export HTTP_PROXY=...&&export HTTPS_PROXY=...&&export NO_PROXY=...`); 在 `_ai_stream_execute` 主命令 + `_exec_parallel_step` 并行命令前注入代理 env。
+- **前端**: ①OfflineRepoView 新增「📡 代理配置」tab(列表+新增/编辑/删除/设默认弹窗, 仿 registry CRUD)。②中间件 ComponentStoreView: 代理 details 顶部加「快速选用」下拉(applyProxy 填充 http/https/no_proxy, loadProxies on mount)。③K8sOfflineDeployView: 代理 details 顶部加「快速选用」下拉。④AI 部署 DeployView: 新建计划表单加 代理 el-select + http/https/no_proxy 三输入(applyProxy 填充)。
+- **验证**: `deploy_proxies` 表创建成功、proxy CRUD 服务可用(A 默认→加 B 后默认正确切换); deploy_plans 代理三列迁移成功; 前端 build 通过。**注**: 代理列表 CRUD 的前端 UI + 三个部署页下拉均已完成, 用户可刷新使用。
+- 学习话术: 一处维护配置、多处下拉复用= **Shared Config Store / Template Reuse(共享配置模板)**, 与离线/代理解耦= **Infrastructure-as-Config(基础设施即配置)**。
+
+## 2026-08-16
+
+### 离线二次强制校验(接上条): 勾选离线后强制拦截公网拉取命令
+- 用户: "需要"(补拦截)。中间件/AI 部署勾选 use_offline 后, 不再只靠 AI 自觉, 而是**执行前强制拦截公网 docker pull / 公网软件源命令**。
+- **deploy_service.py**(AI 自动部署): 新增 `_offline_blocked_reason(plan, cmd)`(仅 `plan.use_offline=True` 启用) + `_OFFLINE_PUBLIC_IMAGES`(docker.io/registry.hub.docker.com/ghcr.io/quay.io/gcr.io/aliyun/tencent 等) + `_PUBLIC_REPO_HINTS`(archive.ubuntu.com/mirrors.aliyun.com/tuna/huawei/tencent 等)。规则: ①显式公网镜像仓库标记 ②`docker pull/run/create` 后跟**裸镜像名**(无仓库主机)或显式 docker.io → 拦截(`--name x`/`-p` 等 flag 值误报无碍, 安全优先; 带私有主机如 internal.registry/app/x、x.x.x.x:port、localhost:port 一律放行) ③yum/apt 命令含公网软件源 URL → 拦截。在 `_ai_stream_execute` 串行步骤执行处(line ~2437 前)插入 gate: 命中→step 标 failed+输出⛔+continue(不 raise 避免打断生成器)。
+- **component_catalog_service.py**(中间件): 新增 `_OFFLINE_PUBLIC_SOURCES` + `_offline_native_block(script)`; 在 `deploy_stream` native 分支、`use_offline=True` 时于执行脚本前校验, 命中→error+complete failed 返回。(docker 分支镜像已由 resolve_offline_image 走私有仓, 无需另拦)
+- **验证**: `_offline_blocked_reason`——redis:7/nginx/-d mysql:8/docker.io/library/postgres → BLOCK; 192.168.100.2:5000、localhost:5000、internal.registry.local、registry.example.com、docker compose up、yum(未显式公网源)→ allow。`_offline_native_block`——mirrors.aliyun.com → BLOCK, dnf --disablerepo=* → 放行。前端无需改(后端拦截); build 无需; 后端已重启。
+- 学习话术: "勾选即强拦、禁公网"= **Policy Enforcement Gate(策略强制门禁)/ Egress Guard**; 识别裸镜像 vs 私有仓主机 vs flag 值= **Heuristic Command Parsing(启发式命令解析)**, 安全优先宁可误拦不误放。
+
+## 2026-08-16
+
+### 离线仓库(弹药)结合三个部署页(炮台): 全部可选, 不默认关联
+- 用户: "离线仓库怎么结合其他三个部署功能页"; 明确 **不要默认关联, 变成可选**; "全部做"。K8s 已深度结合(11 处), 中间件 0 处、AI 自动部署 0 处是最大割裂点。
+- **公共函数**: `offline_repo_service.resolve_offline_image(db, image, use_offline) -> {image, registry_url, is_insecure, offline}`。开启且默认 Registry 存在: docker hub 简写无 `/`→`{registry}/library/{img}`, 有仓库路径→`{registry}/{img}`(对标 `_load_image_tar` 的 push 格式); 关闭/无仓库→原样。无 DB/关时跳过。
+- **中间件部署**(component_catalog_service): `render_compose` 加 `offline_image` 参数(替换默认镜像); `deploy_stream` 加 `use_offline`(WS 端点 `ws_deploy` 读 `use_offline` query 透传); docker 分支开启时解析离线镜像+为目标机写 `/etc/docker/daemon.json` 的 insecure-registries 并 `systemctl restart docker`(幂等: grep 已含则跳过); `get_deploy_render` 加 `db` 参数+读 `params["use_offline"]`(仅 db 非空时解析); `/api/render` 加 `use_offline` query。
+- **AI 自动部署**(deploy_service): `DeployPlan` 加 `use_offline` 列(模型 k8s.py + main.py `_MIGRATIONS` `deploy_plans:["use_offline BOOLEAN DEFAULT 0"]`); `ai_parse_manual` 在 plan.use_offline 时注入 `_build_offline_hint(db)`(默认 Registry + 活跃包源 source_url)到 user prompt, 强制 AI 生成命令走私有 Registry/本地包源; `create_plan`/`update_plan`/`_plan_to_dict` 支持 `use_offline`。
+- **前端**: 中间件部署弹窗加「📦 使用离线私有仓库(可选)」勾选(仅 docker 显示, `deployForm.use_offline`, 接 renderRecipe/wsUrl); AI 自动部署新建计划弹窗加「使用离线私有仓库」`el-switch`(form.use_offline)。
+- **验证**: `resolve_offline_image` 实测 redis→registry/library/redis:7, bitnami/kafka→registry/bitnami/kafka; `get_deploy_render` 开离线→`image: 10.0.0.5:5000/library/redis:7`, 关→`image: redis:7`; `use_offline` 列迁移成功; 前端 build 通过(28s); 后端已重启。
+- **待定(用户确认中)**: 中间件/AI 部署"勾选离线后"是否要**二次强制命令校验**(拦截公网 docker pull / 公网 yum 源), 目前仅靠 AI 自觉遵守+prep insecure-registry, 未强拦。K8s 部署保持必须离线(不变)。
+- 学习话术: 弹药/炮台解耦、按需接管镜像源= **Registry Mirroring / Source Switcher(镜像源切换)**; 可选不默认= **Opt-in Feature(默认关闭的可选能力)**; 同一能力按页风险设默认= **Per-Module Default Policy**。
+
+
+## 2026-08-16
+
+### K8s 离线部署接入轻量 AI(三处皆"仅建议不改执行", 符合集群高危人工确认原则)
+- 用户: "接1" → 把上一轮分析的 K8s 轻量 AI 三处落地。`k8s_offline_deploy_service.py` 原本零 LLM。
+- **核心约定**: K8s 集群整集群部署属最高危, 所有 AI 只做"建议/诊断/总结", **绝不自动执行命令**(对比中间件部署是"低危自动执行+高危待确认")。
+- **后端**(k8s_offline_deploy_service.py):
+  - 新增 `_k8s_ai_provider(db)` + `_k8s_ai_call(db, system, user, fallback, timeout)`: 复用 `call_llm` + component_catalog 的 `safe_json_parse`, 无 provider/异常回退 fallback。
+  - ① `precheck_plan` 返回加 `ai_advice`(`_ai_precheck_advice`): AI 汇总预检项给一句话结论+建议; AI 可用时 `ai_generated=True`, 否则 `ai_generated=False`(规则摘要)。
+  - ② `_run_deploy_generator` 的 `except Exception` 分支新增 `_ai_failure_diagnosis(db, p, error)`: 取 `p.logs_json` 最近 40 条, AI 给 root_cause/suggestion(fix|retry|skip)/advice, yield `{"type":"ai", ...}` 事件 + `_append_log` 记录; 仅诊断不自动执行。
+  - ③ `_build_report` 返回加 `ai_summary`(`_ai_report_summary`): 集群构成+一句话结论+建议; 只在部署完成 success 路径调用一次(不拖慢详情读取)。
+- **前端**(K8sOfflineDeployView.vue):
+  - `onmessage` 增 `evt.type==='ai'` → 推 AI 诊断日志(`.tline.ai` 紫色)。
+  - `precheck()` 存 `res.ai_advice` → `precheckAdvice` ref, 模板在预检明细下渲染「🤖 AI 预检建议(或规则)」summary+recommendations。
+  - 模板增「📋 集群部署报告」区块渲染 `detail.report`(报告 + `ai_summary`); 注: `_plan_to_dict` 已返回 `report`(含 ai_summary), `detail.report` 直接可用。
+- **验证**: 服务导入/syntax OK; `_ai_precheck_advice` 对真实 plan 1231 实测——AI 正确发现 "Pod CIDR 未设置" 并建议 kubeadm podSubnet=10.244.0.0/16 与 calico IPPool 对齐, `ai_generated=True`; 前端 build 通过(29.7s); 后端已重启。
+- 学习话术: 同一"AI 决策"能力, 中间件=低危自动执行, K8s=仅建议人工执行, 体现 **Risk-Based Autonomy(按风险定自主度)**; 静态编排页加 AI 建议不改执行= **Decision Support(决策支持)而非 Decision Automation**。
+
+## 2026-08-16
+
+### 三部署菜单 AI 互相借鉴: 中间件部署接 AI 自主决策闭环; K8s 加 AI 只出分析
+- 用户确认: 三部署菜单 AI 可互相借鉴; 中间件部署 AI 自主决策**自动执行+仅高危(rollback/high)待确认**; K8s 加 AI **只出分析报告不改代码**。
+- **公共工具**(component_catalog_service.py): 新增 `safe_json_parse(content, fallback)` 统一 LLM 返回 JSON 解析(剥 ```json 围栏+裸 JSON 截取), 并可复用于其他服务; 已重构 `_ai_decision_options`/`_ai_generate_plan` 两处手写 `json.loads(content)` 改用之。
+- **AI 自主决策**: 新增模块级 `_ai_autonomous_decision(db, comp_name, asset_name, deploy_type, system, question, output, history, risk_level, deploy_path, port)` — AI 在 fix/retry/skip/rollback 中自选+修复命令; `needs_confirm = (decision==rollback) or (risk_level=='high')`(呼应 AGENTS.md 高危必审铁律); 无 provider/AI 异常回退 needs_confirm=True。deploy_stream 内新增 `ai_handle_failure` 生成器: 带 attempt 历史(记忆上次决策/结果), 非高危自动执行(fix 跑修复命令→重试 / retry 重跑 / skip 跳过), 高危/rollback/多次失败/无修复命令→`ask_decision` 人工确认兜底。接入 docker compose up 失败、native 安装失败、native 服务未起来(验证)三条失败路径, 处置后统一健康门禁(重新 compose ps / pgrep 校验)。
+- **验证**: `_ai_autonomous_decision` 实测——mysql docker connect refused(medium)→AI 选 retry+fix 命令 needs_confirm=False; kafka native 失败(high)→AI 选 rollback needs_confirm=True(正确暂停等人工)。后端已重启生效; 前端无需改(复用原 decide/ai 事件)。
+- **K8s 部署加 AI 必要性分析**(k8s_offline_deploy_service.py, 1306 行 42 函数, **零 LLM**): 纯离线脚本编排(containerd+kubeadm+离线镜像 tar), 现无 AI; 建议只做**轻量 AI 三处**(见会话报告): ①预检建议(plan 阶段 colKey 按节点环境给建议) ②失败诊断(fix/retry/skip, 复用本会话 _ai_autonomous_decision 同款) ③部署报告/风险。不必要做全自主(离线环境不确定性高+高危), 保持人工确认兜底。
+- 学习话术: AI 决策带历史记忆+分级(低危自执行/高危待确认)= **Graded Autonomy / Human-in-the-loop 分级自主**; 失败诊断+修复+健康门禁闭环= **Auto-Remediation Loop(自愈闭环)**; 静态编排页加轻量 AI= **Assisted vs Autonomous 渐进式增强**。
+
+## 2026-08-16
+
+### 组件商店: 体检改为可读的「AI 体检」(对标部署报告版式)
+- 用户: "体检换成AI体检吧 换成和部署报告一样可读的" → 把原本展示原始 JSON `<pre>` 的四合一体检, 改为像部署报告一样结构化可读的报告。
+- **后端**(component_catalog_service.py): 新增 `generate_ai_health_report(db, install_id)` — 内部调 `full_health_check`(健康/配置/漏洞/AI)后, 把原始 JSON 组织成可读字段: `type='ai_health' / title / status / overall_assessment / executive_summary / kpi(overall_status, health_passed, config_passed, vuln_count, vuln_critical/high, ai_issues, ai_recs, ai_generated, checked_at) / health_section / config_section / vuln_section(rows+status) / issues[] / recommendations[] / risk_assessment`。AI 不可用时规则兜底。组件商店路由新增 `POST /api/installs/{id}/health-report`(component_market.py, import generate_ai_health_report)。
+- **前端**(ComponentStoreView.vue): 安装记录操作列「体检」→「🤖 AI 体检」调 `runHealthCheck(it)`; 新增 `generateHealthReport()`(POST health-report, 成功回写 report-data 并 loadInstalls)。**复用 report-dialog 弹窗**: 顶层 `reportData` 增加 `type==='ai_health'` 分支渲染 AI 体检版式(总体评估+健康/配置/漏洞 section + 问题清单 + 改进建议 + 风险评估), `<template v-else>` 走原部署报告版式; 底栏按钮按 type 显示「🔄 重新体检」。批量体检 `runBatchFullCheck` 改为可读文本摘要。`statusText` 增 healthy/degraded/unhealthy/pending/pass/safe; CSS 增健康徽标色(healthy=绿/degraded=琥珀/unhealthy=红)与 `.report-line`。
+- **坑**: report-dialog 内嵌套 `<template v-if>`/`<template v-else>` 分支时, `v-else` 分支内的 `</div>`(关闭 report-full 父容器)**必须先 `</template>` 再 `</div>`**, 否则 Vue 编译器报 "Element is missing end tag" 构建失败。
+- **验证**: 后端 `generate_ai_health_report(db,34)`(kafka) 输出 title/status=healthy/kpi/各 section/issues/recs 正常; 前端 build 通过(26.8s)。
+- 学习话术: 把机器可读的 JSON 检查结果重排成面向人阅读的分栏卡片报告=**Human-Readable Report / Progressive Disclosure**; 同一弹窗承载两类报告按 type 分支渲染=**Polymorphic Report Rendering**。
+
+## 2026-08-16
+
+### 组件商店: 组件级定制参数模板引擎(param_schema, 真实注入 compose/脚本)
+- 用户: "这么多应用只部署路径一个参数?能不能分别定制化参数" → 确认做**组件级参数模板引擎 + 真实影响部署产物**。
+- **CONTRACT.md**: `component_catalog` 新增 `param_schema`(Text JSON 数组), 每项 `{key,label,type(text/number/password/select/bool),default,required,placeholder,options,hint,env}`; `component_installs` 新增 `deploy_params`(Text JSON, 快照本次部署参数)。env 字段 = compose 环境变量名, 为参数→产物的唯一映射。
+- **后端**:
+  - 模型 ops.py + main.py `_MIGRATIONS` 补列(`component_catalog:["param_schema TEXT DEFAULT '[]'"]`, `component_installs:["deploy_params TEXT DEFAULT '{}'"]`)。
+  - `_BUILTIN_COMPONENTS` 为 mysql/redis/kafka/rabbitmq/nginx/elasticsearch/mongodb/postgresql 定义 param_schema(端口+账号密码+数据目录/副本/JVM 等); `seed_builtin_components` upsert(`item.get("param_schema") or []`), `_comp_to_dict` 返回 param_schema。**改 _BUILTIN_COMPONENTS 必须重启后端 reseed**。
+  - 新增 `render_compose(comp, params, port)`: 按 schema 的 `env` 注入 environment、`db_port` 覆盖映射端口、component 特殊命令(redis `command: redis-server --requirepass`, es `ES_JAVA_OPTS`)、rabbitmq 附加管理端口; `_param_value`(用户值优先, 否则 default, 空/None 跳过)。
+  - 新增 `_inject_native_params(script, comp, params)`: `{{key}}` 占位替换 + `export KEY='val' &&` 前缀。
+  - `deploy_stream` 增 `params` 参数: docker 分支 `params` 非空→`render_compose`, 否则原逻辑; native 分支调 `_inject_native_params`。`get_deploy_render` 同理(按 schema key 过滤 custom_params)。
+  - WS 端点 `ws_deploy` 接收 `params`(JSON query)透传; `record_install` 增 `deploy_params` 落库; `/api/render` 增 `params` query。
+- **前端**(ComponentStoreView.vue): `deployForm` 之外新增 `deployParams` ref; `initDeployParams()`(openDeploy 时按 default 填充); 部署弹窗基础配置区新增 「⚙️ 组件定制参数」区块按 `deployComp.param_schema` 动态渲染(text/number/password/select/bool); `renderRecipe`/`wsUrl` 收集 params(JSON.stringify 传后端)。
+- **验证**: 迁移列存在(`param_schema`/`deploy_params`), mysql 已 reseed param_schema; `render_compose(mysql,{db_port:3307,root_password:secret})` 产出 env+端口覆盖; redis 产出 `command: redis-server --requirepass sekret`; `_inject_native_params` 正确注入 export+占位符。前端 build 通过(26.6s)。
+- 学习话术: 按组件动态渲染表单 + 后端按 schema 生成产物=**Schema-Driven Deployment / Parametrized Provisioning**; 配置模板与参数解耦=**Template + Variable Injection**。
+
+## 2026-08-16
+
+### 组件商店安装记录: 新增「添加到资产」功能(弹窗自动填充+补全, 挂目标机下)
+- 用户: 安装记录加「添加到资产」按钮→弹出添加资产弹窗, 已有的自动填充, 其他字段让用户补全。
+- **决策(问询确认)**: 资产**挂在目标机下作为子资产**(parent_id=安装记录.asset_id, name=组件名, 参照后端 `component_to_asset` 逻辑); 可补全字段=SSH信息(ssh_user/ssh_password/ssh_port)+描述description+标签tags; 资产名可改。
+- **实现(纯前端, ComponentStoreView.vue, 复用已有 `/assets/api/create` 后端接口, 无需改后端)**: 操作列加「➕添加到资产」按钮(v-if running); 新增 asset-dialog 弹窗。`openAddAsset(it)` 自动填充: name=组件名(可改)、ip=目标机ip、ci_type(database/middleware 按 DB_CATS 判定)、port、parent_id=目标机资产、status=online、SSH信息继承目标机 connection_config(解析 ssh_user/ssh_password/ssh_port)、description/tags 预填。`saveAssetFromInstall()` 组装 payload(connection_config 含 container_name=aiops-<name>/component/deploy_type/app_port, ci_attributes 含 source/component/install_id/deploy_type/container)POST `/assets/api/create`, 成功关窗+loadAssets。新增状态 assetFormOpen/assetFormItem/assetForm/assetSaving 与函数 openAddAsset/closeAssetForm/saveAssetFromInstall + 弹窗 scoped CSS。
+- **验证**: 前端 `npm run build` 通过(27s)。后端无需改动/重启。
+- 学习话术: 「已有信息自动填充、仅补全空白字段」=**Prefilled Structured Form / Progressive Disclosure**; 从父资产继承连接凭据生成子资产=**Configuration Inheritance / Parent-Child CI Model**。
+
+## 2026-08-16
+
+### 组件商店部署报告: 升级为落库持久化保存(生成后自动存 DB, 重开不重调 AI)
+- 用户:「生成后就自动保存了吧 除非点击重新生成是吧」→ 确认要**落库持久化**。
+- **数据库**: `component_installs` 表新增 `report_json TEXT DEFAULT ''` 列(模型 ops.py + main.py `_MIGRATIONS` 加 `component_installs:["report_json TEXT DEFAULT ''"]`, 幂等 ALTER 补列)。
+- **后端**(`component_catalog_service.py`): `generate_install_report` 内部加 `_persist(report)` 闭包, 三处 return(无provider兜底 / AI结果 / except兜底)统一 `_persist(...)` 把报告 JSON 写入 `row.report_json` 并 commit。`_install_to_dict` 增加返回 `report_json`。
+- **前端**(`ComponentStoreView.vue`): `openReport(it)` 若 `it.report_json` 已有则 **JSON.parse 直接展示**(不重调 AI); 无则 `generateReport()` 首次生成并存 DB; `generateReport` 成功后把 `report_json` 回写本地 item。仅点「重新生成」才重调接口并覆盖落库。
+- **验证**: 重启后端→迁移成功(`report_json` 列存在)→ `generate_install_report(db,34)` 生成并落库(report_json 长 5406)→ `get_install` 能读回。前端构建通过。
+- 学习话术: 生成物在服务端落库、前端二次读取免重复生成=**Server-side Report Persistence / Cache-then-Regenerate**; 幂等 ALTER 补列=**Idempotent Schema Migration**。
+
+### 组件商店安装记录: AI 可直接交付部署报告(对标 AI 自动部署页报告版式)
+- 用户需求: 部署报告要像「AI 自动部署」功能页(`DeployView.vue` 的 📄 报告 tab)一样**可直接交付**; 方案定为在**安装记录加「📄 部署报告」按钮, 点击后弹窗展示完整版式**; 字段由后端升级 AI 生成。
+- **后端**(`component_catalog_service.py` + `component_market.py`):
+  - 新增 `generate_install_report(db, install_id)`: 读安装记录 + 组件 catalog + 部署事件日志, 让 AI 生成可直接交付字段: executive_summary / deployment_architecture / start_stop_commands / deploy_paths / service_ports / access_methods / login_info / environment / timeline / verification / risk_assessment / recommendations / issues + kpi(阶段/成功/失败/预检/验证/AI决策)。从事件日志自动推算 preflight/verification/ai_decisions/health_overall; AI 不可用时给结构化兜底 base。
+  - 新增路由 `POST /api/installs/{install_id}/report` → `api_install_report`。
+- **前端**(`ComponentStoreView.vue`):
+  - 安装记录操作列加「📄 部署报告」按钮 → `openReport(it)`。
+  - 新增报告弹窗(report-dialog): 头(组件+方式)+ 报告全文(header/状态徽标/meta bar/执行摘要+KPI 卡片/架构/启停/路径/端口/访问/登录/环境表/时间线/验证/风险/建议/问题) + 底部「🔄 重新生成/📝 生成报告」+「关闭」。样式类比 DeployView 报告部分新增到 scoped style。
+  - 函数 `openReport/generateReport/closeReport`, 状态 `reportOpen/reportItem/reportData/reportLoading`。
+- **验证**: 后端重启 + 前端构建通过; 直接调 `generate_install_report(db,34)`(kafka id34 running)成功输出 title/summary/environment/access/ports/paths/commands 等丰富字段。
+- **注意**: `kpi.succeeded_steps` 由 `r.status=='succeeded'` 推算, running/failed 记录会偏低; 属数据状态, 非逻辑错。报告接口经认证(带 token 访问)。
+- 学习话术: 由 AI 生成可交付的多字段结构化报告=**Deliverable AI Report Generation**; 前端弹窗全版式渲染=**Report Rich Template Rendering**。
+
 
 ## 2026-08-15
+
+### Kafka 中间件 native 部署: 补传统方式 → 修复脚本链路 → 平台端到端成功到 133 /data/kafka(含 /data 误清事故)
+- 本轮围绕 Kafka 组件商店部署共 4 个子任务(弹窗/方式/路径上下文/真实部署), 全部落地并验证。
+- **① 部署详情弹窗对齐一键部署**: 详情(replay)弹窗从单栏改为与一键部署同款完整布局(hero 摘要 + 左栏[部署信息只读 + 部署方案] + 右栏[阶段条/预检/日志/AI/报告] + 关闭); `viewInstall` 构造 deployComp/deployForm 使 `genPlan`/`renderRecipe` 可复用; `replayRecipe` 渲染配方。
+- **② Kafka 补「🐧 传统(native)」**: kafka `deploy_types` 原为 `[docker,helm,ha]`、`native_script` 空。改为 `[native,docker,helm,ha]` + 下载二进制/KRaft 脚本。改内置清单经 `seed_builtin_components`(startup upsert)写 DB, **必须重启后端**才生效。⚠️ 踩坑: 默认 `_current_mode="demo"` 用 **db/aiops.db**(非 aiops_real.db), 查错库会误判 seed 未生效。
+- **③ AI 决策门控注入部署路径/端口**: `_ai_decision_options` 增参 `deploy_path/port`, system_msg/user 带上真实路径并约束「命令必须基于该路径、禁止臆造路径包名」; `ask_decision` 调用处传 `deploy_path/port`。
+- **④ 修复 native 脚本执行链路(三层根因)+ 平台端到端部署成功**:
+  - 环境: 133(Rocky9.6, ssh root/123456)能直连 archive.apache.org(200), 下载 113MB tgz 仅 13.4s; 初始无 Java。
+  - 根因1 RHEL 强制 `dnf install -y kafka`(源无此包 → No match): native 分支改为**优先用显式 native_script**。
+  - 根因2 CID 空文件短路: `/data/kafka-cluster.id` 空 → `cat file||random-uuid` 的 `||` 不执行 → format 空 CID 失败 → 启动 "No meta.properties"。改 `CID=$(cat file|tr -d '\n'); [ -n "$CID" ] || CID=random-uuid`。
+  - 根因3 `log.dirs=/tmp/...` 不稳定: sed 改 `/data/kafka/data`, format 仅 `[ ! -f meta.properties ]` 时执行。
+  - **🔴 /data 误清事故**: 早期脚本 `rm -rf $KAFKA_HOME` + bash 引号封装破坏变量 → `/data` 目录被清空(redis/aiops-components/harbor 全丢)。用户**选择不回滚**在空 /data 继续。→ 触发制定 AGENTS.md「高危操作人工审核铁律」(删前必审)。**教训: 部署脚本严禁 rm -rf, 用幂等判断 + mv 改名备份 + `--strip-components=1` 解压**。
+  - **最终安全 native_script(已验证 succeeded)**: 装 JDK → `mkdir` → bin 缺失才下载+strip-components 解压 → 9092 未监听才: sed log.dirs → CID 去换行复用/生成 → format(仅无 meta) → nohup kafka-server-start & sleep 22 → `ss|grep 9092 && UP || DOWN`。**全程无 rm -rf**。
+  - 平台端到端: 预检→安装 UP→验证通过→健康 LISTEN→`COMPLETE succeeded`; 建 topic verify1 成功; 9092 监听; /data=kafka+cluster.id。预检会拦截**端口占用**(重复部署前需释放 9092)。
+- 学习话术: 空文件短路=**Empty-file Short-circuit Bug**; 幂等无破坏脚本=**Idempotent & Non-destructive Deploy**; 端口预检=**Port Preflight Gate**; 上下文注入 prompt=**Contextual Prompt Injection**; 内置清单启动 upsert=**Bootstrap Upsert / Seeded Config Refresh**。
+
+### 组件商店「部署详情」弹窗对齐「一键部署」弹窗(全布局一致)
+- 用户需求: 从「安装记录」tab 点「📖 详情」(`viewInstall`)弹窗要跟「一键部署」弹窗完全一致——含部署信息 + 弹窗所有东西。
+- **现状**: 原来 `viewInstall` 打开的 `replay` 回放工作台弹窗是单栏 exec-col(只有终端+AI+报告), 与一键部署的两栏布局相差很大。
+- **改造**(仅 `ComponentStoreView.vue` 前端, 后端无改动):
+  - 重写 replay 弹窗模板为「一键部署」同款完整布局: `deploy-hero` 深色摘要头(图标+组件名+方式/端口/路径+hero-badge 安装状态徽标+回放状态徽标) → `deploy-body` 两栏: **左栏 config-col**(两个 tab: 部署信息只读展示 `replayInstall` 的目标机/部署方式/部署路径/端口/helm命名空间+Release/组件ID/创建+更新时间; 部署方案) + **右栏 exec-col**(完全复用一键部署: AI决策门控卡(续对话) + phase-bar 阶段条 + exec-tabs[预检/日志/AI建议] + terminal 实时日志 + ai-panel + precheck-panel + report-box) → `modal-foot` 关闭按钮。
+  - JS: `viewInstall` 增加 `currentInstallId=item.id`、`cfgTab='base'`、`execTab='log'`, 构造 `deployComp`(从 comps 找组件或兜底最小对象) 与 `deployForm`(asset_id/deploy_type/namespace/release/deploy_path 均用详情 item 填充) → 使 `genPlan`(AI 生成方案) 与 `renderRecipe` 在详情模式可直接复用; 新增 `replayRecipe(item)` 调 `/render`(host 传空, 后端允许) 填充 `deployRecipe` 供「部署方案」tab 展示; 回放状态继续走原 `startReplay` resume ws 复用 `logs/aiTips/currentStep/precheckChecks/deployReport/decisionPending`。
+- **要点**: 详情弹窗为**只读查看**性质, 底部仅「关闭」; 部署信息直接读 `replayInstall` 字段(`asset_name/deploy_type/deploy_path/port/name_space/release_name/created_at/updated_at`), 不再依赖 deployForm。所有 CSS 类(.deploy-hero/.deploy-body/.config-col/.exec-col/.cfg-tabs-head 等)均复用既有样式, 无新增。
+- **二次反馈修复**: 用户反馈「生成部署方案的 tab 没有了」——详情弹窗「部署方案」tab 原来只有配方展示、没有 AI 生成方案按钮。已改为与一键部署 plan tab 完全一致: `plan-toolbar`(🤖 AI 生成方案 / 🔄 重新生成按钮 + precheckSystem) + `plan-meta`(系统 + AI 生成徽标) + `recipe` 展示(deployPlan.plan 优先, 其次 deployRecipe 配方)。前提是把 `deployComp`/`deployForm` 在 `viewInstall` 构造好, 使 `genPlan` 共用。
+- 前端 build 26.2s 通过; 后端无改动未重启。
+
+## 2026-08-15
+
+### 虚机 11.0.1.133(资产193)不能上网——排查+修复(Docker代理+系统级代理+DNS豁免)
+- 用户报"本地虚机不能上网",资产193 vm-11.0.1.133(Rocky Linux 9.6, K8s master3)。
+- **排查根因(SSH 11.0.1.133 root/123456 diag)**:
+  1. 默认网关 `11.0.1.2` 不可达(ARP **FAILED**, ping Destination Host Unreachable)——虚拟化网段/网关层问题, 虚机内无法根治。
+  2. DNS 指向不通的网关 → 系统级域名解析全挂(`getent hosts mirrors.aliyun.com` 空)。
+  3. Docker daemon 代理指向失效的 `11.0.1.1:7890`(Connection refused)。
+  4. 唯一可用出口 = 代理机 `11.0.1.1:7897`(ARP REACHABLE, curl -x 走 TCP 全部 200/301); **全网无 DNS 服务**(11.0.1.1/11.0.1.2 的 53 UDP 均超时)。
+- **已修复(用户选"系统级代理 + DNS 豁免")**:
+  - Docker daemon(`/etc/systemd/system/docker.service.d/http-proxy.conf`, base64 写入避免引号坑, `.bak` 备份): `7890`→`7897`, daemon-reload + restart docker, **实测能拉新镜像 busybox:1.36**(上行 200)✅
+  - 系统级代理: `/etc/environment` + `/root/.bashrc` 注入 `HTTP(S)_PROXY=http://11.0.1.1:7897` + `NO_PROXY`(**non-interactive SSH exec_command 经 pam_env 也能拿到**, 项目 `_exec_ssh` 命令可用)
+  - dnf/yum 代理: `/etc/dnf/dnf.conf` 加 `proxy=http://11.0.1.1:7897`(native 安装走代理拉包)
+  - DNS 豁免: `/etc/hosts` 硬编码 `223.109.232.35 mirrors.aliyun.com`(让 `getent hosts` 绕过不通 DNS)
+- **验证(全过)**: 调 `precheck_deploy`(demo 库 asset193 + redis id=2, native)返回 **ok=True system=rhel, 8 项全 PASS**, 其中 **DNS 解析(mirrors.aliyun.com)与网络可达(mirrors.aliyun.com)从 FAIL 变 PASS**。Docker 拉新镜像亦成功。
+- **遗留**: 默认网关 11.0.1.2 不可达是虚拟化环境层问题(非虚机内能修), 若需直连外网需在 VM/网关侧确认 11.0.1.x 网段路由; 当前靠代理 11.0.1.1:7897 兜底。
+- 学习话术: 虚机上不了网先分层定位(**网络栈分层**)——网关可达性(ARP/route) → DNS 解析(getent) → 出口代理(代理机是否通、daemon/系统/包管理器三层代理是否一致); Docker 失效代理地址=**Dead Proxy Config**; 网关 ARP FAILED=**L2 Connectivity / Gateway Unreachable**; non-interactive 继承系统代理=**pam_env / /etc/environment**; hosts 兜底解析=**DNS Pin / hosts fallback**。
+
+### 组件商店安装改造: K8s 风格实时终端 + AI 辅助部署(WebSocket)
+- 用户需求: 把组件商店安装改造成像 K8s 部署那样——带实时终端显示 + AI 辅助的安装模式。
+- **形态确认** (用户选): 部署过程**实时 AI 建议**(每阶段后 AI 输出建议/失败诊断) + 阶段条 + 实时终端日志 + 停止按钮; 覆盖**全部四种方式**(docker/native 真实执行, helm/ha 虚拟阶段+AI建议)。
+- **后端** `component_catalog_service.py` 新增:
+  - `_ai_deploy_tip`(call_llm 生成阶段 AI 建议, 无 provider/解析失败降级 `_rule_deploy_tip` 规则提示) / `_get_deploy_provider`
+  - `deploy_stream(...)` 生成器式实时部署(对标 K8s run_deploy): 逐个 yield `status/phase/log/ai/complete/error` 事件; 分 5 阶段(预检/代理/生成配方/执行/验证), 每阶段后 `ai(tip)`; docker/native 真实执行, helm/ha 虚拟; 各阶段检查 `_DEployStop[install_id]`(threading.Event) 支持取消
+  - 模块级 `_DEployStop` + `register_deploy_stop(cancel_deploy)`; `_exec_native` 已在 service 内实装(直接 `_exec_ssh` + 脚本, 不再依赖 router 的私有函数)
+- **后端** `component_market.py` 新增:
+  - `GET /component-market/ws/deploy`(WebSocket, **Query 传参**): accept 后启动 producer 线程逐个 send_event(install_id 关联/DB 回写状态), 主协程 receive_text 收 `{"type":"stop",...}` 取消; 断开 WS 不停止后台
+  - `POST /component-market/api/deploys/{install_id}/stop`(取消)
+- **前后端联通**: 前端部署弹窗改 K8s 风格(阶段条 `phases[5]` + `.terminal` 实时日志 + `.ai-panel` AI 建议 + `■ 停止` 按钮), WS url 用 query 拼 `component_id/asset_id/deploy_type/...`; AI 事件标签 `ai_generated` 徽标。
+- **🔴 踩坑(重要)**: ws 端点若用**字符串注解 `websocket: "WebSocket"` + 函数内 import WebSocket** → uvicorn 握手一直 **403**, 而 `/k8s-offline/ws`、`/deploy/ws` 等(顶层 import + 正常注解)都 101。**原因** FastAPI 无法把该 route 识别为 websocket handler。修复: `component_market.py` 顶部 `from fastapi import ... WebSocket, WebSocketDisconnect` + 签名 `websocket: WebSocket`。已在 CONTRACT 记入。
+- **验证(全过)**: helm 虚拟部署 WS 全事件流(status/phase/log/ai/complete=deployed, AI 建议 `ai_generated=True` 真实生成, install_id=13, DB deploying 正确回写); docker 真实部署(资产192 redis): 实时终端完整显示 Docker 探测→拉镜像→up→验证, **AI 连续 3 条建议**(preflight"Docker环境正常"/deploy"镜像拉取成功容器创建失败"/fail"端口或配置冲突"), 容器未进 Up(目标机 6379 占用, 环境问题非 bug)已 `failed` 回写; 回归 /healthz /menu 200, 后端日志 0 ERROR; 前端 build 22.2s; dev 3000 运行; 测试记录已清理。
+- 学习话术: 同步阻塞部署→异步流式推送 = **Streaming / Generator-based Task Execution**; ws 路由识别失败=**Route Type Hint / ASGI scope mismatch**。
+
+### 组件商店部署弹窗视觉/布局完全对齐 K8S(详情/部署式)
+- 用户要"弹窗改造成跟 K8S 部署一样: 表单流程/位置布局/tab 长得一样", 并规划以后把 K8S 部署、AI 自动部署、中间件部署统一放资源管理。
+- 只改部署弹窗为 K8s「详情/部署」式布局(用户选择):
+  - 结构: `modal-overlay` + `modal-box wide`(960px, max-width 92vw) + `modal-head`(图标+状态徽标) → `modal-body` → **deploy-actions(kv 信息条)** → **form-grid(3列, 对齐 K8s)`** → proxy-block(details) → 配方预览 → **phase-bar(阶段条)** → **precheck-panel** → **terminal + AI 建议面板两列** → report-box → `modal-foot`(**逻辑预检 / ■停止 / ▶开始部署 / 完成**)。
+  - 样式新增 `.modal-overlay/.modal-box wide/.modal-head/.modal-body/.modal-foot/.form-grid/.form-row/.deploy-actions/.status-badge/.req/.hint`, 与组件商店原有 `.terminal/.phase-bar/.precheck-panel/.report-box` 共存(后者样式覆盖为 K8s 观感)。
+- 部署方式改为 select 下拉(`@change=renderRecipe`), 替代原按钮组; openDeploy 末尾自动 `renderRecipe()` 首渲染; 目标机 change 也重渲染配方。
+- computed 新增: `currentAssetNameShort`、`deployStatusText`(待部署/部署中/成功/失败/已体检)、`deployStatusClass`(draft/running/succeeded/failed→status-badge)。
+- 前端 build 22.5s 通过; 后端无改动未重启。后续统一资源管理时, 各部署入口可共用此布局(见 CONTRACT 组件商店实时部署契约)。
+
+### 资源管理新增「交付部署」分组, 统一收口部署类能力
+- 用户确认: 资源管理下新建「交付部署」分组, 收 K8S 部署/AI 自动部署/中间件部署/离线仓库 4 项; 中间件部署从技能中心 tab 拆成独立页面; AI 自动部署从 Agent 管理挪走。
+- **menu_config.json**: resource 组新增 `delivery-deploy` 分组(描述"交付部署"), 含 4 个叶子(k8s-cluster-deploy / middleware-store / ai-deploy / offline-repo, 均为 type=vue); 从 Agent 管理移除 ai-deploy, 从 K8s资源 移除 k8s-cluster-deploy, 从 资产管理 移除 offline-repo。
+- **AppLayout.vue**: 新增 `middleware-store` 分支(→ `ComponentStoreHostView`) + defineAsyncComponent import + VUE_PAGES set 补 `middleware-store`。K8s/AI/离线仓库的 activeView 分支本就存在(410/412/413 行)。
+- **新增 `ComponentStoreHostView.vue`**(独立页面包裹 ComponentStoreView); **SkillCenterView.vue** 移除「📦 组件商店」tab(现只剩 技能库/技能市场/组件方案)。
+- **权限**: 组件商店之前无菜单, admin 角色 `role_menus` 需新增 `middleware-store`(用脚本补, admin 现 138 项)。k8s/ai-deploy/offline-repo 的 key 未变故 role_menus 无需动; operator/viewer 的 role_menus 为空(不限)。
+- **验证**: menu_config JSON 合法、无同层 key 冲突; `/api/menu` 返回 resource 含 4 分组, delivery-deploy 含 4 项, aiops 组已无 ai-deploy; 前端 build 24.5s, 产物含 AppLayout(middleware-store 分支)+ ComponentStoreHostView chunk; 后端重启后 healthz 200、日志 0 ERROR。
+- 学习话术: 菜单统一收口交付类=**Menu Taxonomy / Navigation Consolidation**; vue 页面菜单需同时登记 AppLayout 分支 + VUE_PAGES + role_menus(三处一致, 否则可见不渲染/渲染不可见)。
+
+### 中间件部署弹窗视觉优化(深色摘要头 + 两栏分区卡片)
+- 用户反馈之前两栏/全堆式弹窗"不好看" → 重设计部署弹窗为专业后台美学(非营销动效):
+  - **深色渐变摘要头部** `.deploy-hero`: 组件 emoji 图标框 + 标题/版本/描述 + 方式标签组(含端口徽标) + 状态徽标(大号圆角) + 关闭 → 背景 `linear-gradient(135deg,#0f172a→#1e293b→#312e81)`
+  - **两栏主体** `.deploy-body`(grid 36%/64%): 左=配置栏(白色卡片, 目标机/方式按钮组 mode-btn/路径/helm 命名空间/代理折叠/配方折叠); 右=执行栏(灰底, 阶段条/预检/实时终端/AI 建议/报告)
+  - **折叠收敛**: 配方 `.recipe-block` 与代理 `.proxy-block` 都用 `<details>`(▸ 箭头旋转), 减少视觉噪音
+  - **方式选择** 用 `.mode-grid` 按钮组(两列, 激活态 indigo 渐变 + 阴影)替代下拉, 更直观
+  - 表单控件 indigo 焦点环(`box-shadow 0 0 0 3px rgba(99,102,241,.12)`), 卡片圆角 10-14px, 阴影柔和
+- 模板引用复用已有 `selectDeployType`(mode 按钮切换), `currentAssetNameShort` 保留未用。
+- 前端 build 24.3s 通过; 纯前端改动后端未重启。旧样式类(deploy-workspace/form-grid 等)残留但不再被模板引用(无害)。
+
+## 2026-08-15(第二次会话续)
+
+### 部署核心 Bug 修复 + AI 失败诊断 + AI 交付版部署报告
+- 用户指出"部署 redis 失败但显示成功/服务器无 redis 进程", 还要求 "AI 能自我察觉问题" + "部署报告用 AI 生成可直接交付版本"。
+- **🔴 核心 Bug(Shell 管道退出码陷阱)**: `__RC__=$?` 放在 `CMD 2>&1 | tail -30` 之后, `$?` 取的是 `tail` 的退出码(永远 0) → 部署失败恒判成功。
+  - 修复三处(docker api_deploy 754 / docker deploy_stream / native deploy_stream): 改用 `OUT=$(CMD 2>&1); RC=$?; echo \"$OUT\" | tail -30; echo __RC__=$RC`(真取 CMD 退出码)。
+  - **`_exec_ssh` 判断修复**(`out != "" or err == ""` 恒真): 新增解析 `__RC__=N`, 有标记则 `ok = (N==0)`, 否则退回旧逻辑(兼容其他调用方)。
+- **native 部署后验证**: 新增 `_NATIVE_VERIFY` 字典(name -> (探测命令, 成功关键字)), 部署后**必须验证服务真正起来**(redis-cli ping/systemctl/ss 端口), 否则标 failed(不再误判 running)。
+- **AI 失败诊断(自我察觉)**: 新增 `_ai_deploy_diagnosis` —— 失败时把完整日志喂 LLM, 输出 `{root_cause, steps[], risk, summary}`, yield `ai` 事件(stage='diagnosis')。
+- **AI 交付版报告**: 新增 `_ai_final_report` —— 部署完成(yield `report` 事件, 含 conclusion 即交付版)输出 `{conclusion, root_cause, executed, impact, next_steps[], risks[], overview}`, 可直接交付客户/团队。
+- **deploy_stream** 内新增 helpers `diag(error_hint, phase)` / `final_report(status, logs, health)`, 5 处失败分支全部由 `ai("fail")` 改为 `diag(...)`。
+- **前端** ComponentStoreView: AI 面板支持 `.ai-tip.diagnostic`(红系诊断卡, root_cause+编号步骤); report 事件区分「交付报告(deliverable)」与「四合一体检」, 交付报告卡(结论/根因/已执行/影响/下一步/风险渲染), openReportRaw 展示对应 JSON; build 22.7s。
+- **多轮实测(用户要求多测)**: ① docker redis(6379被系统redis占) → AI 诊断"容器名 aiops-redis 已被旧容器占用" + 修复步骤 ✓; ② clickhouse docker 成功 → **交付报告**(conclusion="...Docker部署成功", executed, next_steps) + 四合一体检 healthy ✓; ③ kafka native 无脚本 → 预检拦截 failed ✓; ④ 11.0.1.133 redis native → **AI 诊断"yum安装redis失败后尝试apt-get但系统无此命令"+移除apt-get回退建议 ✓(不再误判 running)**。
+- 修正历史误判记录: 18/19(native 实为失败)改为 failed; 清理测试失败记录(20/22/23); 保留 21(clickhouse running)。
+- 学习话术: Shell 管道 `$?` 语义=**Pipeline Exit Status / PIPESTATUS**; 部署后服务级验证=**Post-deploy Service Liveness Probe**; 失败喂日志给 LLM=**Root-cause Diagnosis via LLM / Agentic Self-healing**; 交付报告=**AI-Generated Deliverable Report**。
+
+### AI 决策门控(人机协同审批): 异常时 AI 出 2 方案 + 用户自定义并选后执行
+- 用户要求 "就像你问我一样": 实际执行脚本拿不准/错误时, AI 判断生成方案, 让用户选(或自定义输入), 再执行下一步(LLM-in-the-loop 门控)。
+- 目标确认: 异常时自动触发 + 支持手动(预留); AI 生成 **2 方案 + 1 用户自定义**; **不设超时一直等**。
+- **后端机制**(component_catalog_service.py):
+  - 模块级 `_DECISION_REG`(install_id -> {id, event:threading.Event, result}) + `register_decision` / `resolve_decision`(前端回包写 result+set event, 防错 ID 匹配)。
+  - `_ai_decision_options(db, comp, asset, context, question)` 调 LLM 生成 ≤2 个 `{key,title,detail}` 处置方案(无 provider 降级规则方案)。
+  - `deploy_stream` 内 `ask_decision(question, context)` 生成器: 生成方案 → `yield {type:'decide', id, install_id, question, options, free:true}` → 阻塞等前端选择(轮询 cancelled 支持停止)→ 返回用户选择。调用处用 `choice = yield from ask_decision(...)`。
+  - **接入点(异常触发)**: ① docker compose up 失败 → ask_decision → 执行所选命令 → 重新 up; ② native 脚本执行非零 → ask_decision; ③ native 服务验证未通过 → ask_decision → 执行所选 → 重新验证。
+- **ws 端点**(component_market.py): receive 循环新增处理 `{type:'decision', install_id, id, choice}` → `resolve_decision(...)` 唤醒部署流。import resolve_decision。
+- **前端** ComponentStoreView: 状态 `decisionPending`; onmessage 收到 `decide` 事件 → 置顶弹 **AI 决策卡片**(`.decision-card` indigo 渐变): 问题 + 2 个 AI 方案按钮(标记 A/B, hover 抬升) + 自定义命令输入; 选择后 WS 回发 `{type:'decision',...}`。startDeploy/stopDeploy 重置。
+- **验证**: 库级端到端(mock precheck 通过 + mock compose up 失败)→ **decide 事件带 2 AI 真实方案**("方案A 停止移除占用6379的进程"/"方案B 改映射端口6380:6379") → resolve_decision 返回 True 并唤醒 → 部署流继续执行所选 → complete failed, 线程正常结束(无死锁)。SSH 不稳时预检如实拦截(证明预检有效)。
+- **⚠ 注意**: 资产192(39.106.16.32)SSH 偶发 `No existing session`(目标机侧/并发问题, 非代码), 会致预检失败; 需等 SSH 稳定或减少并发连接。
+- 学习话术: 部署中 AI 出策+用户选=**Human-in-the-loop Decision Gate / Agentic Approval Flow**; 生成器阻塞等外部回执=**Generator Suspension via threading.Event + WS round-trip**。
+
+### 决策门控自测通过(14/14 + 自定义方案)
+- 综合自测 3 轮全部 PASS: ① AI 生成 2 方案 + 失败诊断; ② 决策门控完整闭环(失败→decide 事件(2 方案)→回包 resolve_decision→部署流继续→complete, 无死锁); ③ 成功路径 complete=succeeded + AI 交付版报告(conclusion/next_steps) + 四合一体检。
+- 修复 1 个 FAIL: `_ai_decision_options` 原在 LLM 只返回 1 个方案时不足 2 个 → 改为**不足则用 fallback 补足到 2 个**(并过滤空 title/detail), 保证前端始终 ≥2 个 AI 方案可选。
+- 补测「用户自定义方案路径」: 输入自定义命令 `ss -lntp | grep 6379 && kill...` → resolve_decision ok → 部署流接收自定义选择并继续, 线程正常结束(无死锁)。
+- 前端产物含决策卡片(ComponentStoreHostView chunk); 本次后端 0 ERROR; 记录已清理(仅剩 clickhouse running + 历史 failed)。
+
+### 修复 deploy_path 实际未贯穿 + 代理注入条件 bug
+- 用户质疑"部署路径是不是没用" → 核实: 部署阶段(写 compose / cd / docker compose up)确实用 deploy_path, 但 **预检(precheck_deploy)完全不用它**、且旧 `deploy_docker` 代理注入条件写错。
+- **代理注入条件 bug 修复**(旧 `deploy_docker` 744): 原 `if deploy_path:`(填路径才注入代理) → 改为 `if http_proxy or https_proxy:`(配了代理才注入, 与路径无关)。deploy_stream 里的条件本来就是对的。
+- **预检真正用 deploy_path**: `precheck_deploy` 新增 `deploy_path` 参数; 磁盘检查由硬编码 `/data` 改为**目标路径的父目录**(`df -m "$(dirname '<path>')"`, 不创建目录, 保持无副作用); 新增「**部署路径可写**」item(docker 时 `mkdir -p && [ -w ] && touch 探测`)。
+- **贯穿链路**: precheck REST 端点 + deploy_stream 内 precheck 调用 + 前端 runPrecheck 请求体 都传 deploy_path; ws 端点已默认 `deploy_path or /data/aiops-components/<name>`。
+- 验证: precheck 现返回 8 项含「部署路径可写」; `precheck_deploy`/`deploy_stream` 均含 deploy_path 参数; 后端 0 ERROR。
+- 学习话术: 预检与部署共用同一输入字段=**Preflight/Deploy Input Consistency**; 代理注入条件=**Guard by Capability not by Side-effect (看是否配置代理而非看路径)**。
+
+### 部署方案 AI 生成 + 系统类型识别
+- 用户要求: "部署配方预览"改名成"部署方案", 且**先预检判断系统类型再 AI 生成方案**(可展示 + 可执行)。
+- **系统类型识别**(precheck_deploy): SSH 探测 `cat /etc/os-release`(grep `^ID=` 用 `l.startswith(\"ID=\")` 精准提取, 避免 VERSION_ID 误匹配) + `which yum/apt-get/dnf`; 得 `system`(rhel|debian|alpine|centos|unknown) + 包管理器; 返回 `{..., system}` 并加「目标机系统」预检项。
+- **AI 生成部署方案** `_ai_generate_plan(db, comp, deploy_type, system, target, port)`: 把系统类型喂给 LLM, 生成可直接执行的命令序列(yum/dnf vs apt-get vs apk 按系统选); 返回 `{ai_generated, kind, system, title, plan}`; 无 provider/失败降级规则方案。
+- **deploy_stream 阶段2**: 预检后拿到 `pc["system"]` → `_ai_generate_plan` → `yield {type:"plan", ...}` + 逐行推日志; title 改"生成部署方案(AI)"。
+- **REST 端点** `POST /component-market/api/plan`: 先 precheck 拿 system 再 AI 生成(供前端「生成方案」按钮)。
+- **前端** ComponentStoreView: 「部署配方预览」→「📋 部署方案」折叠(展示 system 徽标 + AI 生成标记 + 命令); 新增「🤖 AI 生成方案」按钮(调 /api/plan) + `precheckSystem`/`deployPlan`/`generatingPlan`; onmessage 处理 `plan` 事件。
+- **验证**: 库级 redis native 分系统: rhel→`dnf install -y redis`/`systemctl enable --now redis`; debian→`apt-get update && apt-get install -y redis-server`/`redis-cli ping` 均 ai_generated=True; REST nginx native 曾返回 system=centos + `yum install -y nginx` 方案。后端 0 ERROR, 前端 build 22.7s。
+- **⚠ 注意**: 资产192 SSH 高度不稳定(多次 `No session`/timed out), 导致 precheck/plan 偶发超时——目标机侧问题非代码; 曾一次成功拿到 system=centos。
+- 学习话术: 按发行版生成可执行命令=**Distro-aware Provisioning / AI-generated Runbook**; os-release+包管理器探测=**OS/PM Detection via /etc/os-release**。
+
+### 修复: 部署「展示 dnf / 实际执行 yum||apt」不一致(核心矛盾)
+- 用户贴日志: 阶段2 AI 方案显示 `dnf install -y redis`(系统 rhel), 但阶段3 实际执行 `yum install -y redis || (apt-get update && apt-get install -y redis-server)`(组件内置一刀切 native_script)→ 失败 __RC__=127(apt-get 不存在) → 触发决策门控。
+- **根因**: AI 生成的方案只展示, 执行阶段仍用组件内置 `yum install || apt-get` 一刀切脚本(与该机系统不匹配)。
+- **修复**(deploy_stream native 分支): 按 precheck 探测的 `system` 选择包管理器命令, 不再用一刀切:
+  - `debian/ubuntu` → `apt-get update && apt-get install -y <name>`
+  - `rhel/centos/alma/rocky` → `(command -v dnf && dnf install -y <name>) || yum install -y <name>`
+  - 未知系统 → 回退组件既有 native_script
+  - 无脚本且系统未知 → 报错
+- 执行日志现在标注: `按系统类型(rhel)执行安装: ...`, 与阶段2 展示的 AI 方案**一致**(同系统 → dnf/yum)。
+- **验证**: 库测 rhel native 执行命令=`(dnf||yum) installer redis`, `yum||apt 一刀切=False`(已消除); 后端 0 ERROR。
+- ⚠ 注: target 192 SSH 不稳会致 precheck 抖动; 库测用 mock 验证逻辑不依赖真机。
+
+### 🔴 核心修复: native 验证 `inactive` 子串误判 → "没装成功却标 running"
+- 用户核对最新记录: redis native (asset193) status=running 但实际 dnf 装 redis 失败(DNS 解析 mirrors.aliyun.com 失败 `__RC__=1`) → 决策门控用户选"使用EPEL源"(被当 shell 命令执行 → command not found) → 验证却"通过:inactive" → 误标 running。
+- **根因(子串匹配陷阱)**: 判断 `any("active" in vout)` 里 `inactive` 含子串 `active` → 误判通过; 且验证命令无明确成功/失败标记。
+- **修复**:
+  1. `_NATIVE_VERIFY` 全部重写为**统一产出 UP/DOWN 标记**(每个命令末 `&& echo UP || echo DOWN`; redis 用 `redis-cli ping | grep PONG` 或 `systemctl is-active | grep -xq 'active'` 精确匹配); 默认 unknown 分支改为 `(pgrep|pidof) ... echo UP || echo DOWN`。
+  2. passed 判断(两处 1767/1783)= `("UP" in vout) and ("DOWN" not in vout)`(只看成功标记, 杜绝 inactive 子串误判)。
+- **验证(单元)**: DOWN→False, UP→True, **inactive→False(旧 bug 消除)**, 默认进程存在→True, 全对。
+- 修正记录 24: running→failed(实际未装成功)。
+- 学习话术: `inactive` 含 `active` 子串=**Substring-match False Positive**; 改为显式成功标记 UP/DOWN=**Sentinel-based Liveness Check**。
+
+### 决策门控升级: 用户自定义"意图"由 AI 转成可执行命令
+- 用户问"AI 不能问我是否配置吗" → 澄清: 决策门控**已问**且 AI 给出针对"配置源"的方案(方案A=禁用 docker-ce-stable 源再装 redis; 方案B=修复 DNS `echo nameserver 223.5.5.5`)。但用户若**点自定义输入填中文意图**(如"使用EPEL源安装Redis")会被**直接当 shell 命令执行** → command not found。
+- **修复**: 新增 `_ai_intent_to_command(db, comp_name, intent_text, context)` —— 用户自定义文本若**含中文**(`_contains_cn`)先交 AI 转成一行可执行命令; 纯命令原样返回。deploy_stream 内新增 `exec_choice(choice)` helper(含中文→AI 转命令→执行), 三处决策执行(1723 docker / 1792 native 失败 / 1817 native 验证 rerun)统一改用它。
+- **验证**: 中文意图"使用EPEL源安装Redis并启动服务" → AI 转成 `dnf install -y epel-release && dnf install -y redis && systemctl start redis && ...`; 纯命令原样。后端 0 ERROR。
+- 学习话术: 自然语言处置意图→shell 命令=**Natural-Language-to-Command (Intent → Command) via LLM**; AI 现成命令本地执行 + 自定义输入经 AI 翻译 = **Dual-mode Decision Execution**。
+
+### 修复 2: ①传统部署却被 AI 建议 docker ②目标机下拉列全部资产
+- **① 决策门控没带部署方式/上下文**: 用户选「传统部署(native)」但失败后 AI 决策却给"检查并启动Redis容器(docker ps/run)"方案 —— 牛头不对马嘴。
+  - 根因: `_ai_decision_options` 原不接收 deploy_type/system; `ask_decision` 也没传, AI 不知道是 native, 惯性按 docker 讲。
+  - 修复: `_ai_decision_options` 加 `deploy_type`/`system` 参数, system prompt 强约束"严格围绕【deploy_type】方式处置, docker 时才用 docker 命令"; `ask_decision` 传 `deploy_type` + `pc["system"]`。
+  - **又踩变量名坑**: 1359 把 AI 的 system message 用了参数 `system`(系统类型字符串)当 role content → prompt 变成 "rhel" → LLM 不返回 JSON → 全 fallback。修复: 用 `system_msg`。
+  - 验证: native+rhel 决策给"修复DNS并重装redis/使用本地缓存安装"(docker提及=False); 不再建议 docker。
+- **② 目标机下拉显示全部资产**: `/assets/api/list` 全量(174 ssh + kubernetes/database/http 等), 且含 k8s 命名空间/服务杂项(`default/adservice`、`kube-system`)——不能部署中间件。
+  - 修复(前端 loadAssets): 只保留 `connection_type==='ssh'`(剔除非 ssh 类型)且 `id && ip` 且名字不含 `/`(剔除 k8s 命名空间); 下拉标注 offline。
+- 后端 0 ERROR; 前端 build 22.97s; 已重启后端。
+
+### 修复: AI 生成部署方案未结合部署路径(deploy_path)
+- 用户问"部署路径 AI生成部署方案没加进去吗" → 核实: `_ai_generate_plan` 原无 deploy_path 参数, AI 方案完全忽略用户填的路径(如 /data/redis1)。
+- 修复: `_ai_generate_plan` 加 `deploy_path=""` 参数; fallback 头部打印部署路径; system/user prompt 要求"结合部署路径, 命令含 mkdir -p <path> / 数据落盘到该路径"。调用处 deploy_stream 阶段2(1726)与 REST /api/plan(component_market.py 118)都传 deploy_path; 前端 genPlan 已传。
+- 验证: native + deploy_path=/data/redis1 → AI 方案含 `mkdir -p /data/redis1`/`chown redis:redis /data/redis1`/`sed -i 's|^dir .*|dir /data/redis1|' /etc/redis.conf`(数据目录改到该路径)。
+- 学习话术: 部署路径作为方案约束输入=**User-Provided Path as Provisioning Constraint**; AI 方案体现落盘/数据目录=**Path-Aware Runbook Generation**。
+
+### 预检加网络连通性检查 + 安装记录可查看执行详情
+- **预检网络检查**(用户问"预检测网络通不通吗", 之前不测 → 已加): precheck_deploy 新增 #4.5 网络连通段:
+  - docker → 测 `registry-1.docker.io`; native → 测 `mirrors.aliyun.com`
+  - 三项: `DNS 解析(<host>)`(getent hosts) + `网络可达(<host>)`(curl -I https) + 配代理时 `代理可达(<host>)`(curl -x proxy)。
+  - 实测资产193 native: **「DNS 解析(mirrors.aliyun.com)」=> False "无法解析(网络/DNS 问题)"** —— 精准抓住该机 mirrors.aliyun.com 解析不了的真实问题(正是之前记录24 部署失败根因)。
+- **安装记录可点开查看执行详情 → 升级为「完整部署工作台回放 + 可续 AI 对话」**(用户需求: 部署时关了窗口/要回看历史, 且 AI 还在等决策要能续)**:
+  - 后端: ComponentInstall 表加 `events_json`(Text, 部署完整结构化事件 JSON 数组; 手动 ALTER 补列, main.py 幂等迁移未自动补) + `_append_install_event`/`get_install_events`。
+  - ws 端点(component_market.py ws_deploy)支持 **resume**: query 带 `install_id`+`resume=1` → 回放 `events_json` 历史事件(status/phase/precheck/ai/decide/log/report/complete, 标 `resumed`/`resume_phase`), 并若该 install 有**未决 pending decision**(`_DECISION_REG` 未 set)推送最新 decide 标 `resumed_decision` 供前端**续决策回包**(复用 resolve_decision, 后台部署仍继续跑)。新建部署时逐事件 `_append_install_event`。
+  - 前端: 记录卡「📖 查看执行」→ `viewInstall` 调详情 + 打开**回放工作台弹窗**(复用 exec-col: AI决策/阶段条/预检/终端/AI建议/报告), 连 `ws/deploy?resume=1&install_id=` 回放历史 + 续决策(`submitReplayDecision`)。状态: replayOpen/replayInstall/replayWs/replayDone/replayConnecting, 复用 logs/aiTips/decisionPending/currentStep/precheckChecks/deployReport。
+  - 验证: 往记录24写6个事件 → ws resume 回放 `['status','phase','precheck','ai','decide','log','resume_done']`, 含续到 AI 决策(options=2); 后端 0 ERROR; 前端 build 38s。
+- 学习话术: 部署事件持久化回放 = **Event Sourcing / Audit Replay**; ws resume 按 install_id 续未决决策 = **Resumable Session / Reconnect Decision Continuation**。
+
+### 部署弹窗减挤: 执行区改分栏 Tab
+- 用户反馈"部署弹窗还是太挤" → 右栏(执行区)原来从上到下堆 6 块(AI决策/阶段条/预检面板/终端/AI建议/报告)。
+- 优化: 右栏改为 **分栏 Tab**: `🖥 日志 | 🤖 AI建议(带数量角标) | 🩺 预检/报告`, 同一时间只显示一块; AI 决策卡(最重要)与阶段条**常驻顶部不被 Tab 藏住**; 终端/AI/预检面板各自下滚动(`term-body-lg`/`ai-panel-lg`/`check-tab` 限高)。
+- 新增 `execTab` 状态(默认 'log'), openDeploy/startReplay 重置; 样式 `.exec-tabs-head/.exec-tab/.tab-badge`。
+- 前端 build 48.8s; 后端无改动。
+- 学习话术: 高密度信息区用**Segmented Tabs / Progressive Disclosure**(分 Tab 折叠非主信息, 常驻关键控件)。
+
+### 配置区也改 Tab + Tab 按部署流程排序
+- 用户: "部署方案也分到tab吧(后期配置项不止安装路径)", 且 "tab顺序按部署流程排"。
+- 左栏配置区改 **Tab**: `基础配置 | 部署方案`(state `cfgTab`, 默认 base); 代理并入「基础配置」details; 部署方案独立 Tab(AI 生成按钮/系统徽标/命令); 便于未来扩展参数/环境变量/卷/资源 Tab。
+- **Tab 顺序按部署流程**: 左栏 基础配置→部署方案; 右栏(执行)重排为 **预检 → 日志 → AI 建议**(原 日志|AI|预检报告; 预检提前)。整体= 配置→方案→预检→日志→AI报告。
+- 修复 build 失败: 左栏替换时多写一个 `</div>`(提前闭合 deploy-body) → 删除。
+- 前端 build 1m5s; 后端无改动。
+- 学习话术: 左右分栏各自用流程顺序 Tab = **Extensible Config Tabs**(为后续配置项扩展预留结构)。
+
+### 修复: 「查看完整报告」弹窗被部署弹窗遮挡(只黑屏无内容)
+- 现象: 在部署弹窗(replay/deploy)里点「查看完整报告」→ 只有背景变黑, 报告内容不显示。
+- 根因: resultView 弹窗 `.mask` z-index=100, 部署/replay 弹窗 `.modal-overlay` z-index=1050 → 部署弹窗盖住报告弹窗(只见 report 的黑遮罩从四周透出)。
+- 修复: `.mask` z-index 100 → **1100**(高于 1050), resultView 报告弹窗正确叠在部署弹窗之上。
+- 前端 build 34s; 后端无改动。
+
+### 安装记录改为 K8S 式表格列表(照抄 K8S 部署)
+- 用户吐槽"安装记录做的一塌糊涂, 不如当组件目录点击一键部署→生成部署计划→直接照抄K8S部署"。确认: 保留「组件目录」tab, **安装记录改成 K8S 式表格列表**(照抄 K8S 离线部署页的表格+详情弹窗)。
+- 改造: 安装记录 tab 由自定义 inst-card 卡片 → **表格**: 顶部状态筛选按钮(全部/运行中/部署中/失败/已停止, `setStatus` 重查) + 表格列(组件图标+名/目标机/方式/端口/状态徽标/更新时间/操作:📖详情·体检·删除)。点「详情」→ 现有回放工作台弹窗(replay)。
+- 新增: `statusFilter` + computed `filteredInstalls` + `setStatus()`; 样式 `.status-filter/.sf-btn/.table-wrap/.table/...`(对齐 K8S 淡紫 active 筛选 + 白底圆角表格)。
+- 后端无改动(installs 字段已含 component_name/asset_name/deploy_type/port/status/updated_at)。前端 build 27s。
+- 学习话术: 管理列表从自定义卡片→**Consistent Table + Status Filter**(照抄已验证的 K8S 交互, 减少心智负担)。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+- 用户要求"能改到跟 K8S 部署一样的流程/样式就改, 有啥拿过来改啥" → 确认度: 预检+阶段+终端全对齐; 报告=部署+四合一体检。
+- **后端** `component_catalog_service.precheck_deploy`(对标 K8s `precheck_plan`): 返回 `{ok, issues, checks:[{name,ok,message}]}`, 预检项=目标机资产/SSH连/root/内存/端口占用/部署方式环境(docker-Compose / native脚本 / helm·ha引擎)/磁盘(/data)。`component_market.py` 加 `POST /api/precheck`。
+- **deploy_stream 增强**: 阶段0 改为调用 precheck_deploy, 逐项 `yield {type:"precheck"}`(前端预检面板), 预检失败 → AI 建议 + error + complete=failed 中断; docker/native **部署成功后自动触发四合一体检** `full_health_check` 并 `yield {type:"report", overall_status, summary, report}`。
+- **前端** ComponentStoreView: 配置阶段加「🔍 预检」按钮 + `.precheck-panel` 明细(样式对齐 K8s); 部署中视图也渲染 precheck 面板; AI 面板底部加 `.report-box` 部署报告(overall 徽标 + 完整报告按钮)。build 22.6s。
+- **验证(全过)**: 独立 REST precheck(资产192 redis docker 8 项, 准确报"端口6379占用" ok=false); 部署流 precheck 事件逐项推送 + 预检失败中断 + AI 预检建议(gen=True); 库函数 mock 成功部署验证 **report 事件**(HAS report=True, overall=unhealthy, complete=succeeded, 完整 5阶段+AI+体检报告事件链); 四种部署方式此前已全实测; 本次时段日志 0 ERROR; regress /healthz 200。
+- **发现(非 bug)**: 资产192(39.106.16.32)宿主机有原生 redis-server 占 6379 + 80 端口被占 → docker 部署 redis/nginx 常因端口/容器名冲突失败, AI 均准确诊断("端口6379被占用"/"容器名冲突,已有同名容器存在")。测试记录与真机残留均已清理。
+- 学习话术: 部署前独立校验=**Preflight / Precheck Gate**; 部署后自动体检=**Post-deploy Validation & Health Report**; precheck 数组=[{name, ok, message}] 结构=**Checklist Evaluation**。
+
+
+
+### 组件商店: 真实服务器全量测试 + 「部署后一键登记为资产」新功能
+- 用户需求: 在他给的服务器(资产193 `vm-11.0.1.133`)真测组件商店全部功能 + 全量 54 docker 组件逐个「部署→体检→卸载」; 部署后要**一键登记为资产**。
+- **新增「登记为资产」能力**:
+  - 后端 `component_catalog_service.component_to_asset(db, install_id)`: 把 running 实例登记为**子资产**(parent_id=目标机), 复用目标机 SSH + 记住 `container_name=aiops-<name>`/`app_port`, ci_type 按组件映射(database/middleware), **去重**(同组件同名同父已存在则不重复建, 返回 already:true)。路由 `POST /component-market/api/installs/{id}/to-asset`。
+  - 前端 `ComponentStoreView.vue` 安装记录行加「📌 登记为资产」按钮(running 才可点), 调 to-asset。
+  - 已实测: 部署 memcached → to-asset 创建 asset #194(挂193下, ci_type=database, ssh, 记住容器名), 再次点击去重返回 already。前端已 build。
+- **真实服务器全量测试(11.0.1.133, 代理 11.0.1.1:7897 拉镜像)**:
+  - 方式: `POST /api/deploy`(支持代理+compose覆盖+部署路径) → `full-check` 体检 → `docker compose down` 卸载, 逐个进行, 结果写 `docs/组件商店全量测试_进度.md`。
+  - 进度: 已测 **36/54 (22 部署成功 / 14 失败 / 剩余18重型)**。
+  - **真实发现(商店配置缺陷)**: 大量组件依赖的镜像 tag 在 docker hub 拉不到(`bitnami/kafka`、`bitnami/etcd`、`bitnami/redis-cluster`、`bitnami/mysql`(mysql-cluster)、`tdengine/tdengine:3`、`apache/rocketmq:5.1`、`gitlab/gitlab-ce:16.11.0`、`rmohr/activemq`、`harisekhon/hbase` 均为 "not found"); 集群/重型组件(redis/mysql cluster、gitlab、doris、starrocks 等)单机 5.5G 无法初始化。
+  - 健康探测: deploy_type=docker 改用容器状态探测(docker ps), 解决 witness 误报; es/mongodb/pg/rabbitmq 等 "部署 Up 但 unhealthy" 为探测命令未适配容器之残留, 部署本身成功。
+  - 遗留: 剩余 18 个重型组件批处理因组件卡死(超时久)已中断, 待用户决策是否继续。
+- 本次遗留: 全量明细 `docs/组件商店全量测试_明细.json`(仓库未提交); 进度表 `docs/组件商店全量测试_进度.md`。
+
+### 菜单合并重组——SLO四页合一 & K8s资源列表统一
+- 用户指出"菜单项多, 评估哪些适合合并到一页" → 评估 130 叶子 key, 落 2 个最高价值/最低风险合并(均前端 Tab 容器化, 后端接口不变)。
+- **SLO 四页合一**: 新建 `frontend/src/views/SLOView.vue`(Tab: SLO配置/SLO仪表盘/错误预算/预算消耗/可用性报表), 内嵌原 SLOConfigView/SloDashboardView/ErrorBudgetView/BurnRateView/AvailabilityReportView 五组件。menu_config.json 的 slo-management 分组由 4 项(slo-config/error-budget/burn-rate/availability-report)合并为 `slo`(保留 sla-agreement)。顺带把孤儿 SloDashboardView 收编进 Tab。
+- **K8s 资源列表统一**: 新建 `frontend/src/views/K8sResourceView.vue`(Tab 切换 Namespace/StatefulSet/DaemonSet/Service/Ingress/ConfigMap/Secret/HPA/PVC/PV), 内嵌复用 K8sResourceListView(resource-type prop 驱动)。menu 中 `k8s-namespaces` 替换为 `k8s-resource`(资源列表)。
+- **AppLayout**: 注册 activeView `slo`→SLOView、`k8s-resource`→K8sResourceView; 保留原各子 activeView(url 直连向后兼容)。
+- **role_menus**: 删旧key(slo-config/error-budget/burn-rate/availability-report/k8s-namespaces), 插新key(slo/k8s-resource), 两个db 140→137。
+- 已 `npm run build --prefix frontend`(24.5s)+重启后端, `/api/menu` 验证 `slo`/`k8s-resource` 生效、旧key消失。组件 SLOView/K8sResourceView 已打包进 dist。
+- **链路手册同步**: 链路5-8 SLO 入口改为"SLO 管理(Tab容器)"(含五Tab说明); 链路33-36 第三步改为"资源列表(Tab容器)"统一说明。
+- 学习话术: 同一实体多视图拆菜单=**Page Fragmentation(页面碎片化)**; 合并为 Tab=**Tabbed Consolidation / Master-Detail**; 降低导航深度=**Information Architecture Simplification(IA 精简)**。
+- **待办(未做)**: 其余低优先级合并(拓扑+路径查询、变更发布4页、混沌三页、告警三页)风险更高, 暂缓; 多集群/Edge升级/网络设备应迁出"系统管理"归入 K8s 分组, 未做。
 
 ### 链路手册二轮覆盖核对 + 补齐剩余 14 个未覆盖功能页
 - 用户追问"链路文件是否全部正确/覆盖所有功能页" → 全面交叉核对 119 视图 vs 13 份链路手册(链路1-48)。

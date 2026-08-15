@@ -675,3 +675,105 @@ def get_repo_config_for_plan(db: Session, plan_id: int) -> dict:
         "registry_is_insecure": not (default_registry.is_secure if default_registry else False),
         "package_sources": [_source_to_dict(s) for s in sources],
     }
+
+
+def list_proxies(db: Session) -> list:
+    from app.models import DeployProxy
+    rows = db.query(DeployProxy).order_by(DeployProxy.is_default.desc(), DeployProxy.id.asc()).all()
+    return [_proxy_to_dict(p) for p in rows]
+
+
+def _proxy_to_dict(p) -> dict:
+    return {
+        "id": p.id, "name": p.name,
+        "http_proxy": p.http_proxy or "", "https_proxy": p.https_proxy or "",
+        "no_proxy": p.no_proxy or "", "is_default": bool(p.is_default),
+    }
+
+
+def create_proxy(db: Session, payload: dict) -> dict:
+    from app.models import DeployProxy
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise ValueError("代理名称不能为空")
+    if payload.get("is_default"):
+        db.query(DeployProxy).update({DeployProxy.is_default: False})
+    p = DeployProxy(
+        name=name,
+        http_proxy=(payload.get("http_proxy") or "").strip(),
+        https_proxy=(payload.get("https_proxy") or "").strip(),
+        no_proxy=(payload.get("no_proxy") or "").strip(),
+        is_default=bool(payload.get("is_default")),
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return _proxy_to_dict(p)
+
+
+def update_proxy(db: Session, proxy_id: int, payload: dict) -> Optional[dict]:
+    from app.models import DeployProxy
+    p = db.query(DeployProxy).filter(DeployProxy.id == proxy_id).first()
+    if not p:
+        return None
+    if payload.get("is_default"):
+        db.query(DeployProxy).update({DeployProxy.is_default: False})
+    for f in ("name", "http_proxy", "https_proxy", "no_proxy"):
+        if f in payload:
+            setattr(p, f, (payload.get(f) or "").strip())
+    if "is_default" in payload:
+        p.is_default = bool(payload.get("is_default"))
+    db.commit()
+    db.refresh(p)
+    return _proxy_to_dict(p)
+
+
+def delete_proxy(db: Session, proxy_id: int) -> bool:
+    from app.models import DeployProxy
+    p = db.query(DeployProxy).filter(DeployProxy.id == proxy_id).first()
+    if not p:
+        return False
+    db.delete(p)
+    db.commit()
+    return True
+
+
+def set_default_proxy(db: Session, proxy_id: int) -> Optional[dict]:
+    from app.models import DeployProxy
+    p = db.query(DeployProxy).filter(DeployProxy.id == proxy_id).first()
+    if not p:
+        return None
+    db.query(DeployProxy).update({DeployProxy.is_default: False})
+    p.is_default = True
+    db.commit()
+    return _proxy_to_dict(p)
+
+
+def resolve_offline_image(db: Session, image: str, use_offline: bool = False) -> dict:
+    """离线镜像解析(三部署页共用, 可选开关)。
+    当 use_offline=True 且有默认私有 Registry 时:
+      - docker hub 简写(无 `/`)→ {registry}/library/{image}(对标 _load_image_tar 的推送格式)
+      - 已有仓库路径 → {registry}/{image}
+      - 返回 is_secure/insecure 供 docker daemon --insecure-registry 使用
+    否则原样返回 + 不 insecure。供组件商店/AI 部署在离线时自动改走私有仓库。
+    """
+    image = (image or "").strip()
+    if not image:
+        return {"image": image, "registry_url": "", "is_insecure": False, "offline": False}
+    if not use_offline:
+        return {"image": image, "registry_url": "", "is_insecure": False, "offline": False}
+    registry = db.query(OfflineRegistry).filter(OfflineRegistry.is_default == True).first()  # noqa: E712
+    if not registry or not registry.registry_url:
+        return {"image": image, "registry_url": "", "is_insecure": not bool(getattr(registry, "is_secure", False) if registry else False), "offline": False}
+    url = registry.registry_url.rstrip("/")
+    # docker hub 简写: redis:7 / nginx:latest → library/xxx
+    if "/" not in image:
+        target = f"{url}/library/{image}"
+    else:
+        target = f"{url}/{image}"
+    return {
+        "image": target,
+        "registry_url": url,
+        "is_insecure": not (registry.is_secure if registry else False),
+        "offline": True,
+    }

@@ -14,6 +14,7 @@
       <button :class="['tab', activeTab === 'bundles' && 'active']" @click="switchTab('bundles')">📦 离线包</button>
       <button :class="['tab', activeTab === 'registries' && 'active']" @click="switchTab('registries')">🖼️ 私有镜像仓库</button>
       <button :class="['tab', activeTab === 'sources' && 'active']" @click="switchTab('sources')">📃 系统包源</button>
+      <button :class="['tab', activeTab === 'proxies' && 'active']" @click="switchTab('proxies')">📡 代理配置</button>
       <button :class="['tab', activeTab === 'health' && 'active']" @click="switchTab('health')">🩺 健康状态</button>
     </div>
 
@@ -137,6 +138,36 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ 代理配置(供三个部署页下拉复用) ═══════════════ -->
+    <div v-show="activeTab === 'proxies'">
+      <div class="toolbar">
+        <button class="btn btn-primary" @click="openProxyModal()">＋ 新增代理</button>
+        <button class="btn" @click="loadProxies">刷新</button>
+        <span class="hint" style="margin-left:10px">配置后可供 中间件/K8s/AI 自动部署 下拉直接选用(用于部署访问公网)</span>
+      </div>
+
+      <div v-if="proxies.length === 0" class="empty-state">
+        <p>暂无代理配置。新增一个，如 NAT 环境宿主机代理 <code>192.168.100.2:7897</code>。</p>
+      </div>
+
+      <div v-else>
+        <div v-for="px in proxies" :key="px.id" class="reg-row">
+          <div class="reg-info">
+            <div class="reg-name">{{ px.name }}
+              <span v-if="px.is_default" class="badge-tag tag-default">默认</span>
+            </div>
+            <div class="reg-url mono">HTTP: {{ px.http_proxy || '—' }}</div>
+            <div class="reg-sub">HTTPS: {{ px.https_proxy || '—' }} · NO_PROXY: {{ px.no_proxy || '—' }}</div>
+          </div>
+          <div class="reg-actions">
+            <button class="btn btn-sm" v-if="!px.is_default" @click="setDefaultProxy(px)">设为默认</button>
+            <button class="btn btn-sm" @click="openProxyModal(px)">编辑</button>
+            <button class="btn btn-sm btn-delete" @click="delProxy(px)">删除</button>
           </div>
         </div>
       </div>
@@ -295,6 +326,43 @@
       </div>
     </div>
 
+    <!-- ═══ 代理配置 弹窗 ═══ -->
+    <div v-if="proxyModal.visible" class="modal-overlay" @click.self="proxyModal.visible = false">
+      <div class="modal-box" style="width:540px">
+        <div class="modal-head">
+          <h3>{{ proxyModal.editId ? '编辑代理' : '新增代理' }}</h3>
+          <button class="modal-close" @click="proxyModal.visible = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <label>名称 <span class="req">*</span></label>
+            <input v-model="proxyForm.name" class="input" placeholder="如：NAT 宿主机代理" />
+          </div>
+          <div class="form-row">
+            <label>HTTP 代理</label>
+            <input v-model="proxyForm.http_proxy" class="input mono" placeholder="如 http://192.168.100.2:7897" />
+          </div>
+          <div class="form-row">
+            <label>HTTPS 代理</label>
+            <input v-model="proxyForm.https_proxy" class="input mono" placeholder="如 http://192.168.100.2:7897(留空则用 HTTP)" />
+          </div>
+          <div class="form-row">
+            <label>NO_PROXY</label>
+            <input v-model="proxyForm.no_proxy" class="input" placeholder="127.0.0.1,localhost,.local" />
+          </div>
+          <div class="form-row">
+            <label>设为默认</label>
+            <label class="checkbox-line"><input type="checkbox" v-model="proxyForm.is_default" /> 部署页默认选用</label>
+          </div>
+          <div v-if="proxyError" class="error-msg">{{ proxyError }}</div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="proxyModal.visible = false">取消</button>
+          <button class="btn btn-primary" @click="saveProxy">保存</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ 镜像/文件弹窗 ═══ -->
     <div v-if="imgModal.visible" class="modal-overlay" @click.self="imgModal.visible = false">
       <div class="modal-box" style="width:640px">
@@ -319,6 +387,29 @@
         <div class="modal-foot"><button class="btn" @click="imgModal.visible = false">关闭</button></div>
       </div>
     </div>
+
+    <GuideDrawer v-model="showGuide" title="📖 离线仓库 · 操作说明">
+      <div class="guide-section">
+        <h4>一、功能定位</h4>
+        <p><strong>离线仓库</strong>用于在受限/离线环境支撑部署：离线包管理、私有镜像仓库（Registry）、系统包源（deb/rpm），对标 <code>Pixiu builder serve</code>。K8s 集群部署、中间件部署等均会复用这里的 Registry / 包源 / 离线包。</p>
+      </div>
+      <div class="guide-section">
+        <h4>二、离线包</h4>
+        <ul>
+          <li>点击「<strong>⬆ 上传离线包</strong>」导入 <code>.tar.gz</code>，包内含 <code>images/</code>（镜像 tar）与 <code>packages/</code>（deb/rpm）目录。</li>
+          <li>上传后可加载、查验，状态包括 待加载 / 加载中 / 已加载 / 失败。</li>
+          <li>可用顶部搜索按名称过滤离线包。</li>
+        </ul>
+      </div>
+      <div class="guide-section">
+        <h4>三、私有镜像仓库</h4>
+        <p>管理私有 Registry 的地址、认证、命名空间。部署组件时会按需拉取/推送镜像到该仓库，避免依赖公网。</p>
+      </div>
+      <div class="guide-section">
+        <h4>四、系统包源</h4>
+        <p>配置 deb/rpm 包源，供目标主机离线安装系统依赖（repos 同步）。点「健康状态」可查看各源连通与同步情况。</p>
+      </div>
+    </GuideDrawer>
   </div>
 </template>
 
@@ -349,6 +440,11 @@ const testingId = ref(null)
 const regModal = ref({ visible: false, editId: null })
 const regForm = ref({ name: '', registry_url: '', is_secure: false, username: '', password: '', has_password: false, is_internal: false, is_default: false })
 
+const proxies = ref([])
+const proxyError = ref('')
+const proxyModal = ref({ visible: false, editId: null })
+const proxyForm = ref({ name: '', http_proxy: '', https_proxy: '', no_proxy: '', is_default: false })
+
 const sources = ref([])
 const health = ref(null)
 const healthLoading = ref(false)
@@ -360,6 +456,7 @@ function switchTab(t) {
   activeTab.value = t
   if (t === 'registries') loadRegistries()
   else if (t === 'sources') loadSources()
+  else if (t === 'proxies') loadProxies()
   else if (t === 'health') refreshHealth()
 }
 
@@ -534,6 +631,41 @@ async function delReg(r) {
   try { await request.delete(`/offline/api/registries/${r.id}`); ElMessage.success('已删除'); loadRegistries() } catch (e) { regError.value = e.message }
 }
 
+async function loadProxies() {
+  try { const res = await request.get('/offline/api/proxies'); proxies.value = res.items || [] } catch (e) { proxyError.value = e.message }
+}
+
+function openProxyModal(px) {
+  proxyError.value = ''
+  if (px) {
+    proxyForm.value = { name: px.name, http_proxy: px.http_proxy || '', https_proxy: px.https_proxy || '', no_proxy: px.no_proxy || '', is_default: !!px.is_default }
+    proxyModal.value = { visible: true, editId: px.id }
+  } else {
+    proxyForm.value = { name: '', http_proxy: '', https_proxy: '', no_proxy: '', is_default: proxies.value.length === 0 }
+    proxyModal.value = { visible: true, editId: null }
+  }
+}
+
+async function saveProxy() {
+  if (!proxyForm.value.name.trim()) { proxyError.value = '名称不能为空'; return }
+  try {
+    if (proxyModal.value.editId) await request.post(`/offline/api/proxies/${proxyModal.value.editId}/update`, proxyForm.value)
+    else await request.post('/offline/api/proxies/create', proxyForm.value)
+    proxyModal.value.visible = false
+    ElMessage.success('已保存')
+    loadProxies()
+  } catch (e) { proxyError.value = e.message }
+}
+
+async function delProxy(px) {
+  try { await ElMessageBox.confirm(`删除代理「${px.name}」？`, '删除确认', { type: 'warning' }) } catch { return }
+  try { await request.post(`/offline/api/proxies/${px.id}/delete`); ElMessage.success('已删除'); loadProxies() } catch (e) { proxyError.value = e.message }
+}
+
+async function setDefaultProxy(px) {
+  try { await request.post(`/offline/api/proxies/${px.id}/default`); ElMessage.success('已设为默认'); loadProxies() } catch (e) { proxyError.value = e.message }
+}
+
 async function loadSources() {
   try {
     const res = await request.get('/offline/api/sources')
@@ -556,11 +688,9 @@ onMounted(() => { loadBundles(1) })
 <style scoped>
 .offline-page { padding: 12px; }
 .page-header { margin-bottom: 12px; }
-.page-header-row { display: flex; align-items: center; justify-content: space-between; }
+.page-header-row { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 .page-header h1 { font-size: 20px; margin: 0; }
 .page-header p { color: #909399; font-size: 12px; margin: 4px 0 0; }
-.btn-guide { cursor: pointer; }
-
 .btn { padding: 6px 14px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); cursor: pointer; font-size: 0.82rem; text-decoration: none; display: inline-block; transition: all 0.2s; }
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }

@@ -8,7 +8,7 @@
     <div class="toolbar">
       <button class="btn btn-primary" @click="openCreate">+ 新建模型</button>
       <button class="btn btn-success" @click="predictAll">运行全部预测</button>
-      <button class="btn" @click="showLogic = true">逻辑说明</button>
+      <button class="btn btn-guide" @click="showLogic = true">📖 操作说明</button>
       <button class="btn" @click="loadModels">刷新</button>
     </div>
 
@@ -71,7 +71,7 @@
       </div>
     </div>
 
-    <el-dialog v-model="showLogic" title="预测模型 - 逻辑说明" width="650px">
+    <GuideDrawer v-model="showLogic" title="📖 预测模型 · 操作说明" :width="860">
       <div style="font-size:13px;line-height:1.8">
         <h4 style="margin:0 0 8px">一、什么是预测模型？</h4>
         <p>预测模型是基于历史时序数据，通过数学算法<strong>预测未来趋势</strong>的工具。简单说就是：根据过去 7 天的数据，预测未来 7 天会发生什么。</p>
@@ -134,7 +134,7 @@
           <strong>行动：</strong>提前安排磁盘扩容，避免业务中断
         </div>
       </div>
-    </el-dialog>
+    </GuideDrawer>
 
     <el-dialog v-model="showResult" title="预测结果" width="800px">
       <div v-if="predictionResult" style="font-size:13px">
@@ -203,6 +203,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import request from '@/api/request'
 
 const loading = ref(false)

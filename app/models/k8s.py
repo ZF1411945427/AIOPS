@@ -50,9 +50,13 @@ class DeployPlan(Base):
     cleanup_history_json = Column(Text, default="[]")  # 回滚清理历史记录
     last_deployed_at = Column(DateTime, nullable=True)
     deploy_count = Column(Integer, default=0)
+    http_proxy = Column(String(256), default="")  # 部署代理(可选, 供执行步骤注入 HTTP_PROXY)
+    https_proxy = Column(String(256), default="")  # 部署代理 HTTPS
+    no_proxy = Column(String(512), default="")  # 部署代理 NO_PROXY
     dag_json = Column(Text, default="{}")  # AI 执行引擎 DAG 执行计划
     ai_decision_log_json = Column(Text, default="[]")  # AI 自主决策日志
     strategy = Column(String(32), default="auto")  # AI 选定的部署策略: auto/rolling/blue-green/canary/recreate
+    use_offline = Column(Boolean, default=False)  # 可选用离线私有仓库/本地包源(2026-08-16, 可选不默认)
     risk_score = Column(Integer, default=0)  # AI 预判的部署风险评分 0-100
     deployment_feature_json = Column(Text, default="{}")  # 部署特征向量(供 L5 学习)
     health_gate_json = Column(Text, default="[]")  # 部署过程中的健康门控记录

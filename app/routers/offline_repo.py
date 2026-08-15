@@ -224,3 +224,57 @@ def get_plan_offline_config(plan_id: int, db: Session = Depends(get_db)):
         return offline_repo_service.get_repo_config_for_plan(db, plan_id)
     except Exception as e:
         return JSONResponse({"warning": str(e)}, status_code=200)
+
+
+# ─────────────────────────── 代理配置(供三部署页下拉复用) ───────────────────────────
+
+@router.get("/proxies")
+def list_proxies(db: Session = Depends(get_db)):
+    try:
+        return {"items": offline_repo_service.list_proxies(db)}
+    except Exception as e:
+        return JSONResponse({"warning": str(e), "items": []}, status_code=200)
+
+
+@router.post("/proxies/create")
+def create_proxy(payload: dict, db: Session = Depends(get_db)):
+    try:
+        p = offline_repo_service.create_proxy(db, payload)
+        return {"ok": True, "proxy": p}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"warning": str(e)}, status_code=200)
+
+
+@router.post("/proxies/{proxy_id}/update")
+def update_proxy(proxy_id: int, payload: dict, db: Session = Depends(get_db)):
+    try:
+        p = offline_repo_service.update_proxy(db, proxy_id, payload)
+        if not p:
+            return JSONResponse({"error": "代理不存在"}, status_code=404)
+        return {"ok": True, "proxy": p}
+    except Exception as e:
+        return JSONResponse({"warning": str(e)}, status_code=200)
+
+
+@router.post("/proxies/{proxy_id}/delete")
+def delete_proxy(proxy_id: int, db: Session = Depends(get_db)):
+    try:
+        ok = offline_repo_service.delete_proxy(db, proxy_id)
+        if not ok:
+            return JSONResponse({"error": "代理不存在"}, status_code=404)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"warning": str(e)}, status_code=200)
+
+
+@router.post("/proxies/{proxy_id}/default")
+def set_default_proxy(proxy_id: int, db: Session = Depends(get_db)):
+    try:
+        p = offline_repo_service.set_default_proxy(db, proxy_id)
+        if not p:
+            return JSONResponse({"error": "代理不存在"}, status_code=404)
+        return {"ok": True, "proxy": p}
+    except Exception as e:
+        return JSONResponse({"warning": str(e)}, status_code=200)

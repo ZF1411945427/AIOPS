@@ -6,9 +6,7 @@
           <h1>K8s 集群部署</h1>
           <p>离线环境下基于 kubeadm 一键创建集群，复用离线仓库的私有 Registry / 包源 / 离线包，产出 kubeconfig 并自动接入监控</p>
         </div>
-        <div>
-          <button class="btn primary" @click="openCreate">＋ 新建集群</button>
-        </div>
+        <button class="btn primary" @click="openCreate">＋ 新建集群</button>
       </div>
     </div>
 
@@ -119,6 +117,13 @@
 
           <details class="proxy-block">
             <summary>🌐 网络代理(可选，仅在线部署需要)</summary>
+            <div class="form-row" style="margin-bottom:8px">
+              <label>快速选用</label>
+              <select v-model="proxySelectedId" class="input" @change="applyProxy">
+                <option :value="null">— 选择离线仓库已存代理 / 留空手填 —</option>
+                <option v-for="px in proxyList" :key="px.id" :value="px.id">{{ px.name }}{{ px.is_default ? ' (默认)' : '' }}</option>
+              </select>
+            </div>
             <div class="form-grid" style="margin-top: 8px">
               <div class="form-row">
                 <label>HTTP 代理</label>
@@ -220,6 +225,11 @@
               <span class="precheck-name">{{ c.name }}</span>
               <span class="precheck-msg" :class="c.ok ? 'ok' : 'fail'">{{ c.message }}</span>
             </div>
+            <div v-if="precheckAdvice" class="precheck-ai">
+              <div class="precheck-ai-title">🤖 AI 预检建议{{ precheckAdvice.ai_generated ? '' : ' (规则)' }}</div>
+              <div class="precheck-ai-summary">{{ precheckAdvice.summary }}</div>
+              <div v-for="(r, ri) in (precheckAdvice.recommendations || [])" :key="'r'+ri" class="precheck-ai-item">• {{ r }}</div>
+            </div>
           </div>
 
           <div class="terminal" v-if="detail.logs && detail.logs.length">
@@ -230,6 +240,24 @@
             </div>
           </div>
           <div v-else class="hint">暂无执行日志。点击「开始部署」观察实时进度。</div>
+
+          <div class="k8s-report" v-if="detail.report">
+            <div class="k8s-report-head">
+              <span class="k8s-report-title">📋 集群部署报告</span>
+              <span class="k8s-report-status" :class="detail.report.status">{{ detail.report.status }}</span>
+            </div>
+            <div class="k8s-report-meta">
+              <span>{{ detail.report.kubernetes_version }}</span>
+              <span>运行时 {{ detail.report.runtime }}</span>
+              <span>CNI {{ detail.report.cni }}</span>
+              <span>{{ detail.report.master_count }} master / {{ detail.report.worker_count }} worker</span>
+            </div>
+            <div v-if="detail.report.ai_summary" class="k8s-report-ai">
+              <div class="k8s-report-ai-title">🤖 AI 总结{{ detail.report.ai_summary.ai_generated ? '' : ' (规则)' }}</div>
+              <div class="k8s-report-ai-sum">{{ detail.report.ai_summary.summary }}</div>
+              <div v-for="(r, ri) in (detail.report.ai_summary.recommendations || [])" :key="'rs'+ri" class="k8s-report-ai-item">• {{ r }}</div>
+            </div>
+          </div>
         </div>
         <div class="modal-foot">
           <button class="btn" :disabled="deploying" @click="precheck">逻辑预检</button>
@@ -253,6 +281,18 @@ const plans = ref([])
 const loading = ref(false)
 const statusFilter = ref('')
 const meta = ref({ bundles: [], registries: [], assets: [] })
+const proxyList = ref([])
+const proxySelectedId = ref(null)
+async function refreshProxyList() {
+  try { const r = await request.get('/offline/api/proxies'); proxyList.value = r.items || [] } catch (e) { /* ignore */ }
+}
+function applyProxy() {
+  const px = proxyList.value.find(p => p.id === proxySelectedId.value)
+  if (!px) return
+  form.value.http_proxy = px.http_proxy || ''
+  form.value.https_proxy = px.https_proxy || ''
+  form.value.no_proxy = px.no_proxy || '127.0.0.1,localhost,.local'
+}
 
 const showEdit = ref(false)
 const editId = ref(null)
@@ -264,6 +304,7 @@ const detail = ref(null)
 const deploying = ref(false)
 const deployWs = ref(null)
 const precheckChecks = ref([])
+const precheckAdvice = ref(null)
 
 const phases = ['预检', '环境准备', '运行时/二进制', 'kubeadm配置', '初始化', 'CNI', '节点加入']
 
@@ -396,10 +437,12 @@ async function refreshDetail(id) {
 
 async function precheck() {
   precheckChecks.value = []
+  precheckAdvice.value = null
   try {
     const res = await request.post(`/k8s-offline/api/plans/${detail.value.id}/precheck`, null, { params: { test_ssh: true } })
     refreshDetail(detail.value.id)
     precheckChecks.value = res.checks || []
+    precheckAdvice.value = res.ai_advice || null
     if (res.ok) ElMessage.success(`逻辑预检通过 (${(res.checks || []).length} 项)`)
     else ElMessage.warning('预检问题: ' + (res.issues || []).join('; '))
   } catch (e) { ElMessage.error(e.message) }
@@ -436,8 +479,16 @@ function startDeploy() {
       deploying.value = false
       refreshDetail(detail.value.id)
       ElMessage[evt.status === 'succeeded' ? 'success' : 'error'](evt.message || '部署结束')
-    } else if (evt.type === 'error') {
+    }     else if (evt.type === 'error') {
       ElMessage.error(evt.message)
+    } else if (evt.type === 'ai') {
+      if (!Array.isArray(detail.value.logs)) detail.value.logs = []
+      detail.value.logs.push({
+        type: 'ai',
+        node: '',
+        message: `🤖 AI 诊断: ${evt.root_cause || ''} → 建议 ${evt.suggestion || 'fix'} (${evt.advice || ''})`,
+        ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      })
     }
   }
   deployWs.value.onclose = () => {
@@ -477,13 +528,13 @@ async function addToAssets() {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-onMounted(() => { loadPlans(); loadMeta() })
+onMounted(() => { loadPlans(); loadMeta(); refreshProxyList() })
 </script>
 
 <style scoped>
 .k8s-page { padding: 12px; }
 .page-header { margin-bottom: 12px; }
-.page-header-row { display: flex; align-items: center; justify-content: space-between; }
+.page-header-row { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 .page-header h1 { font-size: 20px; margin: 0; }
 .page-header p { color: #909399; font-size: 12px; margin: 4px 0 0; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -578,6 +629,25 @@ input, select { width: 100%; border: 1px solid #dcdfe6; border-radius: 4px; padd
 .precheck-msg.ok { color: #1a7f37; }
 .precheck-msg.fail { color: #cf222e; }
 .terminal .ssh { color: #c586c0; }
+.terminal .ai { color: #d9a0ff; }
+
+.precheck-ai { border-top: 1px dashed #d0d7de; margin-top: 8px; padding-top: 8px; }
+.precheck-ai-title { font-weight: 600; color: #4f46e5; margin-bottom: 4px; }
+.precheck-ai-summary { font-size: 13px; color: #24292f; margin-bottom: 4px; }
+.precheck-ai-item { font-size: 12px; color: #57606a; padding: 1px 0; }
+
+.k8s-report { margin-top: 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; }
+.k8s-report-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.k8s-report-title { font-weight: 700; color: #111827; }
+.k8s-report-status { font-size: 12px; padding: 2px 10px; border-radius: 12px; font-weight: 600; }
+.k8s-report-status.succeeded { background: #dcfce7; color: #16a34a; }
+.k8s-report-status.failed { background: #fee2e2; color: #dc2626; }
+.k8s-report-status.stopped { background: #fee2e2; color: #dc2626; }
+.k8s-report-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+.k8s-report-ai { border-top: 1px dashed #d1d5db; padding-top: 8px; }
+.k8s-report-ai-title { font-weight: 600; color: #4f46e5; margin-bottom: 4px; }
+.k8s-report-ai-sum { font-size: 13px; color: #111827; margin-bottom: 4px; }
+.k8s-report-ai-item { font-size: 12px; color: #57606a; padding: 1px 0; }
 
 .modal-box .req { color: #f56c6c; }
 .empty-state { text-align: center; color: #909399; padding: 30px 0; line-height: 1.8; }

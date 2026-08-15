@@ -355,16 +355,4 @@ onMounted(() => {
 .cluster-error-icon { font-size: 1.1rem; }
 .cluster-error-text { color: var(--text-secondary, #64748b); }
 .page-header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.btn-guide {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 5px 12px; font-size: 0.78rem; font-weight: 500;
-  border: 1px solid var(--border, rgba(0,0,0,0.12));
-  border-radius: 6px; background: var(--bg-card, #fff);
-  color: var(--text-secondary, #64748b); cursor: pointer;
-  white-space: nowrap; transition: all 0.2s;
-}
-.btn-guide:hover {
-  border-color: #6366f1; color: #6366f1;
-  background: rgba(99,102,241,0.05);
-}
 </style>

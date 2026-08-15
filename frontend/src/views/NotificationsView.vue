@@ -409,7 +409,6 @@ onMounted(() => {
 .btn:hover { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .btn-primary { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
-.btn-guide { background: rgba(99,102,241,0.08); color: var(--accent, #6366f1); border-color: rgba(99,102,241,0.3); }
 .btn-danger { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }

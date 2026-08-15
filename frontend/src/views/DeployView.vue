@@ -63,6 +63,18 @@
         <div class="form-row"><label class="row-label">探查前自动下载源码</label>
           <el-switch v-model="form.artifact_auto_download" active-text="开启" inactive-text="关闭" />
         </div>
+        <div class="form-row"><label class="row-label">使用离线私有仓库 (可选)</label>
+          <el-switch v-model="form.use_offline" active-text="开启" inactive-text="关闭" />
+          <div class="hint">开启后 AI 生成部署命令时强制 docker 镜像走离线私有 Registry、系统包走本地包源(需离线仓库已配置默认 Registry/包源)。不开启则默认联网。</div>
+        </div>
+        <div class="form-row"><label class="row-label">网络代理</label>
+          <el-select v-model="proxySelectedId" placeholder="选择离线仓库已存代理(可选)" clearable filterable style="width:100%" @change="applyProxy">
+            <el-option v-for="px in proxyList" :key="px.id" :value="px.id" :label="`${px.name}${px.is_default ? ' (默认)' : ''}`" />
+          </el-select>
+        </div>
+        <div class="form-row"><label class="row-label">HTTP 代理</label><input v-model="form.http_proxy" class="input mono" placeholder="如 http://192.168.100.2:7897" /></div>
+        <div class="form-row"><label class="row-label">HTTPS 代理</label><input v-model="form.https_proxy" class="input mono" placeholder="留空则用 HTTP" /></div>
+        <div class="form-row"><label class="row-label">NO_PROXY</label><input v-model="form.no_proxy" class="input" placeholder="127.0.0.1,localhost,.local" /></div>
         <div class="form-row"><label>部署手册</label>
           <div class="doc-upload-area">
             <input ref="fileInput" type="file" accept=".md,.txt,.yaml,.yml" style="display:none" @change="onFileSelect" />
@@ -522,7 +534,19 @@ const showCreate = ref(false)
 const allAssets = ref([])
 const fileInput = ref(null)
 const detailFileInput = ref(null)
-const form = ref({ name: '', description: '', asset_ids: [], artifact_path: '', artifact_download_path: '', artifact_auto_download: true, doc_raw: '', doc_file_name: '' })
+const form = ref({ name: '', description: '', asset_ids: [], artifact_path: '', artifact_download_path: '', artifact_auto_download: true, use_offline: false, http_proxy: '', https_proxy: '', no_proxy: '', doc_raw: '', doc_file_name: '' })
+const proxyList = ref([])
+const proxySelectedId = ref(null)
+async function refreshProxyList() {
+  try { const r = await request.get('/offline/api/proxies'); proxyList.value = r.items || [] } catch (e) { /* ignore */ }
+}
+function applyProxy() {
+  const px = proxyList.value.find(p => p.id === proxySelectedId.value)
+  if (!px) return
+  form.value.http_proxy = px.http_proxy || ''
+  form.value.https_proxy = px.https_proxy || ''
+  form.value.no_proxy = px.no_proxy || '127.0.0.1,localhost,.local'
+}
 
 const detailPlan = ref(null)
 const detailTab = ref('sop')
@@ -644,7 +668,7 @@ async function doCreate() {
     if (res.plan) {
       const planObj = res.plan || {}
       showCreate.value = false
-      form.value = { name: '', description: '', asset_ids: [], artifact_path: '', artifact_download_path: '', artifact_auto_download: true, doc_raw: '', doc_file_name: '' }
+      form.value = { name: '', description: '', asset_ids: [], artifact_path: '', artifact_download_path: '', artifact_auto_download: true, use_offline: false, http_proxy: '', https_proxy: '', no_proxy: '', doc_raw: '', doc_file_name: '' }
       loadPlans()
       const pw = planObj.path_warning || res.path_warning
       if (pw) {
@@ -1131,6 +1155,7 @@ async function runGenerateReport() {
 onMounted(() => {
   loadPlans()
   loadAssets()
+  refreshProxyList()
 })
 </script>
 

@@ -18,32 +18,26 @@
         <input v-model.number="limit" class="input limit-input" type="number" min="1" max="20" placeholder="数量">
         <button class="btn btn-primary" @click="runRecommend" :disabled="loading">{{ loading ? '查询中...' : '查询推荐' }}</button>
         <button class="btn btn-accent" @click="aiAlertAnalyze" :disabled="alertAiLoading">{{ alertAiLoading ? '分析中...' : 'AI 分析' }}</button>
-        <button class="btn btn-help" @click="showLogic = true">逻辑说明</button>
+        <button class="btn btn-guide" @click="showLogic = true">📖 操作说明</button>
       </div>
 
-      <div v-if="showLogic" class="modal-overlay" @click.self="showLogic = false">
-        <div class="modal-box modal-wide">
-          <h3>推荐算法 · 通俗易懂版</h3>
-          <div class="logic-section">
-            <div class="logic-title">整体流程</div>
-            <div class="logic-flow">
-              <span class="flow-box flow-alert">告警进来</span>
-              <span class="flow-arrow">→</span>
-              <span class="flow-box flow-split">两路同时查</span>
-              <span class="flow-arrow">→</span>
-              <span class="flow-box flow-merge">合并排序</span>
-              <span class="flow-arrow">→</span>
-              <span class="flow-box flow-out">推荐结果</span>
-            </div>
-          </div>
-          <div class="logic-section">
-            <div class="logic-title">两路数据源</div>
-            <div class="logic-row"><span class="logic-tag tag-rule">规则匹配</span> 故障知识库（knowledge_base 表）</div>
-            <div class="logic-row"><span class="logic-tag tag-rag">RAG 语义</span> 知识库文档（kb_documents + Milvus）</div>
-          </div>
-          <div class="modal-actions"><button class="btn" @click="showLogic = false">知道了</button></div>
+      <GuideDrawer v-model="showLogic" title="📖 智能推荐 · 操作说明" :width="700">
+        <div class="guide-section">
+          <h4>整体流程</h4>
+          <p>告警进来 → 两路同时查（规则匹配 + RAG 语义）→ 合并排序 → 输出推荐结果。</p>
         </div>
-      </div>
+        <div class="guide-section">
+          <h4>两路数据源</h4>
+          <ul>
+            <li><strong>规则匹配</strong>：故障知识库（knowledge_base 表）</li>
+            <li><strong>RAG 语义</strong>：知识库文档（kb_documents + Milvus 向量检索）</li>
+          </ul>
+        </div>
+        <div class="guide-section">
+          <h4>AI 告警分析</h4>
+          <p>对告警内容调用 AI 做根因分析、影响评估，并给出处置建议，辅助快速定位与响应。</p>
+        </div>
+      </GuideDrawer>
 
       <div v-if="sources" class="source-bar">
         <span class="source-item">规则匹配 {{ sources.rule }} 条</span>
@@ -371,6 +365,7 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import GuideDrawer from '@/components/GuideDrawer.vue'
 import request from '@/api/request'
 
 const tab = ref('alert')

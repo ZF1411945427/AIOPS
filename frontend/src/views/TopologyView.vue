@@ -1024,7 +1024,6 @@ onBeforeUnmount(() => {
 .btn-primary:hover { background: var(--accent-hover, #4f46e5); }
 .btn-danger { background: rgba(239,68,68,0.1); color: #ef4444; border-color: rgba(239,68,68,0.3); }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
-.btn-guide { background: rgba(99,102,241,0.08); color: var(--accent, #6366f1); border-color: rgba(99,102,241,0.2); }
 .auto-refresh-label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; cursor: pointer; color: var(--text-secondary, #64748b); margin-left: 8px; }
 .content-grid { display: grid; grid-template-columns: 1fr 280px; gap: 14px; }
 .panel { background: var(--bg-card, #fff); border: 1px solid var(--border, rgba(0,0,0,0.07)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }

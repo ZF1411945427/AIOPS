@@ -676,10 +676,41 @@
 | **`compose_yaml`** | Text | docker compose 内容 |
 | **`ha_config`** | Text(JSON) | 高可用配置 `{mode, replicas/brokers/nodes/members}` |
 | **`config_keys`** | Text | 关联 config_drift 配置项键（逗号分隔，如 `redis.conf`） |
+| **`param_schema`** | Text(JSON 数组) | **组件级定制参数模板**（2026-08-16 新增），前端按此动态渲染部署表单，后端据此真实生成 compose/改写脚本 |
 | **`complexity`** | String(16) | simple/medium/complex |
 | **`enabled`** | Boolean | 是否启用 |
 | **`sort_order`** | Integer | 排序 |
 | **`created_at`/`updated_at`** | DateTime | 时间戳 |
+
+**`param_schema` JSON 格式（Single Source of Truth）：**
+
+```json
+[
+  {
+    "key": "mysql_root_password",
+    "label": "Root 密码",
+    "type": "password",
+    "default": "root123",
+    "required": true,
+    "placeholder": "MySQL root 密码",
+    "hint": "对应 MYSQL_ROOT_PASSWORD"
+  },
+  { "key": "db_port", "label": "端口", "type": "number", "default": 3306, "required": true }
+]
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `key` | String | 参数唯一键（snake_case，作为 compose 环境变量名 / 脚本变量名） |
+| `label` | String | 表单显示名 |
+| `type` | String | `text`/`number`/`password`/`select`/`bool` |
+| `default` | 任意 | 默认值 |
+| `required` | Boolean | 是否必填 |
+| `placeholder` | String | 占位提示 |
+| `options` | Array | `type=select` 时的候选项 |
+| `hint` | String | 底部说明（对应哪个环境变量/作用） |
+
+**消费约定**：前端 `deployForm.params` 以 `{key: value}` 形式收集；后端 docker 分支把 `params` 注入 compose 的 `environment`/`ports`/`volumes`（`render_compose`），native 分支把 `params` 以环境变量前缀注入脚本。**不得在代码中发明 schema 未声明的参数键**。
 
 ### `component_installs` — 组件安装记录
 
@@ -704,6 +735,7 @@
 | **`vuln_result`** | Text(JSON) | 漏洞检查结果（`scan_type`/`findings`/`safe`） |
 | **`ai_analysis`** | Text(JSON) | AI 健康分析（summary/health_score/issues/recommendations/severity） |
 | **`deploy_log`** | Text | 部署日志（截断） |
+| **`deploy_params`** | Text(JSON) | **本次部署定制的参数快照** `{key:value}`（2026-08-16 新增，供安装记录查看/AI 分析） |
 | **`deploy_plan_id`** | Integer | 关联 deploy.plans（可空） |
 | **`created_at`/`updated_at`** | DateTime | 时间戳 |
 
@@ -711,7 +743,40 @@
 **漏洞扫描**：基础版为版本对比（`_MIN_CVE_RULES`），`safe=false` 表示命中；生产建议接 Trivy/Clair/Grype。
 **config/health 为空或失败**：`config_check_status`/`health_status` 反映最近一次检查，`pending` 表示未检查。
 
+#### 实时流式部署（WebSocket, AI 辅助，对标 K8s 集群部署 WS）
+
+- 端点：`GET /component-market/ws/deploy`（WebSocket，Query 传参）。Query：`component_id`(必)、`asset_id`(必)、`deploy_type`(默认 docker)、`deploy_path`、`namespace`、`release`、`http_proxy`、`https_proxy`、`no_proxy`。
+- 逐步推送事件 `{type}`：`status`(running/succeeded)/`phase`(step 0-4 + title)/`log`(node+message)/`ai`(stage/summary/advice/risk/ai_generated)/`error`/`complete`(status: succeeded/failed/stopped/deployed, install_id)。
+- 服务端已连接 `event.install_id` 关联安装记录；`deploy_log` 落库为完整事件日志；docker/native 真实执行，helm/ha 虚拟执行(建记录+AI建议+complete=deployed)。
+- 前端停止：向 WS 发 `{"type":"stop","install_id":N}`；或 `POST /component-market/api/deploys/{install_id}/stop`（走 `cancel_deploy`，置共享 `threading.Event`，部署流各阶段检查中断）。
+- **调用链**：`component_market.api ws_deploy` → `component_catalog_service.deploy_stream`(生成器逐个 yield) → `_exec_ssh`/`_apply_docker_proxy`/`get_deploy_render`；AI 建议 `_ai_deploy_tip`(call_llm, 无 provider 降级 `_rule_deploy_tip`)。
+- - `POST /component-market/api/precheck` — **逻辑预检**(对标 K8s `precheck_plan`)。body: `{component_id, asset_id, deploy_type?, port?, http_proxy?, https_proxy?, no_proxy?}`。返回 `{ok, issues, checks:[{name, ok, message}]}`。预检项: 目标机资产/SSH 连通/root 校验/目标机内存/端口占用/对应部署方式环境(Docker/Compose / native 脚本 / helm·ha 引擎)/磁盘空间(/data)。走 `component_catalog_service.precheck_deploy`。
+- 部署流事件新增: `{type:"precheck", name, ok, message}`(部署阶段0 逐步推 8 项预检明细, 前端渲染预检面板; 预检未通过 → error + complete=failed 中断) 与 `{type:"report", overall_status, summary, report}`(docker/native **部署成功后自动触发四合一体检** `full_health_check`, 产出综合报告)。
+
+**部署结果判断契约(🔴 关键)**
+- 远程执行命令**禁止**写 `CMD 2>&1 | tail -30; echo __RC__=$?`(`$?` 取 tail 的退出码恒 0 → 失败误判成功)。
+- 必须用 `OUT=$(CMD 2>&1); RC=$?; echo "$OUT" | tail -30; echo __RC__=$RC`(真取 CMD 退出码); `_exec_ssh` 会解析输出里 `__RC__=N`, `N==0` 才算 ok。
+- native 部署后**必须**做服务级验证(用 `_NATIVE_VERIFY[name]=(探测命令, 成功关键字)`), 未通过/未起服务 → complete=failed(不能只凭安装脚本返回码判 running)。
+- **AI 自我察觉**: 部署失败时 `_ai_deploy_diagnosis` 喂完整日志给 LLM, yield `ai` 事件 `stage='diagnosis'`(字段 `root_cause`/`steps[]`/`risk`/`summary`), 由 `deploy_stream` 内 `diag()` helper 触发。
+- **AI 交付版报告**: `_ai_final_report` 产出 `report` 事件, **含 `conclusion` 即交付版**(字段 `conclusion`/`root_cause`/`executed`/`impact`/`next_steps[]`/`risks[]`/`overview`), 可直接交付客户; 不含 conclusion 的 report 事件=四合一体检数据。
+
+**AI 决策门控契约(Human-in-the-loop)**
+- 部署执行异常(拿不准/错误)时, `deploy_stream` 内 `ask_decision()` 调 `_ai_decision_options` 生成 **2 个 AI 方案**, `yield {type:"decide", id, install_id, question, options:[{key,title,detail}], free:true}` 并阻塞等前端选择(不超时, stop 可解除)。
+- 前端收到 `decide` 显示决策卡(2 方案 + 自定义输入), 通过 WS 回发 `{type:"decision", install_id, id, choice}`; 后端 `resolve_decision(install_id, id, choice)` 写入结果并唤醒部署流(错误 decision_id 返回 False 不误唤醒)。
+- 部署流按用户所选执行(把 choice 当命令最佳努力执行)→ 重试 → 仍失败则 complete=failed。
+- 注册表 `_DECISION_REG`(进程内, 内存态), 模块级 `register_decision`/`resolve_decision`。
+- 变更点: 关键词 `ask_decision` / `resolve_decision` / `_DECISION_REG` / `decide` / `decision`。
+
+**执行回放 / 续 AI 对话契约**
+- `ComponentInstall.events_json`(Text)= 部署完整**结构化事件 JSON 数组**(status/phase/precheck/ai/decide/log/report/complete), 每事件含 `install_id`; 新建部署时由 ws 端点 `_append_install_event` 逐条追加(1 次 DB 写/事件)。
+- ws 端点 `GET /component-market/ws/deploy` query 支持 **resume**: `install_id`+`resume=1` → 回放 events_json 历史(标 `resumed`/`resume_phase`), 且若 `_DECISION_REG[install_id]` 有未决 decision 则推送最新 decide(标 `resumed_decision`), 前端回包仍走 `resolve_decision`(同一 decision_id)续决策; 无未决则推 `{type:'resume_done', install_id}`。
+- 前端「📖 查看执行」→ 回放工作台弹窗, 连 resume ws 恢复历史 + 续决策。
+- 变更点: `events_json` / `_append_install_event` / `get_install_events` / `resume` / `resumed_decision` / `resume_done`。
+
+**🔴 踩坑**：ws 端点**必须**顶部 `from fastapi import WebSocket` 且签名 `websocket: WebSocket`（正常类型注解），**不可**用字符串注解+函数内 import，否则 uvicorn 握手返回 403(101 握手失败)。
+
 ---
+
 
 ## 第三章：跨表同语义字段长度统一
 

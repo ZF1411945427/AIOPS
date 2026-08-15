@@ -3,7 +3,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox", "/agent", "/edge/metrics", "/metrics"}
+PUBLIC_PATHS = {"/login", "/static", "/assets", "/product", "/product/intro", "/product/overview", "/user-guide", "/vue-assets", "/mobile-app", "/api/system/db-mode", "/api/v1/traces/ingest-status", "/api/v1/traces/otlp", "/api/v1/traces/jaeger", "/api/v1/traces/agent-guide", "/v1/traces", "/mobile", "/me", "/healthz", "/readyz", "/health-map", "/api/system/health", "/api/menu", "/license", "/edge/commands/pending", "/im/callback", "/api/traces/domains", "/api/traces/services", "/api/traces/asset-domains", "/sandbox", "/agent", "/edge/metrics", "/metrics", "/component-market/ws"}
 
 
 class TraceIdMiddleware(BaseHTTPMiddleware):

@@ -1,7 +1,7 @@
 <template>
   <transition name="slide">
     <div v-if="modelValue" class="guide-overlay" @click.self="$emit('update:modelValue', false)">
-      <div class="guide-drawer">
+      <div class="guide-drawer" :style="drawerStyle">
         <div class="guide-header">
           <span class="guide-title">{{ title }}</span>
           <button class="guide-close" @click="$emit('update:modelValue', false)">✕</button>
@@ -15,11 +15,17 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  title: { type: String, default: '📖 使用说明' }
+  title: { type: String, default: '📖 使用说明' },
+  width: { type: [Number, String], default: 520 }
 })
 defineEmits(['update:modelValue'])
+const drawerStyle = computed(() => {
+  const w = typeof props.width === 'number' ? props.width + 'px' : props.width
+  return { width: w, maxWidth: '92vw' }
+})
 </script>
 
 <style scoped>
@@ -29,7 +35,7 @@ defineEmits(['update:modelValue'])
   display: flex; justify-content: flex-end;
 }
 .guide-drawer {
-  width: 520px; max-width: 90vw; height: 100%;
+  max-width: 90vw; height: 100%;
   background: var(--card-bg, #fff);
   box-shadow: -4px 0 24px rgba(0,0,0,0.12);
   display: flex; flex-direction: column;
