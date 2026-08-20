@@ -6,6 +6,9 @@ from app.database import get_db
 from app.services import knowledge_graph_service
 from app.services import graph_inference_service
 from sqlalchemy.orm import Session
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/knowledge/graph", tags=["knowledge-graph"])
 
@@ -41,8 +44,8 @@ def api_graph(db: Session = Depends(get_db)):
                         "edge_count": len(edges or pg_graph.get("edges", [])),
                         "source": "neo4j" if nodes else "postgresql",
                     })
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         graph = knowledge_graph_service.get_dependency_graph(db)
         return JSONResponse({
             "nodes": graph.get("nodes", []),

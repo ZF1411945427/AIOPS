@@ -187,6 +187,12 @@
                 <div><span class="kv-label">涉及服务：</span>{{ (detail.cluster?.services || []).join(', ') || '-' }}</div>
               </div>
             </div>
+            <div v-if="detail.key_points && (detail.key_points.root_cause || detail.key_points.solution)" class="key-points">
+              <div class="kp-title">📌 要点总结</div>
+              <div v-if="detail.key_points.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ detail.key_points.root_cause }}</span></div>
+              <div v-if="detail.key_points.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ detail.key_points.solution }}</span></div>
+              <div v-if="detail.key_points.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ detail.key_points.impact }}</span></div>
+            </div>
             <div class="detail-section">
               <h4>根因推荐</h4>
               <pre class="code-block">{{ formatJson(detail.root_cause) }}</pre>

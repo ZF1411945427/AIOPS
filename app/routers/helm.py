@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.template_utils import parse_json_config
 from app.models import DataSource
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/helm", tags=["helm"])
 
@@ -93,8 +96,8 @@ def _cleanup(*paths):
             continue
         try:
             os.unlink(p)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 @router.get("/api/status")

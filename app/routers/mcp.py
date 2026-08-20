@@ -22,8 +22,8 @@ def _current_user_id(request: Request) -> int:
                 payload = verify_login_token(auth[7:])
                 if payload:
                     uid = payload.get("user_id")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return uid
 
 
@@ -102,8 +102,8 @@ def api_mcp_update(server_id: int, request: Request, payload: dict, db: Session 
     old_cfg = {}
     try:
         old_cfg = json.loads(s.auth_config) if s.auth_config else {}
-    except Exception:
-        pass
+    except Exception as _exc1:
+        logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     if payload.get("api_key"):  # 留空=不更新
         old_cfg["api_key"] = str(payload["api_key"])
     s.auth_config = json.dumps(old_cfg, ensure_ascii=False)
@@ -144,3 +144,7 @@ def api_mcp_test(server_id: int, request: Request, db: Session = Depends(get_db)
 def api_mcp_reload(request: Request, db: Session = Depends(get_db)):
     n = mcp_external.reload_external_tools(db)
     return JSONResponse({"ok": True, "loaded": n, "message": f"已重载 {n} 个外部工具"})
+
+
+import logging
+logger = logging.getLogger(__name__)

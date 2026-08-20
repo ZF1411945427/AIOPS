@@ -111,7 +111,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import axios from 'axios'
+import request from '@/api/request'
 
 const API = '/api/chaos'
 const scenarioList = ref([])
@@ -154,7 +154,7 @@ const filteredList = computed(() =>
 )
 
 async function loadScenarios() {
-  try { const { data } = await axios.get(`${API}/scenarios`); scenarioList.value = data } catch {}
+  try { const data = await request.get(`${API}/scenarios`); scenarioList.value = data } catch {}
 }
 
 function showCreateDialog() {
@@ -165,7 +165,7 @@ function showCreateDialog() {
 async function createScenario() {
   if (!createForm.name) { ElMessage.warning('请填写场景名称'); return }
   try {
-    await axios.post(`${API}/scenarios`, {
+    await request.post(`${API}/scenarios`, {
       name: createForm.name, description: createForm.description,
       category: createForm.target_layer, target_layer: createForm.target_layer,
       fault_type: createForm.fault_type,
@@ -181,7 +181,7 @@ async function createScenario() {
 async function deleteScenario(scenario) {
   try {
     await ElMessageBox.confirm(`确认删除场景"${scenario.name}"？`, '提示', { type: 'warning' })
-    await axios.delete(`${API}/scenarios/${scenario.id}`)
+    await request.delete(`${API}/scenarios/${scenario.id}`)
     ElMessage.success('已删除')
     loadScenarios()
   } catch (e) { if (e !== 'cancel') ElMessage.error('删除失败') }

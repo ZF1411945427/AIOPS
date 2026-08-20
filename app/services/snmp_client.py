@@ -9,6 +9,9 @@ import socket
 from typing import Any, Dict, List, Tuple
 
 # ─── BER 编码 ────────────────────────────────────────────────────
+import logging
+logger = logging.getLogger(__name__)
+
 _TAG_BOOL = 0x01
 _TAG_INT = 0x02
 _TAG_STR = 0x04
@@ -354,14 +357,14 @@ def discover_neighbors(host: str, community: str = "public", port: int = 161,
             })
         if neighbors:
             return neighbors
-    except SnmpError:
-        pass
+    except SnmpError as _exc:
+        logger.warning("[except:pass] SnmpError: %s", _exc, exc_info=True)
     # CDP 退化
     try:
         for vb in s.walk(OID_CDP_CACHE):
             pass
-    except SnmpError:
-        pass
+    except SnmpError as _exc1:
+        logger.warning("[except:pass] SnmpError: %s", _exc1, exc_info=True)
     return neighbors
 
 

@@ -9,6 +9,9 @@ from app.services import asset_service
 from app.services.connection_service import ConnectionTester
 from app.models import Asset, DataSource, AssetLifecycle, AssetSessionLink
 from app.services.agent_service import get_or_create_session, add_message
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 templates = get_templates()
@@ -67,20 +70,27 @@ def asset_api_list(
         # 解析 ci_attributes 取引用关系/孤岛标记（三层纳管模型）
         ref_count = None
         is_orphan = False
+        attrs = {}
+        _cfg = {}
         try:
             attrs = json.loads(a.ci_attributes) if a.ci_attributes else {}
             if a.ci_type in ("configmap", "secret", "pvc"):
                 refs = attrs.get("referenced_by", []) or []
                 ref_count = len(refs)
                 is_orphan = bool(attrs.get("orphan"))
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
+        try:
+            _cfg = json.loads(a.connection_config) if a.connection_config else {}
         except Exception:
-            pass
+            _cfg = {}
         lifecycle_status = lc_map.get(a.id, "provisioning")
         result.append({
             "id": a.id, "name": a.name, "type": a.ci_type, "ci_type": getattr(a, 'ci_type', None),
             "ip": a.ip, "status": a.status,
             "lifecycle_status": lifecycle_status,
             "connection_type": getattr(a, 'connection_type', None),
+            "probe_type": getattr(a, 'probe_type', None) or "tcp",
             "edge_agent_id": getattr(a, 'edge_agent_id', None) or "",
             "last_checked_at": a.last_checked_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, 'last_checked_at', None) else None,
             "latency_ms": getattr(a, 'latency_ms', None),
@@ -89,6 +99,12 @@ def asset_api_list(
             "created_at": a.created_at.strftime("%Y-%m-%d %H:%M") if getattr(a, 'created_at', None) else None,
             "ref_count": ref_count,
             "is_orphan": is_orphan,
+            # 生产只读铁闸: 环境 + AI 有效访问模式(非服务器经父链继承)
+            "environment": getattr(a, 'environment', None) or "non-production",
+            "effective_ai_access": asset_service.effective_ai_access(db, a),
+            # 子类型(中间件 mw_subtype / 数据库 db_type 等)用于列表子类型小标
+            "mw_subtype": attrs.get("mw_subtype", _cfg.get("mw_subtype", "")),
+            "db_type": _cfg.get("db_type", ""),
         })
     total_pages = (total + page_size - 1) // page_size if total > 0 else 1
     return JSONResponse({"items": result, "total": total, "page": page, "page_size": page_size, "total_pages": total_pages})
@@ -153,71 +169,11 @@ def api_asset_delete(asset_id: int, db: Session = Depends(get_db)):
 def _build_connection_config(payload: dict) -> dict:
     """根据 payload 字段构造 connection_config dict.
 
+    HTTP 适配层转发到 service 层实现(保持既有调用点不变)。
     字段名以 CONTRACT.md 为准（Single Source of Truth）。
     """
-    ct = payload.get("connection_type", "ssh")
-    # 合并已有 config（编辑场景：connection_config 已存则作为 base）
-    base = {}
-    if payload.get("connection_config"):
-        try:
-            base = json.loads(payload["connection_config"]) if isinstance(payload["connection_config"], str) else payload["connection_config"]
-        except Exception:
-            base = {}
-
-    if ct == "ssh":
-        return {
-            "ssh_user": payload.get("ssh_user", base.get("ssh_user", "root")),
-            "ssh_password": payload.get("ssh_password", base.get("ssh_password", "")),
-            "ssh_port": int(payload.get("ssh_port", base.get("ssh_port", 22))),
-        }
-    elif ct == "winrm":
-        return {
-            "winrm_user": payload.get("winrm_user", base.get("winrm_user", "Administrator")),
-            "winrm_password": payload.get("winrm_password", base.get("winrm_password", "")),
-            "winrm_port": int(payload.get("winrm_port", base.get("winrm_port", 5985))),
-            "winrm_transport": payload.get("winrm_transport", base.get("winrm_transport", "ntlm")),
-            "winrm_ssl": payload.get("winrm_ssl", base.get("winrm_ssl", False)),
-        }
-    elif ct == "kubernetes":
-        cfg = dict(base)
-        if payload.get("k8s_api_server"):
-            cfg["k8s_api_server"] = payload["k8s_api_server"]
-        if payload.get("k8s_token"):
-            cfg["k8s_token"] = payload["k8s_token"]
-        if payload.get("k8s_namespace"):
-            cfg["k8s_namespace"] = payload["k8s_namespace"]
-        return cfg
-    elif ct == "snmp":
-        return {
-            "snmp_community": payload.get("snmp_community", base.get("snmp_community", "public")),
-            "snmp_port": int(payload.get("snmp_port", base.get("snmp_port", 161))),
-            "snmp_version": payload.get("snmp_version", base.get("snmp_version", "v2c")),
-        }
-    elif ct == "http":
-        cfg = dict(base)
-        if payload.get("http_url"):
-            cfg["http_url"] = payload["http_url"]
-        if payload.get("http_auth"):
-            cfg["http_auth"] = payload["http_auth"]
-        if payload.get("http_credential"):
-            cfg["http_credential"] = payload["http_credential"]
-        # 中间件子类型字段透传到 connection_config，供 _test_middleware 使用
-        if payload.get("mw_subtype"):
-            cfg["mw_subtype"] = payload["mw_subtype"]
-        if payload.get("mw_port") is not None:
-            cfg["mw_port"] = int(payload["mw_port"])
-        if payload.get("mw_admin_url"):
-            cfg["mw_admin_url"] = payload["mw_admin_url"]
-        return cfg
-    elif ct == "database":
-        return {
-            "db_type": payload.get("db_type", base.get("db_type", "mysql")),
-            "db_port": int(payload.get("db_port", base.get("db_port", 3306))),
-            "db_user": payload.get("db_user", base.get("db_user", "root")),
-            "db_password": payload.get("db_password", base.get("db_password", "")),
-            "db_name": payload.get("db_name", base.get("db_name", "")),
-        }
-    return {}
+    from app.services.asset_service import build_connection_config as _svc
+    return _svc(payload)
 
 
 @router.post("/api/create")
@@ -263,7 +219,18 @@ def api_asset_create(payload: dict, db: Session = Depends(get_db)):
         "connection_type": connection_type,
         "connection_config": json.dumps(config, ensure_ascii=False),
         "ci_attributes": json.dumps(payload.get("ci_attributes") or {}, ensure_ascii=False),
+        "probe_type": (payload.get("probe_type") or "tcp"),
     }
+    # 生产只读铁闸: 仅服务器类资产可设置 environment / ai_access_mode;
+    # 非服务器资产环境由父链继承, 不落库(保持默认 non-production, 由 effective_ai_access 追溯父服务器)
+    _ci_type_server = ci_type.replace("-", "_")
+    if _ci_type_server in ("server", "virtual_machine", "cloud_host", "vm"):
+        data["environment"] = "production" if payload.get("environment") == "production" else "non-production"
+        # 生产默认 read-only; 豁免(ai_access_mode=read-write)需显式勾选
+        if data["environment"] == "production":
+            data["ai_access_mode"] = "read-write" if payload.get("ai_access_mode") == "read-write" else "read-only"
+        else:
+            data["ai_access_mode"] = "read-write"
     if payload.get("parent_id"):
         data["parent_id"] = int(payload["parent_id"])
     asset = asset_service.create_asset(db, data)
@@ -282,7 +249,8 @@ def api_asset_update(asset_id: int, payload: dict, db: Session = Depends(get_db)
     if not asset:
         return JSONResponse({"ok": False, "message": "资产不存在"}, status_code=404)
     data = {}
-    for k in ("name", "ci_type", "ip", "status", "tags", "k8s_cluster", "connection_type"):
+    for k in ("name", "ci_type", "ip", "status", "tags", "k8s_cluster", "connection_type", "probe_type"):
+
         if k in payload:
             data[k] = payload[k]
     if "connection_config" in payload:
@@ -299,12 +267,25 @@ def api_asset_update(asset_id: int, payload: dict, db: Session = Depends(get_db)
             if host and ctype:
                 result = ConnectionTester.test(ctype, host, cfg)
                 data["status"] = "online" if result.get("ok") else "offline"
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     if "ci_attributes" in payload:
         data["ci_attributes"] = json.dumps(payload["ci_attributes"], ensure_ascii=False) if isinstance(payload["ci_attributes"], dict) else payload["ci_attributes"]
     if "parent_id" in payload:
         data["parent_id"] = int(payload["parent_id"]) if payload["parent_id"] else None
+    # 生产只读铁闸: 仅服务器类资产可改 environment / ai_access_mode
+    ci = (asset.ci_type or "").replace("-", "_")
+    if ci in ("server", "virtual_machine", "cloud_host", "vm"):
+        if "environment" in payload:
+            env = "production" if payload["environment"] == "production" else "non-production"
+            data["environment"] = env
+            # 生产非只读(豁免)需显式传 ai_access_mode=read-write; 生产默认 read-only
+            if env == "production":
+                data["ai_access_mode"] = "read-write" if payload.get("ai_access_mode") == "read-write" else "read-only"
+            else:
+                data["ai_access_mode"] = payload.get("ai_access_mode", "read-write") if payload.get("ai_access_mode") in ("read-only", "read-write") else "read-write"
+        elif "ai_access_mode" in payload and (asset.environment or "non-production") == "production":
+            data["ai_access_mode"] = "read-write" if payload["ai_access_mode"] == "read-write" else "read-only"
     updated = asset_service.update_asset(db, asset_id, data)
     # K8s 集群更新后同步 DataSource
     if data.get("ci_type") == "kubernetes_cluster" or asset.ci_type == "kubernetes_cluster":
@@ -339,6 +320,13 @@ def api_asset_detail(asset_id: int, db: Session = Depends(get_db)):
         "ip": asset.ip, "status": asset.status, "tags": asset.tags or "",
         "k8s_cluster": asset.k8s_cluster or "", "parent_id": asset.parent_id,
         "connection_type": asset.connection_type or "ssh",
+        "probe_type": asset.probe_type or "tcp",
+        # 生产只读铁闸字段(仅服务器资产落库; 非服务器经父链继承)
+        "environment": asset.environment or "non-production",
+        "ai_access_mode": asset.ai_access_mode or "read-only",
+        "effective_ai_access": asset_service.effective_ai_access(db, asset),
+        "effective_environment": asset_service.effective_environment(db, asset),
+        "is_server_type": (asset.ci_type or "").replace("-", "_") in ("server", "virtual_machine", "cloud_host", "vm"),
         "ci_attributes": attrs,
         "ssh_user": config.get("ssh_user", "root"),
         "ssh_password": "***" if config.get("ssh_password") else "",

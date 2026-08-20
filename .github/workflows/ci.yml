@@ -69,7 +69,7 @@ jobs:
 
       - name: Run unit + integration tests with coverage gate
         run: |
-          python -m pytest tests/ -q --cov=app --cov-fail-under=20 --cov-report=term-missing
+          python -m pytest tests/ -q --cov=app --cov-fail-under=25 --cov-report=term-missing
 
   backend-e2e:
     name: Backend E2E smoke (real process)

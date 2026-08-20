@@ -31,6 +31,12 @@
       </div>
 
       <div v-if="impactResult" class="result-section">
+        <div v-if="impactResult.summary_block && (impactResult.summary_block.root_cause || impactResult.summary_block.solution)" class="key-points">
+          <div class="kp-title">📌 要点总结</div>
+          <div v-if="impactResult.summary_block.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ impactResult.summary_block.root_cause }}</span></div>
+          <div v-if="impactResult.summary_block.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ impactResult.summary_block.solution }}</span></div>
+          <div v-if="impactResult.summary_block.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ impactResult.summary_block.impact }}</span></div>
+        </div>
         <div class="summary-cards">
           <div class="summary-card"><div class="sum-val">{{ impactResult.summary.total_impacted }}</div><div class="sum-label">受影响资产</div></div>
           <div class="summary-card"><div class="sum-val">{{ impactResult.summary.max_depth_reached }}</div><div class="sum-label">最大传播深度</div></div>
@@ -103,6 +109,12 @@
       </div>
 
       <div v-if="rootResult" class="result-section">
+        <div v-if="rootResult.summary_block && (rootResult.summary_block.root_cause || rootResult.summary_block.solution)" class="key-points">
+          <div class="kp-title">📌 要点总结</div>
+          <div v-if="rootResult.summary_block.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ rootResult.summary_block.root_cause }}</span></div>
+          <div v-if="rootResult.summary_block.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ rootResult.summary_block.solution }}</span></div>
+          <div v-if="rootResult.summary_block.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ rootResult.summary_block.impact }}</span></div>
+        </div>
         <div class="summary-cards">
           <div class="summary-card"><div class="sum-val">{{ rootResult.total_alerts_analyzed }}</div><div class="sum-label">分析告警数</div></div>
           <div class="summary-card"><div class="sum-val">{{ rootResult.total_assets_analyzed }}</div><div class="sum-label">涉及资产</div></div>

@@ -68,3 +68,38 @@ def refresh_clusters(request: Request, window_minutes: int = 5, db: Session = De
     except Exception as e:
         logger.warning(f"refresh_clusters 异常: {e}")
         return {"ok": False, "message": str(e)}
+
+
+@router.get("/persisted")
+def list_persisted(
+    request: Request,
+    limit: int = 50,
+    cluster_type: str = "",
+    db: Session = Depends(get_db),
+):
+    """查询已落库的告警聚类（含自动生成的故障单关联）"""
+    try:
+        user_id = request.session.get("user_id")
+        if not user_id:
+            return {"warning": "未登录", "items": []}
+        items = alert_correlation_service.list_persisted_clusters(
+            db, limit=limit, cluster_type=cluster_type or None
+        )
+        return {"items": items, "count": len(items)}
+    except Exception as e:
+        logger.warning(f"list_persisted 异常: {e}")
+        return {"warning": str(e), "items": []}
+
+
+@router.post("/persist")
+def persist_now(request: Request, auto_incident: bool = True, db: Session = Depends(get_db)):
+    """手动触发一次聚类落库 + 自动生成故障单"""
+    try:
+        user_id = request.session.get("user_id")
+        if not user_id:
+            return {"warning": "未登录"}
+        result = alert_correlation_service.persist_clusters(db, auto_incident=auto_incident)
+        return {"ok": True, **result}
+    except Exception as e:
+        logger.warning(f"persist_now 异常: {e}")
+        return {"ok": False, "message": str(e)}

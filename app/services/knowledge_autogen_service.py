@@ -223,8 +223,8 @@ def approve_draft(draft_id: int, db: Session) -> dict:
                 ).all()
                 for ia in inc_alerts:
                     alert_ids_to_link.add(ia.alert_id)
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except (json.JSONDecodeError, TypeError) as _exc:
+            logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc, exc_info=True)
 
     for aid in alert_ids_to_link:
         if aid:

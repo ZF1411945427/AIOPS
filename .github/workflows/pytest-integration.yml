@@ -1,0 +1,19 @@
+# ===== 集成测试 (已有 151 个用例) =====
+name: pytest-integration
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install deps
+        run: |
+          pip install -r requirements-ci.txt
+      - name: Run integration tests
+        run: python -m pytest tests/test_api_integration.py tests/test_alert_rules.py tests/test_ai_provider_health.py tests/test_tenant_service.py -v --tb=short

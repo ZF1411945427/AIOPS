@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import RemediationWorkflow, RemediationLog, Alert, Asset
 from app.template_utils import get_templates
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/remediation-workflows", tags=["remediation_workflows"])
 templates = get_templates()
@@ -179,8 +182,8 @@ def api_workflow_run(wf_id: int, dry_run: bool = False, db: Session = Depends(ge
                 try:
                     from app.services.remediation_effect_service import track_effect
                     track_effect(log.id, db, status_before=_abs)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
             if not success and not dry_run:
                 break
         if not dry_run:

@@ -281,8 +281,8 @@ def http_probe(req: HttpRequest):
         body_preview = ""
         try:
             body_preview = resp.read(2048).decode("utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         resp_headers = dict(resp.headers.items())
         return {
             "success": True,

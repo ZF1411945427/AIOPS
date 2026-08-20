@@ -14,6 +14,9 @@ import threading
 from pathlib import Path
 from typing import Any, Dict
 
+import logging
+logger = logging.getLogger(__name__)
+
 SKILLS_DRAWIO_DIR = Path(__file__).resolve().parent.parent.parent / "skills" / "drawio"
 SERVER_SCRIPT = SKILLS_DRAWIO_DIR / "server.mjs"
 
@@ -73,12 +76,12 @@ class MCPClient:
     def close(self):
         try:
             self.proc.stdin.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         try:
             self.proc.terminate()
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
 
 
 def _call_tool(name: str, args: dict, drawio_path: str) -> dict:

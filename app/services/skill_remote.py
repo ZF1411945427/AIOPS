@@ -30,6 +30,9 @@ from app.services import skill_registry
 from app.services.config_service import get_config
 from app.models import SystemConfig
 
+import logging
+logger = logging.getLogger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RAW_CACHE_DIR = PROJECT_ROOT / "marketplace" / "remote_cache"
 
@@ -70,8 +73,8 @@ def resolve_github_token(db: Optional[Session] = None,
             cfg_val = get_config(db, "github_api_token", "")
             if cfg_val and cfg_val.strip() and cfg_val.strip() != "***":
                 return cfg_val.strip()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return os.environ.get("GITHUB_TOKEN", "").strip()
 
 
@@ -367,8 +370,8 @@ def preview_remote_skill(owner: str, repo: str, skill: str, branch: str = DEFAUL
         if arr and isinstance(arr[0], dict):
             relevance = {"relevant": bool(arr[0].get("relevant", True)),
                          "reason": str(arr[0].get("reason") or "")}
-    except Exception:
-        pass
+    except Exception as _exc1:
+        logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     return {
         "name": _meta_value(meta, "name", default=skill) or skill,
         "version": _meta_value(meta, "version", "1.0.0"),

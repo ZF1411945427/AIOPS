@@ -138,6 +138,12 @@
 
     <el-dialog v-model="showResult" title="预测结果" width="800px">
       <div v-if="predictionResult" style="font-size:13px">
+        <div v-if="predictionResult.summary_block && (predictionResult.summary_block.root_cause || predictionResult.summary_block.solution)" class="key-points" style="margin-top:0">
+          <div class="kp-title">📌 要点总结</div>
+          <div v-if="predictionResult.summary_block.root_cause" class="kp-row"><span class="kp-tag">结论</span><span class="kp-text">{{ predictionResult.summary_block.root_cause }}</span></div>
+          <div v-if="predictionResult.summary_block.solution" class="kp-row"><span class="kp-tag">建议</span><span class="kp-text">{{ predictionResult.summary_block.solution }}</span></div>
+          <div v-if="predictionResult.summary_block.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ predictionResult.summary_block.impact }}</span></div>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
           <div class="result-item">
             <span class="result-label">指标</span>

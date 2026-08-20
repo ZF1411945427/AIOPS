@@ -153,8 +153,8 @@ async def webssh_terminal(websocket: WebSocket, agent_id: str,
         # 通知 edge agent 关闭 PTY
         try:
             await send_to_agent(agent_id, {"type": "pty_close", "pty_id": pty_id})
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         await unregister_pty(pty_id)
         # 更新审计日志
         if log:

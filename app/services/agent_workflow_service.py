@@ -23,6 +23,8 @@ from app.models import (
 )
 from app.services.mcp_registry import call_mcp_tool
 
+from app.logger import logger
+
 # 智能体工作流节点参数模板（渲染 JSON/字符串数据，非 HTML），autoescape=True 会破坏数据
 # 安全性由 _render_value 的输入白名单与节点配置校验保障，故标记 nosec B701
 _jinja_env = Environment(loader=BaseLoader(), autoescape=False)  # nosec B701
@@ -52,8 +54,8 @@ def _audit(db: Session, run_id: Optional[int] = None, node_run_id: Optional[int]
         logger.warning(f"审计日志写入失败: {e}")
         try:
             db.rollback()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 # ─── 序列化 ───
@@ -229,8 +231,8 @@ def _eval_operand(operand: str, runtime_context: Dict) -> Any:
         if "." in operand:
             return float(operand)
         return int(operand)
-    except ValueError:
-        pass
+    except ValueError as _exc1:
+        logger.warning("[except:pass] ValueError: %s", _exc1, exc_info=True)
     # 变量路径 nodes.xxx.output.yyy
     try:
         val = _jinja_env.from_string("{{ " + operand + " }}").render(**runtime_context)
@@ -744,12 +746,24 @@ def start_workflow_run(
         try:
             _advance_run(bg_db, _run_id)
         except Exception as e:
-            try:
-                _finalize_run(bg_db, _run_id, AgentWorkflowRun.STATUS_FAILED, f"后台执行异常: {e}")
-            except Exception:
-                pass
-            from app.logger import logger
-            logger.error(f"run#{_run_id} 后台执行异常: {e}")
+            emsg = str(e)
+            if "QueuePool" in emsg and "overflow" in emsg:
+                import time as _t
+                _t.sleep(3)
+                try:
+                    _advance_run(bg_db, _run_id)
+                except Exception as e2:
+                    try:
+                        _finalize_run(bg_db, _run_id, AgentWorkflowRun.STATUS_FAILED, f"后台执行异常(重试后): {e2}")
+                    except Exception:
+                        pass
+                    logger.warning(f"run#{_run_id} 后台执行异常(重试后): {e2}")
+            else:
+                try:
+                    _finalize_run(bg_db, _run_id, AgentWorkflowRun.STATUS_FAILED, f"后台执行异常: {e}")
+                except Exception:
+                    pass
+                logger.warning(f"run#{_run_id} 后台执行异常: {e}")
         finally:
             bg_db.close()
 
@@ -892,8 +906,8 @@ def _workflow_max_concurrency(db: Session) -> int:
             val = int(cfg.config_value)
             if 1 <= val <= 32:
                 return val
-    except Exception:
-        pass
+    except Exception as _exc3:
+        logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
     return 4
 
 

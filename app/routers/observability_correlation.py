@@ -10,6 +10,7 @@ from sqlalchemy import desc
 from app.database import get_db
 from app.models import Span, Alert, MetricRecord, Asset, LogAnomalyRule, K8sEvent, AssetChangeLog
 from app.logger import logger
+from app.routers.agent_sse import _clean_key_point
 
 router = APIRouter(prefix="/observability", tags=["observability-correlation"])
 logger.info("[ObservabilityCorrelation] Router loaded, prefix=/observability")
@@ -412,7 +413,58 @@ def run_correlation_analysis(
         alert_list, metric_anomaly_list, result["log_anomalies"], trace_data
     )
 
+    # ── 统一三要素要点总结(根因/方案/影响)，CONTRACT.md 第二十七章 ──
+    result["summary_block"] = _build_correlation_key_points(result)
+
     return result
+
+
+def _build_correlation_key_points(result: dict) -> dict:
+    """基于关联分析结果组装统一三要素要点(不加额外 LLM 调用)。
+
+    根因取最高置信度 RCA 建议；方案按根因类型推断处置方向；影响用统计描述。
+    无异常时返回空 dict(前端不渲染要点卡)。
+    """
+    s = result.get("summary", {})
+    total = (s.get("total_alerts", 0) + s.get("total_metric_anomalies", 0)
+             + s.get("total_log_anomalies", 0) + s.get("total_trace_anomalies", 0))
+    if total == 0:
+        return {}
+
+    rca = result.get("rca_suggestions", [])
+    conf_order = {"high": 0, "medium": 1, "low": 2}
+    rca.sort(key=lambda r: conf_order.get(r.get("confidence"), 3))
+    root = rca[0] if rca else None
+
+    _SOLUTION = {
+        "application": "检查相关应用/服务进程、错误日志与配置，必要时重启或回滚最近变更",
+        "infrastructure": "排查对应主机/中间件的资源占用与日志，确认是否为资源耗尽或进程异常",
+        "code_issue": "定位慢查询/死锁/异常逻辑，结合日志与调用链修复代码缺陷",
+    }
+    root_cause = f"检测到 {rca[0].get('message')}" if root else "存在多维信号异常，需进一步定位"
+    solution = _SOLUTION.get(root.get("type")) if root and root.get("type") in _SOLUTION else \
+        "结合告警、日志、调用链定位根因，按其严重度执行处置或提交故障单"
+
+    impact_parts = []
+    if s.get("total_alerts"):
+        impact_parts.append(f"{s.get('total_alerts')} 条告警")
+    if s.get("total_metric_anomalies"):
+        impact_parts.append(f"{s.get('total_metric_anomalies')} 个指标异常")
+    if s.get("total_log_anomalies"):
+        impact_parts.append(f"{s.get('total_log_anomalies')} 个日志异常")
+    if s.get("total_trace_anomalies"):
+        impact_parts.append(f"{s.get('total_trace_anomalies')} 处调用链异常")
+    if s.get("correlated_assets"):
+        impact_parts.append(f"关联 {s.get('correlated_assets')} 个资产")
+    impact = "、".join(impact_parts) if impact_parts else "影响待确认"
+    if s.get("critical_assets"):
+        impact += f"，含 {s.get('critical_assets')} 个严重资产"
+
+    return {
+        "root_cause": _clean_key_point(root_cause, 100),
+        "solution": _clean_key_point(solution, 160),
+        "impact": _clean_key_point(impact, 100),
+    }
 
 
 def format_correlation_for_llm(data: dict) -> str:

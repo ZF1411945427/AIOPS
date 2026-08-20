@@ -19,8 +19,8 @@ def _current_user_id(request: Request) -> int:
                 payload = verify_login_token(auth[7:])
                 if payload:
                     user_id = payload.get("user_id")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return user_id
 
 
@@ -86,3 +86,7 @@ async def api_secret_resolve(request: Request, db: Session = Depends(get_db)):
 def api_secret_references(db: Session = Depends(get_db)):
     refs = secret_vault.collect_references(db)
     return JSONResponse({"ok": True, "references": refs, "total": len(refs)})
+
+
+import logging
+logger = logging.getLogger(__name__)

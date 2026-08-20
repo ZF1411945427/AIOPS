@@ -9,6 +9,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 
 # 默认工具级超时（秒）。未显式声明 timeout_seconds 的工具也受此兜底，防 Agent 卡死
+import logging
+logger = logging.getLogger(__name__)
+
 DEFAULT_TOOL_TIMEOUT = 30
 
 
@@ -124,8 +127,8 @@ def _write_tool_audit(tool_name: str, arguments: Dict, result: Any, user_id: Opt
             session.commit()
         finally:
             session.close()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 def register_mcp_tool(
@@ -363,8 +366,8 @@ def call_mcp_tool(
             try:
                 from app.services.tenant_context import set_current_tenant
                 set_current_tenant(_captured_tenant)
-            except Exception:
-                pass
+            except Exception as _exc1:
+                logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
         _t0 = time.time()
         try:
             r = tool.handler(db=session, user_id=user_id, **arguments)
@@ -379,13 +382,13 @@ def call_mcp_tool(
                 try:
                     from app.services.tenant_context import clear_current_tenant
                     clear_current_tenant()
-                except Exception:
-                    pass
+                except Exception as _exc2:
+                    logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
             if close_session:
                 try:
                     session.close()
-                except Exception:
-                    pass
+                except Exception as _exc3:
+                    logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
 
     def _record_metric():
         if _metric:

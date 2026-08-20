@@ -5,6 +5,9 @@ from app.models import Asset, Alert, AssetRelation
 from app.database import get_session_for, get_db_mode
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 HEALTH_GREEN = "green"
 HEALTH_GRAY = "gray"
 HEALTH_RED = "red"
@@ -132,8 +135,8 @@ def _extract_domains(asset: Asset) -> list:
                 domains = [str(d).strip() for d in raw if str(d).strip()]
             else:
                 domains = [d.strip() for d in str(raw).split(",") if d.strip()]
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as _exc:
+        logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc, exc_info=True)
     if domains:
         return domains
     tags_str = (asset.tags or "").strip()
@@ -156,8 +159,8 @@ def get_layer(asset: Asset) -> str:
         explicit = attrs.get("layer")
         if explicit and str(explicit) in LAYER_ORDER:
             return str(explicit)
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as _exc1:
+        logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc1, exc_info=True)
     ct = (asset.ci_type or "").strip().lower()
     layer = LAYER_MAP.get(ct)
     if layer:

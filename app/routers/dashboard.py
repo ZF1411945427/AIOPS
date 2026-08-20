@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 
-from app.database import get_db
+from app.database import get_db, time_trunc_expr
 from app.models import Asset, Alert, AlertRule, Incident, DataSource
 from app.services.health_score_service import compute_health_score
 from app.services.metric_v2_service import is_vm_available
@@ -97,11 +97,9 @@ def dashboard_data(
 
     # Alert trend (by day/hour)
     if hours <= 24:
-        fmt = "%Y-%m-%d %H:00"
-        group_expr = func.strftime("%Y-%m-%d %H:00", Alert.created_at)
+        group_expr = time_trunc_expr(db, Alert.created_at, "hour")
     else:
-        fmt = "%Y-%m-%d"
-        group_expr = func.strftime("%Y-%m-%d", Alert.created_at)
+        group_expr = time_trunc_expr(db, Alert.created_at, "day")
     alert_rows = alert_filter.with_entities(
         group_expr.label("period"),
         func.count(Alert.id).label("count")

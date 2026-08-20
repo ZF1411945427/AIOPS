@@ -1,0 +1,18 @@
+# ===== Python 语法编译检查 =====
+name: backend-compile
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Syntax check
+        run: |
+          python -m py_compile $(find app -name '*.py')
+          python -m py_compile run.py

@@ -8,7 +8,9 @@ AI 洞察路由 — 统一指标/日志/链路三页的 AI 能力增强
 - DELETE /ai-insight/history/{id} — 删除历史
 - POST /ai-insight/rca       — 跨域根因分析
 """
+import json
 import logging
+import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import JSONResponse
@@ -18,11 +20,47 @@ from app.database import get_db
 from app.models import Span
 from app.services import metric_v2_service
 from app.services.agent_service import call_llm
+from app.routers.agent_sse import _clean_key_point
 from app.services.ai_insight_service import (
     _get_provider, analyze_trend, TREND_CN, cluster_logs,
     aggregate_traces, cross_domain_rca,
     record_analysis, list_analysis, get_analysis_detail, delete_analysis,
 )
+
+
+def _build_insight_key_points(source_type: str, meta: dict, analysis: str) -> dict:
+    """从 AI 洞察的统计 meta 和 analysis 文本组装统一三要素要点(不加额外 LLM 调用)。"""
+    first = (analysis or "").strip().splitlines()
+    verdict = ""
+    for ln in first[:8]:
+        ln = ln.strip().lstrip("#>*").strip()
+        if ln and ("健康" in ln or "正常" in ln or "高危" in ln or "关注" in ln or "异常" in ln or "结论" in ln):
+            verdict = ln
+            break
+    if not verdict:
+        verdict = (analysis or "").strip()[:40]
+
+    if source_type == "metrics":
+        cnt = meta.get("trend_count", 0)
+        root_cause = f"检测到 {cnt} 项指标存在趋势异常/波动"
+        solution = "结合异常指标与趋势，按 P0/P1/P2 处置对应资源（CPU/内存/磁盘等），必要时扩容或优化"
+        impact = f"涉及 {meta.get('metric_count', 0)} 项指标，其中 {cnt} 项趋势异常"
+    elif source_type == "logs":
+        root_cause = f"日志聚类出 {meta.get('cluster_count', 0)} 组模式，错误占比 {meta.get('error_pct', 0)}%"
+        solution = "针对高优先异常模式定位根因，按 P0/P1 处置，并关联 trace_id 追踪调用链"
+        impact = f"共 {meta.get('log_count', 0)} 条日志，错误占比 {meta.get('error_pct', 0)}%"
+    elif source_type == "traces":
+        root_cause = f"调用链聚合出 {meta.get('service_count', 0)} 个服务，存在错误/慢调用"
+        solution = "定位瓶颈服务与错误调用链，优化或修复对应服务，必要时限流/扩容"
+        impact = f"涉及 {meta.get('trace_count', 0)} 条调用链、{meta.get('service_count', 0)} 个服务"
+    else:
+        return {}
+
+    return {
+        "root_cause": _clean_key_point(root_cause, 100),
+        "solution": _clean_key_point(solution, 160),
+        "impact": _clean_key_point(impact, 100),
+    }
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai-insight", tags=["ai_insight"])
@@ -265,6 +303,7 @@ async def ai_insight_analyze(request: Request, db: Session = Depends(get_db)):
     rec = record_analysis(db, user_id, source_type, title, analysis,
                           provider=provider.default_model, meta_json=meta,
                           question=question, score=score)
+    key_points = _build_insight_key_points(source_type, meta, analysis)
     return JSONResponse({
         "ok": True,
         "analysis": analysis,
@@ -273,6 +312,7 @@ async def ai_insight_analyze(request: Request, db: Session = Depends(get_db)):
         "meta": meta,
         "score": score,
         "enhanced": enhanced_data,
+        "key_points": key_points,
     })
 
 
@@ -346,3 +386,95 @@ async def insight_rca(request: Request, db: Session = Depends(get_db)):
                                          "trace_count": result.get("trace_count", 0)})
         result["record_id"] = rec.id
     return JSONResponse(result)
+
+
+@router.post("/generate-promql")
+async def ai_generate_promql(request: Request, db: Session = Depends(get_db)):
+    """根据自然语言请求生成自定义卡片 PromQL 查询.
+
+    body: {
+      request: "CPU 使用率最高的前3台主机",
+      hours: 24
+    }
+    返回: {ok, promql, title, provider, error?}
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "请求体格式错误"}, status_code=400)
+
+    user_request = (body.get("request") or "").strip()
+    if not user_request:
+        return JSONResponse({"error": "请描述你想查询的指标/需求"}, status_code=400)
+
+    provider = _get_provider(db)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "未配置可用的 AI 模型提供商"})
+
+    metric_names = metric_v2_service.query_metric_names()
+    names_str = ", ".join(metric_names[:200]) if metric_names else "(无可用指标)"
+    hours = int(body.get("hours", 24) or 24)
+    time_desc = (body.get("time_desc") or "").strip() or f"最近 {hours} 小时"
+
+    sys_prompt = (
+        "你是一名资深 PromQL / Prometheus 专家。用户的系统会把指标写入 VictoriaMetrics，"
+        "指标带 asset_id（资产 id）、unit（单位）、target 等标签。"
+        f"系统当前可用的指标名有: {names_str}\n\n"
+        "请根据用户的自然语言需求，生成一段可执行的自定义 PromQL。要求：\n"
+        "1. 只能使用上面列出的指标名，不要臆造不存在的指标。\n"
+        "2. 优先给出有意义的聚合，常见用法：avg/max/min/sum by 或 avg_over_time，"
+        "需要排名的用 topk/bottomk，需要滚动的用 rate()。\n"
+        "3. 若需要区分资产/单个主机，用 asset_id 标签过滤，如 {asset_id=\"1\"}。\n"
+        "4. 注意：查询时间范围是用户卡片设置的时间范围，滚动函数窗口（如 rate()[5m]、avg_over_time()[1h]）"
+        "要远小于该总时长，不要超过总时长，也不要恰好等于总时长。\n"
+        "5. 只输出一行 PromQL 表达式，不要写解释、不要写 markdown 代码块、不要换行。\n"
+        "同时给卡片起一个简短的标题（少于 20 字）。\n\n"
+        "输出严格按如下 JSON 格式（不要输出其他内容）:\n"
+        '{"promql": "<PromQL>", "title": "<卡片标题>"}'
+    )
+    user_prompt = f"查询时间范围: {time_desc}。\n用户需求: {user_request}"
+    resp = call_llm(provider, [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_prompt},
+    ], timeout_override=120)
+    if resp.get("error"):
+        return JSONResponse({"ok": False, "error": f"AI 生成失败: {resp['error']}"})
+    try:
+        content = resp["choices"][0]["message"]["content"]
+    except Exception:
+        return JSONResponse({"ok": False, "error": "AI 返回格式异常"})
+
+    promql, title = _parse_promql_response(content, user_request)
+    if not promql:
+        return JSONResponse({"ok": False, "error": "AI 未能解析出有效的 PromQL"})
+
+    return JSONResponse({
+        "ok": True,
+        "promql": promql.strip(),
+        "title": title,
+        "provider": provider.default_model,
+    })
+
+
+def _parse_promql_response(content: str, fallback_title: str) -> tuple:
+    """从 LLM 输出解析 promql 与 title；剥离 markdown 代码块/JSON 包裹，取最像的表达式。"""
+    text = (content or "").strip()
+    text = re.sub(r"^```(?:json|promql)?\s*", "", text).strip()
+    text = re.sub(r"\s*```$", "", text).strip()
+    title = fallback_title[:20]
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data.get("promql", ""), (data.get("title") or title)[:20]
+    except Exception:
+        pass
+    m = re.search(r'"promql"\s*:\s*"([^"]*)"', text)
+    if m:
+        return m.group(1), title
+    line = text.splitlines()[0].strip() if text else ""
+    if line and (any(c in line for c in "({") or line[0].isalpha()):
+        return line, title
+    return "", title

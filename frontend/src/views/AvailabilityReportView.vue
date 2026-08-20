@@ -111,8 +111,8 @@
 <script setup>
 import { ref, onMounted, computed } from "vue"
 import { ElMessage } from "element-plus"
-import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
+import request from '@/api/request'
 
 const showGuide = ref(false)
 const reportList = ref([])
@@ -130,8 +130,8 @@ const stats = computed(() => {
 
 const loadData = async () => {
   try {
-    const res = await axios.get("/api/sre/availability")
-    reportList.value = res.data
+    const res = await request.get("/api/sre/availability")
+    reportList.value = res
   } catch (e) {
     console.error(e)
   }
@@ -140,8 +140,8 @@ const loadData = async () => {
 const generateReport = async () => {
   generating.value = true
   try {
-    const res = await axios.post("/api/sre/availability/generate")
-    ElMessage.success(res.data.message)
+    const res = await request.post("/api/sre/availability/generate")
+    ElMessage.success(res.message)
     loadData()
   } catch (e) {
     ElMessage.error("生成失败")
@@ -152,7 +152,7 @@ const generateReport = async () => {
 
 const deleteReport = async (id) => {
   try {
-    await axios.delete(`/api/sre/availability/${id}`)
+    await request.delete(`/api/sre/availability/${id}`)
     ElMessage.success("删除成功")
     loadData()
   } catch (e) {

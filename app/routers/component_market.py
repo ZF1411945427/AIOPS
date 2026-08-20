@@ -27,6 +27,7 @@ from app.services.component_catalog_service import (
     resolve_decision, _append_install_event, get_install_events,
     generate_install_report, generate_ai_health_report,
 )
+from app.services.component_catalog_service import submit_install_decision, _set_pending_decision_install
 
 router = APIRouter(prefix="/component-market", tags=["ComponentMarket"])
 
@@ -36,8 +37,8 @@ def _on_startup():
     db = next(get_db())
     try:
         seed_builtin_components(db)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 @router.get("/api/stats")
@@ -87,7 +88,7 @@ def api_render(component_id: int = Query(...), deploy_type: str = Query("docker"
 @router.post("/api/precheck")
 def api_precheck(body: dict = Body(...)):
     """逻辑预检(对标 K8s 集群部署 precheck): 部署前检查目标机/环境/端口/资源。
-    body: {component_id, asset_id, deploy_type?, port?, http_proxy?, https_proxy?, no_proxy?}
+    body: {component_id, asset_id, deploy_type?, port?, params?, http_proxy?, https_proxy?, no_proxy?}
     返回: {ok, issues, checks:[{name, ok, message}]}"""
     from app.models import Asset
     db = next(get_db())
@@ -103,6 +104,7 @@ def api_precheck(body: dict = Body(...)):
         https_proxy=body.get("https_proxy") or "",
         no_proxy=body.get("no_proxy") or "",
         deploy_path=body.get("deploy_path") or "",
+        params=body.get("params") or {},
     )
     return result
 
@@ -113,7 +115,7 @@ def api_gen_plan(body: dict = Body(...)):
     body: {component_id, asset_id, deploy_type?, port?, deploy_path?}
     返回: {ok, system, plan} 或 {ok:false, error}"""
     from app.models import Asset
-    from app.services.component_catalog_service import _ai_generate_plan
+    from app.services.component_catalog_service import _ai_generate_plan, _plan_to_visual_steps
     db = next(get_db())
     comp = get_component(db, body.get("component_id"))
     if not comp:
@@ -125,13 +127,35 @@ def api_gen_plan(body: dict = Body(...)):
         db, asset, comp, deploy_type=deploy_type,
         port=body.get("port"),
         deploy_path=body.get("deploy_path") or "",
+        params=body.get("params") or {},
     )
     system = (pc or {}).get("system") or ""
+    params = body.get("params") or {}
+    _gen_port = int(params.get("db_port") or params.get("amqp_port")
+                    or body.get("port") or comp.get("default_port") or 0)
     plan = _ai_generate_plan(db, comp, deploy_type, system,
                              target=asset.ip if asset else "",
-                             port=int(body.get("port") or comp.get("default_port") or 0),
-                             deploy_path=body.get("deploy_path") or "")
-    return {"ok": True, "system": system, **plan}
+                             port=_gen_port,
+                             deploy_path=body.get("deploy_path") or "",
+                             params=params)
+    # 附加结构化步骤(前端渲染步骤卡片) + 预检摘要信息, 便于方案顶部展示环境
+    plan_text = plan.get("plan") or ""
+    steps = _plan_to_visual_steps(plan_text, deploy_type)
+    # 从预检里挑出「系统/工具链/端口/磁盘」等关键环境信息给方案头
+    _env = {}
+    if pc:
+        chk = pc.get("checks") or []
+        for c in chk:
+            n = c.get("name", "")
+            if c.get("level") == "error":
+                _env.setdefault("errors", []).append(f"{n}: {c.get('message','')}")
+        try:
+            _env["system"] = next((c["message"] for c in chk if c["name"] == "目标机系统"), "") or ""
+            _env["port"] = next((c["message"] for c in chk if c["name"].startswith("端口")), "") or ""
+            _env["disk"] = next((c["message"] for c in chk if c["name"].startswith("磁盘空间")), "") or ""
+        except Exception:
+            pass
+    return {"ok": True, "system": system, "steps": steps, "env": _env, **plan}
 
 
 @router.post("/api/deploy")
@@ -182,7 +206,20 @@ def api_deploy(body: dict = Body(...)):
         return {"ok": ok, "install": get_install(db, inst["id"]), "component": comp["display_name"],
                 "deploy_type": deploy_type, "deploy_log": log}
     elif deploy_type == "native":
-        ok, out = _exec_native(asset, comp.get("native_script") or "")
+        # ▼ 使用 _inject_native_params 保证参数真正注入部署脚本
+        from app.services.component_catalog_service import _inject_native_params, _native_proxy_prefix
+        params = body.get("params") or {}
+        deploy_path = body.get("deploy_path", "").strip() or f"/data/aiops-components/{comp['name']}"
+        native_script = comp.get("native_script") or ""
+        if params:
+            injected = _inject_native_params(native_script, comp, params, deploy_path=deploy_path)
+            http_proxy = body.get("http_proxy") or ""
+            https_proxy = body.get("https_proxy") or ""
+            if http_proxy:
+                injected = f"{_native_proxy_prefix(http_proxy, https_proxy or http_proxy, body.get('no_proxy') or '')}\n{injected}"
+            ok, out = _exec_native(asset, injected)
+        else:
+            ok, out = _exec_native(asset, native_script)
         update_install_status(db, inst["id"], "running" if ok else "failed", out)
         return {"ok": ok, "install": get_install(db, inst["id"]), "component": comp["display_name"],
                 "deploy_type": deploy_type, "deploy_log": out}
@@ -198,8 +235,9 @@ def _exec_native(asset, script: str) -> tuple:
     from app.services.component_catalog_service import _exec_ssh
     if not script:
         return (False, "组件未提供原生安装脚本")
-    cmd = f"set -e; {script} 2>&1 | tail -20; echo __RC__=$?"
-    return _exec_ssh(asset, cmd, timeout=300)
+    cmd = f"export AIOPS_DEPLOY=1; {script} 2>&1 | tail -20; echo __RC__=$?"
+    # ▼ 大型包(ES/Mongo 数百MB)+ 冷启动重试可能超过5分钟, 放宽到10分钟
+    return _exec_ssh(asset, cmd, timeout=600)
 
 
 @router.get("/api/installs")
@@ -276,11 +314,12 @@ def api_full_check(install_id: int):
 
 
 @router.post("/api/installs/{install_id}/report")
-def api_install_report(install_id: int):
-    """AI 生成该安装记录的**可直接交付**完整部署报告(对标 AI 自动部署页报告版式)"""
+def api_install_report(install_id: int, body: dict = Body({})):
+    """AI 生成该安装记录的**可直接交付**完整部署报告(对标 AI 自动部署页报告版式)。
+    body: {template_id?: 知识库报告模板ID, 可选}"""
     db = next(get_db())
     try:
-        result = generate_install_report(db, install_id)
+        result = generate_install_report(db, install_id, template_id=body.get("template_id") or 0)
         return {"ok": True, "report": result}
     except ValueError as e:
         return {"ok": False, "error": str(e)}
@@ -349,8 +388,8 @@ async def ws_deploy(websocket: WebSocket):
         try:
             await websocket.send_text(_json.dumps(
                 {"type": "error", "message": "缺少 component_id / asset_id"}, ensure_ascii=False))
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
         await websocket.close()
         return
 
@@ -381,9 +420,20 @@ async def ws_deploy(websocket: WebSocket):
                     ev["install_id"] = ev.get("install_id") or resume_id
                     ev["resumed"] = True
                     send_event(ev)
-                # 若该部署仍有未决的 AI 决策(后台等待中), 推送最新 decision 供续对话
+                # 若该部署仍有未决的 AI 决策(后台等待中或已持久化到 DB), 推送最新 decision 供续对话
                 from app.services import component_catalog_service as _cc
                 pending = _cc._DECISION_REG.get(resume_id)
+                # 尝试从 DB 恢复持久化的待决策卡片
+                pending_decision = None
+                try:
+                    from app.models import ComponentInstall as _CI
+                    _inst = db.query(_CI).filter(_CI.id == resume_id).first()
+                    if _inst and _inst.pending_decision_json:
+                        _db_dec = json.loads(_inst.pending_decision_json)
+                        if isinstance(_db_dec, dict):
+                            pending_decision = _db_dec
+                except Exception:
+                    pending_decision = None
                 if pending and not pending.get("event").is_set():
                     latest_decision = None
                     for ev in hist:
@@ -393,6 +443,11 @@ async def ws_deploy(websocket: WebSocket):
                         latest_decision["install_id"] = resume_id
                         latest_decision["resumed_decision"] = True
                         send_event(latest_decision)
+                elif pending_decision:
+                    pending_decision["install_id"] = resume_id
+                    pending_decision["resumed_decision"] = True
+                    pending_decision["resumed"] = True
+                    send_event(pending_decision)
                 else:
                     send_event({"type": "resume_done", "install_id": resume_id})
                 return
@@ -403,7 +458,6 @@ async def ws_deploy(websocket: WebSocket):
                 send_event({"type": "error", "message": "组件或目标机不存在"})
                 return
             deploy_path = (qp.get("deploy_path") or "").strip() or f"/data/aiops-components/{comp['name']}"
-            port = qp.get("port") or comp.get("default_port") or 0
             release = qp.get("release") or ""
             namespace = qp.get("namespace") or "default"
             params = {}
@@ -414,7 +468,14 @@ async def ws_deploy(websocket: WebSocket):
                         params = {}
                 except Exception:
                     params = {}
+            # ▼ 修复: 端口优先取 params 里的端口类参数(db_port/amqp_port/mq_port 等),
+            # 因为前端把用户配置端口放在 params 而非顶层的 port query;
+            # 否则 port 回退到 default_port(如 redis 6379), 导致 AI 决策拿不到用户配置的真实端口(如 16379)。
+            _p_for_port = int(params.get("db_port") or params.get("amqp_port")
+                             or params.get("mq_port") or params.get("port") or 0)
+            port = int(qp.get("port") or _p_for_port or comp.get("default_port") or 0)
             use_offline = (qp.get("use_offline") or "").lower() in ("1", "true", "yes", "on")
+            plan = qp.get("plan") or ""
             inst = record_install(
                 db, comp["id"], comp["name"], asset_id, deploy_type=deploy_type,
                 deploy_path=deploy_path, release_name=release,
@@ -430,12 +491,13 @@ async def ws_deploy(websocket: WebSocket):
                 https_proxy=qp.get("https_proxy") or "",
                 no_proxy=qp.get("no_proxy") or "127.0.0.1,localhost,.local",
                 namespace=namespace, release=release, install_id=install_id,
-                params=params, use_offline=use_offline,
+                params=params, use_offline=use_offline, plan=plan,
             ):
                 event["install_id"] = install_id
                 _append_install_event(db, install_id, event)
                 send_event(event)
                 if event.get("type") == "complete":
+                    _set_pending_decision_install(db, install_id, None)
                     status = event.get("status")
                     logtext = "\n".join(e.get("message", "") for e in event_buf if e.get("message"))
                     if status == "succeeded":
@@ -451,8 +513,8 @@ async def ws_deploy(websocket: WebSocket):
             try:
                 send_event({"type": "error", "message": str(e)})
                 send_event({"type": "complete", "status": "failed", "message": str(e)})
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
         finally:
             db.close()
 
@@ -468,17 +530,42 @@ async def ws_deploy(websocket: WebSocket):
                 elif data.get("type") == "decision" and data.get("install_id") and data.get("id"):
                     # 用户选择/输入了 AI 决策方案, 唤醒等待的部署流
                     resolve_decision(int(data["install_id"]), str(data["id"]), str(data.get("choice") or ""))
-            except Exception:
-                pass
+            except Exception as _exc3:
+                logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as _exc4:
+        logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
 
 
 @router.post("/api/deploys/{install_id}/stop")
 def api_stop_deploy(install_id: int):
     """请求停止指定安装记录的实时部署。返回是否命中正在进行的部署流。"""
+    db = next(get_db())
+    _set_pending_decision_install(db, install_id, None)
     if cancel_deploy(install_id):
         return {"ok": True, "message": "已发送停止指令"}
     return {"ok": False, "message": "未找到进行中的部署流"}
+
+
+@router.post("/api/deploys/{install_id}/decision")
+def api_deploy_decision(install_id: int, payload: dict = Body({})):
+    """HTTP 决策提交接口(组件商店): 将用户选择投递到内存注册表, 唤醒等待的部署流。
+    即使 WS 已断开, 只要部署线程活跃, 此接口即可生效。"""
+    db = next(get_db())
+    return submit_install_decision(
+        db, install_id,
+        decision_id=str(payload.get("id", "")),
+        choice=str(payload.get("choice", "")),
+    )
+
+
+@router.post("/api/deploys/{install_id}/decision")
+def api_submit_install_decision(install_id: int, body: dict = Body(...)):
+    """HTTP 提交 AI 决策(组件商店): 关闭弹窗后仍可从详情恢复并提交。"""
+    db = next(get_db())
+    return submit_install_decision(db, install_id, body.get("id", ""), body.get("choice", ""))
+
+
+import logging
+logger = logging.getLogger(__name__)

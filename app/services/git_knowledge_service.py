@@ -15,6 +15,9 @@ from sqlalchemy.orm import Session
 
 from app.models import GitRepo, KbDocument
 
+import logging
+logger = logging.getLogger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 REPO_CACHE = PROJECT_ROOT / "repo_cache"
 
@@ -71,8 +74,8 @@ def delete_repo(db: Session, repo_id: int) -> None:
         import shutil
         try:
             shutil.rmtree(local, ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     # 删除该仓库的 git 源文档
     db.query(KbDocument).filter(
         KbDocument.source_type == "git",

@@ -9,6 +9,7 @@ export function useAgentSSE() {
   const streamingSteps = ref([])
   const streamingTask = ref(null)
   const streamingReport = ref(null)
+  const streamingSummary = ref(null)  // AI 分析要点总结(根因/方案/影响)
   const currentSubAgent = ref(null)  // P1-1: 当前子专家 {name, display_name, domain, icon, color}
   let eventSource = null
 
@@ -24,6 +25,7 @@ export function useAgentSSE() {
     streamingSteps.value = []
     streamingTask.value = null
     streamingReport.value = null
+    streamingSummary.value = null
     currentSubAgent.value = null
 
     const url = `/agent/chat/stream?session_id=${sessionId}&message=${encodeURIComponent(message)}`
@@ -115,6 +117,7 @@ export function useAgentSSE() {
       streamingDone.value = true
       streamingStatus.value = ''
       streamingError.value = null
+      streamingSummary.value = (data.summary && (data.summary.root_cause || data.summary.solution)) ? data.summary : null
       if (data.reply) {
         streamingContent.value = data.reply
       }
@@ -131,6 +134,10 @@ export function useAgentSSE() {
         }
       }
       streamingReport.value = { summary: data.reply }
+      if (eventSource) {
+        eventSource.close()
+        eventSource = null
+      }
     })
 
     eventSource.addEventListener('error', (e) => {
@@ -141,7 +148,11 @@ export function useAgentSSE() {
     })
 
     eventSource.onerror = () => {
-      if (eventSource.readyState !== EventSource.CLOSED && !streamingDone.value) {
+      if (eventSource) {
+        eventSource.close()
+        eventSource = null
+      }
+      if (!streamingDone.value) {
         streamingError.value = '连接中断'
         streamingStatus.value = ''
         streamingDone.value = true
@@ -167,6 +178,7 @@ export function useAgentSSE() {
     streamingSteps,
     streamingTask,
     streamingReport,
+    streamingSummary,
     currentSubAgent,
   }
 }

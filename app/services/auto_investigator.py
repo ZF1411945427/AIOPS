@@ -330,8 +330,8 @@ def _session_mode(db: Session) -> str:
         for mode, eng in get_all_engines().items():
             if bind is eng:
                 return mode
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     from app.database import get_db_mode
     return get_db_mode()
 

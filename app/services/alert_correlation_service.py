@@ -14,6 +14,7 @@ AIOps 核心闭环：告警聚类 → 关联拓扑 → 根因推荐 → 单一�
 """
 from __future__ import annotations
 
+import json
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -291,6 +292,43 @@ def cluster_detail(db: Session, cluster_id: str) -> Dict[str, Any]:
         "cluster_type": cluster_type,
         "root_cause": root_cause,
         "impact_analysis": impact,
+        "key_points": _build_cluster_key_points(target, root_cause, impact),
+    }
+
+
+def _build_cluster_key_points(target, root_cause, impact) -> dict:
+    """从聚类详情(根因推理+影响分析)组装统一三要素要点(根因/方案/影响)。"""
+    from app.routers.agent_sse import _clean_key_point
+
+    # 根因: 优先用 infer_root_cause 的 summary_block, 否则用候选
+    kb = root_cause.get("summary_block") if isinstance(root_cause, dict) else {}
+    if kb and (kb.get("root_cause") or kb.get("solution")):
+        root_text = kb.get("root_cause") or ""
+        sol_text = kb.get("solution") or ""
+        imp_text = kb.get("impact") or ""
+    else:
+        cands = (root_cause.get("root_cause_candidates") or []) if isinstance(root_cause, dict) else []
+        if cands:
+            root_text = f"根因候选：{cands[0].get('asset_name')}（置信度 {cands[0].get('confidence') or 'low'}）"
+        else:
+            root_text = "暂未定位到明确根因"
+        sol_text = "沿根因候选及下游依赖处置告警，确认恢复后标记处理"
+        imp_text = ""
+        imp_sum = impact.get("summary") if isinstance(impact, dict) else {}
+        if imp_sum:
+            imp_text = f"传播影响 {imp_sum.get('total_impacted', 0)} 个资产"
+
+    if not imp_text:
+        imp_sum = impact.get("summary") if isinstance(impact, dict) else {}
+        if imp_sum:
+            imp_text = f"传播影响 {imp_sum.get('total_impacted', 0)} 个资产、高危 {imp_sum.get('high_impact_count', 0)} 个"
+    if not imp_text and target:
+        imp_text = f"聚类含 {target.get('alert_count', 0)} 条告警"
+
+    return {
+        "root_cause": _clean_key_point(root_text, 100),
+        "solution": _clean_key_point(sol_text, 160),
+        "impact": _clean_key_point(imp_text, 100),
     }
 
 
@@ -305,3 +343,148 @@ def get_clusters_cached(db: Session, force_refresh: bool = False) -> Dict[str, A
     _CLUSTER_CACHE["ts"] = now
     _CLUSTER_CACHE["data"] = data
     return data
+
+
+# ─── 第二十四章：告警关联落库 + 自动 incident 闭环（2026-08-16）────────────
+_AUTO_INCIDENT_SEVERITIES = ("critical", "high")
+_AUTO_INCIDENT_MIN_ALERTS = 2
+
+
+def _auto_create_incident_for_cluster(db: Session, cluster: Dict[str, Any]) -> Optional[int]:
+    """为满足条件的聚类自动生成故障单并关联告警。已有未关闭故障单则复用。"""
+    from app.models import Incident, IncidentAlert
+    from app.services import incident_service
+
+    alert_ids = cluster.get("alert_ids") or []
+    key_asset_id = cluster.get("key_asset_id")
+    if not alert_ids:
+        return None
+    # 复用：该关键资产已有 open incident 且已包含部分告警 → 关联过去而非重复建
+    existing = None
+    if key_asset_id:
+        existing = (
+            db.query(Incident)
+            .filter(Incident.asset_id == key_asset_id, Incident.status == "open")
+            .order_by(Incident.id.desc())
+            .first()
+        )
+    if existing:
+        for aid in alert_ids:
+            link = db.query(IncidentAlert).filter(
+                IncidentAlert.incident_id == existing.id,
+                IncidentAlert.alert_id == int(aid),
+            ).first()
+            if not link:
+                db.add(IncidentAlert(incident_id=existing.id, alert_id=int(aid)))
+        existing.alert_count = (
+            db.query(IncidentAlert).filter(IncidentAlert.incident_id == existing.id).count()
+        )
+        db.commit()
+        return existing.id
+
+    # 新建故障单
+    from app.models import Asset
+    sev = cluster.get("dominant_severity") or "warning"
+    asset_name = ""
+    if key_asset_id:
+        _asset = db.query(Asset).filter(Asset.id == key_asset_id).first()
+        asset_name = _asset.name if _asset else f"资产#{key_asset_id}"
+    summary = cluster.get("metric_names") or []
+    title = f"[{sev}] {asset_name or '未关联资产'} 告警风暴 · {len(alert_ids)} 条告警"
+    if summary:
+        title += f"({'/'.join(list(summary)[:3])})"
+    inc = incident_service.create_incident(
+        db,
+        title=title,
+        severity=sev,
+        impact="high",
+        description=f"告警聚类自动生成：cluster_id={cluster.get('cluster_id')}，"
+                    f"类型={cluster.get('cluster_type')}，关联告警 {len(alert_ids)} 条。",
+        asset_id=key_asset_id,
+    )
+    for aid in alert_ids:
+        db.add(IncidentAlert(incident_id=inc.id, alert_id=int(aid)))
+    inc.alert_count = len(alert_ids)
+    db.commit()
+    logger.info(f"[alert-cluster] 自动生成故障单#{inc.id}「{title}」")
+    return inc.id
+
+
+def persist_clusters(db: Session, auto_incident: bool = True, max_clusters: int = 50) -> Dict[str, Any]:
+    """第二十四章：把 cluster_alerts 结果落库到 alert_clusters，并按条件自动生成故障单。
+
+    由 main.py background_loop 周期调用。返回 {persisted, incidents}.
+    """
+    from app.models import AlertCluster
+
+    data = cluster_alerts(db)
+    all_clusters: List[Dict[str, Any]] = []
+    for gk in ("service_clusters", "time_clusters", "topology_clusters"):
+        all_clusters.extend(data.get(gk, []))
+
+    persisted = 0
+    incident_ids: List[int] = []
+    for c in all_clusters[:max_clusters]:
+        alert_ids = c.get("alert_ids") or []
+        if not alert_ids:
+            continue
+        inc_id = None
+        if auto_incident:
+            sev = c.get("dominant_severity") or "info"
+            if len(alert_ids) >= _AUTO_INCIDENT_MIN_ALERTS and sev in _AUTO_INCIDENT_SEVERITIES:
+                inc_id = _auto_create_incident_for_cluster(db, c)
+                if inc_id:
+                    incident_ids.append(inc_id)
+
+        existing = db.query(AlertCluster).filter(
+            AlertCluster.cluster_id == c["cluster_id"],
+            AlertCluster.cluster_type == c["cluster_type"],
+        ).order_by(AlertCluster.id.desc()).first()
+        if existing:
+            existing.alert_ids_json = json.dumps(alert_ids, ensure_ascii=False)
+            existing.alert_count = len(alert_ids)
+            existing.dominant_severity = c.get("dominant_severity") or "info"
+            existing.summary_json = json.dumps(c, ensure_ascii=False, default=str)
+            if inc_id:
+                existing.incident_id = inc_id
+        else:
+            db.add(AlertCluster(
+                cluster_id=c["cluster_id"],
+                cluster_type=c["cluster_type"],
+                alert_ids_json=json.dumps(alert_ids, ensure_ascii=False),
+                key_asset_id=c.get("key_asset_id"),
+                alert_count=len(alert_ids),
+                dominant_severity=c.get("dominant_severity") or "info",
+                summary_json=json.dumps(c, ensure_ascii=False, default=str),
+                incident_id=inc_id,
+            ))
+        persisted += 1
+
+    db.commit()
+    return {"persisted": persisted, "incidents_created": len(set(incident_ids)), "incident_ids": list(set(incident_ids))}
+
+
+def list_persisted_clusters(db: Session, limit: int = 50, cluster_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    """查询已落库的告警聚类（含关联 incident）。"""
+    from app.models import AlertCluster
+
+    q = db.query(AlertCluster).order_by(AlertCluster.id.desc())
+    if cluster_type:
+        q = q.filter(AlertCluster.cluster_type == cluster_type)
+    rows = q.limit(limit).all()
+    result = []
+    for r in rows:
+        d = {
+            "id": r.id,
+            "cluster_id": r.cluster_id,
+            "cluster_type": r.cluster_type,
+            "alert_count": r.alert_count,
+            "dominant_severity": r.dominant_severity,
+            "key_asset_id": r.key_asset_id,
+            "incident_id": r.incident_id,
+            "alert_ids": r.get_alert_ids(),
+            "summary": r.get_summary(),
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+        }
+        result.append(d)
+    return result

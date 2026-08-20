@@ -1,21 +1,24 @@
 """架构边界检查 — 对齐 go-arch-lint 的依赖方向约束。
 
 规则:
-  1. 分层: routers → services → models
+  1. 分层: routers → services → core → models
   2. services 禁止顶层 import routers（函数内延迟 import 允许）
   3. 禁止 services 间的循环依赖链（顶层 import）
-  4. 所有模块必须位于 app/ 下且属于已知层
+  4. core 层禁止导入 services 或 routers
+  5. routers 禁止直接执行原生 SQL (db.execute 含 text SQL)
+  6. 所有模块必须位于 app/ 下且属于已知层
 
 退出码: 0 通过, 1 违规
 """
 import ast
 import os
+import re
 import sys
 
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(PROJECT, "app")
 
-LAYERS = {"models": 0, "domains": 1, "services": 2, "routers": 3}
+LAYERS = {"models": 0, "core": 1, "domains": 2, "services": 3, "routers": 4}
 KNOWN_APPS = set(LAYERS.keys())
 
 
@@ -89,6 +92,47 @@ def check():
                 errors.append(
                     f"  [DIR] {src_mod} 顶层 import routers 模块 {dep_mod}"
                 )
+            # 规则4: core 层禁止导入 services 或 routers
+            if src_layer == "core" and tgt_app in ("services", "routers"):
+                errors.append(
+                    f"  [DIR] {src_mod} core 层禁止导入 {tgt_app} 模块 {dep_mod}"
+                )
+
+    # 规则5: routers 禁止直接执行原生 SQL
+    for root, dirs, files in os.walk(APP):
+        for f in files:
+            if not f.endswith(".py"):
+                continue
+            full = os.path.join(root, f)
+            layer = _layer_of(full)
+            if layer != "routers":
+                continue
+            with open(full, encoding="utf-8") as fh:
+                content = fh.read()
+            # 匹配 db.execute 或 session.execute 包含 text( 或 _text( 或原生 SQL 字符串
+            if re.search(r'\b(db|session)\.execute\s*\(', content):
+                # 排除 ORM 查询: db.execute(text(...)) 或 db.execute(_text(...))
+                # 只报真正的原生 SQL 模式
+                tree = ast.parse(content)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Call):
+                        func = node.func
+                        if isinstance(func, ast.Attribute) and func.attr == "execute":
+                            for arg in node.args:
+                                if isinstance(arg, ast.Call):
+                                    call_name = ""
+                                    if isinstance(arg.func, ast.Name):
+                                        call_name = arg.func.id
+                                    elif isinstance(arg.func, ast.Attribute):
+                                        call_name = arg.func.attr
+                                    if call_name in ("text", "_text", "sa_text", "_sa_text"):
+                                        break
+                            else:
+                                lineno = getattr(node, 'lineno', 0)
+                                rel = os.path.relpath(full, PROJECT).replace("\\", "/")
+                                errors.append(
+                                    f"  [RAW_SQL] {rel} 第 {lineno} 行: 原生 SQL 应封装到 service 层"
+                                )
 
     # 循环依赖检测(有向图 DFS)
     visited = set()

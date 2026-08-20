@@ -13,6 +13,9 @@ from app.template_utils import get_templates, parse_json_config
 from app.models import Asset, DataSource
 from app.services import topology_service, pod_health_service
 from app.services.mobile_push_service import verify_login_token
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/containers", tags=["containers"])
 templates = get_templates()
@@ -150,13 +153,13 @@ async def pod_log_ws(websocket: WebSocket, asset_id: int):
     except Exception as e:
         try:
             await websocket.send_text(f"Error: {e}")
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     finally:
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
 
 
 @router.websocket("/ws/pod/{asset_id}/terminal")
@@ -227,8 +230,8 @@ async def pod_terminal_ws(websocket: WebSocket, asset_id: int):
                         await websocket.send_bytes(data[1:])
                     elif isinstance(data, str):
                         await websocket.send_text(data)
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
 
         async def browser_to_k8s():
             try:
@@ -242,8 +245,8 @@ async def pod_terminal_ws(websocket: WebSocket, asset_id: int):
                             kws.send("\x00" + msg)
                         else:
                             kws.send_binary(b"\x00" + msg)
-            except Exception:
-                pass
+            except Exception as _exc3:
+                logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
 
         t1 = asyncio.create_task(k8s_to_browser())
         t2 = asyncio.create_task(browser_to_k8s())
@@ -254,13 +257,13 @@ async def pod_terminal_ws(websocket: WebSocket, asset_id: int):
     except Exception as e:
         try:
             await websocket.send_text(f"Error: {e}")
-        except Exception:
-            pass
+        except Exception as _exc4:
+            logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
     finally:
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as _exc5:
+            logger.warning("[except:pass] Exception: %s", _exc5, exc_info=True)
 
 
 def _event_to_dict(e):
@@ -558,8 +561,8 @@ async def docker_terminal_ws(websocket: WebSocket, asset_id: int):
                     if not line:
                         break
                     await websocket.send_text(line.decode("utf-8", errors="replace").replace("\n", "\r\n"))
-            except Exception:
-                pass
+            except Exception as _exc6:
+                logger.warning("[except:pass] Exception: %s", _exc6, exc_info=True)
 
         async def browser_to_docker():
             try:
@@ -575,8 +578,8 @@ async def docker_terminal_ws(websocket: WebSocket, asset_id: int):
                         msg = msg.replace("\r", "\n")
                         proc.stdin.write(msg.encode("utf-8"))
                         await proc.stdin.drain()
-            except Exception:
-                pass
+            except Exception as _exc7:
+                logger.warning("[except:pass] Exception: %s", _exc7, exc_info=True)
 
         t1 = asyncio.create_task(docker_to_browser())
         t2 = asyncio.create_task(browser_to_docker())
@@ -589,13 +592,13 @@ async def docker_terminal_ws(websocket: WebSocket, asset_id: int):
     except Exception as e:
         try:
             await websocket.send_text(f"Error: {e}")
-        except Exception:
-            pass
+        except Exception as _exc8:
+            logger.warning("[except:pass] Exception: %s", _exc8, exc_info=True)
     finally:
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as _exc9:
+            logger.warning("[except:pass] Exception: %s", _exc9, exc_info=True)
 
 
 @router.get("/api/pods")
@@ -858,8 +861,8 @@ def api_deployment_canary_api(asset_id: int, body: dict = Body(default={}), db: 
         existing_canary = None
         try:
             existing_canary = apps_v1.read_namespaced_deployment(name=canary_name, namespace=ns)
-        except Exception:
-            pass
+        except Exception as _exc10:
+            logger.warning("[except:pass] Exception: %s", _exc10, exc_info=True)
         if existing_canary:
             apps_v1.patch_namespaced_deployment_scale(name=canary_name, namespace=ns, body={"spec": {"replicas": canary_replicas}})
         else:

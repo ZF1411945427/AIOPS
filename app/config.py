@@ -4,6 +4,12 @@
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载项目根目录下的 .env 文件（如存在）
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=str(_env_path), override=False)
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -26,9 +32,21 @@ DB_DIR = os.environ.get("AIOPS_DB_DIR", str(PROJECT_ROOT / "db"))
 DEMO_DB_PATH = os.environ.get("AIOPS_DEMO_DB", str(Path(DB_DIR) / "aiops.db"))
 REAL_DB_PATH = os.environ.get("AIOPS_REAL_DB", str(Path(DB_DIR) / "aiops_real.db"))
 
+# 数据库连接串（统一在此配置，database.py 从此导入）
+# AIOPS_DB_URL 显式指定时优先（兼容测试/CI/多环境），不设则走 AIOPS_PG_URL 生产默认
+AIOPS_DB_URL = os.environ.get("AIOPS_DB_URL", "").strip()
+AIOPS_PG_URL = os.environ.get(
+    "AIOPS_PG_URL",
+    "postgresql://aiops:aiops-secret@127.0.0.1:5432/aiops",
+)
+
 # ── Milvus ──
 MILVUS_DB_PATH = os.environ.get("AIOPS_MILVUS_DB", str(Path(DB_DIR) / "milvus" / "kb_v2.db"))
 MILVUS_COLLECTION = os.environ.get("AIOPS_MILVUS_COLLECTION", "kb_chunks_v2")
+
+# ── Redis（阶段二：Celery broker + 分布式冷却/节流缓存）──
+REDIS_URL = os.environ.get("AIOPS_REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_COOLDOWN_DB = int(os.environ.get("AIOPS_REDIS_COOLDOWN_DB", "1"))  # 分离冷却缓存与 broker，避免互相干扰
 
 # ── Embedding ──
 EMBEDDING_MODE = os.environ.get("EMBEDDING_MODE", "local")

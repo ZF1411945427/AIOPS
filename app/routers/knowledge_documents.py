@@ -92,9 +92,10 @@ def api_doc_list(
     search: str = "",
     source_type: str = "",
     asset_id: int = 0,
+    tags: str = "",
     db: Session = Depends(get_db)):
     try:
-        items = rag_service.list_documents(db, search=search, source_type=source_type, asset_id=asset_id)
+        items = rag_service.list_documents(db, search=search, source_type=source_type, asset_id=asset_id, tags=tags)
         from app.models import KbChunk
         total_chunks = db.query(KbChunk).count()
         indexed_count = sum(1 for d in items if d.status == "indexed")
@@ -222,14 +223,18 @@ def api_doc_delete(doc_id: int, db: Session = Depends(get_db)):
         try:
             from app.services import vector_store
             vector_store.delete_by_document(doc_id)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         if doc.file_path and os.path.exists(doc.file_path):
             try:
                 os.remove(doc.file_path)
-            except OSError:
-                pass
+            except OSError as _exc1:
+                logger.warning("[except:pass] OSError: %s", _exc1, exc_info=True)
         rag_service.delete_document(db, doc_id)
         return JSONResponse({"ok": True, "id": doc_id})
     except Exception as e:
         return JSONResponse({"ok": False, "message": str(e)}, status_code=200)
+
+
+import logging
+logger = logging.getLogger(__name__)

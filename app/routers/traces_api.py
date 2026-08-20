@@ -8,6 +8,9 @@ from app.database import get_db
 from app.models import Span, Asset
 from app.services.health_engine import _extract_domains, _normalize_service_name
 from app.services.tempo_query_service import is_tempo_enabled, search_traces, get_trace as tempo_get_trace, _TEMPO_QUERY_URL
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/traces", tags=["api_traces"])
 
@@ -50,8 +53,8 @@ def _services_by_domain(domain: str, db: Session) -> list:
                 elif isinstance(raw, list):
                     for svc in raw:
                         matched.add(str(svc).strip())
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as _exc:
+                logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc, exc_info=True)
     tokens = _domain_tokens(domain)
     if tokens:
         for s in all_services:
@@ -85,8 +88,8 @@ def list_trace_domains(db: Session = Depends(get_db)):
                 if sn in all_services:
                     domain_set.update(domains)
                     break
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except (json.JSONDecodeError, TypeError) as _exc1:
+            logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc1, exc_info=True)
     # 兜底: 服务名包含某域 ASCII token 的域也加入
     for s in all_services:
         sl = s.lower()
@@ -129,8 +132,8 @@ def list_traces(
             # 回退: Tempo 无数据且本系统 SQLite 有 span 时仍走 SQLite
             if tempo_res["traces"]:
                 return JSONResponse(tempo_res)
-        except Exception:
-            pass
+        except Exception as _exc2:
+            logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
     subq = db.query(
         Span.trace_id,
         func.count(Span.id).label("span_count"),
@@ -200,8 +203,8 @@ def get_trace(trace_id: str, db: Session = Depends(get_db)):
             tempo_data = tempo_get_trace(_TEMPO_QUERY_URL, trace_id)
             if tempo_data:
                 return JSONResponse(tempo_data)
-        except Exception:
-            pass
+        except Exception as _exc3:
+            logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
     spans = db.query(Span).filter(Span.trace_id == trace_id).order_by(Span.started_at).all()
     if not spans:
         return JSONResponse({"spans": []})

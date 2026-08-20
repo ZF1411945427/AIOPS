@@ -18,6 +18,9 @@ from app.database import get_session_for, get_db_mode
 from app.models import SandboxConfig, SandboxPolicy, SandboxExecutionLog
 
 # 风险等级顺序（只升不降）
+import logging
+logger = logging.getLogger(__name__)
+
 RISK_ORDER = ["read_only", "advisory", "medium", "high", "critical"]
 
 # 默认全局配置（无配置行时使用）
@@ -86,8 +89,8 @@ def update_config(data: dict, db=None) -> dict:
             if key in data:
                 try:
                     setattr(cfg, key, int(data[key]))
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as _exc:
+                    logger.warning("[except:pass] (TypeError, ValueError): %s", _exc, exc_info=True)
         if "max_risk_level" in data and data["max_risk_level"] in RISK_ORDER:
             cfg.max_risk_level = data["max_risk_level"]
         for key in ("execution_window_start", "execution_window_end"):

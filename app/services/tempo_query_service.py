@@ -12,6 +12,9 @@ import base64
 import os
 from datetime import datetime, timezone, timedelta
 
+import logging
+logger = logging.getLogger(__name__)
+
 _TEMPO_QUERY_URL = os.environ.get("AIOPS_TEMPO_QUERY_URL", "").strip()
 
 
@@ -89,8 +92,8 @@ def search_traces(query_url: str, service: str = "", limit: int = 50, operation:
     try:
         ser = requests.get(f"{query_url}/api/services", timeout=5)
         services = [s for s in (ser.json().get("data") or []) if s]
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
     return {"traces": traces, "services": services, "total": len(traces)}
 

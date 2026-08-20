@@ -47,8 +47,8 @@ class ConnectionManager:
     async def send_personal(self, websocket: WebSocket, message: dict):
         try:
             await websocket.send_json(message)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
     def room_size(self, room: str) -> int:
         return len(self.rooms.get(room, set()))

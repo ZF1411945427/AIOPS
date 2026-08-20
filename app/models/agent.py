@@ -97,6 +97,78 @@ class AgentConfig(Base):
             return []
 
 
+class VoiceProvider(Base):
+    """语音服务(STT/TTS)云引擎配置。
+
+    对应 CONTRACT.md 26.6。敏感字段 access_key_secret 用 Fernet(种子 PROVIDER_ENCRYPT_SEED)
+    加密存储,与 AIProvider 同款;access_key_id/app_id 为非秘密标识,明文存储。
+    """
+    __tablename__ = "voice_providers"
+
+    ENGINE_ALIYUN = "aliyun"
+    ENGINE_BAIDU = "baidu"
+    ENGINE_TENCENT = "tencent"
+    ENGINE_EDGE = "edge-tts"
+    ENGINE_LOCAL = "local"
+    ENGINE_CHOICES = [ENGINE_ALIYUN, ENGINE_BAIDU, ENGINE_TENCENT, ENGINE_EDGE, ENGINE_LOCAL]
+
+    TYPE_STT = "stt"
+    TYPE_TTS = "tts"
+    TYPE_BOTH = "both"
+    TYPE_CHOICES = [TYPE_STT, TYPE_TTS, TYPE_BOTH]
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(64), unique=True, nullable=False)
+    engine = Column(String(32), default=ENGINE_ALIYUN)
+    engine_type = Column(String(16), default=TYPE_BOTH)
+    app_id = Column(String(128), default="")
+    access_key_id = Column(String(255), default="")
+    access_key_secret = Column(Text, default="")   # 加密存储 SecretKey
+    region = Column(String(64), default="")
+    stt_model = Column(String(128), default="")
+    tts_voice = Column(String(128), default="")
+    base_url = Column(String(255), default="")
+    extra_json = Column(Text, default="{}")
+    is_enabled = Column(Boolean, default=True)
+    priority = Column(Integer, default=10)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+    def set_access_key_secret(self, value):
+        """加密存储 SecretKey(空值=清空)。复用 PROVIDER_ENCRYPT_SEED 派生的 Fernet key。"""
+        from cryptography.fernet import Fernet
+        import hashlib
+        import base64
+        from app.config import PROVIDER_ENCRYPT_SEED
+        value = (value or "").strip()
+        if not value:
+            self.access_key_secret = ""
+            return
+        seed = PROVIDER_ENCRYPT_SEED.encode("utf-8")
+        key = base64.urlsafe_b64encode(hashlib.sha256(seed).digest())
+        self.access_key_secret = Fernet(key).encrypt(value.encode("utf-8")).decode("utf-8")
+
+    def get_access_key_secret(self):
+        if not self.access_key_secret:
+            return ""
+        try:
+            from cryptography.fernet import Fernet
+            import hashlib
+            import base64
+            from app.config import PROVIDER_ENCRYPT_SEED
+            seed = PROVIDER_ENCRYPT_SEED.encode("utf-8")
+            key = base64.urlsafe_b64encode(hashlib.sha256(seed).digest())
+            return Fernet(key).decrypt(self.access_key_secret.encode("utf-8")).decode("utf-8")
+        except Exception:
+            return ""
+
+    def get_extra(self):
+        try:
+            return json.loads(self.extra_json) if self.extra_json else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+
 class SubAgent(Base):
     """子智能体（Sub-agent）定义 — 按域分派的专家 Agent。
 

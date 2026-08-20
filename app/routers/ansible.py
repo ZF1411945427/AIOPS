@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import AnsibleInventory, AnsiblePlaybook, AnsibleRun, Asset
 from app.template_utils import parse_json_config
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/ansible", tags=["ansible"])
 
@@ -364,8 +367,8 @@ def run_playbook(body: RunCreate, db: Session = Depends(get_db)):
             if f and hasattr(f, "name") and os.path.exists(f.name):
                 try:
                     os.unlink(f.name)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
     run.output = output[:20000]
     run.error = error[:8000]
@@ -424,8 +427,8 @@ def ansible_status():
                 installed = True
                 first_line = (r.stdout or "").splitlines()[0] if (r.stdout or "").strip() else ""
                 version = first_line
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     return JSONResponse({"installed": installed, "version": version, "bin_path": bin_path})
 
 
@@ -474,8 +477,8 @@ def test_inventory(body: TestInventoryReq, db: Session = Depends(get_db)):
         if inv_file and hasattr(inv_file, "name") and os.path.exists(inv_file.name):
             try:
                 os.unlink(inv_file.name)
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
 
     return JSONResponse({
         "ok": status == "completed",

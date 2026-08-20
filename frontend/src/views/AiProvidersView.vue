@@ -71,6 +71,47 @@
       </div>
     </div>
 
+    <div class="panel" style="margin-top:14px;">
+      <div class="panel-head">
+        <span>语音服务 (STT 识别 / TTS 合成)</span>
+        <div class="panel-actions">
+          <span v-if="vResolved" class="text-sm" style="color:var(--text-secondary,#64748b)">
+            当前生效: 识别「{{ vResolved.stt?.name || vResolved.stt?.engine || '本地' }}」 · 合成「{{ vResolved.tts?.name || vResolved.tts?.engine || 'edge-tts' }}」
+          </span>
+          <button class="btn btn-sm" @click="loadVoice">刷新</button>
+          <button class="btn btn-primary btn-sm" @click="openVoiceDialog()">+ 新增语音配置</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div v-if="voiceLoading" class="loading-state">加载中...</div>
+        <table v-else-if="voices.length" class="table">
+          <thead><tr><th>名称</th><th>引擎</th><th>类型</th><th>AccessKeyId</th><th>密钥</th><th>区域</th><th>优先级</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="v in voices" :key="v.id">
+              <td>{{ v.name }}</td>
+              <td>{{ engineLabel(v.engine) }}</td>
+              <td>{{ typeLabel(v.engine_type) }}</td>
+              <td class="text-sm">{{ v.access_key_id || '-' }}</td>
+              <td><span class="badge" :class="v.has_access_key ? 'on' : 'off'">{{ v.has_access_key ? '已配置' : '未配置' }}</span></td>
+              <td class="text-sm">{{ v.region || '-' }}</td>
+              <td>{{ v.priority }}</td>
+              <td><span class="badge" :class="v.is_enabled ? 'on' : 'off'">{{ v.is_enabled ? '启用' : '禁用' }}</span></td>
+              <td>
+                <button class="btn btn-sm" @click="openVoiceDialog(v)">编辑</button>
+                <button class="btn btn-sm" @click="testVoice(v)" :disabled="voiceTesting === v.id">{{ voiceTesting === v.id ? '测试中...' : '测试' }}</button>
+                <button class="btn btn-sm" @click="toggleVoice(v)">{{ v.is_enabled ? '禁用' : '启用' }}</button>
+                <button class="btn btn-sm btn-danger" @click="deleteVoice(v)">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="empty-state">暂无语音配置（STT 未配置、TTS 使用 edge-tts）</div>
+        <p class="text-sm" style="margin-top:10px;color:var(--text-tertiary,#94a3b8)">
+          支持引擎: 阿里云(纯HTTP推荐) / 百度(永久免费量大) / 腾讯(需 tencentcloud-sdk-python) / edge-tts(微软免费)。配置后主脑与移动端语音自动使用；STT 云端失败返回空，TTS 云端失败自动回退 edge-tts。
+        </p>
+      </div>
+    </div>
+
     <div v-if="showProviderDialog" class="modal-overlay" @click.self="showProviderDialog = false">
       <div class="modal-box">
         <h3>{{ editingProvider ? '编辑提供商' : '新增提供商' }}</h3>
@@ -114,6 +155,50 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showVoiceDialog" class="modal-overlay" @click.self="showVoiceDialog = false">
+      <div class="modal-box modal-lg">
+        <h3>{{ editingVoice ? '编辑语音配置' : '新增语音配置' }}</h3>
+        <div class="form-row"><label>名称</label><input v-model="vForm.name" class="input" placeholder="如: 阿里云语音"></div>
+        <div class="grid-2">
+          <div class="form-row"><label>引擎</label>
+            <select v-model="vForm.engine" class="input">
+              <option value="aliyun">阿里云 (NLS)</option>
+              <option value="baidu">百度智能云</option>
+              <option value="tencent">腾讯云</option>
+              <option value="edge-tts">edge-tts (微软免费, 仅TTS)</option>
+            </select>
+          </div>
+          <div class="form-row"><label>类型</label>
+            <select v-model="vForm.engine_type" class="input">
+              <option value="both">STT + TTS</option>
+              <option value="stt">仅识别 (STT)</option>
+              <option value="tts">仅合成 (TTS)</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-row"><label>AppKey / AppID / 应用ID</label><input v-model="vForm.app_id" class="input" placeholder="阿里填 AppKey; 百度/腾讯填 AppID(可空)"></div>
+          <div class="form-row"><label>AccessKeyId / API Key</label><input v-model="vForm.access_key_id" class="input" placeholder="云账号 AccessKeyId 或 API Key"></div>
+        </div>
+        <div class="form-row"><label>AccessKey Secret / SecretKey {{ editingVoice ? '(留空不修改)' : '' }}</label><input v-model="vForm.access_key_secret" type="password" class="input" placeholder="加密存储, 仅显示是否已配置"></div>
+        <div class="grid-3">
+          <div class="form-row"><label>区域 Region</label><input v-model="vForm.region" class="input" placeholder="如 cn-shanghai / ap-beijing"></div>
+          <div class="form-row"><label>STT 模型 / dev_pid</label><input v-model="vForm.stt_model" class="input" placeholder="如 16k_zh / 1537"></div>
+          <div class="form-row"><label>TTS 音色</label><input v-model="vForm.tts_voice" class="input" placeholder="如 xiaoyun / 0"></div>
+        </div>
+        <div class="grid-3">
+          <div class="form-row"><label>Base URL (可选)</label><input v-model="vForm.base_url" class="input" placeholder="默认用官方地址"></div>
+          <div class="form-row"><label>优先级(小优先)</label><input v-model.number="vForm.priority" type="number" class="input"></div>
+          <div class="form-row"><label>启用</label><input type="checkbox" v-model="vForm.is_enabled"></div>
+        </div>
+        <div class="form-row"><label>扩展参数 JSON (速率/音量等, 可选)</label><textarea v-model="vForm.extra_json" class="input textarea" placeholder='{}'></textarea></div>
+        <div class="modal-actions">
+          <button class="btn" @click="showVoiceDialog = false">取消</button>
+          <button class="btn btn-primary" @click="saveVoice">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -132,6 +217,15 @@ const editingProvider = ref(null)
 const editingConfig = ref(null)
 const pForm = ref({ name: '', base_url: '', default_model: '', api_key: '', temperature: 0.2, max_tokens: 10000, timeout_seconds: 30 })
 const cForm = ref({ name: 'default', default_provider_id: 0, system_prompt: '', welcome_message: '', suggested_questions: '[]', allow_action_execution: false, require_confirmation: true, max_history_messages: 12 })
+
+// 语音服务(STT/TTS)配置
+const voices = ref([])
+const voiceLoading = ref(false)
+const showVoiceDialog = ref(false)
+const editingVoice = ref(null)
+const vForm = ref({ name: '', engine: 'aliyun', engine_type: 'both', app_id: '', access_key_id: '', access_key_secret: '', region: '', stt_model: '', tts_voice: '', base_url: '', extra_json: '{}', priority: 10, is_enabled: true })
+const voiceTesting = ref(0)
+const vResolved = ref(null)
 
 // P1 任务#5: AI Provider 健康度 + 熔断器
 const health = ref({ providers: [], total: 0, opened_count: 0, half_open_count: 0, closed_count: 0 })
@@ -320,7 +414,96 @@ async function saveConfig() {
   }
 }
 
-onMounted(load)
+// ── 语音服务(STT/TTS)配置 ─────────────────────────────
+async function loadVoice() {
+  voiceLoading.value = true
+  try {
+    const data = await request.get('/ai/voice/providers')
+    voices.value = data.providers || []
+  } catch (e) { console.error('load voice:', e) } finally { voiceLoading.value = false }
+  try {
+    vResolved.value = await request.get('/ai/voice/resolved')
+  } catch (e) { /* ignore */ }
+}
+
+function engineLabel(engine) {
+  return { aliyun: '阿里云', baidu: '百度', tencent: '腾讯云', 'edge-tts': 'edge-tts', local: '本地' }[engine] || engine
+}
+function typeLabel(t) {
+  return { stt: '识别', tts: '合成', both: '识别+合成' }[t] || t
+}
+
+function openVoiceDialog(v = null) {
+  editingVoice.value = v
+  if (v) {
+    vForm.value = { name: v.name, engine: v.engine, engine_type: v.engine_type, app_id: v.app_id || '', access_key_id: v.access_key_id || '', access_key_secret: '', region: v.region || '', stt_model: v.stt_model || '', tts_voice: v.tts_voice || '', base_url: v.base_url || '', extra_json: v.extra_json || '{}', priority: v.priority, is_enabled: !!v.is_enabled }
+  } else {
+    vForm.value = { name: '', engine: 'aliyun', engine_type: 'both', app_id: '', access_key_id: '', access_key_secret: '', region: '', stt_model: '', tts_voice: '', base_url: '', extra_json: '{}', priority: 10, is_enabled: true }
+  }
+  showVoiceDialog.value = true
+}
+
+function _validExtra() {
+  const s = (vForm.value.extra_json || '').trim()
+  if (!s) return '{}'
+  try { JSON.parse(s); return s } catch (e) { return null }
+}
+
+async function saveVoice() {
+  if (!vForm.value.name) { ElMessage.warning('名称不能为空'); return }
+  const extra = _validExtra()
+  if (extra === null) { ElMessage.warning('扩展参数 JSON 格式错误'); return }
+  const payload = { ...vForm.value, extra_json: extra, priority: parseInt(vForm.value.priority || 10) }
+  try {
+    if (editingVoice.value) {
+      await request.put(`/ai/voice/providers/${editingVoice.value.id}/edit`, payload)
+    } else {
+      await request.post('/ai/voice/providers/create', payload)
+    }
+    ElMessage.success('保存成功')
+    showVoiceDialog.value = false
+    loadVoice()
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e.message || e))
+  }
+}
+
+async function testVoice(v) {
+  voiceTesting.value = v.id
+  try {
+    const data = await request.post(`/ai/voice/providers/${v.id}/test`)
+    const parts = []
+    if (data.auth) parts.push(data.auth.msg || (data.auth.ok ? '鉴权 OK' : '鉴权失败'))
+    if (data.tts) parts.push(data.tts.ok ? `TTS 合成 ${data.tts.bytes} 字节` : 'TTS 失败')
+    const msg = parts.join(' · ')
+    if (data.status === 'ok') ElMessage.success(msg || '测试通过')
+    else ElMessage.error(msg || '测试失败')
+  } catch (e) {
+    ElMessage.error('测试失败: ' + (e.message || e))
+  } finally {
+    voiceTesting.value = 0
+  }
+}
+
+async function toggleVoice(v) {
+  try {
+    await request.post(`/ai/voice/providers/${v.id}/toggle`)
+    loadVoice()
+  } catch (e) { ElMessage.error('操作失败: ' + (e.message || e)) }
+}
+
+async function deleteVoice(v) {
+  try {
+    await ElMessageBox.confirm(`确认删除语音配置「${v.name}」？`, '删除确认', { type: 'warning' })
+    await request.delete(`/ai/voice/providers/${v.id}/delete`)
+    ElMessage.success('已删除')
+    loadVoice()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('删除失败: ' + (e.message || e))
+  }
+}
+
+onMounted(() => { load(); loadVoice() })
 </script>
 
 <style scoped>
@@ -359,5 +542,6 @@ onMounted(load)
 .input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 6px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
 .textarea { min-height: 80px; resize: vertical; font-family: inherit; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>

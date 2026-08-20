@@ -244,16 +244,16 @@ def ai_efficiency(db: Session = Depends(get_db), days: int = Query(30, ge=1, le=
         AgentEvaluation.created_at >= since, AgentEvaluation.has_hallucination == True
     ).scalar() or 0
 
-    avg_latency = db.query(func.avg(AgentEvaluation.latency_ms)).filter(AgentEvaluation.created_at >= since).scalar() or 0
-    avg_rounds = db.query(func.avg(AgentEvaluation.round_count)).filter(AgentEvaluation.created_at >= since).scalar() or 0
-    avg_completion = db.query(func.avg(AgentEvaluation.completion_rate)).filter(AgentEvaluation.created_at >= since).scalar() or 0
-    avg_tokens = db.query(func.avg(AgentEvaluation.total_tokens)).filter(AgentEvaluation.created_at >= since).scalar() or 0
+    avg_latency = db.query(func.avg(AgentEvaluation.latency_ms)).filter(AgentEvaluation.created_at >= since).scalar()
+    avg_rounds = db.query(func.avg(AgentEvaluation.round_count)).filter(AgentEvaluation.created_at >= since).scalar()
+    avg_completion = db.query(func.avg(AgentEvaluation.completion_rate)).filter(AgentEvaluation.created_at >= since).scalar()
+    avg_tokens = db.query(func.avg(AgentEvaluation.total_tokens)).filter(AgentEvaluation.created_at >= since).scalar()
 
     total_tool_calls = db.query(func.count(ToolInvocation.id)).filter(ToolInvocation.created_at >= since).scalar() or 0
     success_tool_calls = db.query(func.count(ToolInvocation.id)).filter(
         ToolInvocation.created_at >= since, ToolInvocation.status == "success"
     ).scalar() or 0
-    avg_tool_latency = db.query(func.avg(ToolInvocation.latency_ms)).filter(ToolInvocation.created_at >= since).scalar() or 0
+    avg_tool_latency = db.query(func.avg(ToolInvocation.latency_ms)).filter(ToolInvocation.created_at >= since).scalar()
 
     tool_dist = db.query(
         ToolInvocation.tool_name, func.count(ToolInvocation.id)
@@ -285,16 +285,16 @@ def ai_efficiency(db: Session = Depends(get_db), days: int = Query(30, ge=1, le=
             "success_rate": round(success_evals / total_evals * 100, 1) if total_evals else 0,
             "hallucination_count": hallucination_count,
             "hallucination_rate": round(hallucination_count / total_evals * 100, 1) if total_evals else 0,
-            "avg_latency_ms": round(avg_latency, 0) if avg_latency else 0,
-            "avg_rounds": round(avg_rounds, 1) if avg_rounds else 0,
-            "avg_completion": round(avg_completion * 100, 1) if avg_completion else 0,
-            "avg_tokens": round(avg_tokens, 0) if avg_tokens else 0,
+            "avg_latency_ms": round(float(avg_latency), 0) if avg_latency else 0,
+            "avg_rounds": round(float(avg_rounds), 1) if avg_rounds else 0,
+            "avg_completion": round(float(avg_completion) * 100, 1) if avg_completion else 0,
+            "avg_tokens": round(float(avg_tokens), 0) if avg_tokens else 0,
         },
         "tools": {
             "total_calls": total_tool_calls,
             "success_calls": success_tool_calls,
             "success_rate": round(success_tool_calls / total_tool_calls * 100, 1) if total_tool_calls else 0,
-            "avg_latency_ms": round(avg_tool_latency, 0) if avg_tool_latency else 0,
+            "avg_latency_ms": round(float(avg_tool_latency), 0) if avg_tool_latency else 0,
             "top_tools": [{"name": n, "count": c} for n, c in tool_dist],
         },
         "daily": daily_eval,

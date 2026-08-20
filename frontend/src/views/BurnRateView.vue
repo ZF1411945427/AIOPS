@@ -74,16 +74,16 @@
 
 <script setup>
 import { ref, onMounted } from "vue"
-import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
+import request from '@/api/request'
 
 const showGuide = ref(false)
 const burnRates = ref([])
 
 const loadData = async () => {
   try {
-    const res = await axios.get("/api/sre/burn-rate")
-    burnRates.value = res.data
+    const res = await request.get("/api/sre/burn-rate")
+    burnRates.value = res
   } catch (e) {
     console.error(e)
   }

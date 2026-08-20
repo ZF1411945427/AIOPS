@@ -70,7 +70,10 @@
             </div>
             <div class="form-row">
               <label>K8s 版本</label>
-              <input v-model="form.kubernetes_version" placeholder="如 v1.31.6" />
+              <select v-model="form.kubernetes_version">
+                <option value="" disabled>请选择 K8s 版本</option>
+                <option v-for="ver in (meta.versions || [])" :key="ver" :value="ver">{{ ver }}</option>
+              </select>
             </div>
             <div class="form-row">
               <label>容器运行时</label>
@@ -94,6 +97,11 @@
             <div class="form-row">
               <label>Service CIDR</label>
               <input v-model="form.service_cidr" placeholder="10.96.0.0/12" />
+            </div>
+            <div class="form-row">
+              <label>证书有效期(年)</label>
+              <input v-model.number="form.cert_expiry_years" type="number" min="1" max="100" placeholder="默认100≈永久" />
+              <div class="hint" style="font-size:11px">CA 与 apiserver/etcd 等全部证书统一此年限(所有证书时长一致)，默认 100 年≈永久</div>
             </div>
             <div class="form-row">
               <label>控制面镜像仓库(imageRepository)</label>
@@ -179,7 +187,7 @@
 
     <!-- 详情/部署 -->
     <div v-if="detail" class="modal-overlay" @click.self="closeDetail">
-      <div class="modal-box wide">
+      <div class="modal-box wide" ref="detailModalBox">
         <div class="modal-head">
           <h3>{{ detail.name }} <span class="status-badge" :class="detail.status">{{ statusText(detail.status) }}</span></h3>
           <button class="modal-close" @click="closeDetail">×</button>
@@ -232,7 +240,7 @@
             </div>
           </div>
 
-          <div class="terminal" v-if="detail.logs && detail.logs.length">
+          <div class="terminal" ref="termBox" v-if="detail.logs && detail.logs.length">
             <div v-for="(l, i) in detail.logs" :key="i" class="tline" :class="l.type">
               <span class="tts">{{ l.ts }}</span>
               <span class="tnode" v-if="l.node">[{{ l.node }}]</span>
@@ -241,7 +249,21 @@
           </div>
           <div v-else class="hint">暂无执行日志。点击「开始部署」观察实时进度。</div>
 
-          <div class="k8s-report" v-if="detail.report">
+          <div v-if="decision" class="ai-decision-card">
+            <div class="ai-decision-head">🤖 AI 需你决策</div>
+            <div class="ai-decision-q">{{ decision.question }}</div>
+            <div v-if="decision.root_cause" class="ai-decision-root">根因: {{ decision.root_cause }}</div>
+            <div class="ai-decision-opts">
+              <button v-for="o in (decision.options || [])" :key="o.key" class="ai-opt-btn"
+                      :class="{ primary: o.key === 'fix' || o.key === 'retry_after_fix' }"
+                      @click="submitDecision(o.key)">
+                {{ o.title }}
+              </button>
+            </div>
+            <div class="ai-decision-desc" v-if="decision.hint">{{ decision.hint }}</div>
+          </div>
+
+          <div class="k8s-report" v-if="detail.report && detail.status === 'succeeded'">
             <div class="k8s-report-head">
               <span class="k8s-report-title">📋 集群部署报告</span>
               <span class="k8s-report-status" :class="detail.report.status">{{ detail.report.status }}</span>
@@ -260,8 +282,8 @@
           </div>
         </div>
         <div class="modal-foot">
-          <button class="btn" :disabled="deploying" @click="precheck">逻辑预检</button>
-          <button class="btn danger" v-if="deploying" @click="stopDeploy">■ 停止</button>
+          <button class="btn" :disabled="deploying || detail.status === 'running'" @click="precheck">逻辑预检</button>
+          <button class="btn danger" v-if="deploying || detail.status === 'running'" @click="stopDeploy">■ 停止</button>
           <button class="btn primary" v-else-if="detail.status === 'stopped'" @click="startDeploy">▶ 继续部署</button>
           <button class="btn primary" v-else @click="startDeploy">▶ 开始部署</button>
           <button class="btn primary" v-if="detail.status === 'succeeded' && !deploying" @click="addToAssets">＋ 添加到 K8s 资产</button>
@@ -273,14 +295,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 
 const plans = ref([])
 const loading = ref(false)
 const statusFilter = ref('')
-const meta = ref({ bundles: [], registries: [], assets: [] })
+const meta = ref({ bundles: [], registries: [], assets: [], versions: [] })
 const proxyList = ref([])
 const proxySelectedId = ref(null)
 async function refreshProxyList() {
@@ -303,21 +325,32 @@ const form = ref(emptyForm())
 const detail = ref(null)
 const deploying = ref(false)
 const deployWs = ref(null)
+const termBox = ref(null)
+const detailModalBox = ref(null)
+const decision = ref(null)
 const precheckChecks = ref([])
 const precheckAdvice = ref(null)
 
 const phases = ['预检', '环境准备', '运行时/二进制', 'kubeadm配置', '初始化', 'CNI', '节点加入']
 
 function emptyForm() {
-  return { name: '', kubernetes_version: '', runtime: 'containerd', cni: 'calico',
-           pod_cidr: '', service_cidr: '', image_repository: '', bundle_id: null, registry_id: null,
+  return { name: '', kubernetes_version: 'v1.31.6', runtime: 'containerd', cni: 'calico',
+           pod_cidr: '10.244.0.0/16', service_cidr: '10.96.0.0/12', image_repository: '', bundle_id: null, registry_id: null,
            http_proxy: '', https_proxy: '', no_proxy: '127.0.0.1,localhost,.local', untaint_master: false,
+           cert_expiry_years: 100,
            nodes: [{ host_role: 'master', asset_id: null, ip: '', hostname: '', username: 'root', password: '', ssh_port: 22 }] }
 }
 
 function statusText(s) {
   return { draft: '草稿', planned: '已规划', running: '部署中', stopped: '已停止', succeeded: '成功', failed: '失败', rolled_back: '已回滚',
            pending: '待执行', ok: 'O' }[s] || s
+}
+function resetDeployState() {
+  decision.value = null
+  deploying.value = false
+  precheckChecks.value = []
+  precheckAdvice.value = null
+  if (deployWs.value) { deployWs.value.close(); deployWs.value = null }
 }
 function nodeSummary(p) {
   if (!p.nodes && !p.node_count) return '-'
@@ -372,6 +405,7 @@ async function openEdit(p) {
       https_proxy: res.https_proxy || '',
       no_proxy: res.no_proxy || '127.0.0.1,localhost,.local',
       untaint_master: !!res.untaint_master,
+      cert_expiry_years: res.cert_expiry_years ?? 100,
       nodes: (res.nodes || []).map(n => ({
         host_role: n.host_role || 'worker',
         asset_id: n.asset_id,
@@ -418,17 +452,28 @@ async function removePlan(p) {
 }
 
 async function openDetail(id) {
+  resetDeployState()
   detail.value = null
   try {
     const res = await request.get(`/k8s-offline/api/plans/${id}`, { params: { include_kubeconfig: false } })
     detail.value = res
+    // 恢复该计划持久化的决策卡片（各计划独立，互不干扰）
+    if (res.pending_decision && res.pending_decision.options && res.pending_decision.options.length) {
+      decision.value = res.pending_decision
+    }
   } catch (e) { ElMessage.error(e.message) }
 }
 function closeDetail() {
   deploying.value = false
   if (deployWs.value) { deployWs.value.close(); deployWs.value = null }
   detail.value = null
+  resetDeployState()
 }
+
+watch(() => detail.value?.logs?.length, async () => {
+  await nextTick()
+  if (termBox.value) termBox.value.scrollTop = termBox.value.scrollHeight
+})
 
 async function refreshDetail(id) {
   const res = await request.get(`/k8s-offline/api/plans/${id}`, { params: { include_kubeconfig: false } })
@@ -481,7 +526,37 @@ function startDeploy() {
       ElMessage[evt.status === 'succeeded' ? 'success' : 'error'](evt.message || '部署结束')
     }     else if (evt.type === 'error') {
       ElMessage.error(evt.message)
-    } else if (evt.type === 'ai') {
+    } else if (evt.type === 'decide') {
+      decision.value = {
+        id: evt.id,
+        question: evt.question || '部署遇到问题，请选择处理方案',
+        options: evt.options || [],
+        hint: '',
+      }
+      if (!Array.isArray(detail.value.logs)) detail.value.logs = []
+      detail.value.logs.push({
+        type: 'ai', node: '', message: `🤖 需要你决策: ${decision.value.question}`,
+        ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      })
+      // 弹窗提示，确保用户注意到决策来了
+      ElMessage.info('🤖 AI 需要你决策，请查看下方的决策卡片')
+      // 等待 DOM 更新后，将弹窗滚动到决策卡片位置
+      nextTick(() => {
+        const box = detailModalBox.value
+        if (box) {
+          // 把 modal-box 滚动到底部，让决策卡片可见
+          setTimeout(() => { box.scrollTop = box.scrollHeight }, 100)
+          setTimeout(() => { box.scrollTop = box.scrollHeight }, 500)
+        }
+      })
+    } else if (evt.type === 'preflight') {
+      if (!Array.isArray(detail.value.logs)) detail.value.logs = []
+      detail.value.logs.push({
+        type: 'ai', node: '', message: `🤖 AI 预检: containerd安装=${evt.containerd_install || '-'} 策略=${evt.strategy || '-'}` + ((evt.risks || []).length ? ` 风险: ${(evt.risks || []).join('; ')}` : ''),
+        ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      })
+    }
+    else if (evt.type === 'ai') {
       if (!Array.isArray(detail.value.logs)) detail.value.logs = []
       detail.value.logs.push({
         type: 'ai',
@@ -496,6 +571,26 @@ function startDeploy() {
     refreshDetail(detail.value.id)
   }
   deployWs.value.onerror = () => { deploying.value = false; ElMessage.error('WebSocket 连接失败') }
+}
+
+async function submitDecision(key) {
+  const choice = (key || '').toString()
+  try {
+    const res = await request.post(`/k8s-offline/api/plans/${detail.value.id}/decision`, { choice })
+    if (res && res.ok) {
+      if (!Array.isArray(detail.value.logs)) detail.value.logs = []
+      detail.value.logs.push({
+        type: 'ai', node: '', message: `👉 你选择了: ${choice}`,
+        ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      })
+      decision.value = null
+      refreshDetail(detail.value.id)
+    } else {
+      ElMessage.warning((res && res.message) || '提交决策失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 function stopDeploy() {
@@ -519,8 +614,21 @@ async function downloadKubeconfig() {
 }
 
 async function addToAssets() {
+  // 手动注册 + 确认编辑框：可修改资产/数据源名称后再注册
+  let name = (detail.value.name || '').trim()
   try {
-    const res = await request.post(`/k8s-offline/api/plans/${detail.value.id}/to-assets`)
+    const { value } = await ElMessageBox.prompt(
+      '填写要注册的 K8s 资产名称（数据源名，可修改），确认后注册为 K8s 资产。',
+      '注册为 K8s 资产',
+      { inputValue: name, inputPlaceholder: '资产名称', confirmButtonText: '注册', cancelButtonText: '取消',
+        inputValidator: v => (v && v.trim() ? true : '资产名称不能为空') }
+    )
+    name = (value || '').trim()
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
+    const res = await request.post(`/k8s-offline/api/plans/${detail.value.id}/to-assets`, { name })
     if (!res.ok) { ElMessage.warning(res.message || '操作失败'); return }
     const ds = res.datasource || {}
     ElMessage.success(`${res.message}：${ds.name} (${ds.endpoint || '-'})`)
@@ -635,6 +743,17 @@ input, select { width: 100%; border: 1px solid #dcdfe6; border-radius: 4px; padd
 .precheck-ai-title { font-weight: 600; color: #4f46e5; margin-bottom: 4px; }
 .precheck-ai-summary { font-size: 13px; color: #24292f; margin-bottom: 4px; }
 .precheck-ai-item { font-size: 12px; color: #57606a; padding: 1px 0; }
+
+.ai-decision-card { margin-top: 12px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 14px 16px; }
+.ai-decision-head { font-weight: 700; color: #4f46e5; margin-bottom: 8px; }
+.ai-decision-q { font-size: 13px; color: #111827; margin-bottom: 6px; }
+.ai-decision-root { font-size: 12px; color: #6b7280; margin-bottom: 10px; }
+.ai-decision-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-opt-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid #c7d2fe; background: #fff; color: #3730a3; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; }
+.ai-opt-btn:hover { background: #e0e7ff; }
+.ai-opt-btn.primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+.ai-opt-btn.primary:hover { background: #4338ca; }
+.ai-decision-desc { font-size: 12px; color: #8a63d2; margin-top: 8px; }
 
 .k8s-report { margin-top: 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; }
 .k8s-report-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }

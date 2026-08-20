@@ -99,7 +99,7 @@
           <h4 class="sub-title">关联告警 ({{ detail.alerts.length }})</h4>
           <table class="table inner-table">
             <thead>
-              <tr><th>ID</th><th>指标</th><th>级别</th><th>状态</th><th>时间</th></tr>
+              <tr><th>ID</th><th>指标</th><th>级别</th><th>状态</th><th>时间</th><th>操作</th></tr>
             </thead>
             <tbody>
               <tr v-for="a in detail.alerts" :key="a.id">
@@ -108,11 +108,18 @@
                 <td><span class="badge" :class="a.severity">{{ a.severity }}</span></td>
                 <td><span class="badge" :class="a.status">{{ a.status }}</span></td>
                 <td class="text-sm">{{ formatTime(a.created_at) }}</td>
+                <td><button class="btn btn-sm" @click="gotoAlert(a.id)">去告警中心</button></td>
               </tr>
             </tbody>
           </table>
           <div v-if="rcaResult" class="rca-box">
             <h4>根因分析</h4>
+            <div v-if="rcaSummary && (rcaSummary.root_cause || rcaSummary.solution)" class="key-points">
+              <div class="kp-title">📌 要点总结</div>
+              <div v-if="rcaSummary.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ rcaSummary.root_cause }}</span></div>
+              <div v-if="rcaSummary.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ rcaSummary.solution }}</span></div>
+              <div v-if="rcaSummary.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ rcaSummary.impact }}</span></div>
+            </div>
             <div class="rca-report" v-html="rcaResult"></div>
           </div>
           <div v-if="aiRcaResult" class="rca-box ai-rca-box">
@@ -153,6 +160,7 @@ const jumpPage = ref(1)
 const detailVisible = ref(false)
 const detail = ref(null)
 const rcaResult = ref('')
+const rcaSummary = ref(null)
 const aiRcaResult = ref('')
 const aiRcaLoading = ref({})   // 按 incident id 跟踪，避免全局联动
 const sopGenerating = ref({})  // 按 incident id 跟踪
@@ -288,11 +296,12 @@ async function doRca() {
   try {
     const data = await request.get(`/incidents/api/${detail.value.incident.id}/rca`)
     const analysis = data.analysis
-    if (analysis && analysis.report) {
-      rcaResult.value = md.render(analysis.report)
+    rcaSummary.value = (analysis && analysis.summary_block) || null
+    if (analysis && analysis.report_md) {
+      rcaResult.value = md.render(analysis.report_md)
     } else if (typeof analysis === 'string') {
       rcaResult.value = md.render(analysis)
-    } else {
+    } else if (analysis) {
       rcaResult.value = md.render('```\n' + JSON.stringify(analysis, null, 2) + '\n```')
     }
   } catch (e) {
@@ -370,8 +379,20 @@ function statusCn(s) {
   return { open: '进行中', resolved: '已解决' }[s] || s
 }
 
+function gotoAlert(alertId) {
+  window._pendingAlertId = alertId
+  detailVisible.value = false
+  window._navigateTo('alerts')
+}
+
 onMounted(() => {
   loadIncidents()
+  // 从告警中心跳转过来：自动打开对应故障单详情
+  const pendingIncidentId = window._pendingIncidentId
+  if (pendingIncidentId) {
+    window._pendingIncidentId = null
+    showDetail(pendingIncidentId)
+  }
 })
 </script>
 

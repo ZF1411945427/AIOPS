@@ -142,6 +142,12 @@
               <span class="cp-count">×{{ c.count }}</span>
             </div>
           </div>
+          <div v-if="analysisKeyPoints && (analysisKeyPoints.root_cause || analysisKeyPoints.solution)" class="key-points">
+            <div class="kp-title">📌 要点总结</div>
+            <div v-if="analysisKeyPoints.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ analysisKeyPoints.root_cause }}</span></div>
+            <div v-if="analysisKeyPoints.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ analysisKeyPoints.solution }}</span></div>
+            <div v-if="analysisKeyPoints.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ analysisKeyPoints.impact }}</span></div>
+          </div>
           <div class="ai-result" v-html="analysisHtml"></div>
         </div>
         <div v-else class="empty-hint">点击"开始分析"调用大模型分析勾选的日志</div>
@@ -234,6 +240,7 @@ const showAnalyze = ref(false)
 const aiLoading = ref(false)
 const aiError = ref('')
 const analysisText = ref('')
+const analysisKeyPoints = ref(null)
 const analyzeQuestion = ref('')
 const analyzeMeta = ref('')
 const transferring = ref(false)
@@ -254,6 +261,7 @@ async function runAnalyze() {
   if (aiLoading.value) return
   aiLoading.value = true; aiError.value = ''
   clusterSummary.value = null
+  analysisKeyPoints.value = null
   try {
     const logsData = selectedLogs.value.map(l => ({
       timestamp: l.timestamp, level: l.level, host: l.host,
@@ -268,6 +276,7 @@ async function runAnalyze() {
     }, { timeout: 120000 })
     if (!res.ok) { aiError.value = res.error || '分析失败'; return }
     analysisText.value = res.analysis || ''
+    analysisKeyPoints.value = res.key_points || null
     const m = res.meta || {}
     analyzeMeta.value = `数据源: ${currentSourceName} · 已选 ${logsData.length} 条 · 聚类 ${m.cluster_count || 0} 组 · 模型: ${res.provider || '-'} · 记录 #${res.record_id || '-'}`
     if (res.enhanced && res.enhanced.clusters) {

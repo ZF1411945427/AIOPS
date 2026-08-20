@@ -174,8 +174,8 @@
 <script setup>
 import { ref, onMounted, reactive, computed, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
-import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
+import request from '@/api/request'
 
 const showGuide = ref(false)
 const oncallList = ref([])
@@ -294,8 +294,8 @@ const buildSchedule = () => {
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await axios.get("/api/sre/oncall")
-    oncallList.value = res.data
+    const res = await request.get("/api/sre/oncall")
+    oncallList.value = res
   } catch (e) {
     console.error(e)
   } finally {
@@ -305,8 +305,8 @@ const loadData = async () => {
 
 const loadCurrentOncall = async () => {
   try {
-    const res = await axios.get("/api/sre/oncall/current")
-    currentOncall.value = res.data
+    const res = await request.get("/api/sre/oncall/current")
+    currentOncall.value = res
   } catch (e) {
     console.error(e)
   }
@@ -314,8 +314,8 @@ const loadCurrentOncall = async () => {
 
 const loadMemberCandidates = async () => {
   try {
-    const res = await axios.get("/api/sre/oncall/members")
-    memberCandidates.value = res.data.members || []
+    const res = await request.get("/api/sre/oncall/members")
+    memberCandidates.value = res.members || []
   } catch (e) {
     console.error(e)
   }
@@ -372,10 +372,10 @@ const saveOncall = async () => {
       current_period_ended_at: form.current_period_ended_at
     }
     if (editingId.value) {
-      await axios.put(`/api/sre/oncall/${editingId.value}`, payload)
+      await request.put(`/api/sre/oncall/${editingId.value}`, payload)
       ElMessage.success("更新成功")
     } else {
-      await axios.post("/api/sre/oncall", payload)
+      await request.post("/api/sre/oncall", payload)
       ElMessage.success("创建成功")
     }
     dialogVisible.value = false
@@ -390,7 +390,7 @@ const saveOncall = async () => {
 const deleteOncall = async (row) => {
   try {
     await ElMessageBox.confirm(`确定删除值班表「${row.team_name}」吗？`, "提示", { type: "warning" })
-    await axios.delete(`/api/sre/oncall/${row.id}`)
+    await request.delete(`/api/sre/oncall/${row.id}`)
     ElMessage.success("删除成功")
     loadData()
     loadCurrentOncall()

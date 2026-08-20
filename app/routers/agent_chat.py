@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
-from app.database import get_db
+from app.database import get_db, date_prefix_expr
 from app.models import ChatSession, ChatMessage, PendingAction, ToolInvocation, AgentConfig, Alert, Asset, AIProvider
 from app.services.agent_service import (
     process_chat_message, confirm_pending_action, cancel_pending_action, add_message)
@@ -140,8 +140,8 @@ def pending_status(action_id: int, request: Request, db: Session = Depends(get_d
                 inner = parsed.get("result", {})
                 if isinstance(inner, dict):
                     result_message = inner.get("message", "")
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except (json.JSONDecodeError, TypeError) as _exc:
+            logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc, exc_info=True)
     return {
         "status": action.status,
         "result_message": result_message,
@@ -268,14 +268,14 @@ def agent_stats(request: Request, db: Session = Depends(get_db)):
     seven_days_ago = datetime.now() - timedelta(days=7)
     daily_rows = (
         db.query(
-            func.date(ToolInvocation.created_at).label("day"),
+            date_prefix_expr(db, ToolInvocation.created_at).label("day"),
             func.count(ToolInvocation.id).label("count"),
             func.sum(case((ToolInvocation.status == ToolInvocation.STATUS_SUCCESS, 1), else_=0)).label("is_success"),
         )
         .join(ChatSession, ToolInvocation.session_id == ChatSession.id)
         .filter(ChatSession.user_id == user_id, ToolInvocation.created_at >= seven_days_ago)
-        .group_by(func.date(ToolInvocation.created_at))
-        .order_by(func.date(ToolInvocation.created_at))
+        .group_by(date_prefix_expr(db, ToolInvocation.created_at))
+        .order_by(date_prefix_expr(db, ToolInvocation.created_at))
         .all()
     )
     daily = []
@@ -347,8 +347,8 @@ def api_pending_list(request: Request, db: Session = Depends(get_db), status: st
                     inner = parsed.get("result") or {}
                     if isinstance(inner, dict):
                         result_message = inner.get("message", "")
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as _exc1:
+                logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc1, exc_info=True)
         result.append({
             "id": a.id,
             "session_id": a.session_id,
@@ -738,8 +738,8 @@ async def transfer_from_remediation(request: Request, db: Session = Depends(get_
                     diag_parts.append(f"  $ {c.get('cmd','')}  ({c.get('desc','')})")
                     if c.get("output"):
                         diag_parts.append(f"    输出: {c['output'][:300]}")
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
     # AI 方案
     if pending_action_id:
         pa = db.query(_PA).filter(_PA.id == pending_action_id).first()
@@ -947,3 +947,71 @@ def list_providers_for_chat(request: Request, db: Session = Depends(get_db)):
             for p in providers
         ]
     }
+
+@router.get("/suggestions")
+def get_suggestions(request: Request, db: Session = Depends(get_db)):
+    """根据系统状态返回动态快捷指令。"""
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+
+    # 统计活跃告警数
+    active_alerts = db.query(func.count(Alert.id)).filter(
+        Alert.status.in_(["triggered", "acknowledged"]),
+        Alert.archived == False,
+    ).scalar() or 0
+
+    # 统计资产在线/总数
+    total_assets = db.query(func.count(Asset.id)).scalar() or 0
+    online_assets = db.query(func.count(Asset.id)).filter(
+        Asset.status == "online"
+    ).scalar() or 0
+
+    # 统计未关闭故障单
+    open_incidents = db.query(func.count(Alert.id)).filter(
+        Alert.status.in_(["triggered", "acknowledged"]),
+        Alert.archived == False,
+        Alert.severity.in_(["critical", "high"]),
+    ).scalar() or 0
+
+    suggestions = []
+    quick_actions = []
+
+    # 根据活跃告警量推荐
+    if active_alerts > 0:
+        suggestions.append("查看当前活跃告警")
+        suggestions.append("分析最近的告警趋势")
+        if active_alerts >= 5:
+            suggestions.append("⚠️ 告警较多，建议做一次健康体检")
+    else:
+        suggestions.append("查看系统健康态势")
+        suggestions.append("当前资源使用概况")
+
+    # 根据资产在线率推荐
+    if total_assets > 0 and online_assets < total_assets:
+        suggestions.append("查看离线资产明细")
+    if total_assets > 0:
+        suggestions.append("资产总览与分布")
+
+    suggestions.append("有哪些待处理的故障单")
+    suggestions.append("分析最近的异常指标")
+
+    # 动态快捷操作
+    quick_actions.append({"icon": "📜", "label": "看日志并分析", "command": "帮我查看最近的日志并分析其中是否有异常"})
+    if active_alerts > 0:
+        quick_actions.insert(0, {"icon": "🚨", "label": f"查活跃告警（{active_alerts}条）", "command": "当前有哪些活跃的告警？整理给我"})
+    else:
+        quick_actions.append({"icon": "🚨", "label": "查活跃告警", "command": "当前有哪些活跃的告警？整理给我"})
+    if active_alerts >= 3:
+        quick_actions.append({"icon": "🩺", "label": "⚠️ 系统健康体检", "command": "对系统做一次健康体检并给出结论"})
+    else:
+        quick_actions.append({"icon": "🩺", "label": "系统健康体检", "command": "对系统做一次健康体检并给出结论"})
+    quick_actions.append({"icon": "🔻", "label": "分析异常指标", "command": "分析最近的指标异常并定位可能的根因"})
+    if open_incidents > 0:
+        quick_actions.append({"icon": "📋", "label": f"待处理故障（{open_incidents}）", "command": "列出当前未关闭的故障单"})
+
+    return {"suggestions": suggestions[:8], "quick_actions": quick_actions[:8]}
+
+
+import logging
+logger = logging.getLogger(__name__)

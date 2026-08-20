@@ -5,6 +5,9 @@ from app.models import MetricRecord, Asset
 
 
 # 采集命令（兼容 CentOS/Ubuntu 等 Linux 发行版）
+import logging
+logger = logging.getLogger(__name__)
+
 COLLECT_COMMANDS = {
     # === CPU (5) ===
     # 修复: 原 'awk '/Cpu/{print $2}'' 只取 us(user) 列，dd 等 syscall 密集故障消耗 sy(system) 列导致永远不告警
@@ -110,8 +113,8 @@ def collect_asset_metrics(asset, db):
                         timestamp=now,
                     ))
                     result["metrics"].append({"name": name, "value": val, "asset_id": asset.id})
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
         # 服务型资产通用探活：SSH 进宿主机检查本地端口是否存活
         if asset.ci_type in ("middleware", "database"):
@@ -134,8 +137,8 @@ def collect_asset_metrics(asset, db):
                     val = 1.0 if raw == "1" else 0.0
                     db.add(MetricRecord(asset_id=asset.id, name="svc_up", value=val, unit="", timestamp=now))
                     result["metrics"].append({"name": "svc_up", "value": val, "asset_id": asset.id})
-                except Exception:
-                    pass
+                except Exception as _exc1:
+                    logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
 
         ssh.close()
         db.commit()
@@ -153,8 +156,8 @@ def collect_asset_metrics(asset, db):
                         "timestamp": now,
                     })
                 write_metrics_batch(batch)
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
     except Exception as e:
         result["error"] = str(e)
     return result

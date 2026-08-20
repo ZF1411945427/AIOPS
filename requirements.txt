@@ -111,6 +111,7 @@ six==1.17.0
 slowapi==0.1.10
 sniffio==1.3.1
 SQLAlchemy==2.0.36
+alembic==1.19.1
 sse-starlette==2.1.0
 starlette==0.41.3
 statsmodels==0.14.6
@@ -144,4 +145,12 @@ zstandard==0.25.0
 # docker           # Docker 数据源采集
 # netsnmp          # SNMP 监控采集（注意：是 netsnmp-python，非 pysnmp）
 # neo4j            # 知识图谱（neo4j_graph_service.py）
+
+# ===== 分布式任务队列（阶段二：Celery + Redis）=====
+celery[redis]>=5.3
+# ===== TTS 语音合成（edge-tts 微软神经语音 + 可选云 TTS 阿里/百度/腾讯，本地 VITS 已移除 2026-08-19）=====
+edge-tts>=7.0.0
+# ===== STT 音频解码（voice_service.py 上传云端前，mp3/wav/webm 供移动端/文件路径解码）=====
+av>=13.0.0
+# 注: 本地 sherpa-onnx(KWS/ASR/VITS) 已整体移除(2026-08-19)，语音全走云端；如需安装腾讯云 SDK: tencentcloud-sdk-python
 # pywinrm          # Windows 远程管理（script_exec.py / connection_service.py）

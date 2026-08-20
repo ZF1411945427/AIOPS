@@ -58,6 +58,14 @@
         <div>正在加载指标数据...</div>
       </div>
       <template v-else>
+        <CustomDashboard
+          :cards="customCards"
+          ref="customDashRef"
+          @edit="editCustomCard"
+          @delete="deleteCustomCard"
+          @reorder="reorderCustomCards"
+          @resize="resizeCustomCard"
+        />
         <MetricCard
           v-for="name in filteredMetrics" :key="name"
           :name="name"
@@ -75,7 +83,7 @@
           @toggle-select="toggleSelectMetric"
           @drill="openDrillDown(name)"
         />
-        <div v-if="filteredMetrics.length === 0 && !loading" class="empty-state">
+        <div v-if="filteredMetrics.length === 0 && customCards.length === 0 && !loading" class="empty-state">
           <div style="font-size:32px;margin-bottom:8px;">&#128202;</div>
           <div>暂无指标数据</div>
         </div>
@@ -119,7 +127,15 @@
         <div class="ai-drawer-body">
           <div v-if="rcaLoading" class="ai-loading"><div class="ai-spinner"></div><span>正在跨域分析指标 {{ rcaMetric }}...</span></div>
           <div v-else-if="rcaError" class="ai-error-bar">{{ rcaError }}</div>
-          <div v-else-if="rcaResult" class="ai-result" v-html="rcaResult"></div>
+          <template v-else-if="rcaResult">
+            <div v-if="rcaKeyPoints && (rcaKeyPoints.root_cause || rcaKeyPoints.solution)" class="key-points">
+              <div class="kp-title">📌 要点总结</div>
+              <div v-if="rcaKeyPoints.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ rcaKeyPoints.root_cause }}</span></div>
+              <div v-if="rcaKeyPoints.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ rcaKeyPoints.solution }}</span></div>
+              <div v-if="rcaKeyPoints.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ rcaKeyPoints.impact }}</span></div>
+            </div>
+            <div class="ai-result" v-html="rcaResult"></div>
+          </template>
         </div>
       </div>
     </div>
@@ -131,19 +147,42 @@
           <label>卡片标题</label>
           <input v-model="customForm.title" placeholder="例如: CPU 平均使用率" class="form-input" />
         </div>
+        <div class="form-row">
+          <div class="form-group form-col">
+            <label>分类</label>
+            <select v-model="customForm.category" class="form-input">
+              <option value="">不分类</option>
+              <option v-for="c in CATEGORIES" :key="c.key" :value="c.key">{{ c.icon }} {{ c.label }}</option>
+            </select>
+          </div>
+          <div class="form-group form-col">
+            <label>时间范围</label>
+            <select v-model="customForm.hours" class="form-input">
+              <option :value="1">最近 1 小时</option>
+              <option :value="6">最近 6 小时</option>
+              <option :value="24">最近 24 小时</option>
+              <option :value="72">最近 3 天</option>
+              <option :value="168">最近 7 天</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group ai-promql-group">
+          <label>AI 生成 PromQL</label>
+          <div class="ai-promql-row">
+            <input
+              v-model="promqlRequest" class="form-input"
+              placeholder="用自然语言描述，如：CPU 使用率最高 Top5 主机" @keyup.enter="generatePromql"
+            />
+            <button class="btn-ai ai-gen-btn" :disabled="promqlGenerating || !promqlRequest.trim()" @click="generatePromql">
+              {{ promqlGenerating ? '生成中...' : 'AI ✨' }}
+            </button>
+          </div>
+          <div class="ai-promql-hint">AI 将参考上方所选时间范围生成查询</div>
+          <div v-if="promqlError" class="ai-promql-error">{{ promqlError }}</div>
+        </div>
         <div class="form-group">
           <label>PromQL 查询</label>
           <textarea v-model="customForm.promql" placeholder="例如: avg(cpu_usage) by (__name__)" class="form-textarea" rows="3"></textarea>
-        </div>
-        <div class="form-group">
-          <label>时间范围</label>
-          <select v-model="customForm.hours" class="form-input" style="width:auto">
-            <option :value="1">最近 1 小时</option>
-            <option :value="6">最近 6 小时</option>
-            <option :value="24">最近 24 小时</option>
-            <option :value="72">最近 3 天</option>
-            <option :value="168">最近 7 天</option>
-          </select>
         </div>
         <div class="form-group">
           <label>宽度</label>
@@ -203,7 +242,13 @@
             <div class="ai-spinner"></div>
             <span>AI 正在分析 {{ aiMetricCount }} 项指标...</span>
           </div>
-          <div v-else-if="aiResult" class="ai-result" v-html="aiResult"></div>
+          <div v-if="aiKeyPoints && (aiKeyPoints.root_cause || aiKeyPoints.solution)" class="key-points">
+            <div class="kp-title">📌 要点总结</div>
+            <div v-if="aiKeyPoints.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ aiKeyPoints.root_cause }}</span></div>
+            <div v-if="aiKeyPoints.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ aiKeyPoints.solution }}</span></div>
+            <div v-if="aiKeyPoints.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ aiKeyPoints.impact }}</span></div>
+          </div>
+          <div v-if="aiResult" class="ai-result" v-html="aiResult"></div>
           <div v-else class="ai-empty">点击「开始分析」，AI 将基于当前页面指标最新值做健康体检</div>
           <div v-if="aiResult && !aiLoading" class="ai-transfer-bar">
             <button class="btn-transfer" :disabled="transferring" @click="transferToAgent">
@@ -224,6 +269,7 @@ import request from '@/api/request'
 import * as echarts from 'echarts'
 import MetricCard from './metrics/MetricCard.vue'
 import MetricDetailModal from './metrics/MetricDetailModal.vue'
+import CustomDashboard from './metrics/CustomDashboard.vue'
 import { formatValue, formatTime, formatAxisTime, TIME_RANGES, THRESHOLDS, metricStatus, statusColor } from './metrics/metricsUtils.js'
 
 const CATEGORIES = [
@@ -294,7 +340,10 @@ const customCards = ref([])
 const customLoading = ref(false)
 const showCustomModal = ref(false)
 const editingCardIdx = ref(null)
-const customForm = ref({ title: '', promql: '', hours: 24, w: 2, h: 1 })
+const customForm = ref({ title: '', promql: '', hours: 24, w: 2, h: 1, category: '' })
+const promqlRequest = ref('')
+const promqlGenerating = ref(false)
+const promqlError = ref('')
 
 const detailVisible = ref(false)
 const detailName = ref('')
@@ -308,6 +357,7 @@ const aiLoading = ref(false)
 const aiError = ref('')
 const aiResult = ref('')
 const aiResultRaw = ref('')
+const aiKeyPoints = ref(null)
 const aiMeta = ref('')
 const aiMetricCount = ref(0)
 const transferring = ref(false)
@@ -321,6 +371,7 @@ const rcaLoading = ref(false)
 const rcaResult = ref('')
 const rcaError = ref('')
 const rcaMetric = ref('')
+const rcaKeyPoints = ref(null)
 
 const isAggregateMode = computed(() => selectedAsset.value === '0' && aggregateMode.value)
 const aggregateLabel = computed(() => {
@@ -547,15 +598,48 @@ async function saveCustomCard() {
 
 function editCustomCard(idx) {
   const card = customCards.value[idx]
-  customForm.value = { title: card.title, promql: card.promql, hours: card.hours || 24, w: card.w || 2, h: card.h || 1 }
+  customForm.value = { title: card.title, promql: card.promql, hours: card.hours || 24, w: card.w || 2, h: card.h || 1, category: card.category || '' }
   editingCardIdx.value = idx
   showCustomModal.value = true
 }
 
 function openCustomModal() {
-  customForm.value = { title: '', promql: '', hours: 24, w: 2, h: 1 }
+  customForm.value = { title: '', promql: '', hours: 24, w: 2, h: 1, category: '' }
+  promqlRequest.value = ''
+  promqlError.value = ''
   editingCardIdx.value = null
   showCustomModal.value = true
+}
+
+async function generatePromql() {
+  const req = promqlRequest.value.trim()
+  if (!req) return
+  promqlGenerating.value = true
+  promqlError.value = ''
+  const hours = customForm.value.hours || 24
+  const hourLabel = { 1: '最近1小时', 6: '最近6小时', 24: '最近24小时', 72: '最近3天', 168: '最近7天' }[hours] || `最近${hours}小时`
+  const rangeEnd = new Date()
+  const rangeStart = new Date(Date.now() - hours * 3600 * 1000)
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const timeDesc = `${hourLabel}（${fmt(rangeStart)} ~ ${fmt(rangeEnd)}，步长约 5 分钟）`
+  try {
+    const res = await request.post('/ai-insight/generate-promql', {
+      request: req,
+      hours,
+      time_desc: timeDesc,
+    }, { timeout: 120000 })
+    if (res.ok) {
+      if (res.promql) customForm.value.promql = res.promql
+      if (res.title) customForm.value.title = res.title
+      ElMessage.success('PromQL 已生成，请核对后保存')
+    } else {
+      promqlError.value = res.error || 'AI 生成失败'
+    }
+  } catch (e) {
+    promqlError.value = 'AI 生成请求失败：' + (e.message || e)
+  } finally {
+    promqlGenerating.value = false
+  }
 }
 
 async function deleteCustomCard(idx) {
@@ -716,6 +800,7 @@ async function runAiAnalyze() {
   aiLoading.value = true
   aiError.value = ''
   aiResult.value = ''
+  aiKeyPoints.value = null
   insightTrends.value = {}
   try {
     const res = await request.post('/ai-insight/analyze', {
@@ -725,6 +810,7 @@ async function runAiAnalyze() {
       title: `指标体检 #${Date.now().toString().slice(-6)}`,
     }, { timeout: 120000 })
     if (res.ok) {
+      aiKeyPoints.value = res.key_points || null
       aiResult.value = mdToHtml(res.analysis || '')
       aiResultRaw.value = res.analysis || ''
       aiMetricCount.value = (res.meta && res.meta.metric_count) || metrics.length
@@ -832,11 +918,13 @@ async function runRca(name) {
   rcaLoading.value = true
   rcaError.value = ''
   rcaResult.value = ''
+  rcaKeyPoints.value = null
   try {
     const res = await request.post('/ai-insight/rca', {
       metric_name: name, asset_id: assetId, hours: timeRange.value,
     }, { timeout: 120000 })
     if (res.ok) {
+      rcaKeyPoints.value = res.summary_block || null
       rcaResult.value = mdToHtml(res.analysis || '')
     } else {
       rcaError.value = res.error || 'RCA 分析失败'
@@ -861,9 +949,78 @@ onMounted(async () => {
     loadChartData()
     loadCustomCardData()
   }, 15000)
+
+  // 语音填表桥接：暴露给全局 AIOpsChatWidget 语音指挥，实现"语音逐项填写自定义卡片表单"
+  window._metricCardForm = {
+    isOpen: () => showCustomModal.value,
+    open() {
+      openCustomModal()
+    },
+    close() {
+      showCustomModal.value = false
+      editingCardIdx.value = null
+    },
+    // 返回当前表单字段 schema（供后端 LLM 语音解析用）
+    getSchema() {
+      return [
+        { key: 'title', label: '卡片标题', type: 'text' },
+        { key: 'category', label: '分类', type: 'select', options: CATEGORIES.map(c => ({ value: c.key, label: c.label })) },
+        { key: 'hours', label: '时间范围', type: 'select', options: [
+          { value: 1, label: '最近1小时' }, { value: 6, label: '最近6小时' }, { value: 24, label: '最近24小时' },
+          { value: 72, label: '最近3天' }, { value: 168, label: '最近7天' } ] },
+        { key: 'promql', label: 'PromQL查询', type: 'textarea' },
+        { key: 'w', label: '宽度', type: 'select', options: [
+          { value: 1, label: '1列' }, { value: 2, label: '2列' }, { value: 3, label: '3列' }, { value: 4, label: '4列' } ] },
+        { key: 'h', label: '高度', type: 'select', options: [
+          { value: 1, label: '标准' }, { value: 2, label: '双倍' } ] },
+      ]
+    },
+    // 把 LLM 解析出的 {key:value} 填进表单（仅填充存在的字段）
+    fill(values) {
+      if (!values || typeof values !== 'object') return Object.keys(values || {})
+      const known = ['title', 'category', 'hours', 'promql', 'w', 'h']
+      const applied = []
+      for (const k of known) {
+        if (k in values && values[k] !== undefined && values[k] !== null && values[k] !== '') {
+          let v = values[k]
+          if (k === 'hours') v = Number(v)
+          if (k === 'w' || k === 'h') v = Number(v)
+          customForm.value[k] = v
+          applied.push(k)
+        }
+      }
+      return applied
+    },
+    // 校验并保存
+    validate() {
+      return !!(customForm.value.title && customForm.value.promql)
+    },
+    // AI 生成 PromQL：voice 传自然语言描述 → 调 generatePromql 填充
+    async generatePromql(desc) {
+      const d = (desc || '').trim()
+      if (!d) return { ok: false, message: '请描述你想监控的指标' }
+      promqlRequest.value = d
+      try { await generatePromql() } catch (e) { return { ok: false, message: 'AI 生成失败' } }
+      if (promqlError.value) return { ok: false, message: promqlError.value }
+      return { ok: true, promql: customForm.value.promql, title: customForm.value.title }
+    },
+    async save() {
+      if (!customForm.value.title || !customForm.value.promql) {
+        ElMessage.warning('标题和 PromQL 不能为空')
+        return { ok: false, message: '标题和 PromQL 不能为空' }
+      }
+      try {
+        await saveCustomCard()
+        return { ok: true, message: '卡片已保存' }
+      } catch (e) {
+        return { ok: false, message: e.message || '保存失败' }
+      }
+    },
+  }
 })
 
 onBeforeUnmount(() => {
+  if (window._metricCardForm) delete window._metricCardForm
   if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
@@ -969,6 +1126,9 @@ onBeforeUnmount(() => {
 }
 .modal-box h3 { margin: 0 0 20px; font-size: 16px; font-weight: 700; color: var(--text-primary); }
 .form-group { margin-bottom: 16px; }
+.form-row { display: flex; gap: 12px; }
+.form-col { flex: 1; }
+.form-row .form-col .form-input { width: 100%; }
 .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
 .form-input {
   width: 100%; padding: 8px 12px; border-radius: 8px;
@@ -981,6 +1141,11 @@ onBeforeUnmount(() => {
   color: var(--text-primary); font-size: 13px; font-family: monospace;
   resize: vertical; box-sizing: border-box;
 }
+.ai-promql-row { display: flex; gap: 8px; }
+.ai-promql-row .form-input { flex: 1; }
+.ai-gen-btn { white-space: nowrap; }
+.ai-promql-hint { color: #909399; font-size: 12px; margin-top: 6px; }
+.ai-promql-error { color: #f56c6c; font-size: 12px; margin-top: 6px; }
 .size-picker { display: flex; gap: 8px; }
 .size-btn {
   padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(148,163,184,0.2);

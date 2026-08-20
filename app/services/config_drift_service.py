@@ -18,8 +18,12 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from app.models import Asset, ConfigBaseline, ConfigDriftRecord
+from app.routers.agent_sse import _clean_key_point
 
 # 内置采集模板: 按资产 ci_type 匹配要采集的配置项
+import logging
+logger = logging.getLogger(__name__)
+
 _BUILTIN_TEMPLATES = [
     {
         "ci_type": "server",
@@ -97,8 +101,8 @@ def _exec_ssh(asset: Asset, command: str) -> tuple:
     except Exception as e:
         try:
             ssh.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         return (False, f"命令执行失败: {e}")
 
 
@@ -464,6 +468,12 @@ def ai_assess(db: Session, drift_id: int) -> dict:
         }
     except Exception:
         assessment = _rule_assessment(r)
+
+    assessment["summary_block"] = {
+        "root_cause": _clean_key_point(assessment.get("root_cause") or assessment.get("summary", ""), 100),
+        "solution": _clean_key_point(assessment.get("recommendation", ""), 160),
+        "impact": _clean_key_point(assessment.get("impact", ""), 100),
+    }
 
     # 同步严重级别
     r.severity = assessment.get("severity", r.severity)

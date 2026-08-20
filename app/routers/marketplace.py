@@ -23,8 +23,8 @@ def _current_user_id(request: Request) -> int:
                 payload = verify_login_token(auth[7:])
                 if payload:
                     user_id = payload.get("user_id")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return user_id
 
 

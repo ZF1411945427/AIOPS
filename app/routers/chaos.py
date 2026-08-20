@@ -4,6 +4,9 @@ import threading
 import random
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+import logging
+logger = logging.getLogger(__name__)
+
 
 try:
     import paramiko
@@ -428,8 +431,8 @@ def _inject_and_observe_async(exp_id: int, asset_id: int, fault_type: str, param
                 exp.result = "failed"
                 exp.finished_at = datetime.now()
                 db.commit()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     finally:
         with _RUNNING_LOCK:
             _RUNNING.pop(exp_id, None)

@@ -15,6 +15,9 @@ from app.models import (
 )
 from app.services.mcp_registry import call_mcp_tool, get_internal_tools
 
+import logging
+logger = logging.getLogger(__name__)
+
 _rlock = threading.Lock()
 
 # 工作流节点参数模板（渲染 JSON/字符串数据，非 HTML），autoescape=True 会破坏数据
@@ -543,8 +546,8 @@ def _execute_node(db: Session, run: WorkflowRun, nr: WorkflowNodeRun, payload: D
                 response_summary=json.dumps(result, ensure_ascii=False),
             ))
             db.commit()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 def _finalize_run(db: Session, run_id: int, status: str, message: str):

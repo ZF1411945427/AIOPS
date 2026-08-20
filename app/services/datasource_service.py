@@ -2,6 +2,7 @@ from app.template_utils import parse_json_config
 import json
 import re
 import time
+import threading
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,9 @@ from sqlalchemy.orm import Session
 from app.models import DataSource, MetricRecord, Asset, K8sEvent
 from sqlalchemy import text as _sa_text
 
+
+import logging
+logger = logging.getLogger(__name__)
 
 def _source_auth(source: DataSource) -> dict:
     """解析数据源 auth_config，并注入 Secrets Vault 引用（{{secret:name}} → 解密值）。
@@ -206,27 +210,77 @@ def _test_ssh(source: DataSource) -> tuple:
         return (False, f"SSH 连接失败: {str(e)}")
 
 
+def _build_k8s_api_client(cfg: dict):
+    """按 cfg 构造 kubernetes ApiClient, 兼容 kubeconfig 与 host/token 两种认证。
+    - 内网自签集群: 一律 verify_ssl=False + assert_hostname=False(否则证书 hostname 校验失败)
+    - 禁用系统/环境代理(K8s 集群为内网直连, 走代理会 ReadTimeout)
+    返回 (api_client, error_str)。"""
+    try:
+        from kubernetes import client, config as k8s_config
+    except ImportError:
+        return None, "missing kubernetes Python package"
+    kc_raw = cfg.get("kubeconfig")
+    if kc_raw:
+        import yaml as _yaml
+        if isinstance(kc_raw, str):
+            kc_raw = _yaml.safe_load(kc_raw)
+        clusters = {c["name"]: c["cluster"] for c in (kc_raw.get("clusters") or [])}
+        users = {u["name"]: u["user"] for u in (kc_raw.get("users") or [])}
+        contexts = {c["name"]: c["context"] for c in (kc_raw.get("contexts") or [])}
+        cur_ctx = kc_raw.get("current-context")
+        ctx = contexts.get(cur_ctx) or (list(contexts.values())[0] if contexts else {})
+        cluster = clusters.get(ctx.get("cluster")) or {}
+        user = users.get(ctx.get("user")) or {}
+        server = cluster.get("server")
+        if not server:
+            return None, "kubeconfig 缺少 cluster.server"
+        configuration = client.Configuration()
+        configuration.host = server
+        configuration.verify_ssl = False
+        configuration.assert_hostname = False
+        configuration.ssl_ca_cert = None
+        configuration.timeout = 10
+        if user.get("token"):
+            configuration.api_key = {"authorization": "Bearer " + user["token"]}
+        elif user.get("client-certificate-data") and user.get("client-key-data"):
+            configuration.cert_file = None
+            configuration.key_file = None
+            # 用内存里的 cert/key 构造 SSLContext 会较繁琐, 交由 SDK 的 ssl_ca_cert 路径;
+            # 这里将 client-cert/key 写入临时文件供 SDK 使用
+            import base64 as _b64, tempfile, os
+            _dir = tempfile.mkdtemp(prefix="k8sckey_")
+            _cf = os.path.join(_dir, "client.crt")
+            _kf = os.path.join(_dir, "client.key")
+            with open(_cf, "wb") as _f:
+                _f.write(_b64.b64decode(user["client-certificate-data"]))
+            with open(_kf, "wb") as _f:
+                _f.write(_b64.b64decode(user["client-key-data"]))
+            configuration.cert_file = _cf
+            configuration.key_file = _kf
+        # 禁代理: 内网集群直连
+        configuration.proxy = None
+        api_client = client.ApiClient(configuration=configuration)
+        return api_client, None
+    elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
+        configuration = client.Configuration()
+        configuration.host = cfg["k8s_api_server"]
+        configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
+        configuration.verify_ssl = cfg.get("verify_ssl", False)
+        configuration.assert_hostname = False
+        configuration.timeout = 10
+        configuration.proxy = None
+        api_client = client.ApiClient(configuration=configuration)
+        return api_client, None
+    return None, "缺少 kubeconfig 或 k8s_api_server/k8s_token 配置"
+
+
 def _test_kubernetes(source: DataSource) -> tuple:
     try:
         from kubernetes import client
         cfg = _source_auth(source)
-        if cfg.get("kubeconfig"):
-            from kubernetes import config as k8s_config
-            kc_raw = cfg["kubeconfig"]
-            if isinstance(kc_raw, str):
-                import yaml as _yaml
-                kc_raw = _yaml.safe_load(kc_raw)
-            k8s_config.load_kube_config_from_dict(kc_raw)
-            api_client = client.ApiClient()
-        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
-            configuration = client.Configuration()
-            configuration.host = cfg["k8s_api_server"]
-            configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
-            configuration.verify_ssl = cfg.get("verify_ssl", False)
-            configuration.timeout = 10
-            api_client = client.ApiClient(configuration=configuration)
-        else:
-            return (False, "缺少 k8s_api_server/k8s_token 配置")
+        api_client, err = _build_k8s_api_client(cfg)
+        if err:
+            return (False, err)
         v1 = client.CoreV1Api(api_client=api_client)
         nodes = v1.list_node().items
         return (True, f"K8s 连接成功, 发现 {len(nodes)} nodes")
@@ -356,8 +410,8 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
             else:
                 try:
                     total_size += float(store_size)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         _save_metric(db, source.name, "es_indices", float(index_count), "indices", now)
         _save_metric(db, source.name, "es_docs_total", float(total_docs), "docs", now)
         _save_metric(db, source.name, "es_store_size_bytes", float(total_size), "bytes", now)
@@ -378,8 +432,8 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
     except Exception as e:
         try:
             es.close()
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
         source.last_status = "error"
         source.last_error = str(e)
         msg = f"ES 采集失败: {e}"
@@ -390,6 +444,9 @@ def _scrape_elasticsearch(db: Session, source: DataSource) -> tuple:
 
 
 def _sync_k8s_asset(db: Session, ci_type: str, name: str, parent_id: int, k8s_cluster: str, attrs: dict) -> Asset:
+    # parent_id=0 表示"无父节点"（顶层 kubernetes_cluster 资产），置 None 避免违反 FK
+    if not parent_id:
+        parent_id = None
     # attrs 中的 status 字段映射为资产 status（Ready/Running -> online，否则 offline）
     attr_status = attrs.pop("status", None)
     asset_status = "online" if attr_status in ("Ready", "Running", "Active", "online") else ("offline" if attr_status in ("NotReady", "Failed", "Unknown", "Terminating", "Succeeded", "offline") else None)
@@ -469,8 +526,8 @@ def _scrape_prometheus(db: Session, source: DataSource) -> tuple:
                         labels = r.get("metric", {})
                         _save_metric(db, labels.get("instance", source.name), mname, value, "%", now)
                         collected += 1
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
         source.last_status = "online"
         source.last_error = ""
         source.last_scraped_at = datetime.now()
@@ -533,8 +590,8 @@ def scrape_source(db: Session, source: DataSource) -> tuple:
                 for a in k8s_assets:
                     a.status = "offline"
                 db.commit()
-            except Exception:
-                pass
+            except Exception as _exc3:
+                logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
         db.commit()
         return (False, str(e))
 
@@ -753,23 +810,10 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
     cfg = _source_auth(source)
     api_client = None
     try:
-        if cfg.get("kubeconfig"):
-            from kubernetes import config as k8s_config
-            kc_raw = cfg["kubeconfig"]
-            if isinstance(kc_raw, str):
-                import yaml as _yaml
-                kc_raw = _yaml.safe_load(kc_raw)
-            k8s_config.load_kube_config_from_dict(kc_raw)
-            api_client = client.ApiClient()
-        elif cfg.get("k8s_api_server") and cfg.get("k8s_token"):
-            configuration = client.Configuration()
-            configuration.host = cfg["k8s_api_server"]
-            configuration.api_key = {"authorization": "Bearer " + cfg["k8s_token"]}
-            configuration.verify_ssl = cfg.get("verify_ssl", False)
-            configuration.timeout = 10
-            api_client = client.ApiClient(configuration=configuration)
-        else:
-            raise Exception("缺少 k8s_api_server/k8s_token 配置")
+        from kubernetes import client
+        api_client, err = _build_k8s_api_client(cfg)
+        if err:
+            raise Exception(err)
     except Exception as e:
         source.last_status = "error"
         source.last_error = f"K8s 配置错误: {e}"
@@ -959,8 +1003,8 @@ def _scrape_kubernetes(db: Session, source: DataSource) -> tuple:
             _save_metric(db, full_pod_name, "pod_cpu_usage", total_cpu, "cores", now)
             _save_metric(db, full_pod_name, "pod_memory_usage", total_mem, "bytes", now)
             collected += 2
-    except Exception:
-        pass
+    except Exception as _exc4:
+        logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
 
     source.last_status = "online"
     source.last_error = ""
@@ -1058,11 +1102,71 @@ def _scrape_docker(db: Session, source: DataSource) -> tuple:
     return (True, msg)
 
 
-_scrape_fail_cache = {}  # source_id -> 失败时间戳，5 分钟内不重试
+_scrape_fail_cache = {}  # source_id -> 失败时间戳，5 分钟内不重试（进程内降级缓存）
 _SCRAPE_FAIL_COOLDOWN = 300  # 5 分钟
+_scrape_fail_lock = threading.Lock()
+# 分布式冷却缓存：Redis 可用时跨进程共享，不可用时回退进程内 dict
+_scrape_cooldown = None
+
+
+def _get_scrape_cooldown():
+    global _scrape_cooldown
+    if _scrape_cooldown is None:
+        from app.services.cooldown_cache import CooldownCache
+        _scrape_cooldown = CooldownCache(prefix="scrape_fail", ttl=_SCRAPE_FAIL_COOLDOWN)
+    return _scrape_cooldown
+
+
+def _bump_scrape_fail(src_id: int):
+    """将源记入失败冷却（Redis 优先，进程内 dict 兜底）。"""
+    try:
+        _get_scrape_cooldown().mark(src_id)
+    except Exception:
+        with _scrape_fail_lock:
+            _scrape_fail_cache[src_id] = time.time()
+
+
+def _in_scrape_fail(src_id: int) -> bool:
+    """源是否处于失败冷却期。"""
+    try:
+        return _get_scrape_cooldown().is_in_cooldown(src_id)
+    except Exception:
+        with _scrape_fail_lock:
+            ts = _scrape_fail_cache.get(src_id)
+            if ts is None:
+                return False
+            if time.time() - ts < _SCRAPE_FAIL_COOLDOWN:
+                return True
+            _scrape_fail_cache.pop(src_id, None)
+            return False
+
+
+def _is_sqlite_staticpool():
+    """SQLite 内存库(StaticPool)共用单连接，并发会互相踩踏 → 该类库保持串行."""
+    from app.database import get_db_url_for, get_db_mode
+    try:
+        url = get_db_url_for(get_db_mode())
+        if url.startswith("sqlite"):
+            return ":memory:" in url
+    except Exception:
+        pass
+    return False
 
 
 def scrape_all_sources(db: Session):
+    """采集所有到期的启用数据源.
+
+    生产库(PostgreSQL/文件型 SQLite)走有界高并发：每个源用独立 session，替代原来
+    串行 + 80s 硬预算的粗暴 skip，大幅提升上千源当轮覆盖率。
+    内存型 SQLite(StaticPool 单连接)自动回退串行，避免并发踩踏。
+    """
+    _MODE = None
+    try:
+        from app.database import get_db_mode as _gdm
+        _MODE = _gdm()
+    except Exception:
+        pass
+
     results = []
     now = datetime.now()
     sources = db.query(DataSource).filter(DataSource.enabled == True).all()
@@ -1073,32 +1177,121 @@ def scrape_all_sources(db: Session):
             if elapsed < source.scrape_interval:
                 continue
         # 失败冷却：5 分钟内不重试最近失败的源（避免不可达源拖慢整个采集）
-        if source.id in _scrape_fail_cache:
-            if time.time() - _scrape_fail_cache[source.id] < _SCRAPE_FAIL_COOLDOWN:
-                continue
-            else:
-                del _scrape_fail_cache[source.id]
-        due.append(source)
-    # 串行采集（SQLite session 非线程安全），整体时间预算 80s 防止超时
-    _BUDGET = 80.0
-    _t0 = time.time()
-    for source in due:
-        _elapsed = time.time() - _t0
-        if _elapsed >= _BUDGET:
-            results.append({"source_id": source.id, "name": source.name, "is_success": False, "message": "跳过(整体时间预算耗尽)"})
+        if _in_scrape_fail(source.id):
             continue
+        due.append(source)
+
+    if not due:
+        return results
+
+    use_concurrent = (not _is_sqlite_staticpool()) and len(due) > 1
+
+    if not use_concurrent:
+        # 串行兜底（内存库 / 单源）：直接复用传入 db
+        _BUDGET = 80.0
+        _t0 = time.time()
+        for source in due:
+            _elapsed = time.time() - _t0
+            if _elapsed >= _BUDGET:
+                results.append({"source_id": source.id, "name": source.name, "is_success": False, "message": "跳过(整体时间预算耗尽)"})
+                continue
+            try:
+                success, msg = scrape_source(db, source)
+                results.append({"source_id": source.id, "name": source.name, "is_success": success, "message": msg})
+                if not success:
+                    _bump_scrape_fail(source.id)
+            except Exception as e:
+                results.append({"source_id": source.id, "name": source.name, "is_success": False, "message": str(e)})
+                _bump_scrape_fail(source.id)
+        return results
+
+    # 有界高并发：每源独立 session（避免 SQLAlchemy session 跨线程共享）
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from app.database import get_session_for
+    import os as _os
+    _MAX_WORKERS = int(_os.environ.get("AIOPS_SCRAPE_WORKERS", "32"))
+
+    def _run_one(src_id: int, src_name: str):
+        _sess = get_session_for(_MODE)()
         try:
-            success, msg = scrape_source(db, source)
-            results.append({"source_id": source.id, "name": source.name, "is_success": success, "message": msg})
-            if not success:
-                _scrape_fail_cache[source.id] = time.time()
+            src = _sess.query(DataSource).filter(DataSource.id == src_id).first()
+            if src is None:
+                return {"source_id": src_id, "name": src_name, "is_success": False, "message": "源不存在"}
+            success, msg = scrape_source(_sess, src)
+            return {"source_id": src_id, "name": src_name, "is_success": success, "message": msg}
         except Exception as e:
-            results.append({"source_id": source.id, "name": source.name, "is_success": False, "message": str(e)})
-            _scrape_fail_cache[source.id] = time.time()
+            return {"source_id": src_id, "name": src_name, "is_success": False, "message": str(e)}
+        finally:
+            _sess.close()
+
+    _fail = []
+    with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+        futures = {executor.submit(_run_one, s.id, s.name): s.id for s in due}
+        for fut in as_completed(futures):
+            r = fut.result()
+            results.append(r)
+            if not r.get("is_success"):
+                _fail.append(r["source_id"])
+    for sid in _fail:
+        _bump_scrape_fail(sid)
     return results
 
 
 
+
+
+def scrape_via_provider(db: Session, source: DataSource) -> tuple:
+    from app.providers.factory import ProviderFactory
+    from app.services.secret_vault import resolve_secret_refs
+    from app.template_utils import parse_json_config
+    auth = parse_json_config(source.auth_config)
+    auth = resolve_secret_refs(auth, db)
+    provider = ProviderFactory.get_provider(
+        provider_type=source.type,
+        source_id=source.id,
+        auth_config=auth,
+        db=db,
+        endpoint=source.endpoint or "",
+    )
+    if not provider:
+        return None
+    try:
+        results = provider.scrape(db=db)
+        source.last_status = "online"
+        source.last_error = ""
+        source.last_scraped_at = datetime.now()
+        db.commit()
+        return (True, f"采集成功，{len(results)} 条记录")
+    except Exception as e:
+        import traceback
+        logger.error("Provider scrape failed: %s\n%s", e, traceback.format_exc())
+        source.last_status = "error"
+        source.last_error = str(e)
+        source.last_scraped_at = datetime.now()
+        db.commit()
+        return (False, str(e))
+
+
+def test_via_provider(db: Session, source: DataSource) -> tuple:
+    from app.providers.factory import ProviderFactory
+    from app.services.secret_vault import resolve_secret_refs
+    from app.template_utils import parse_json_config
+    auth = parse_json_config(source.auth_config)
+    auth = resolve_secret_refs(auth, db)
+    provider = ProviderFactory.get_provider(
+        provider_type=source.type,
+        source_id=source.id,
+        auth_config=auth,
+        db=db,
+        endpoint=source.endpoint or "",
+    )
+    if not provider:
+        return None
+    try:
+        success, msg = provider.test_connection()
+        return (success, msg)
+    except Exception as e:
+        return (False, str(e))
 
 
 def _test_jaeger(source: DataSource) -> tuple:

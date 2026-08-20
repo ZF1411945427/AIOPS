@@ -1,0 +1,1 @@
+from app.providers.zabbix_provider.provider import ZabbixProvider

@@ -19,8 +19,8 @@ def _current_user_id(request: Request) -> int:
                 payload = verify_login_token(auth[7:])
                 if payload:
                     uid = payload.get("user_id")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return uid
 
 
@@ -77,3 +77,7 @@ def api_cluster_check(cluster_id: int, request: Request, db: Session = Depends(g
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
     return JSONResponse({"ok": True, "status": status})
+
+
+import logging
+logger = logging.getLogger(__name__)

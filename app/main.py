@@ -136,6 +136,12 @@ _MIGRATIONS = {
     ],
     "assets": [
         "edge_agent_id VARCHAR(64) DEFAULT ''",
+        "online_since DATETIME",
+    ],
+    "alerts": [
+        "archived BOOLEAN DEFAULT 0",
+        "last_notified_at DATETIME",
+        "source VARCHAR(32) DEFAULT 'internal'",
     ],
     "trace_anomaly_configs": [
         "check_window_minutes INTEGER DEFAULT 30",
@@ -162,6 +168,7 @@ _MIGRATIONS = {
         "last_deployed_at DATETIME",
         "deploy_count INTEGER DEFAULT 0",
         "dag_json TEXT DEFAULT '{}'",
+        "pending_decision_json TEXT DEFAULT 'null'",
         "ai_decision_log_json TEXT DEFAULT '[]'",
         "strategy VARCHAR(32) DEFAULT 'auto'",
         "risk_score INTEGER DEFAULT 0",
@@ -195,6 +202,8 @@ _MIGRATIONS = {
         "https_proxy VARCHAR(256) DEFAULT ''",
         "no_proxy VARCHAR(512) DEFAULT ''",
         "untaint_master BOOLEAN DEFAULT 0",
+        "cert_expiry_years INTEGER",
+        "pending_decision_json TEXT DEFAULT 'null'",
     ],
     "sandbox_policies": [
         "allowed_workdirs TEXT DEFAULT '[]'",
@@ -202,53 +211,64 @@ _MIGRATIONS = {
     "component_installs": [
         "report_json TEXT DEFAULT ''",
         "deploy_params TEXT DEFAULT '{}'",
+        "pending_decision_json TEXT DEFAULT 'null'",
     ],
     "component_catalog": [
         "param_schema TEXT DEFAULT '[]'",
     ],
 }
 for _eng in get_all_engines().values():
+    _is_pg = _eng.dialect.name == "postgresql"
     with _eng.connect() as _conn:
         for _table, _cols in _MIGRATIONS.items():
             for _col_def in _cols:
                 try:
-                    _conn.execute(_sa_text(f"ALTER TABLE {_table} ADD COLUMN {_col_def}"))
+                    if _is_pg:
+                        # PG: ADD COLUMN IF NOT EXISTS 幂等, 避免 DuplicateColumn 污染事务
+                        _conn.execute(_sa_text(f"ALTER TABLE {_table} ADD COLUMN IF NOT EXISTS {_col_def}"))
+                    else:
+                        _conn.execute(_sa_text(f"ALTER TABLE {_table} ADD COLUMN {_col_def}"))
                     _conn.commit()
                 except Exception:
-                    pass
+                    try:
+                        _conn.rollback()
+                    except Exception:
+                        pass
 
         # 重建 pending_actions 表：旧表 session_id 为 NOT NULL，工作流场景需 NULL
-        try:
-            _info = _conn.execute(_sa_text("PRAGMA table_info(pending_actions)")).fetchall()
-            _sess_col = [r for r in _info if r[1] == "session_id"]
-            if _sess_col and _sess_col[0][3] == 1:  # notnull=1
-                _conn.execute(_sa_text(
-                    "CREATE TABLE _pa_new (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                    "session_id INTEGER, message_id INTEGER, run_id INTEGER, node_run_id INTEGER, "
-                    "action_type VARCHAR(64) NOT NULL, title VARCHAR(128) DEFAULT '', "
-                    "risk_level VARCHAR(16) DEFAULT 'low', reason VARCHAR(500), "
-                    "status VARCHAR(16) DEFAULT 'pending', action_payload TEXT DEFAULT '{}', "
-                    "result_payload TEXT DEFAULT '{}', confirmed_by VARCHAR(64) DEFAULT '', "
-                    "confirmed_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
-                    "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
-                ))
-                _conn.execute(_sa_text(
-                    "INSERT INTO _pa_new (id, session_id, message_id, run_id, node_run_id, "
-                    "action_type, title, risk_level, reason, status, action_payload, "
-                    "result_payload, confirmed_by, confirmed_at, created_at, updated_at) "
-                    "SELECT id, session_id, message_id, run_id, node_run_id, action_type, "
-                    "title, risk_level, reason, status, action_payload, result_payload, "
-                    "confirmed_by, confirmed_at, created_at, updated_at FROM pending_actions"
-                ))
-                _conn.execute(_sa_text("DROP TABLE pending_actions"))
-                _conn.execute(_sa_text("ALTER TABLE _pa_new RENAME TO pending_actions"))
-                _conn.commit()
-                logger.info("pending_actions 重建完成: session_id 已改为 nullable")
-        except Exception as _e:
+        # (仅 SQLite 需要; PG 由模型 create_all 按 session_id 可空建好)
+        if not _is_pg:
             try:
-                _conn.rollback()
-            except Exception:
-                pass
+                _info = _conn.execute(_sa_text("PRAGMA table_info(pending_actions)")).fetchall()
+                _sess_col = [r for r in _info if r[1] == "session_id"]
+                if _sess_col and _sess_col[0][3] == 1:  # notnull=1
+                    _conn.execute(_sa_text(
+                        "CREATE TABLE _pa_new (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                        "session_id INTEGER, message_id INTEGER, run_id INTEGER, node_run_id INTEGER, "
+                        "action_type VARCHAR(64) NOT NULL, title VARCHAR(128) DEFAULT '', "
+                        "risk_level VARCHAR(16) DEFAULT 'low', reason VARCHAR(500), "
+                        "status VARCHAR(16) DEFAULT 'pending', action_payload TEXT DEFAULT '{}', "
+                        "result_payload TEXT DEFAULT '{}', confirmed_by VARCHAR(64) DEFAULT '', "
+                        "confirmed_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                        "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+                    ))
+                    _conn.execute(_sa_text(
+                        "INSERT INTO _pa_new (id, session_id, message_id, run_id, node_run_id, "
+                        "action_type, title, risk_level, reason, status, action_payload, "
+                        "result_payload, confirmed_by, confirmed_at, created_at, updated_at) "
+                        "SELECT id, session_id, message_id, run_id, node_run_id, action_type, "
+                        "title, risk_level, reason, status, action_payload, result_payload, "
+                        "confirmed_by, confirmed_at, created_at, updated_at FROM pending_actions"
+                    ))
+                    _conn.execute(_sa_text("DROP TABLE pending_actions"))
+                    _conn.execute(_sa_text("ALTER TABLE _pa_new RENAME TO pending_actions"))
+                    _conn.commit()
+                    logger.info("pending_actions 重建完成: session_id 已改为 nullable")
+            except Exception as _e:
+                try:
+                    _conn.rollback()
+                except Exception:
+                    pass
 
         # ── 性能索引：高频查询字段加索引（幂等，已存在则跳过）──
         _INDEXES = [
@@ -281,6 +301,17 @@ app = FastAPI(
     openapi_url=None if _config.APP_ENV == "prod" else "/openapi.json",
 )
 
+# ── 全局 JSON 序列化：Decimal → float 兜底 ──
+from decimal import Decimal as _Decimal
+_json_encoder_default = json.JSONEncoder.default
+def _json_default(self, obj):
+    if isinstance(obj, _Decimal):
+        return float(obj)
+    return _json_encoder_default(self, obj)
+json.JSONEncoder.default = _json_default
+# 替换 json.dumps() 内部缓存的编码器实例, 使补丁生效
+json._default_encoder = json.JSONEncoder()
+
 # ── 限流中间件 (slowapi) ──
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -299,7 +330,12 @@ from fastapi import HTTPException as _HTTPException
 async def _global_exception_handler(request: Request, exc: Exception):
     from app.logger import logger
     import traceback
-    logger.error(f"Unhandled exception on {request.url.path}: {exc}\n{traceback.format_exc()}")
+    emsg = str(exc)
+    # 连接池耗尽在 demo 模式下是预期行为, 降级为 WARNING 不刷 ERROR
+    if "QueuePool" in emsg and "overflow" in emsg:
+        logger.warning(f"连接池耗尽: {request.url.path} - {emsg}")
+    else:
+        logger.error(f"Unhandled exception on {request.url.path}: {exc}\n{traceback.format_exc()}")
     if isinstance(exc, _HTTPException):
         # H1: 统一错误结构(保留 detail/error 兼容 request.js)
         return JSONResponse({
@@ -430,7 +466,8 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         if request.url.path.startswith("/vue-assets/") or request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            # 构建产物文件名带 hash，改为每次重新校验，避免强制刷新仍命中旧 JS/CSS
+            response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
         return response
 
 
@@ -449,7 +486,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
             response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
             response.headers.setdefault("X-XSS-Protection", "1; mode=block")
-            response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+            response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(self), camera=()")
             if _config.APP_ENV == "prod":
                 response.headers.setdefault(
                     "Strict-Transport-Security",
@@ -525,7 +562,8 @@ _MOBILE_INDEX = Path(__file__).resolve().parent.parent / "mobile/dist/build/h5/i
 @app.get("/", response_class=HTMLResponse)
 def serve_spa():
     content = _VUE_INDEX.read_text(encoding="utf-8")
-    return HTMLResponse(content=content)
+    # index.html 禁止缓存: 构建产物文件名带 hash, 缓存旧 index.html 会导致引用旧 JS/CSS 404
+    return HTMLResponse(content=content, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 from app.bootstrap import register_routers as _register_routers
@@ -549,6 +587,11 @@ for _mode in ("demo", "real"):
     set_db_mode(_mode)
     _seed_db = get_session_for(_mode)()
     try:
+        # PG/生产库严格外键: 先确保默认租户存在, 再初始化 admin 角色/用户/权限
+        from app.services.tenant_service import get_or_create_default_tenant as _ensure_tenant
+        from app.startup import init_admin as _init_admin
+        _ensure_tenant(_seed_db)
+        _init_admin()
         _added = seed_workflow_templates(_seed_db)
         if _added:
             logger.info(f"{_mode} 库播种 {_added} 个 SOP 工作流模板")
@@ -585,6 +628,19 @@ for _mode in ("demo", "real"):
     finally:
         _seed_db.close()
 set_db_mode("demo")
+
+# M5: 启动时注册所有 Provider 到统一注册表
+try:
+    _reg_db = get_session_for(get_db_mode())()
+    try:
+        from app.core.provider_base import register_all_providers
+        _n = register_all_providers(_reg_db)
+        logger.info(f"Provider 注册表初始化完成: {_n} 个 Provider")
+    finally:
+        _reg_db.close()
+except Exception as _reg_e:
+    logger.warning(f"Provider 注册表初始化失败: {_reg_e}")
+
 threading.Thread(target=background_loop, daemon=True).start()
 
 # B4: 进程重启后恢复未完成的工作流 run（running/awaiting_confirm 续跑）
@@ -651,21 +707,18 @@ async def prom_metrics():
         "# TYPE python_gc_objects_collected counter",
     ]
     try:
-        import sqlite3
-        con = sqlite3.connect("db/aiops.db")
-        rules = con.execute("select count(*) from alert_rules").fetchone()[0]
-        skills = con.execute("select count(*) from skills").fetchone()[0]
-        devices = con.execute("select count(*) from network_devices").fetchone()[0]
-        con.close()
+        from app.database import get_session_for, get_db_mode
+        from sqlalchemy import text as _sa_text
+        _metrics_db = get_session_for(get_db_mode())()
+        rules = _metrics_db.execute(_sa_text("select count(*) from alert_rules")).scalar() or 0
+        skills = _metrics_db.execute(_sa_text("select count(*) from skills")).scalar() or 0
+        _metrics_db.close()
         lines.append("# HELP aiops_alert_rule_count Number of alert rules")
         lines.append("# TYPE aiops_alert_rule_count gauge")
         lines.append(f"aiops_alert_rule_count {rules}")
         lines.append('# HELP aiops_skill_count Number of skills')
         lines.append('# TYPE aiops_skill_count gauge')
         lines.append(f"aiops_skill_count {skills}")
-        lines.append("# HELP aiops_network_device_count Number of network devices")
-        lines.append("# TYPE aiops_network_device_count gauge")
-        lines.append(f"aiops_network_device_count {devices}")
     except Exception:
         pass
     # D2 增强: HTTP 应用级请求/错误/延迟指标

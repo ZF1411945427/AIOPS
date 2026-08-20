@@ -45,7 +45,25 @@ def parse_document(file_path: str, file_ext: str) -> str:
             except ImportError:
                 return "[解析失败：未安装 python-docx，无法解析 Word。请运行 pip install python-docx 后重新上传]"
             doc = docx.Document(file_path)
-            return "\n".join(p.text for p in doc.paragraphs)
+            # 按文档顺序提取段落 + 表格(部署报告模板常含 KPI/步骤/端口表格, 需保留结构)
+            from docx.table import Table as _WTable
+            from docx.text.paragraph import Paragraph as _WParagraph
+            parts = []
+            for _body_child in doc.element.body.iterchildren():
+                if _body_child.tag.endswith("}p"):
+                    _par = _WParagraph(_body_child, doc)
+                    _t = _par.text.strip()
+                    if _t:
+                        parts.append(_t)
+                elif _body_child.tag.endswith("}tbl"):
+                    _tbl = _WTable(_body_child, doc)
+                    _rows = []
+                    for _row in _tbl.rows:
+                        _cells = [c.text.strip() for c in _row.cells]
+                        _rows.append(" | ".join(_cells))
+                    if _rows:
+                        parts.append("```\n" + "\n".join(_rows) + "\n```")
+            return "\n".join(parts)
         # 未知扩展名按文本读
         with open(file_path, encoding="utf-8", errors="ignore") as f:
             return f.read()
@@ -313,7 +331,7 @@ def vector_search(
 
 # ─── 文档 CRUD ──────────────────────────────────────────────────
 
-def list_documents(db: Session, search: str = "", source_type: str = "", asset_id: int = 0) -> List[KbDocument]:
+def list_documents(db: Session, search: str = "", source_type: str = "", asset_id: int = 0, tags: str = "") -> List[KbDocument]:
     q = db.query(KbDocument)
     if search:
         q = q.filter(KbDocument.title.ilike(f"%{search}%"))
@@ -321,6 +339,11 @@ def list_documents(db: Session, search: str = "", source_type: str = "", asset_i
         q = q.filter(KbDocument.source_type == source_type)
     if asset_id:
         q = q.filter(KbDocument.asset_id == asset_id)
+    if tags:
+        for tag in tags.split(","):
+            tag = tag.strip()
+            if tag:
+                q = q.filter(KbDocument.tags.ilike(f"%{tag}%"))
     return q.order_by(KbDocument.created_at.desc()).all()
 
 

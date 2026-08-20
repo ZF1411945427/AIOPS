@@ -103,8 +103,8 @@
 
 <script setup>
 import { ref, onMounted } from "vue"
-import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
+import request from '@/api/request'
 
 const showGuide = ref(false)
 const budgetList = ref([])
@@ -114,11 +114,11 @@ const loadData = async () => {
   try {
     // 错误预算从 SLO 实时派生（后端 /error-budget 复用 slo_service._calc_burn）
     const [budgetRes, summaryRes] = await Promise.all([
-      axios.get("/api/sre/error-budget"),
-      axios.get("/api/sre/error-budget/summary"),
+      request.get("/api/sre/error-budget"),
+      request.get("/api/sre/error-budget/summary"),
     ])
-    budgetList.value = budgetRes.data
-    summary.value = summaryRes.data
+    budgetList.value = budgetRes
+    summary.value = summaryRes
   } catch (e) {
     console.error("加载错误预算失败:", e)
   }

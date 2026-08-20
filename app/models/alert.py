@@ -50,6 +50,9 @@ class Alert(Base):
     created_at = Column(DateTime, default=lambda: datetime.now())
     acknowledged_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
+    archived = Column(Boolean, default=False)          # 归档标记：超保留期的已解决告警
+    last_notified_at = Column(DateTime, nullable=True)  # 最近一次通知/推送时间（供周期提醒刷新，不新增记录）
+    source = Column(String(32), default="internal")    # 告警来源：internal / 入站源名 / remote_write
 
 
 class Incident(Base):
@@ -218,3 +221,67 @@ class AlertSessionLink(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
     context_summary = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now())
+
+
+class AlertCluster(Base):
+    """第二十四章：告警关联落库持久化（告警聚类快照 + 自动生成 incident 闭环）。
+
+    cluster_id: 聚类键（svc-<id> / time-<n> / topo-<id>）
+    incident_id: 自动生成的故障单（满足条件时回填）
+    """
+    __tablename__ = "alert_clusters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cluster_id = Column(String(64), nullable=False, index=True)
+    cluster_type = Column(String(32), default="service")  # service / time_window / topology
+    alert_ids_json = Column(Text, default="[]")
+    key_asset_id = Column(Integer, nullable=True)
+    alert_count = Column(Integer, default=0)
+    dominant_severity = Column(String(32), default="info")
+    summary_json = Column(Text, default="{}")
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+    def get_alert_ids(self):
+        import json
+        try:
+            return json.loads(self.alert_ids_json) if self.alert_ids_json else []
+        except Exception:
+            return []
+
+    def get_summary(self):
+        import json
+        try:
+            return json.loads(self.summary_json) if self.summary_json else {}
+        except Exception:
+            return {}
+
+
+class InboundSource(Base):
+    """第二十三章：外部告警入站告警源（对接 Alertmanager / remote_write / webhook / Datadog / PagerDuty）。"""
+    __tablename__ = "inbound_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), nullable=False, unique=True)
+    source_type = Column(String(32), default="alertmanager")
+    endpoint_token = Column(String(64), default="")
+    labels_json = Column(Text, default="{}")
+    metrics_to_rules = Column(Text, default="{}")
+    auto_create_rule = Column(Boolean, default=False)
+    status_webhook_url = Column(String(512), default="")
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+    def get_labels(self):
+        import json
+        try:
+            return json.loads(self.labels_json) if self.labels_json else {}
+        except Exception:
+            return {}
+
+    def get_metrics_to_rules(self):
+        import json
+        try:
+            return json.loads(self.metrics_to_rules) if self.metrics_to_rules else {}
+        except Exception:
+            return {}

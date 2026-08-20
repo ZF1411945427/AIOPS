@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.template_utils import get_templates
 from app.models import DataSource
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 templates = get_templates()
@@ -154,8 +157,8 @@ def api_log_jobs(source_id: int = 0, db: Session = Depends(get_db)):
         if source.auth_config:
             try:
                 auth_config = json.loads(source.auth_config) if isinstance(source.auth_config, str) else (source.auth_config or {})
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         auth = None
         if auth_config.get("username") and auth_config.get("password"):
             auth = (auth_config["username"], auth_config["password"])
@@ -190,8 +193,8 @@ def api_log_services(source_id: int = 0, db: Session = Depends(get_db)):
         if source.auth_config:
             try:
                 auth_config = json.loads(source.auth_config) if isinstance(source.auth_config, str) else (source.auth_config or {})
-            except Exception:
-                pass
+            except Exception as _exc1:
+                logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
         auth = None
         if auth_config.get("username") and auth_config.get("password"):
             auth = (auth_config["username"], auth_config["password"])
@@ -320,8 +323,8 @@ def _query_elasticsearch(source, query_str, time_range, page, size, index="", le
     except Exception as e:
         try:
             es.close()
-        except Exception:
-            pass
+        except Exception as _exc2:
+            logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
         return [], 0, f"ES 查询失败: {e}"
 
 

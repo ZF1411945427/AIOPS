@@ -37,8 +37,8 @@ def call_alert_webhooks(db: Session, alert):
                     req.add_header("Authorization", f"Bearer {h.secret}")
                 urllib.request.urlopen(req, timeout=h.timeout)
                 break
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 @router.get("/status")

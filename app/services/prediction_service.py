@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from sqlalchemy.orm import Session
 from app.models import MetricRecord, PredictionModel, FeatureStoreItem
+from app.routers.agent_sse import _clean_key_point
 
 
 def linear_regression(xs, ys):
@@ -276,7 +277,28 @@ def predict_with_model(db: Session, model: PredictionModel, hours_back: int = 16
         "threshold": threshold,
         "features": features,
         "params": params,
-        "predicted_at": datetime.now().isoformat()
+        "predicted_at": datetime.now().isoformat(),
+        "summary_block": _build_prediction_key_points(model, values[-1] if values else 0, trend, slope, days_until, threshold, r2 if 'r2' in locals() else 0),
+    }
+
+
+def _build_prediction_key_points(model, current_value, trend, slope, days_until, threshold, r2):
+    """从容量/趋势预测结果组装统一三要素要点(根因/方案/影响)。"""
+    mn = model.metric_name or ""
+    near = (days_until is not None and days_until <= 30)
+    if near:
+        root_cause = f"{mn} 当前值 {current_value:.2f}（趋势 {trend}），预计 {days_until} 天后触达阈值 {threshold}"
+        solution = "建议提前扩容或下调配额，避免达到容量上限导致性能下降"
+        impact = f"预计 {days_until} 天内触达阈值，需尽快干预"
+    else:
+        root_cause = f"{mn} 当前值 {current_value:.2f}，趋势 {trend}，暂无近期容量风险"
+        solution = "持续监控趋势，结合业务增长规划扩容"
+        impact = f"R²={r2:.2f}"
+
+    return {
+        "root_cause": _clean_key_point(root_cause, 100),
+        "solution": _clean_key_point(solution, 160),
+        "impact": _clean_key_point(impact, 100),
     }
 
 

@@ -319,8 +319,8 @@ def run_autonomous_cycle(db: Optional[Session] = None) -> str:
                 cycle.duration_ms = int((time.time() - start) * 1000)
                 cycle.finished_at = datetime.now()
                 db.commit()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         return cycle_id
     finally:
         if close_db:

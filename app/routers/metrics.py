@@ -212,7 +212,7 @@ def list_cards(request: Request, db: Session = Depends(get_db)):
     ).order_by(MetricDashboardCard.order.asc()).all()
     return JSONResponse([{
         "id": c.id, "title": c.title, "promql": c.promql,
-        "hours": c.hours, "w": c.w, "h": c.h, "order": c.order,
+        "hours": c.hours, "w": c.w, "h": c.h, "order": c.order, "category": c.category or "",
     } for c in cards])
 
 
@@ -226,6 +226,7 @@ def create_card(request: Request, body: dict, db: Session = Depends(get_db)):
         hours=body.get("hours", 24),
         w=body.get("w", 2),
         h=body.get("h", 1),
+        category=body.get("category", ""),
         order=body.get("order", 0),
     )
     db.add(card)
@@ -243,7 +244,7 @@ def update_card(card_id: int, request: Request, body: dict, db: Session = Depend
     ).first()
     if not card:
         return JSONResponse({"error": "卡片不存在"}, status_code=404)
-    for k in ("title", "promql", "hours", "w", "h", "order"):
+    for k in ("title", "promql", "hours", "w", "h", "order", "category"):
         if k in body:
             setattr(card, k, body[k])
     db.commit()

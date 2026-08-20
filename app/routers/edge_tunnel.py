@@ -199,8 +199,8 @@ async def _async_forward_pty(pty_id: str, data: str):
     if session and session.get("ws_browser"):
         try:
             await session["ws_browser"].send_text(data)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 def _finish_pty(pty_id: str, exit_code: int):

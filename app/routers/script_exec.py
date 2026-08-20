@@ -8,6 +8,9 @@ from slowapi.util import get_remote_address
 from app.database import get_db
 from app.models import DataSource, ScriptTask, Asset
 from app.template_utils import get_templates, parse_json_config
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/script", tags=["script"])
 templates = get_templates()
@@ -108,8 +111,8 @@ def api_script_execute(
             "medium", session_id=0, user_id=user_id, role_id=role_id, db=db)
         if sb.get("decision") == "rejected":
             return JSONResponse({"ok": False, "error": f"沙盒策略拦截: {sb.get('reason')}"}, status_code=403)
-    except Exception:
-        pass  # 沙盒异常不阻断执行(回归安全)
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
     is_asset = target_id.startswith("asset_")
     if is_asset:

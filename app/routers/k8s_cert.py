@@ -10,7 +10,6 @@ from app.services.k8s_cert_service import inspect_cluster, renew_cluster
 
 router = APIRouter(prefix="/k8s/cert", tags=["k8s_cert"])
 
-
 @router.get("/api/clusters")
 def list_cert_clusters(db: Session = Depends(get_db)):
     clusters = db.query(DataSource).filter(DataSource.type == "kubernetes").all()
@@ -41,7 +40,9 @@ async def inspect_cluster_certs(request: Request, db: Session = Depends(get_db))
     if not ds or ds.type != "kubernetes":
         return JSONResponse({"ok": False, "error": "集群不存在或不是 kubernetes 数据源"})
     try:
-        result = inspect_cluster(ds)
+        # 用线程池执行重活(SSH 巡检可能耗时较长), 避免阻塞 asyncio 事件循环导致全站超时
+        import asyncio
+        result = await asyncio.to_thread(inspect_cluster, ds)
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"巡检失败: {e}"})
@@ -54,7 +55,12 @@ async def renew_cluster_certs(request: Request, db: Session = Depends(get_db)):
     if not ds or ds.type != "kubernetes":
         return JSONResponse({"ok": False, "error": "集群不存在或不是 kubernetes 数据源"})
     try:
-        result = renew_cluster(ds, force=body.get("force", False))
+        # renew 含最长 300s 的 SSH 重签+重启, 必须在线程池执行, 否则阻塞事件循环卡死全站
+        import asyncio
+        result = await asyncio.to_thread(
+            renew_cluster, ds,
+            years=int(body.get("years") or 0),
+        )
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"续期失败: {e}"})

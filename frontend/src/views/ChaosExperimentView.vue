@@ -260,7 +260,7 @@
 import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import axios from 'axios'
+import request from '@/api/request'
 import GuideDrawer from '@/components/GuideDrawer.vue'
 
 const showGuide = ref(false)
@@ -371,20 +371,20 @@ watch(() => createForm.fault_type, (ft) => {
 const formatTime = (t) => t ? new Date(t).toLocaleString('zh-CN') : '-'
 
 async function loadSummary() {
-  try { const { data } = await axios.get(`${API}/summary`); summary.value = data } catch {}
+  try { const data = await request.get(`${API}/summary`); summary.value = data } catch {}
 }
 
 async function loadExperiments() {
-  try { const { data } = await axios.get(`${API}/experiments`); experimentList.value = data } catch {}
+  try { const data = await request.get(`${API}/experiments`); experimentList.value = data } catch {}
 }
 
 async function loadTargets() {
-  try { const { data } = await axios.get(`${API}/targets`); targetAssets.value = data } catch {}
+  try { const data = await request.get(`${API}/targets`); targetAssets.value = data } catch {}
 }
 
 async function loadTrend() {
   try {
-    const { data } = await axios.get(`${API}/trend`)
+    const data = await request.get(`${API}/trend`)
     await nextTick()
     if (!trendChart && trendChartRef.value) trendChart = echarts.init(trendChartRef.value)
     if (trendChart) {
@@ -424,7 +424,7 @@ async function previewCommand() {
     else if (ft === 'network-partition') params.target_cidr = '10.0.0.0/8'
     else if (ft === 'process-kill') params.process_name = 'nginx'
     else if (ft === 'pod-kill') params.kill_percentage = createForm.intensity
-    const { data } = await axios.post(`${API}/experiments/preview-command`, {
+    const data = await request.post(`${API}/experiments/preview-command`, {
       name: createForm.name || '预览', description: createForm.description,
       target_type: ft.startsWith('network') ? 'network' : 'pod',
       target_layer: createForm.target_layer,
@@ -456,7 +456,7 @@ async function createExperiment() {
 
   const targetAsset = targetAssets.value.find(a => a.id === createForm.asset_id)
   try {
-    await axios.post(`${API}/experiments`, {
+    await request.post(`${API}/experiments`, {
       name: createForm.name, description: createForm.description,
       target_type: createForm.fault_type.startsWith('network') ? 'network' : 'pod',
       target_layer: createForm.target_layer,
@@ -472,7 +472,7 @@ async function createExperiment() {
 
 async function startExperiment(row) {
   try {
-    const { data } = await axios.post(`${API}/experiments/${row.id}/start`)
+    const data = await request.post(`${API}/experiments/${row.id}/start`)
     if (data.status === 'completed') {
       // pod-kill 等立即完成的情况
       ElMessage.warning(data.message || '实验已完成')
@@ -510,7 +510,7 @@ function pollExperimentStatus(expId, duration) {
 
 async function abortExperiment(row) {
   try {
-    await axios.post(`${API}/experiments/${row.id}/abort`)
+    await request.post(`${API}/experiments/${row.id}/abort`)
     ElMessage.success('实验已终止')
     loadExperiments(); loadSummary()
   } catch (e) { ElMessage.error('终止失败: ' + (e.response?.data?.detail || e.message)) }
@@ -519,7 +519,7 @@ async function abortExperiment(row) {
 async function deleteExperiment(row) {
   try {
     await ElMessageBox.confirm(`确认删除实验"${row.name}"？`, '提示', { type: 'warning' })
-    await axios.delete(`${API}/experiments/${row.id}`)
+    await request.delete(`${API}/experiments/${row.id}`)
     ElMessage.success('已删除')
     loadExperiments(); loadSummary()
   } catch (e) { if (e !== 'cancel') ElMessage.error('删除失败') }
@@ -528,7 +528,7 @@ async function deleteExperiment(row) {
 async function openDetail(row) {
   detailData.value = row
   detailDrawerVisible.value = true
-  try { const { data } = await axios.get(`${API}/experiments/${row.id}/runs`); runHistory.value = data } catch {}
+  try { const data = await request.get(`${API}/experiments/${row.id}/runs`); runHistory.value = data } catch {}
 }
 
 function applyPrefill(prefill) {

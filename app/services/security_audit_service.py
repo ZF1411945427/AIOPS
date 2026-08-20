@@ -54,8 +54,8 @@ def run_bandit() -> dict:
     if out_file.exists():
         try:
             out_file.unlink()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     rc, _out, err = _run_subprocess(
         [sys.executable, "-m", "bandit", "-r", "app", "-f", "json", "-o", str(out_file)],
         timeout=180,
@@ -112,8 +112,8 @@ def run_pip_audit() -> dict:
     if out_file.exists():
         try:
             out_file.unlink()
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     rc, _out, err = _run_subprocess(
         [sys.executable, "-m", "pip_audit", "-f", "json", "-o", str(out_file)],
         timeout=300,
@@ -335,8 +335,8 @@ def run_full_scan(force: bool = False) -> dict:
                 cached["from_cache"] = True
                 cached["cache_age_seconds"] = int(age)
                 return cached
-        except Exception:
-            pass
+        except Exception as _exc2:
+            logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
 
     generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info(f"[security_audit] 开始全量安全扫描 @ {generated} (force={force})")
@@ -368,8 +368,8 @@ def get_summary() -> dict:
     if REPORT_FILE.exists():
         try:
             return json.loads(REPORT_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as _exc3:
+            logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
     return {}
 
 

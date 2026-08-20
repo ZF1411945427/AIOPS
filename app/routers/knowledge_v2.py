@@ -20,6 +20,9 @@ from app.database import get_db
 from app.models import KbDocument
 from app.services import embedding_service, vector_store, rag_engine_v2
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/knowledge/v2", tags=["knowledge_v2"])
 
 
@@ -43,8 +46,8 @@ def _bg_index_document(doc_id: int, mode: str):
             if _d:
                 _d.status = "failed"
                 _db.commit()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     finally:
         _db.close()
 
@@ -113,8 +116,8 @@ def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
             )
             chunks = [{"id": i.get("chunk_index"), "content": i.get("content", "")} for i in results]
             chunks.sort(key=lambda x: x.get("id", 0))
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
 
         # Milvus 查不到时回退 SQLite KbChunk（V1 文档兼容）
         if not chunks:
@@ -124,8 +127,8 @@ def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
                 if db_chunks:
                     chunks = [{"id": c.chunk_index, "content": c.content or ""} for c in db_chunks]
                     chunk_source = "sqlite"
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
 
         return JSONResponse({
             "doc": _doc_to_dict(doc),
@@ -232,14 +235,14 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
         try:
             from app.models import KbChunk
             db.query(KbChunk).filter(KbChunk.document_id == doc_id).delete()
-        except Exception:
-            pass
+        except Exception as _exc3:
+            logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
         # 3. 清文件
         if doc.file_path and os.path.exists(doc.file_path):
             try:
                 os.remove(doc.file_path)
-            except OSError:
-                pass
+            except OSError as _exc4:
+                logger.warning("[except:pass] OSError: %s", _exc4, exc_info=True)
         # 4. 清文档记录
         db.delete(doc)
         db.commit()

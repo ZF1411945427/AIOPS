@@ -337,7 +337,7 @@
 
 <script>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
-import axios from 'axios'
+import request from '@/api/request'
 
 const API = '/inspection/api'
 
@@ -405,21 +405,21 @@ export default {
     const selectedTemplate = computed(() => templates.value.find(t => t.id === taskForm.template_id))
 
     const loadStats = async () => {
-      try { const { data } = await axios.get(`${API}/stats`); stats.value = data } catch (e) { console.error(e) }
+      try { const data = await request.get(`${API}/stats`); stats.value = data } catch (e) { console.error(e) }
     }
 
     const loadTemplates = async () => {
-      try { const { data } = await axios.get(`${API}/templates`); templates.value = data } catch (e) { console.error(e) }
+      try { const data = await request.get(`${API}/templates`); templates.value = data } catch (e) { console.error(e) }
     }
 
     const loadTasks = async () => {
       loadingTasks.value = true
-      try { const { data } = await axios.get(`${API}/tasks`); tasks.value = data } catch (e) { console.error(e) }
+      try { const data = await request.get(`${API}/tasks`); tasks.value = data } catch (e) { console.error(e) }
       loadingTasks.value = false
     }
 
     const loadRecords = async () => {
-      try { const { data } = await axios.get(`${API}/records`); records.value = data } catch (e) { console.error(e) }
+      try { const data = await request.get(`${API}/records`); records.value = data } catch (e) { console.error(e) }
     }
 
     const searchAssets = async () => {
@@ -431,7 +431,7 @@ export default {
         } else if (selectedTemplate.value && selectedTemplate.value.target_ci_types.length) {
           params.ci_types = selectedTemplate.value.target_ci_types.join(',')
         }
-        const { data } = await axios.get(`${API}/assets-browse`, { params })
+        const data = await request.get(`${API}/assets-browse`, { params })
         assetOptions.value = data.items || []
       } catch (e) { console.error(e) }
     }
@@ -472,9 +472,9 @@ export default {
       }
       try {
         if (editingTask.value) {
-          await axios.put(`${API}/tasks/${editingTask.value.id}`, payload)
+          await request.put(`${API}/tasks/${editingTask.value.id}`, payload)
         } else {
-          await axios.post(`${API}/tasks`, payload)
+          await request.post(`${API}/tasks`, payload)
         }
         showTaskDialog.value = false
         loadTasks(); loadStats()
@@ -483,13 +483,13 @@ export default {
 
     const deleteTask = async (task) => {
       if (!confirm(`确定删除任务「${task.name}」？`)) return
-      try { await axios.delete(`${API}/tasks/${task.id}`); loadTasks(); loadStats() } catch (e) { alert('删除失败') }
+      try { await request.delete(`${API}/tasks/${task.id}`); loadTasks(); loadStats() } catch (e) { alert('删除失败') }
     }
 
     const runTask = async (task) => {
       task.status = 'running'
       try {
-        const { data } = await axios.post(`${API}/tasks/${task.id}/run`)
+        const data = await request.post(`${API}/tasks/${task.id}/run`)
         if (data.error) { alert(data.error); task.status = 'idle'; return }
         task.status = 'idle'
         task.last_run_at = new Date().toISOString()
@@ -557,9 +557,9 @@ export default {
       }
       try {
         if (editingTemplate.value) {
-          await axios.put(`${API}/templates/${editingTemplate.value.id}`, payload)
+          await request.put(`${API}/templates/${editingTemplate.value.id}`, payload)
         } else {
-          await axios.post(`${API}/templates`, payload)
+          await request.post(`${API}/templates`, payload)
         }
         showTemplateDialog.value = false
         loadTemplates()
@@ -567,7 +567,7 @@ export default {
     }
     const deleteTemplate = async (tpl) => {
       if (!confirm(`确定删除模板「${tpl.name}」？`)) return
-      try { await axios.delete(`${API}/templates/${tpl.id}`); loadTemplates() } catch (e) { alert('删除失败') }
+      try { await request.delete(`${API}/templates/${tpl.id}`); loadTemplates() } catch (e) { alert('删除失败') }
     }
 
     watch(() => taskForm.template_id, (newId, oldId) => {

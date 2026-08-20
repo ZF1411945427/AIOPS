@@ -295,8 +295,8 @@ def dashboard(user_id: int = Depends(require_user), db: Session = Depends(get_db
                     break
                 elif isinstance(m, str) and m == o.current_oncall:
                     break
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _exc:
+            logger.warning("[except:pass] (ValueError, TypeError): %s", _exc, exc_info=True)
         oncall_list.append({
             "team_name": o.team_name,
             "current_oncall": o.current_oncall,
@@ -365,7 +365,7 @@ class VoiceTranscribeRequest(BaseModel):
 
 @router.post("/voice/transcribe")
 def voice_transcribe(req: VoiceTranscribeRequest, user_id: int = Depends(require_user), db: Session = Depends(get_db)):
-    """接收移动端录音 base64，调用 AI provider 的语音识别接口转为文字。"""
+    """接收移动端录音 base64，走 voice_service 引擎分发(云 STT 或本地 sherpa-onnx)。"""
     try:
         audio_bytes = base64.b64decode(req.audio_base64)
     except Exception:
@@ -374,56 +374,19 @@ def voice_transcribe(req: VoiceTranscribeRequest, user_id: int = Depends(require
     if len(audio_bytes) < 500:
         raise HTTPException(status_code=400, detail="音频太短，请说话至少1秒")
 
-    # 查找支持语音的 AI provider（OpenAI Whisper 兼容接口）
+    from app.services import voice_service
     try:
-        provider = db.query(AIProvider).filter(
-            AIProvider.enabled == True,
-            AIProvider.provider_type.in_(["openai", "azure", "custom"])
-        ).first()
-        if not provider:
-            raise HTTPException(status_code=503, detail="未配置可用的 AI 语音识别服务")
-
-        import urllib.request
-        import urllib.error
-
-        audio_mime = "audio/mpeg" if req.format == "mp3" else "audio/wav"
-        boundary = "----aiops-voice-" + uuid.uuid4().hex
-        CR = chr(13)
-        LF = chr(10)
-        CRLF = CR + LF
-        parts = []
-        parts.append(("--" + boundary + CRLF).encode())
-        parts.append(('Content-Disposition: form-data; name="file"; filename="voice.' + req.format + '"' + CRLF).encode())
-        parts.append(("Content-Type: " + audio_mime + CRLF + CRLF).encode())
-        parts.append(audio_bytes)
-        parts.append((CRLF + "--" + boundary + CRLF).encode())
-        parts.append(('Content-Disposition: form-data; name="model"' + CRLF + CRLF).encode())
-        parts.append(("whisper-1" + CRLF).encode())
-        parts.append(("--" + boundary + "--" + CRLF).encode())
-        body = b"".join(parts)
-
-        base_url = (provider.base_url or "https://api.openai.com/v1").rstrip("/")
-        url = base_url + "/audio/transcriptions"
-        api_key = provider.api_key or ""
-        req_obj = urllib.request.Request(url, data=body, method="POST")
-        req_obj.add_header("Content-Type", "multipart/form-data; boundary=" + boundary)
-        req_obj.add_header("Authorization", "Bearer " + api_key)
-
-        resp = urllib.request.urlopen(req_obj, timeout=60)
-        result = json.loads(resp.read().decode())
-        text = result.get("text", "").strip()
-        if not text:
-            raise HTTPException(status_code=422, detail="语音识别返回空结果")
-        return {"text": text}
+        text, _prov = voice_service.transcribe_audio_file(
+            db, audio_bytes, sample_rate=16000, audio_format=req.format or "mp3"
+        )
     except HTTPException:
         raise
-    except urllib.error.HTTPError as e:
-        detail = f"语音识别服务返回 {e.code}"
-        try:
-            err_body = json.loads(e.read().decode())
-            detail = err_body.get("error", {}).get("message", detail) if isinstance(err_body, dict) else detail
-        except Exception:
-            pass
-        raise HTTPException(status_code=502, detail=detail)
     except Exception as e:
+        logger.warning("语音识别失败: %s", e)
         return JSONResponse({"ok": False, "message": f"语音识别失败: {str(e)}"}, status_code=200)
+    if not text:
+        return JSONResponse({"ok": False, "message": "未识别到语音"}, status_code=200)
+    return {"text": text}
+
+import logging
+logger = logging.getLogger(__name__)

@@ -21,7 +21,6 @@ def register_routers(app):
     from app.routers.anomaly import router as anomaly_router
     from app.routers.cluster_anomaly import router as cluster_anomaly_router
     from app.routers.hotspot import router as hotspot_router
-    from app.routers.k8s_monitor import router as k8s_monitor_router
     from app.routers.k8s_resources import router as k8s_resources_router
     from app.routers.k8s_cert import router as k8s_cert_router
     from app.routers.containers import router as containers_router
@@ -29,8 +28,10 @@ def register_routers(app):
     from app.routers.blue_green import router as blue_green_router
     from app.routers.service_mesh import router as service_mesh_router
     from app.routers.ai_providers import router as ai_providers_router
+    from app.routers.voice_providers import router as voice_providers_router
     from app.routers.agent_chat import router as agent_chat_router
     from app.routers.agent_sse import router as agent_sse_router
+    from app.routers.voice_chat_ws import router as voice_chat_ws_router
     from app.routers.agent_workflow import router as agent_workflow_router
     from app.routers.agent_eval import router as agent_eval_router
     from app.routers.agent_ground_truth import router as agent_ground_truth_router
@@ -138,10 +139,13 @@ def register_routers(app):
     from app.routers.config_drift import router as config_drift_router
     from app.routers.component_market import router as component_market_router
     from app.routers.component_ops import router as component_ops_router
+    from app.routers.inbound import router as inbound_router
+    from app.providers.router import router as providers_router
 
     app.include_router(config_drift_router)
     app.include_router(component_market_router)
     app.include_router(component_ops_router)
+    app.include_router(inbound_router)
     app.include_router(assets_router)
     app.include_router(asset_changes_router)
     app.include_router(asset_discovery_router)
@@ -160,7 +164,6 @@ def register_routers(app):
     app.include_router(anomaly_router)
     app.include_router(cluster_anomaly_router)
     app.include_router(hotspot_router)
-    app.include_router(k8s_monitor_router)
     app.include_router(k8s_resources_router)
     app.include_router(k8s_cert_router)
     app.include_router(containers_router)
@@ -168,8 +171,10 @@ def register_routers(app):
     app.include_router(blue_green_router)
     app.include_router(service_mesh_router)
     app.include_router(ai_providers_router)
+    app.include_router(voice_providers_router)
     app.include_router(agent_chat_router)
     app.include_router(agent_sse_router)
+    app.include_router(voice_chat_ws_router)
     app.include_router(agent_workflow_router)
     app.include_router(agent_eval_router)
     app.include_router(agent_ground_truth_router)
@@ -274,4 +279,5 @@ def register_routers(app):
     app.include_router(rag_eval_router)
     app.include_router(security_audit_router)
     app.include_router(ai_insight_router)
+    app.include_router(providers_router)
 

@@ -107,6 +107,12 @@
             <div class="msg-bubble" :class="[m.role, m.message_type === 'error' ? 'error-bubble' : '']">
               <div v-if="m.role === 'user' && m.expert" class="msg-expert">🧠 {{ m.expert }}已激活</div>
               <div class="msg-content" v-html="renderContent(m.content)"></div>
+              <div v-if="m.summary && (m.summary.root_cause || m.summary.solution)" class="key-points">
+                <div class="kp-title">📌 要点总结</div>
+                <div v-if="m.summary.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ m.summary.root_cause }}</span></div>
+                <div v-if="m.summary.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ m.summary.solution }}</span></div>
+                <div v-if="m.summary.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ m.summary.impact }}</span></div>
+              </div>
               <div class="msg-meta">
                 <span>{{ formatTime(m.created_at) }}</span>
                 <span v-if="m.tool_calls && m.tool_calls !== '[]'" class="tool-badge">🔧</span>
@@ -349,6 +355,7 @@ const {
   streamingSteps,
   streamingTask,
   streamingReport,
+  streamingSummary,
   currentSubAgent,
 } = useAgentSSE()
 
@@ -716,8 +723,13 @@ async function sendMessage() {  const message = inputMessage.value.trim()
     await sseDone
     stopTypewriter()
     if (streamingContent.value) {
-      messages.value.push({ role: 'assistant', content: streamingContent.value, created_at: new Date().toISOString(), _steps: streamingSteps.value.map(s => ({ ...s })), _task: streamingTask.value ? { ...streamingTask.value } : null })
+      const sseSummary = streamingSummary.value || null
+      messages.value.push({ role: 'assistant', content: streamingContent.value, created_at: new Date().toISOString(), _steps: streamingSteps.value.map(s => ({ ...s })), _task: streamingTask.value ? { ...streamingTask.value } : null, summary: sseSummary })
       await loadMessages(activeSessionId.value)
+      if (sseSummary && messages.value.length) {
+        const last = messages.value[messages.value.length - 1]
+        if (last && last.role === 'assistant') last.summary = sseSummary
+      }
       await loadPendingActions(activeSessionId.value)
     } else if (streamingError.value) {
       messages.value.push({ role: 'assistant', content: streamingError.value, message_type: 'error', created_at: new Date().toISOString() })

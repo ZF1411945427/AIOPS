@@ -1,42 +1,30 @@
 <template>
-  <div class="custom-section">
-    <div class="custom-header">
-      <h2>自定义仪表盘</h2>
-      <button class="btn-add btn-sm" @click="$emit('add')">+ 新增卡片</button>
+  <div v-for="(card, idx) in cards" :key="card.id"
+    class="custom-card" :style="cardStyle(card)" draggable="true"
+    @dragstart="onDragStart($event, idx)" @dragover.prevent="onDragOver($event, idx)"
+    @drop="onDrop($event, idx)" @dragend="onDragEnd">
+    <div class="custom-card-header">
+      <span class="drag-handle" title="拖拽移动">&#x2261;</span>
+      <span class="custom-card-title" :title="card.title">
+        <span class="metric-cn">{{ card.title }}</span>
+      </span>
+      <span class="custom-card-promql-label" @click="$emit('edit', idx)">PromQL</span>
+      <button class="card-btn-del" @click="$emit('delete', idx)" title="删除卡片">&times;</button>
     </div>
-    <div v-if="!cards.length" class="custom-empty">编写 PromQL 查询，创建自定义指标卡片，支持拖拽排列和缩放大小</div>
-    <div v-else class="custom-grid" ref="gridRef">
-      <div v-for="(card, idx) in cards" :key="card.id"
-        class="custom-card" :style="cardStyle(card)" draggable="true"
-        @dragstart="onDragStart($event, idx)" @dragover.prevent="onDragOver($event, idx)"
-        @drop="onDrop($event, idx)" @dragend="onDragEnd">
-        <div class="custom-card-header">
-          <span class="drag-handle" title="拖拽移动">&#x2261;</span>
-          <span class="custom-card-title" :title="card.title">
-            <span class="metric-cn">{{ card.title }}</span>
-          </span>
-          <span class="custom-card-promql-label" @click="$emit('edit', idx)">PromQL</span>
-          <button class="card-btn-del" @click="$emit('delete', idx)" title="删除卡片">&times;</button>
-        </div>
-        <div class="custom-card-chart" :ref="el => setChartRef(card.id, el)"></div>
-        <div class="resize-handle" @mousedown.prevent="onResizeStart($event, idx)" title="拖拽缩放"></div>
-      </div>
-    </div>
-    <div v-if="loading" class="custom-loading">加载中...</div>
+    <div class="custom-card-chart" :ref="el => setChartRef(card.id, el)"></div>
+    <div class="resize-handle" @mousedown.prevent="onResizeStart($event, idx)" title="拖拽缩放"></div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 
 const props = defineProps({
   cards: { type: Array, default: () => [] },
-  loading: Boolean,
 })
-const emit = defineEmits(['add', 'edit', 'delete', 'reorder', 'resize'])
+const emit = defineEmits(['edit', 'delete', 'reorder', 'resize'])
 
-const gridRef = ref(null)
 const chartRefs = {}
 const charts = {}
 let dragIdx = null
@@ -82,10 +70,7 @@ function onResizeStart(e, idx) {
   if (!card) return
   const startX = e.clientX, startY = e.clientY
   const startW = card.w || 2, startH = card.h || 1
-  const gridEl = gridRef.value
-  if (!gridEl) return
-  const gridRect = gridEl.getBoundingClientRect()
-  const colW = gridRect.width / 4
+  const colW = 170
   function onMove(ev) {
     const dx = ev.clientX - startX, dy = ev.clientY - startY
     emit('resize', idx, { w: Math.max(1, Math.min(4, Math.round(startW + dx / colW))), h: Math.max(1, Math.min(2, Math.round(startH + dy / 60))) })
@@ -157,11 +142,6 @@ defineExpose({ updateCharts })
 </script>
 
 <style scoped>
-.custom-section { margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(148,163,184,0.15); }
-.custom-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.custom-header h2 { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0; }
-.custom-empty { padding: 40px 0; text-align: center; color: var(--text-muted); font-size: 14px; }
-.custom-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .custom-card {
   background: var(--card-bg); border: 1px solid rgba(148,163,184,0.12);
   border-radius: 12px; display: flex; flex-direction: column;
@@ -174,9 +154,7 @@ defineExpose({ updateCharts })
 }
 .drag-handle { cursor: grab; color: var(--text-muted); font-size: 18px; line-height: 1; padding: 0 2px; }
 .drag-handle:active { cursor: grabbing; }
-.custom-card-title {
-  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.custom-card-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .custom-card-title .metric-cn { font-size: 13px; }
 .custom-card-promql-label {
   font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 4px;
@@ -201,12 +179,4 @@ defineExpose({ updateCharts })
 }
 .custom-card:hover .resize-handle { opacity: 0.6; }
 .resize-handle:hover { opacity: 1 !important; }
-.btn-add {
-  padding: 7px 16px; border-radius: 8px; border: none;
-  background: var(--primary, #6366f1); color: #fff; font-size: 13px;
-  font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.2s;
-}
-.btn-add:hover { background: var(--primary-light, #818cf8); }
-.btn-sm { padding: 5px 12px; font-size: 12px; }
-.custom-loading { text-align: center; padding: 20px; color: var(--text-muted); }
 </style>

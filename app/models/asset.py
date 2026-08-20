@@ -27,6 +27,10 @@ class Asset(Base):
     last_checked_at = Column(DateTime, nullable=True)
     latency_ms = Column(Integer, nullable=True)
     health_status = Column(String(16), default="green")
+    online_since = Column(DateTime, nullable=True)  # 最近一次 offline→online 切换时刻（持续在线时长起算点）
+    probe_type = Column(String(16), default="tcp")  # 资产探活方式: tcp / ping / ssh (CONTRACT.md)
+    environment = Column(String(24), default="non-production")  # 环境: production / non-production (CONTRACT.md)
+    ai_access_mode = Column(String(24), default="read-only")  # AI 访问模式(仅对生产资产生效): read-only / read-write (CONTRACT.md)
 
 
 class TagCategory(Base):

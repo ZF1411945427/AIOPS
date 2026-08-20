@@ -1,0 +1,19 @@
+# ===== 仓库卫生门禁 =====
+name: sanitize
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject stray temp scripts in root
+        run: |
+          if ls check_*.py debug_*.py fix_*.py force_alert.py 2>/dev/null; then
+            echo "::error::Found stray temp scripts. Please remove."
+            exit 1
+          fi
+          echo "Root temp-script guard passed."

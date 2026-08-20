@@ -19,8 +19,8 @@ def _current_user_id(request: Request) -> int:
                 payload = verify_login_token(auth[7:])
                 if payload:
                     uid = payload.get("user_id")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return uid
 
 
@@ -69,3 +69,7 @@ def api_code_search(request: Request, payload: dict, db: Session = Depends(get_d
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     return JSONResponse({"ok": True, "result": result})
+
+
+import logging
+logger = logging.getLogger(__name__)

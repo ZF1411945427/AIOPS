@@ -1,0 +1,17 @@
+# ===== 数据库迁移检查 =====
+name: db-migration-check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check alembic migration tree
+        run: python tools/check_migrations.py

@@ -1,0 +1,2758 @@
+<template>
+  <div class="zhiyuan-shell" :data-mode="mode" :data-skin="appStore.skin || 'default'" :class="shellClasses">
+    <canvas ref="brainCanvas" class="brain-canvas" aria-hidden="true"></canvas>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <!-- 顶栏 -->
+    <header class="topbar hud-panel">
+      <div class="brand"><i></i><strong>ZHIYUAN</strong><span></span><em>CORE COMMAND CENTER</em></div>
+      <!-- 角色切换器 -->
+      <div class="role-switcher" title="切换主脑角色人格与音色">
+        <button
+          v-for="r in roles"
+          :key="r.id"
+          class="role-btn"
+          :class="{ active: currentRole.id === r.id }"
+          :style="{ '--role-color': r.color }"
+          @click="switchRole(r)"
+        >{{ r.icon }}<span>{{ r.name }}</span></button>
+      </div>
+      <div class="status"><i></i><b id="zhiyuan-mode-label">{{ modeLabel }}</b></div>
+      <button class="icon-button" title="刷新数据" @click="refreshAll">⟳</button>
+    </header>
+
+    <!-- 告警走马灯 -->
+    <div class="marquee hud-panel" v-if="marquee.length">
+      <span class="marquee-tag">LIVE</span>
+      <div class="marquee-track">
+        <div class="marquee-inner">
+          <span v-for="(a, i) in marquee" :key="i" class="marquee-item">
+            <em :class="'sev-' + a.severity">{{ a.severity.toUpperCase() }}</em>
+            <b>{{ a.asset_name || 'GLOBAL' }}</b> {{ a.message }}
+            <small>{{ a.created_at }}</small>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主舞台 -->
+    <section class="stage">
+      <div class="identity">
+        <span>ZHIYUAN CORE</span>
+        <b>{{ identityState }}</b>
+      </div>
+    </section>
+
+    <!-- 右侧 子系统/统计 -->
+    <aside class="workers">
+      <!-- 工具调用终端 HUD（执行期间显示） -->
+      <div v-if="steps.length" class="tool-term hud-panel">
+        <div class="tool-term-head">⚙ TOOL EXEC TERMINAL <small>({{ steps.length }})</small></div>
+        <div class="tool-term-body">
+          <div v-for="(s, i) in steps" :key="s.step_id || i" class="tool-term-line" :class="'st-' + s.status">
+            <span class="tt-idx">{{ String(i + 1).padStart(2, '0') }}</span>
+            <b>{{ s.display_name || s.tool_name }}</b>
+            <em v-if="s.status === 'running'" class="tt-status blink">▸ RUN</em>
+            <em v-else-if="s.status === 'success'" class="tt-status tt-ok">✓ OK</em>
+            <em v-else-if="s.status === 'failed'" class="tt-status tt-err">✗ FAIL</em>
+            <em v-else class="tt-status">{{ s.status }}</em>
+          </div>
+        </div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card hud-panel"><b>{{ stats.health_score ?? '--' }}</b><small>健康分</small></div>
+        <div class="stat-card hud-panel"><b>{{ stats.asset_online ?? '--' }}/{{ stats.asset_total ?? '--' }}</b><small>资产在线</small></div>
+        <div class="stat-card hud-panel danger"><b>{{ stats.alert_active ?? '--' }}</b><small>活跃告警</small></div>
+        <div class="stat-card hud-panel"><b>{{ stats.rule_count ?? '--' }}</b><small>告警规则</small></div>
+      </div>
+      <div class="sub-agents-title">SUB-SYSTEMS <small class="sa-tip">点击委派</small></div>
+      <article
+        v-for="sa in subAgents"
+        :key="sa.name"
+        class="worker"
+        :class="{ active: sa.active }"
+        :style="{ '--sa-color': sa.color }"
+        :title="'点击以' + sa.display_name + '身份分析'"
+        @click="switchSubAgent(sa)"
+      >
+        <span>{{ sa.icon }}</span>
+        <div><b>{{ sa.display_name }}</b><small>{{ sa.domain }}</small></div>
+        <i></i>
+      </article>
+      <div v-if="!subAgents.length" class="no-sub">无子系统</div>
+    </aside>
+
+    <!-- 左侧 对话 -->
+    <section class="dialogue hud-panel">
+      <div class="dialogue-head">
+        <b class="zhiyuan">{{ currentRole.name }}</b>
+        <button class="dlg-new" title="历史会话" @click="toggleHistory">📋</button>
+        <button class="dlg-new" title="新会话" @click="newSession">＋</button>
+      </div>
+      <!-- 历史会话列表面板 -->
+      <div v-if="showHistory" class="history-panel">
+        <div class="history-panel-head">历史会话 <small>({{ sessions.length }})</small></div>
+        <div v-if="!sessions.length" class="history-empty">暂无历史会话</div>
+        <div
+          v-for="s in sessions"
+          :key="s.id"
+          class="history-item"
+          :class="{ active: s.id === currentSessionId }"
+          @click="loadSessionHistory(s.id)"
+        >
+          <b>{{ s.title }}</b>
+          <small>{{ s.sub_agent !== 'auto' ? s.sub_agent : '' }}</small>
+        </div>
+      </div>
+      <div class="dlg-body" ref="dlgBody">
+        <!-- 主动告警诊断：新告警到达弹窗 -->
+        <div v-if="alertPop" class="alert-pop">
+          <div class="alert-pop-head">
+            <span class="alert-pop-sev" :class="'sev-' + alertPop.severity">{{ alertPop.severity.toUpperCase() }}</span>
+            <b>{{ alertPop.title }}</b>
+          </div>
+          <div class="alert-pop-body">
+            <small v-if="alertPop.asset">{{ alertPop.asset }}</small>
+            <small v-if="alertPop.time">{{ alertPop.time }}</small>
+          </div>
+          <div class="alert-pop-actions">
+            <button @click="analyzeAlertPop">🔍 分析此告警</button>
+            <button class="secondary" @click="dismissAlertPop">✕ 忽略</button>
+          </div>
+        </div>
+        <!-- 上下文提示：从其他页面跳转过来时自动感知 -->
+        <div v-if="contextHint" class="context-hint">
+          <span>{{ contextHint.label }}</span>
+          <div class="context-hint-actions">
+            <button @click="useContextHint">🔍 分析</button>
+            <button class="secondary" @click="dismissContextHint">✕ 忽略</button>
+          </div>
+        </div>
+        <div v-if="!messages.length && !streamingContent && !steps.length && !contextHint" class="dlg-empty">
+          <p>对{{ currentRole.name }}下达指令，或点麦克风说话，或选下列快捷指令。</p>
+          <div class="suggested">
+            <button v-for="q in suggestions" :key="q" @click="ask(q)">{{ q }}</button>
+          </div>
+        </div>
+
+        <!-- 快捷分析指令 -->
+        <div v-if="!streamingContent && !steps.length && !messages.length" class="quick-actions">
+          <button v-for="a in quickActions" :key="a.label" @click="ask(a.command)">
+            <span>{{ a.icon }}</span>{{ a.label }}
+          </button>
+        </div>
+
+        <div v-for="(m, i) in messages" :key="'m' + i" class="msg" :class="m.role">
+          <b>{{ m.role === 'user' ? 'YOU' : currentRole.name }}</b>
+          <p>{{ m.content }}</p>
+          <div v-if="m.deep_links && m.deep_links.length" class="dlg-links">
+            <button v-for="(lk, li) in m.deep_links" :key="'lk' + li" class="dlg-link" @click="openDeepLink(lk)">
+              {{ lk.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 任务过程可视化 -->
+        <div v-if="currentTask || steps.length || streamSubAgent" class="task-panel">
+          <div class="task-head">
+            <b>◈ {{ currentRole.name }} 任务执行</b>
+            <span v-if="currentTask">{{ currentTask.percent != null ? currentTask.percent + '%' : currentTask.completedSteps + '/' + currentTask.totalSteps }}</span>
+            <span v-else-if="streamSubAgent">{{ streamSubAgent.icon }} {{ streamSubAgent.display_name }}</span>
+          </div>
+          <div v-if="currentTask && currentTask.totalSteps" class="task-bar">
+            <div class="task-bar-fill" :style="{ width: (currentTask.percent || 0) + '%' }"></div>
+          </div>
+          <div class="step-list">
+            <div v-for="s in steps" :key="s.step_id" class="step" :class="s.status">
+              <span class="step-dot"></span>
+              <div class="step-body">
+                <b>{{ s.display_name || s.tool_name }}</b>
+                <small v-if="s.summary">{{ s.summary }}</small>
+                <small class="step-args" v-if="s.tool_args_text">{{ s.tool_args_text }}</small>
+              </div>
+            </div>
+            <div v-if="streamingStatus && !steps.length" class="step running">
+              <span class="step-dot"></span>
+              <div class="step-body"><b>{{ currentRole.name }}思考中…</b><small>{{ streamingStatus }}</small></div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="streamingContent" class="msg zhiyuan">
+          <b>{{ currentRole.name }}</b>
+          <p class="typing">{{ streamingContent }}<span class="caret"></span></p>
+        </div>
+        <div v-else-if="streamingStatus && !steps.length && !currentTask" class="msg system">
+          <b>SYS</b>
+          <p class="blink">{{ streamingStatus }}</p>
+        </div>
+      </div>
+      <div class="dlg-input">
+        <input
+          v-model="input"
+          placeholder="输入指令，或点麦克风说话，{{ currentRole.name }} 将驱动子系统执行…"
+          @keyup.enter="send"
+          :disabled="busy"
+          autocomplete="off"
+        />
+        <button @click="send" :disabled="busy">EXECUTE</button>
+      </div>
+    </section>
+
+    <!-- 底部 控制 -->
+    <footer class="controls">
+      <button class="control mic hud-panel" :class="{ active: listening }" @click="toggleMic" title="语音指令">
+        <span v-if="listening" class="mic-ring"></span>
+        <span v-else>🎙</span>
+        <b>{{ listening ? 'LISTENING…' : 'VOICE' }}</b>
+      </button>
+      <button class="control wake hud-panel" :class="{ active: wakeEnabled }" @click="toggleWake" title="语音唤醒：喊「贾维斯/林妹妹」自动开始聆听">
+        <span>{{ wakeEnabled ? '🔔' : '🔕' }}</span>
+        <b>{{ wakeEnabled ? 'WAKE ON' : 'WAKE' }}</b>
+      </button>
+      <div class="command-hud hud-panel">
+        <span class="cmd-label">CORE {{ mode }}</span>
+      </div>
+      <button class="control speak hud-panel" :class="{ muted: !speechEnabled }" @click="toggleSpeech" title="语音播报开关（TTS）">
+        <span>{{ speechEnabled ? '🔊' : '🔇' }}</span>
+        <b>{{ speechEnabled ? 'SPEAK' : 'MUTED' }}</b>
+      </button>
+      <button class="control stop hud-panel" @click="stop" title="中断当前任务"><span>■</span><b>STOP</b></button>
+    </footer>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import request from '@/api/request'
+import { useAppStore } from '@/stores/app'
+import { connectAlertsWs, disconnectAlertsWs, onAlert } from '@/utils/websocket'
+
+const appStore = useAppStore()
+
+// ---------------- 角色系统（人格 + 音色） ----------------
+// 角色系统: 贾维斯(沉稳AI管家) / 林妹妹(古风撒娇)
+const ROLES = [
+  {
+    id: 'jarvis', icon: '🤖', name: '贾维斯',
+    color: '#f59e0b',
+    persona: '你是贾维斯(J.A.R.V.I.S.)，钢铁侠风格的 AI 管家。沉稳、高效、略带英式幽默，回复简洁有力，偶尔调侃但始终专业。',
+  },
+  {
+    id: 'lin-meimei', icon: '🌸', name: '林妹妹',
+    color: '#f15f79',
+    persona: '你是林妹妹，古风撒娇风格的 AI 助手。自称"妹妹"，称呼用户"哥哥"，用《红楼梦》林黛玉式的语气（"呢""呀""这会儿""罢了"），温柔体贴、带一点俏皮的小抱怨，但始终认真完成任务。',
+  },
+]
+const currentRole = ref(ROLES[0])
+const roles = ROLES
+
+function switchRole(r) {
+  if (!r || r.id === currentRole.value.id) return
+  currentRole.value = r
+  stopSpeech()
+  // 新角色打招呼
+  const greets = {
+    'jarvis': '贾维斯随时为您效劳，先生。',
+    'lin-meimei': '哟，这会子才想起我来，我还以为哥哥早把我给忘了呢。',
+  }
+  const greet = greets[r.id]
+  if (greet) {
+    messages.value.push({ role: 'assistant', content: greet, system: true })
+    speakText(greet)
+  }
+  scrollDlg()
+}
+
+// 按角色注入人格提示词（发送给 LLM 前附加）
+function applyPersona(text) {
+  if (currentRole.value.id === 'jarvis') return text
+  return `${currentRole.value.persona}\n请以该角色身份回复以下内容：\n${text}`
+}
+
+// ---------------- 状态 ----------------
+const mode = ref('ready') // idle/ready | working | speaking | error
+const modeLabel = computed(() => MODE_COPY[mode.value][0])
+const identityState = computed(() => MODE_COPY[mode.value][1])
+const shellClasses = computed(() => ({
+  'theme-dark': appStore.theme === 'dark',
+  'theme-light': appStore.theme !== 'dark',
+}))
+
+const stats = reactive({ asset_total: '--', asset_online: '--', alert_active: '--', rule_count: '--', health_score: '--', health_status: '--' })
+const marquee = ref([])
+const subAgents = ref([])
+
+// 主动告警诊断：新告警到达时弹窗询问是否分析
+const alertPop = ref(null)
+const _alertUnsub = ref(null)
+let _alertSuppressUntil = 0
+
+const messages = ref([])
+const input = ref('')
+const busy = ref(false)
+let currentSessionId = null  // 当前会话 ID
+
+// 历史会话面板
+const showHistory = ref(false)
+const sessions = ref([])
+const loadingHistory = ref(false)
+const streamingContent = ref('')
+const streamingStatus = ref('')
+const steps = ref([])
+const currentTask = ref(null)
+const streamSubAgent = ref(null)
+const dlgBody = ref(null)
+let eventSource = null
+
+// 语音识别（MediaRecorder 录音 → 后端 Whisper 转写，绕开被墙的浏览器外部 STT）
+const listening = ref(false)
+const speechEnabled = ref(true)  // TTS 朗读开关
+let recognition = null
+let speechBuffer = ''
+let _mr = null          // MediaRecorder 实例
+let _mrStream = null    // getUserMedia 流
+let _mrChunks = []      // 录音数据块
+let _mrMime = ''        // 录音 mime 类型
+let _mrCtx = null       // AudioContext（音量检测）
+let _mrAnalyser = null  // AnalyserNode
+let _mrTimeout = 0      // 录音最大时长兜底计时器（防止无限「聆听中」）
+let _mrRaf = 0          // 音量轮询 raf
+let _mrSilentMs = 0     // 静音累计毫秒
+
+const suggestions = ref([
+  '查看系统健康态势',
+  '有哪些活跃告警？',
+  '分析最近的异常',
+  '当前资源使用概况',
+])
+
+const quickActions = ref([
+  { icon: '📜', label: '看日志并分析', command: '帮我查看最近的日志并分析其中是否有异常' },
+  { icon: '🚨', label: '查活跃告警', command: '当前有哪些活跃的告警？整理给我' },
+  { icon: '🩺', label: '系统健康体检', command: '对系统做一次健康体检并给出结论' },
+  { icon: '🔻', label: '分析异常指标', command: '分析最近的指标异常并定位可能的根因' },
+])
+
+const MODE_COPY = {
+  booting: ['INITIALIZING', 'SYSTEM BOOT'],
+  ready: ['READY', 'ALL SYSTEMS ONLINE'],
+  working: ['WORKING', 'TASK EXECUTION'],
+  listening: ['LISTENING', 'VOICE CAPTURE'],
+  speaking: ['RESPONDING', 'VOICE OUTPUT'],
+  error: ['ERROR', 'FAULT DETECTED'],
+}
+
+// ---------------- 数据加载 ----------------
+// 上下文感知：从其他页面跳转过来时携带来源信息
+const contextHint = ref(null)
+const PAGE_CONTEXT_MAP = {
+  'alerts': { label: '你刚在"告警中心"，我可以帮你分析当前活跃告警', command: '分析当前所有活跃告警，并按严重程度排序' },
+  'incident': { label: '你刚在"故障单管理"，我可以帮你梳理未关闭故障单', command: '列出当前所有未关闭的故障单并分析' },
+  'asset-list': { label: '你刚在"资产列表"，我可以帮你检查资产健康状态', command: '检查所有资产的健康状态，列出异常项' },
+  'logs': { label: '你刚在"日志中心"，我可以帮你分析最近的异常日志', command: '分析最近的日志并找出异常' },
+  'metrics': { label: '你刚在"指标监控"，我可以帮你分析当前指标异常', command: '分析最近的指标异常并定位根因' },
+  'traces': { label: '你刚在"链路追踪"，我可以帮你分析调用链异常', command: '分析最近的链路追踪异常' },
+  'topology': { label: '你刚在"拓扑视图"，我可以帮你检查服务连接状态', command: '检查服务拓扑中是否存在异常连接' },
+  'anomaly': { label: '你刚在"异常检测"，我可以帮你汇总异常事件', command: '汇总最近的异常检测结果' },
+  'observability-correlation': { label: '你刚在"关联分析"，我可以帮你做根因关联分析', command: '做一次关联分析并定位可能的根因' },
+}
+
+function pickContextHint() {
+  // 优先 deep link 上下文，其次来源页面
+  const ctx = window.__aiopsNavContext
+  if (ctx && ctx.from === 'jarvis' && ctx.type && ctx.params) {
+    // 从主脑跳到其他页再回来
+    contextHint.value = null
+    return
+  }
+  const from = window.__aiopsLastView
+  if (from && PAGE_CONTEXT_MAP[from] && !messages.value.length) {
+    contextHint.value = { ...PAGE_CONTEXT_MAP[from], from }
+  } else {
+    contextHint.value = null
+  }
+}
+
+function useContextHint() {
+  if (contextHint.value) {
+    ask(contextHint.value.command)
+    contextHint.value = null
+    window.__aiopsLastView = null
+  }
+}
+
+function dismissContextHint() {
+  contextHint.value = null
+  window.__aiopsLastView = null
+}
+
+// ---------------- 主动告警诊断 ----------------
+function setupAlertWatch() {
+  try {
+    const token = localStorage.getItem('aiops-token') || ''
+    connectAlertsWs(token)
+    _alertUnsub.value = onAlert((a) => {
+      // 冷却 30s，避免弹窗轰炸
+      const now = Date.now()
+      if (now < _alertSuppressUntil) return
+      // 只在非忙碌且非听写状态弹
+      if (busy.value || listening.value || eventSource) return
+      const sev = (a.severity || '').toLowerCase()
+      if (!['critical', 'high', 'warning', 'error'].includes(sev)) return
+      _alertSuppressUntil = now + 30000
+      alertPop.value = {
+        title: a.message || `${a.metric_name || '指标'} 异常`,
+        severity: sev,
+        asset: a.asset_name || a.host || '',
+        time: a.created_at || '',
+        cmd: `分析这条告警：${a.message || a.metric_name}${a.asset_name ? '（' + a.asset_name + '）' : ''}`,
+      }
+    })
+  } catch (e) { /* fail-soft */ }
+}
+
+function analyzeAlertPop() {
+  if (alertPop.value) {
+    ask(alertPop.value.cmd)
+    alertPop.value = null
+  }
+}
+
+function dismissAlertPop() {
+  alertPop.value = null
+}
+
+// ---------------- 语音输出（TTS）+ 音频可视化 ----------------
+// 缓存最佳本地声音（浏览器兜底用）
+let _bestVoice = null
+function _refreshBestVoice() {
+  const voices = window.speechSynthesis?.getVoices() || []
+  if (!voices.length) return
+  const preferred = ['Yunxi', 'Yunyang', 'Kangkang', 'Zhiyu', 'David']
+  for (const name of preferred) {
+    const found = voices.find(v => v.lang.startsWith('zh') && v.name.includes(name))
+    if (found) { _bestVoice = found; return }
+  }
+  const zhCandidates = voices.filter(v => v.lang.startsWith('zh'))
+  const maleHint = zhCandidates.find(v => /kang|yun|zhi|男|david/i.test(v.name))
+  if (maleHint) { _bestVoice = maleHint; return }
+  if (zhCandidates.length) { _bestVoice = zhCandidates[0] }
+}
+if (window.speechSynthesis) {
+  _refreshBestVoice()
+  window.speechSynthesis.onvoiceschanged = () => { _refreshBestVoice() }
+}
+
+// 音频可视化：实时电平数据（供 drawBrain 读取）
+let _audioLevel = 0       // 0~1 当前音量
+let _audioFreqs = new Float32Array(32)  // 频率分频
+let _audioCtx = null
+let _analyser = null
+let _audioSrc = null
+let _audioAnimId = 0
+
+function _initAudioAnalyser(audio) {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+    if (_audioSrc) { try { _audioSrc.disconnect() } catch(e) {} }
+    _analyser = _audioCtx.createAnalyser()
+    _analyser.fftSize = 128
+    _analyser.smoothingTimeConstant = 0.8
+    _audioSrc = _audioCtx.createMediaElementSource(audio)
+    _audioSrc.connect(_analyser)
+    _analyser.connect(_audioCtx.destination)
+    // 启动电平轮询
+    const buf = new Float32Array(_analyser.frequencyBinCount)
+    let running = true
+    cancelAnimationFrame(_audioAnimId)
+    function poll() {
+      if (!running) return
+      _analyser.getFloatFrequencyData(buf)
+      // 转 0~1 电平（频率数据是 -100~0 dB）
+      let sum = 0, max = -100
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] + 100) / 100  // -100~0 → 0~1
+        _audioFreqs[i] = Math.max(0, Math.min(1, v))
+        sum += _audioFreqs[i]
+        if (buf[i] > max) max = buf[i]
+      }
+      // 平均电平
+      _audioLevel = sum / buf.length
+      _audioAnimId = requestAnimationFrame(poll)
+    }
+    _audioAnimId = requestAnimationFrame(poll)
+    return () => { running = false; cancelAnimationFrame(_audioAnimId) }
+  } catch(e) { return () => {} }
+}
+
+// 优先用后端 edge-tts（云希男声），失败回退浏览器本地语音
+let _speechAudio = null
+let _speechSeq = 0
+let _audioCleanup = null
+
+function stopSpeech() {
+  if (_audioCleanup) { _audioCleanup(); _audioCleanup = null }
+  if (_speechAudio) { try { _speechAudio.pause(); _speechAudio.src = '' } catch (e) {} _speechAudio = null }
+  if (window.speechSynthesis) window.speechSynthesis.cancel()
+  _audioLevel = 0
+  _audioFreqs.fill(0)
+}
+
+async function speakText(text) {
+  if (!speechEnabled.value || !text) return
+  const seq = ++_speechSeq
+  // 注意：speakText 已自增 _speechSeq，stopSpeech 不再自增
+  stopSpeech()
+  _speechAudio = null
+  // 先显示说话状态，不要等音频加载
+  mode.value = 'speaking'
+  // 尝试后端 edge-tts（按当前角色音色）
+  try {
+    const url = `/agent/tts?voice=${currentRole.value.id}&text=${encodeURIComponent(text.slice(0, 500))}`
+    const resp = await fetch(url)
+    if (resp.ok && seq === _speechSeq) {
+      const blob = await resp.blob()
+      if (seq !== _speechSeq || !speechEnabled.value) return
+      const audioUrl = URL.createObjectURL(blob)
+      const audio = new Audio(audioUrl)
+      _speechAudio = audio
+      // 接音频可视化
+      _audioCleanup = _initAudioAnalyser(audio)
+      audio.onended = () => {
+        if (seq === _speechSeq) {
+          _audioLevel = 0; _audioFreqs.fill(0)
+          URL.revokeObjectURL(audioUrl)
+          if (mode.value === 'speaking') mode.value = 'ready'
+        }
+      }
+      audio.onerror = () => {
+        if (seq === _speechSeq) { _audioLevel = 0; _audioFreqs.fill(0); URL.revokeObjectURL(audioUrl); speakTextLocal(text) }
+      }
+      await audio.play().catch(() => { if (seq === _speechSeq) speakTextLocal(text) })
+      return
+    }
+  } catch (e) { /* 网络失败走本地 */ }
+  if (seq === _speechSeq) speakTextLocal(text)
+}
+
+// 兜底：浏览器本地 speechSynthesis（无音频可视化，但保持模式正常）
+function speakTextLocal(text) {
+  if (!window.speechSynthesis || !text) return
+  window.speechSynthesis.cancel()
+  const u = new SpeechSynthesisUtterance(text)
+  u.lang = 'zh-CN'
+  u.rate = 0.85       // 慢一点，更自然
+  u.pitch = 0.6       // 更低沉有磁性
+  u.volume = 1.0
+  if (/[\u4e00-\u9fff]/.test(text) && _bestVoice) u.voice = _bestVoice
+  u.onstart = () => { mode.value = 'speaking' }
+  u.onend = () => { if (mode.value === 'speaking') mode.value = 'ready' }
+  u.onerror = () => { if (mode.value === 'speaking') mode.value = 'ready' }
+  window.speechSynthesis.speak(u)
+}
+
+function toggleSpeech() {
+  speechEnabled.value = !speechEnabled.value
+  if (!speechEnabled.value) window.speechSynthesis.cancel()
+}
+
+async function refreshAll() {
+  await Promise.all([loadDashboard(), loadMarquee(), loadSubAgents()])
+}
+
+async function loadDashboard() {
+  try {
+    const d = await request.get('/api/dashboard/data', { params: { time_range: '24h' } })
+    Object.assign(stats, d.stats || {})
+  } catch (e) { /* fail-soft */ }
+}
+
+async function loadMarquee() {
+  try {
+    marquee.value = await request.get('/alerts/api/marquee')
+  } catch (e) { marquee.value = [] }
+}
+
+async function loadSubAgents() {
+  try {
+    const d = await request.get('/agent/sub-agents/manifest')
+    subAgents.value = (d.sub_agents || []).map(s => ({ ...s, active: false }))
+  } catch (e) { subAgents.value = [] }
+}
+
+async function switchSubAgent(sa) {
+  if (!sa || busy.value) return
+  // 确保有会话
+  if (!currentSessionId) {
+    try {
+      const r = await request.post('/agent/session/new')
+      if (r && r.session_id) currentSessionId = r.session_id
+    } catch (e) { /* */ }
+  }
+  // 标记活跃
+  subAgents.value = subAgents.value.map(s => ({ ...s, active: s.name === sa.name }))
+  // 设置会话子专家（后端有接口则调用，无则依赖关键词路由）
+  try {
+    if (currentSessionId) {
+      await request.post(`/agent/session/${currentSessionId}/set-sub-agent`, { sub_agent: sa.name })
+    }
+  } catch (e) { /* 接口失败不阻塞 */ }
+  // 委派一条消息
+  const cmd = `请以${sa.display_name}的身份，${sa.description ? sa.description.split('。')[0] + '。' : ''}分析当前系统状态，给出结论。`
+  ask(cmd)
+}
+
+async function loadSuggestions() {
+  try {
+    const d = await request.get('/agent/suggestions')
+    if (d && Array.isArray(d.suggestions) && d.suggestions.length) {
+      suggestions.value = d.suggestions
+    }
+    if (d && Array.isArray(d.quick_actions) && d.quick_actions.length) {
+      quickActions.value = d.quick_actions
+    }
+  } catch (e) { /* 失败保留默认 */ }
+}
+
+// ---------------- 对话 ----------------
+async function newSession() {
+  try {
+    const r = await request.post('/agent/session/new')
+    if (r && r.session_id) currentSessionId = r.session_id
+    messages.value = []
+    streamingContent.value = ''
+    streamingStatus.value = ''
+    showHistory.value = false
+  } catch (e) { /* */ }
+}
+
+async function loadSessions() {
+  try {
+    const d = await request.get('/agent/sessions')
+    sessions.value = (d.sessions || []).slice(0, 30)
+  } catch (e) { sessions.value = [] }
+}
+
+async function loadSessionHistory(sessionId) {
+  if (loadingHistory.value) return
+  loadingHistory.value = true
+  try {
+    const d = await request.get(`/agent/history/${sessionId}`)
+    if (d && d.messages) {
+      messages.value = d.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        deep_links: (m.tool_calls && m.tool_calls.steps) ? [] : [],
+      }))
+    }
+    currentSessionId = sessionId
+    showHistory.value = false
+  } catch (e) { /* */ }
+  loadingHistory.value = false
+}
+
+function toggleHistory() {
+  showHistory.value = !showHistory.value
+  if (showHistory.value) loadSessions()
+}
+
+function ask(q) { input.value = q; send() }
+
+function openDeepLink(lk) {
+  if (!lk || !lk.key) return
+  if (window._navigateTo) {
+    window._navigateTo(lk.key, { type: lk.type, ...(lk.params || {}), from: 'jarvis' })
+  } else if (lk.params?.id) {
+    window.location.href = `/alerts/${lk.params.id}`
+  } else {
+    window.location.href = '/'
+  }
+}
+
+function send() {
+  const text = input.value.trim()
+  if (!text || busy.value) return
+  submit(text)
+}
+
+function submit(text) {
+  messages.value.push({ role: 'user', content: text })
+  input.value = ''
+  resetStream()
+  streamingStatus.value = '思考中…'
+  mode.value = 'working'
+  busy.value = true
+  // 按当前角色注入人格提示词
+  streamChat(applyPersona(text))
+  scrollDlg()
+}
+
+function resetStream() {
+  streamingContent.value = ''
+  streamingStatus.value = ''
+  steps.value = []
+  currentTask.value = null
+  streamSubAgent.value = null
+}
+
+function streamChat(text) {
+  if (eventSource) eventSource.close()
+  let url = `/agent/chat/stream?message=${encodeURIComponent(text)}`
+  if (currentSessionId) url += `&session_id=${currentSessionId}`
+  eventSource = new EventSource(url)
+
+  eventSource.addEventListener('status', e => {
+    const d = JSON.parse(e.data)
+    streamingStatus.value = d.content
+    mode.value = 'working'
+  })
+  eventSource.addEventListener('token', e => {
+    const d = JSON.parse(e.data)
+    if (d.token) { streamingContent.value += d.token; streamingStatus.value = ''; mode.value = 'speaking' }
+  })
+  eventSource.addEventListener('sub_agent', e => {
+    const d = JSON.parse(e.data)
+    streamSubAgent.value = d
+    subAgents.value = subAgents.value.map(s => ({ ...s, active: s.name === d.name }))
+    mode.value = 'working'
+  })
+  eventSource.addEventListener('task_card', e => {
+    const d = JSON.parse(e.data)
+    currentTask.value = {
+      title: d.title || '运维任务',
+      totalSteps: d.total_steps || 0,
+      completedSteps: d.completed_steps || 0,
+      percent: d.percent != null ? d.percent : 0,
+    }
+  })
+  eventSource.addEventListener('step_start', e => {
+    const d = JSON.parse(e.data)
+    steps.value.push({
+      step_id: d.step_id,
+      tool_name: d.tool_name,
+      display_name: d.display_name,
+      tool_args: d.tool_args,
+      tool_args_text: d.tool_args,
+      summary: '',
+      status: 'running',
+    })
+    mode.value = 'working'
+    scrollDlg()
+  })
+  eventSource.addEventListener('step_finish', e => {
+    const d = JSON.parse(e.data)
+    const idx = steps.value.findIndex(s => s.step_id === d.step_id)
+    if (idx >= 0) {
+      steps.value[idx] = { ...steps.value[idx], status: d.status, summary: d.summary, tool_args_text: d.tool_args }
+    }
+  })
+  eventSource.addEventListener('progress', e => {
+    const d = JSON.parse(e.data)
+    if (currentTask.value) {
+      currentTask.value = {
+        ...currentTask.value,
+        totalSteps: d.total_steps != null ? d.total_steps : currentTask.value.totalSteps,
+        completedSteps: d.completed_steps != null ? d.completed_steps : currentTask.value.completedSteps,
+        percent: d.percent != null ? d.percent : currentTask.value.percent,
+      }
+    }
+  })
+  eventSource.addEventListener('done', e => {
+    const d = JSON.parse(e.data)
+    if (d.reply) messages.value.push({ role: 'assistant', content: d.reply, deep_links: d.deep_links || [] })
+    if (d.session_id) currentSessionId = d.session_id
+    resetStream()
+    mode.value = 'ready'
+    busy.value = false
+    eventSource.close(); eventSource = null
+    scrollDlg()
+    // 语音播报回复（拟人对话）
+    if (d.reply) speakText(d.reply)
+  })
+  eventSource.addEventListener('error', e => {
+    const d = JSON.parse(e.data)
+    streamingStatus.value = d.content || '连接出错'
+    mode.value = 'error'
+    setTimeout(() => { mode.value = 'ready' }, 2500)
+  })
+  eventSource.onerror = () => {
+    if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+      if (!streamingContent.value) messages.value.push({ role: 'assistant', content: '连接中断，请重试。' })
+      resetStream()
+      mode.value = 'ready'
+      busy.value = false
+      eventSource.close(); eventSource = null
+    }
+  }
+}
+
+function stop() {
+  if (eventSource) eventSource.close(); eventSource = null
+  // 同步取消后端处理
+  if (currentSessionId) {
+    fetch(`/agent/chat/cancel/${currentSessionId}`, { method: 'POST' }).catch(() => {})
+  }
+  stopSpeech()  // 取消 TTS 播报
+  if (listening.value) stopRecording()
+  busy.value = false
+  resetStream()
+  mode.value = 'ready'
+}
+// ---------------- 语音识别 ----------------
+function secureContextNote() {
+  if (!window.isSecureContext) {
+    return '语音需在 https:// 或 localhost 下使用，请用 http://localhost:8000 访问（当前为非安全上下文，浏览器不弹授权框）'
+  }
+  return ''
+}
+
+// ── 语音唤醒（纯本地：麦克风录音 → 本地 Whisper 识别 → 检测唤醒词，不依赖浏览器外部 STT） ──
+const wakeEnabled = ref(false)
+let _wakePending = false        // 本次录音是否处于「唤醒检测」模式
+let _wakeExistingRole = null     // 进入唤醒流程前的角色快照（便于仅切角色不打断对话）
+const WAKE_WORDS = ['贾维斯', '林妹妹', '妹妹', '唤醒']
+
+function toggleWake() {
+  if (wakeEnabled.value) { stopWake(); return }
+  const ctxNote = secureContextNote()
+  if (ctxNote) { streamingStatus.value = ctxNote; return }
+  if (!initSpeech()) return
+  wakeEnabled.value = true
+  _wakeExistingRole = currentRole.value
+  startWakeListening()
+  streamingStatus.value = '🔔 唤醒就绪：请喊「贾维斯 / 林妹妹」…'
+}
+
+function startWakeListening() {
+  _wakePending = true
+  speechBuffer = ''
+  toggleMic()
+}
+
+function stopWake() {
+  wakeEnabled.value = false
+  _wakePending = false
+  _wakeExistingRole = null
+  if (listening.value) stopRecording()
+  streamingStatus.value = ''
+}
+
+// 唤醒词识别结果处理：命中 → 切角色 + 进入正式聆听；未命中 → 提示重试
+function _handleWakeResult(text) {
+  _wakePending = false
+  wakeEnabled.value = false
+  if (!text || !text.trim()) {
+    streamingStatus.value = '😶 没听清，请再喊一次「贾维斯 / 林妹妹」'
+    return
+  }
+  const hit = WAKE_WORDS.find(w => text.includes(w))
+  if (!hit) {
+    streamingStatus.value = `未检测到唤醒词（听到「${text}」），请再喊「贾维斯 / 林妹妹」`
+    return
+  }
+  // 检测是否点了角色名 → 切角色
+  const roleHit = ROLES.find(r => text.includes(r.name))
+  if (roleHit && roleHit.id !== currentRole.value.id) {
+    switchRole(roleHit)
+    streamingStatus.value = `已切换到「${roleHit.name}」`
+  }
+  stopSpeech()
+  // 进入正式聆听（接着再录一段真正的问题）
+  input.value = ''
+  streamingStatus.value = '👂 在呢，请讲…'
+  startRecognition()
+}
+
+// ── 录音音量检测：静音自动结束 + 说话打断 TTS ──
+function _spVolLoop() {
+  if (!listening.value || !_mrAnalyser || !mediaRecRunning()) {
+    stopVolumeLoop()
+    return
+  }
+  const buf = new Float32Array(_mrAnalyser.fftSize)
+  _mrAnalyser.getFloatTimeDomainData(buf)
+  let sum = 0
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+  const rms = Math.sqrt(sum / buf.length)
+  // 说话打断 TTS：用户出声且 AI 正在播报 → 立刻停
+  if (rms > 0.06 && mode.value === 'speaking') stopSpeech()
+  // 静音累计（自动结束条件）
+  if (rms < 0.015) _mrSilentMs += 120
+  else { _mrSilentMs = 0; _speechHeard = true }
+  // 已捕捉到语音后静音 1.8s 自动结束（避免一开始就误停）
+  if (_speechHeard && _mrSilentMs >= 1800) { stopRecording(); return }
+  _mrRaf = requestAnimationFrame(_spVolLoop)
+}
+let _speechHeard = false
+function startVolumeLoop() {
+  _speechHeard = false
+  _mrSilentMs = 0
+  if (_mrRaf) cancelAnimationFrame(_mrRaf)
+  _mrRaf = requestAnimationFrame(_spVolLoop)
+}
+function stopVolumeLoop() {
+  if (_mrRaf) { cancelAnimationFrame(_mrRaf); _mrRaf = 0 }
+  _speechHeard = false
+}
+function mediaRecRunning() {
+  return _mr && _mr.state === 'recording'
+}
+
+// 录音结束后的转写处理：前端解码为 WAV PCM（避免后端 ffmpeg 依赖）
+async function _flushRecording() {
+  listening.value = false
+  mode.value = mode.value === 'listening' ? 'ready' : mode.value
+  stopVolumeLoop()
+  if (!_mrChunks.length) {
+    if (_wakePending) { _wakePending = false; wakeEnabled.value = false }
+    streamingStatus.value = ''
+    return
+  }
+  const blob = new Blob(_mrChunks, { type: _mrMime || 'audio/webm' })
+  _mrChunks = []
+  if (blob.size < 500) {
+    if (_wakePending) { _wakePending = false; wakeEnabled.value = false; streamingStatus.value = '😶 录音太短，请再喊一次「贾维斯 / 林妹妹」'; return }
+    streamingStatus.value = '⚡ 录音太短，请再说一次'
+    return
+  }
+  streamingStatus.value = '🔊 识别中…'
+  // 总超时保护：任何 await（解码/上传）卡死 12s 都强制结束，避免永远「识别中」
+  let settled = false
+  const finish = (msg) => {
+    if (settled) return
+    settled = true
+    if (msg) streamingStatus.value = msg
+    else streamingStatus.value = ''
+  }
+  const guard = setTimeout(() => finish('⏱️ 语音识别超时，请重试'), 12000)
+  try {
+    // 用 Web Audio API 解码 webm → 重采样为 16kHz 单声道 → 编码为 WAV（纯前端，无需 ffmpeg）
+    const ac = new (window.AudioContext || window.webkitAudioContext)()
+    const arrayBuffer = await blob.arrayBuffer()
+    let audioBuffer
+    try {
+      audioBuffer = await ac.decodeAudioData(arrayBuffer)
+    } catch (decodeErr) {
+      // 解码失败（某些浏览器/编码不兼容）：给出明确提示而不是卡死不返回
+      clearTimeout(guard)
+      if (_wakePending) { _wakePending = false; wakeEnabled.value = false }
+      finish('⚠️ 音频解码失败，请改用 Chrome/Edge 或重试')
+      try { ac.close() } catch (e) {}
+      return
+    }
+    try { ac.close() } catch (e) {}
+    // 混音到单声道 + 重采样到 16kHz
+    const srcRate = audioBuffer.sampleRate
+    const numChannels = audioBuffer.numberOfChannels
+    const targetRate = 16000
+    const srcLen = audioBuffer.length
+    const targetLen = Math.round(srcLen * targetRate / srcRate)
+    // 混音到单声道
+    const mono = new Float32Array(srcLen)
+    if (numChannels === 1) {
+      mono.set(audioBuffer.getChannelData(0))
+    } else {
+      for (let c = 0; c < numChannels; c++) {
+        const ch = audioBuffer.getChannelData(c)
+        for (let i = 0; i < srcLen; i++) mono[i] += ch[i] / numChannels
+      }
+    }
+    // 线性插值重采样到 16kHz
+    const resampled = new Float32Array(targetLen)
+    for (let i = 0; i < targetLen; i++) {
+      const pos = i * srcRate / targetRate
+      const idx = Math.floor(pos)
+      const frac = pos - idx
+      if (idx + 1 < srcLen) {
+        resampled[i] = mono[idx] * (1 - frac) + mono[idx + 1] * frac
+      } else {
+        resampled[i] = mono[Math.min(idx, srcLen - 1)]
+      }
+    }
+    // 编码为 WAV（16bit 单声道）
+    const wavBuffer = _encodeWav(resampled, targetRate)
+    const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' })
+    // base64
+    const b64 = await new Promise((resolve, reject) => {
+      const fr = new FileReader()
+      fr.onload = () => resolve(String(fr.result).split(',')[1] || '')
+      fr.onerror = reject
+      fr.readAsDataURL(wavBlob)
+    })
+    const resp = await request.post('/agent/voice/transcribe', { audio_base64: b64, format: 'wav' })
+    clearTimeout(guard)
+    const text = (resp && resp.text || '').trim()
+    // 唤醒模式：识别结果用于检测唤醒词，不填输入框、不直接提交
+    if (_wakePending) { finish(''); _handleWakeResult(text); return }
+    if (!text) { finish(''); return }
+    input.value = text
+    finish('')
+    submitSpeechIfIntent(text)
+  } catch (e) {
+    clearTimeout(guard)
+    if (_wakePending) { _wakePending = false; wakeEnabled.value = false }
+    finish('语音识别失败：' + (e && e.message ? e.message : '请检查后端语音服务'))
+  }
+}
+
+function _encodeWav(samples, sampleRate) {
+  const numChannels = 1
+  const bitsPerSample = 16
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8
+  const blockAlign = numChannels * bitsPerSample / 8
+  const dataSize = samples.length * numChannels * bitsPerSample / 8
+  const buf = new ArrayBuffer(44 + dataSize)
+  const v = new DataView(buf)
+  const s = (str, off) => { for (let i = 0; i < str.length; i++) v.setUint8(off + i, str.charCodeAt(i)) }
+  s('RIFF', 0); v.setUint32(4, 36 + dataSize, true); s('WAVE', 8)
+  s('fmt ', 12); v.setUint32(16, 16, true); v.setUint16(20, 1, true)
+  v.setUint16(22, numChannels, true); v.setUint32(24, sampleRate, true)
+  v.setUint32(28, byteRate, true); v.setUint16(32, blockAlign, true)
+  v.setUint16(34, bitsPerSample, true); s('data', 36)
+  v.setUint32(40, dataSize, true)
+  let off = 44
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
+    off += 2
+  }
+  return buf
+}
+
+// ── 初始化：探测录音能力（不再依赖浏览器 SpeechRecognition） ──
+function initSpeech() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+    listening.value = false
+    streamingStatus.value = secureContextNote() || '当前浏览器不支持录音/语音识别（请用 Chrome/Edge/Safari 最新版通过 http://localhost 或 https 访问）'
+    return false
+  }
+  return true
+}
+
+function stopRecording() {
+  if (_mrTimeout) { clearTimeout(_mrTimeout); _mrTimeout = 0 }
+  if (_mr && _mr.state === 'recording') { try { _mr.stop() } catch (e) {} }
+}
+
+function startRecording(stream) {
+  _mrStream = stream
+  _mrChunks = []
+  // 选浏览器支持的 mime（Chrome=webm, Safari=mp4, Firefox=ogg）
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+  _mrMime = candidates.find(m => window.MediaRecorder.isTypeSupported(m)) || ''
+  try {
+    _mr = new MediaRecorder(stream, _mrMime ? { mimeType: _mrMime } : undefined)
+  } catch (e) {
+    _mr = new MediaRecorder(stream)
+    _mrMime = ''
+  }
+  _mr.ondataavailable = (e) => { if (e.data && e.data.size) _mrChunks.push(e.data) }
+  _mr.onstop = () => {
+    // 释放麦克风流
+    if (_mrStream) { _mrStream.getTracks().forEach(t => t.stop()); _mrStream = null }
+    _flushRecording()
+  }
+  _mr.onerror = () => {
+    listening.value = false
+    mode.value = mode.value === 'listening' ? 'ready' : mode.value
+    stopVolumeLoop()
+    streamingStatus.value = '录音出错，请重试'
+  }
+  _mr.start()
+  listening.value = true
+  mode.value = 'listening'
+  streamingStatus.value = '🎙️ 聆听中…'
+  // 最大录音时长兜底：15s 无论如何都强制结束，避免无限「聆听中」
+  if (_mrTimeout) { clearTimeout(_mrTimeout); _mrTimeout = 0 }
+  _mrTimeout = setTimeout(() => {
+    _mrTimeout = 0
+    if (_mr && _mr.state === 'recording') { try { _mr.stop() } catch (e) {} }
+  }, 15000)
+  _startMicAnalyser(stream)
+  startVolumeLoop()
+}
+
+// 音量分析器（供静音检测 + 打断 TTS 使用）
+function _startMicAnalyser(stream) {
+  _cleanMicAnalyser()
+  if (!(_mrCtx || window.AudioContext || window.webkitAudioContext)) return
+  try {
+    const AC = _mrCtx || new (window.AudioContext || window.webkitAudioContext)()
+    _mrCtx = AC
+    const src = AC.createMediaStreamSource(stream)
+    _mrAnalyser = AC.createAnalyser()
+    _mrAnalyser.fftSize = 1024
+    _mrAnalyser.smoothingTimeConstant = 0.4
+    src.connect(_mrAnalyser)
+  } catch (e) { _mrAnalyser = null }
+}
+function _cleanMicAnalyser() {
+  if (_mrCtx && _mrCtx.state !== 'closed') { try { _mrCtx.close() } catch (e) {} }
+  _mrCtx = null
+  _mrAnalyser = null
+}
+
+function toggleMic() {
+  if (listening.value) { stopRecording(); return }
+  if (!initSpeech()) return
+  const ctxNote = secureContextNote()
+  if (ctxNote) { streamingStatus.value = ctxNote; return }
+  speechBuffer = ''
+  input.value = ''
+  streamingStatus.value = '🎙️ 请求麦克风…'
+  navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    startRecording(stream)
+  }).catch((err) => {
+    const name = err && err.name
+    const map = {
+      NotAllowedError: '麦克风权限被拒绝：请点地址栏🔒 → 允许麦克风，或检查 Windows 隐私设置里的麦克风，然后重试',
+      NotFoundError: '未检测到可用麦克风设备，请检查系统麦克风',
+      NotReadableError: '麦克风被其他应用占用或无法访问，请关闭占用后再试',
+      SecurityError: '非安全上下文：请用 http://localhost 访问或配置 HTTPS',
+    }
+    streamingStatus.value = map[name] || `无法获取麦克风（${name || '未知错误'}）`
+  })
+}
+
+function startRecognition() {
+  if (listening.value) return
+  toggleMic()
+}
+
+function submitSpeechIfIntent(text) {
+  const stopWords = ['停止', '取消', '关闭', '再见', '没事了']
+  if (stopWords.includes(text)) return
+  if (text.length < 2) return
+  submit(text)
+}
+
+function scrollDlg() { nextTick(() => { if (dlgBody.value) dlgBody.value.scrollTop = dlgBody.value.scrollHeight }) }
+
+// ===================================================================
+// 主脑 Canvas — 三态拟人化视觉系统（v2 重制版）
+// 三大核心状态：IDLE 星云蛰伏 | WORKING 思维风暴 | SPEAKING 智慧辐射
+// ===================================================================
+const brainCanvas = ref(null)
+let ctx = null
+let raf = 0
+let W = 0, H = 0
+let coreNodes = []
+let particles = []
+const CORE_R = 120
+const NODE_COUNT = 110
+const LINK_DIST = 170
+let phaseTime = 0
+let _speakingBeat = 0  // 说话节奏相位
+
+// ──────── Fibonacci 球面均匀分布 ────────
+function fibSphere(n) {
+  const pts = []
+  const ga = Math.PI * (3 - Math.sqrt(5))
+  for (let i = 0; i < n; i++) {
+    let yy = 1 - (i / (n - 1)) * 2
+    let rr = Math.sqrt(1 - yy * yy)
+    let th = ga * i
+    pts.push({ x: Math.cos(th) * rr, y: yy, z: Math.sin(th) * rr })
+  }
+  return pts
+}
+
+// ──────── 初始化 ────────
+function initBrain() {
+  const canvas = brainCanvas.value
+  if (!canvas) return
+  ctx = canvas.getContext('2d')
+  resizeCanvas()
+  coreNodes = fibSphere(NODE_COUNT).map(p => ({ ...p, r: 1 + Math.random() * 1.6, ph: Math.random() * Math.PI * 2 }))
+  // 用 3D 距离筛选近邻连接，让连线更真实
+  const segSet = new Set()
+  for (let i = 0; i < NODE_COUNT; i++) {
+    const dists = coreNodes.map((n, j) => ({ j, d: Math.hypot(n.x - coreNodes[i].x, n.y - coreNodes[i].y, n.z - coreNodes[i].z) }))
+    dists.sort((a, b) => a.d - b.d)
+    for (let k = 1; k <= 3; k++) {
+      if (dists[k].d < 1.8) {
+        const key = Math.min(i, dists[k].j) + '-' + Math.max(i, dists[k].j)
+        segSet.add(key)
+      }
+    }
+  }
+  segments = Array.from(segSet).map(s => {
+    const [a, b] = s.split('-').map(Number)
+    return { a, b }
+  })
+  // 粒子：按模式初始化
+  rebuildParticles(mode.value || 'ready')
+  window.addEventListener('resize', resizeCanvas)
+  tick()
+}
+let segments = []
+
+// ──────── Canvas 尺寸适配 ────────
+function resizeCanvas() {
+  const r = brainCanvas.value.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  W = r.width; H = r.height
+  brainCanvas.value.width = W * dpr
+  brainCanvas.value.height = H * dpr
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  brainCanvas.value.style.width = W + 'px'
+  brainCanvas.value.style.height = H + 'px'
+}
+
+// ──────── 模式配色 ────────
+function accent() {
+  const dark = appStore.theme === 'dark'
+  if (mode.value === 'working') return dark ? '#f59e0b' : '#d97706'
+  if (mode.value === 'error') return dark ? '#ff493e' : '#dc2626'
+  if (appStore.skin === 'taste') return dark ? '#f15f79' : '#c84e89'
+  if (appStore.skin === 'frost') return dark ? '#22d3ee' : '#06b6d4'
+  if (appStore.skin === 'nebula') return dark ? '#a78bfa' : '#7c3aed'
+  return dark ? '#20c7ff' : '#4f46e5'
+}
+function rgb() {
+  const dark = appStore.theme === 'dark'
+  if (mode.value === 'working') return dark ? '245,158,11' : '217,119,6'
+  if (mode.value === 'error') return dark ? '255,73,62' : '220,38,38'
+  if (appStore.skin === 'taste') return dark ? '241,95,121' : '200,78,137'
+  if (appStore.skin === 'frost') return dark ? '34,211,238' : '6,182,212'
+  if (appStore.skin === 'nebula') return dark ? '167,139,250' : '124,58,237'
+  return dark ? '32,199,255' : '79,70,229'
+}
+
+// ──────── 粒子生成器（三态不同） ────────
+function spawnParticle() {
+  const mk = modeKey()
+  // 根据模式决定粒子形态
+  if (mk === 'working') return spawnWorkParticle()
+  if (mk === 'speaking') return spawnSpeakParticle()
+  return spawnIdleParticle()
+}
+
+// IDLE 模式：环状星云粒子
+function spawnIdleParticle() {
+  const angle = Math.random() * Math.PI * 2
+  const ringR = 90 + Math.random() * 120          // 主环半径
+  const tubeR = 20 + Math.random() * 30            // 环管半径
+  const tubeAngle = Math.random() * Math.PI * 2
+  const x = Math.cos(angle) * (ringR + tubeR * Math.cos(tubeAngle))
+  const y = Math.sin(angle) * (ringR + tubeR * Math.sin(tubeAngle))
+  return {
+    // 环上位置
+    ringAngle: angle, ringR, tubeAngle, tubeR,
+    // 当前屏幕位置
+    px: W/2 + x, py: H/2 + y,
+    size: 0.8 + Math.random() * 2.2,
+    sp: 0.2 + Math.random() * 0.4,       // 旋转速度
+    ph: Math.random() * Math.PI * 2,
+    // 环内偏移抖动
+    driftX: (Math.random() - .5) * 0.3,
+    driftY: (Math.random() - .5) * 0.3,
+    // 亮度
+    bright: 0.3 + Math.random() * 0.7,
+    trail: [],
+    // 类型标记
+    _type: 'idle',
+  }
+}
+
+// WORKING 模式：数据流粒子
+function spawnWorkParticle() {
+  const angle = Math.random() * Math.PI * 2
+  const distFromCenter = 80 + Math.random() * (Math.max(W, H) * 0.5)
+  return {
+    angle,        // 从哪个方向流入
+    dist: distFromCenter,
+    px: W/2 + Math.cos(angle) * distFromCenter,
+    py: H/2 + Math.sin(angle) * distFromCenter,
+    size: 0.5 + Math.random() * 3.5,
+    sp: 0.4 + Math.random() * 1.6,       // 流入速度
+    ph: Math.random() * Math.PI * 2,
+    vx: 0, vy: 0,
+    bright: 0.4 + Math.random() * 0.6,
+    trail: [],
+    // 闪烁
+    flicker: Math.random() * Math.PI * 2,
+    _type: 'work',
+    _life: 0.6 + Math.random() * 0.4,     // 生存期，到核心后重生
+  }
+}
+
+// SPEAKING 模式：辐射粒子
+function spawnSpeakParticle() {
+  const angle = Math.random() * Math.PI * 2
+  const speed = 0.5 + Math.random() * 2.5
+  return {
+    px: W/2, py: H/2,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    size: 0.8 + Math.random() * 2.5,
+    sp: speed,
+    ph: Math.random() * Math.PI * 2,
+    bright: 0.6 + Math.random() * 0.4,
+    trail: [],
+    _type: 'speak',
+    _life: 1.0,                          // 从 1 衰减到 0
+    _decay: 0.003 + Math.random() * 0.007,
+  }
+}
+
+// ERROR 模式：混乱爆炸粒子
+function spawnErrorParticle() {
+  const angle = Math.random() * Math.PI * 2
+  return {
+    px: W/2 + Math.cos(angle) * (10 + Math.random() * 40),
+    py: H/2 + Math.sin(angle) * (10 + Math.random() * 40),
+    vx: Math.cos(angle) * (1 + Math.random() * 4),
+    vy: Math.sin(angle) * (1 + Math.random() * 4),
+    size: 0.5 + Math.random() * 3,
+    sp: 0,
+    ph: Math.random() * Math.PI * 2,
+    bright: 0.5 + Math.random() * 0.5,
+    trail: [],
+    _type: 'error',
+    _life: 1.0,
+    _decay: 0.005 + Math.random() * 0.015,
+  }
+}
+
+// 按模式重建粒子池
+function rebuildParticles(newMode) {
+  const count = newMode === 'working' ? 650 : newMode === 'speaking' ? 420 : newMode === 'error' ? 260 : 260
+  const fn = newMode === 'working' ? spawnWorkParticle : newMode === 'speaking' ? spawnSpeakParticle : newMode === 'error' ? spawnErrorParticle : spawnIdleParticle
+  particles = Array.from({ length: count }, () => fn())
+}
+
+// ──────── 三态参数配置 ────────
+const MODE_PARTICLE = {
+  ready:     { breatheMul: 0.6,  glow: 0.55,  envTint: '80,160,255',  coreSpd: 0.25, armSpd: 0.8,  linkMul: 0.8,  trail: 0.0 },
+  listening: { breatheMul: 0.8,  glow: 0.60,  envTint: '100,180,255', coreSpd: 0.30, armSpd: 0.9,  linkMul: 0.8,  trail: 0.0 },
+  working:   { breatheMul: 1.8,  glow: 0.85,  envTint: '255,155,47',  coreSpd: 0.80, armSpd: 3.6,  linkMul: 2.0,  trail: 0.5 },
+  speaking:  { breatheMul: 2.0,  glow: 0.75,  envTint: '32,199,255',  coreSpd: 0.40, armSpd: 2.0,  linkMul: 1.4,  trail: 0.6 },
+  error:     { breatheMul: 1.5,  glow: 0.90,  envTint: '255,73,62',   coreSpd: 0.70, armSpd: 2.8,  linkMul: 2.2,  trail: 0.0 },
+}
+
+// 声波环 & 特效状态
+const EMIT_RINGS = []
+const FX = {
+  flash: 0, burst: 0, shockwaves: [], lightning: [], shake: 0,
+  dataSparks: [],   // 工作模式火花
+  glowRays: 0,      // 说话模式光束强度
+}
+let _lastMode = 'ready'
+// (保留 _lastMode 用于调试；当前渲染直接读 mode.value)
+
+// ──────── 模式切换视觉爆发 ────────
+function onModeChange(newMode, oldMode) {
+  if (newMode === oldMode) return
+  const cx = W / 2, cy = H / 2
+  // 重建粒子池
+  rebuildParticles(newMode)
+  // 闪白
+  FX.flash = newMode === 'error' ? 1.4 : newMode === 'working' ? 0.8 : newMode === 'speaking' ? 0.5 : 0.3
+  FX.burst = 1.6
+  // 冲击波
+  const shockSpeed = newMode === 'error' ? 20 : newMode === 'working' ? 14 : newMode === 'speaking' ? 12 : 6
+  const shockWidth = newMode === 'error' ? 7 : newMode === 'working' ? 5 : 4
+  for (let i = 0; i < 4; i++) {
+    setTimeout(() => {
+      FX.shockwaves.push({ r: 10, alpha: 0.9 + Math.random() * 0.1, speed: shockSpeed + Math.random() * 4, width: shockWidth })
+    }, i * 60)
+  }
+  // 震动
+  FX.shake = newMode === 'error' ? 28 : newMode === 'working' ? 14 : newMode === 'speaking' ? 6 : 3
+  // 闪电
+  if (newMode === 'working' || newMode === 'speaking') {
+    for (let i = 0; i < 6; i++) {
+      setTimeout(() => FX.lightning.push(makeLightning(cx, cy)), i * 50)
+    }
+  }
+  // 说话模式光束
+  if (newMode === 'speaking') FX.glowRays = 1.0
+  _lastMode = newMode
+}
+
+watch(mode, (nv, ov) => onModeChange(nv, ov))
+
+function modeKey() {
+  const m = mode.value
+  if (MODE_PARTICLE[m]) return m
+  return 'ready'
+}
+
+// ──────── 闪电发生器 ────────
+function makeLightning(cx, cy) {
+  const pts = [{ x: cx, y: cy }]
+  const segs = 5 + Math.floor(Math.random() * 5)
+  const angle = Math.random() * Math.PI * 2
+  let px = cx + Math.cos(angle) * 25, py = cy + Math.sin(angle) * 25
+  pts.push({ x: px, y: py })
+  for (let i = 0; i < segs; i++) {
+    const a = angle + (Math.random() - .5) * 1.4
+    const len = 35 + Math.random() * 80
+    px += Math.cos(a) * len
+    py += Math.sin(a) * len
+    pts.push({ x: px, y: py })
+  }
+  return { points: pts, alpha: 0.9, life: 1 }
+}
+
+// ──────── HUD 多层同心环（Jarvis 风格 v4：霓虹发光 + 大尺寸） ────────
+let _speakingScale = 0  // 说话脉冲系数 0~1，平滑过渡
+function drawOrbits(cx, cy) {
+  const c = rgb()
+  const mk = modeKey()
+  const isWork = mk === 'working'
+  const isSpeak = mk === 'speaking'
+  const isErr = mk === 'error'
+  // 音频电平驱动：说话时 _audioLevel 实时驱动脉冲，非说话时平滑衰减
+  const targetSS = isSpeak ? Math.min(1, _audioLevel * 3.5 + 0.15) : isWork ? 0.3 : 0
+  _speakingScale += (targetSS - _speakingScale) * 0.08
+  const ss = _speakingScale
+  const pulse = 0.5 + 0.5 * Math.sin(phaseTime * 2.5)
+  const spdMul = isWork ? 2.0 : isSpeak ? 1.5 : isErr ? 0.5 : 0.8
+
+  ctx.save()
+  // 统一霓虹发光设定
+  const glowA = 14 + ss * 18
+  // ── 第1层：外刻度环（60 刻度 + 12 大刻度 + 外发光圈） ──
+  const r1 = Math.min(W, H) * 0.46
+  const r1s = r1 + ss * 10  // 说话时略微扩大
+  // 外发光圈
+  ctx.save()
+  ctx.strokeStyle = `rgba(${c},${0.28 + ss * 0.3})`
+  ctx.lineWidth = 10 + ss * 6
+  ctx.shadowColor = `rgba(${c},0.9)`
+  ctx.shadowBlur = glowA * 2
+  ctx.beginPath()
+  ctx.arc(cx, cy, r1s, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+  // 主环
+  ctx.strokeStyle = `rgba(${c},${0.55 + ss * 0.35})`
+  ctx.lineWidth = 3
+  ctx.shadowColor = `rgba(${c},0.95)`
+  ctx.shadowBlur = glowA
+  ctx.beginPath()
+  ctx.arc(cx, cy, r1s, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.shadowBlur = 0
+  // 60 个小刻度
+  for (let i = 0; i < 60; i++) {
+    const angle = (i / 60) * Math.PI * 2 + phaseTime * 0.15 * spdMul
+    const isMajor = i % 5 === 0
+    const innerR = r1s - (isMajor ? 16 : 8)
+    const outerR = r1s - 1
+    ctx.strokeStyle = `rgba(${c},${isMajor ? 0.95 + ss * 0.05 : 0.45 + ss * 0.3})`
+    ctx.lineWidth = isMajor ? 3.5 : 1.6
+    ctx.shadowColor = `rgba(${c},0.9)`
+    ctx.shadowBlur = isMajor ? glowA : 6
+    ctx.beginPath()
+    ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR)
+    ctx.lineTo(cx + Math.cos(angle) * outerR, cy + Math.sin(angle) * outerR)
+    ctx.stroke()
+  }
+  ctx.shadowBlur = 0
+
+  // ── 第2层：弧段层（8 段弧 × 3 圈） ──
+  const arcR1 = r1s * 0.85, arcR2 = r1s * 0.78, arcR3 = r1s * 0.70
+  const arcRot = phaseTime * 0.2 * spdMul
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + arcRot
+    const arcLen = Math.PI / 12
+    ctx.strokeStyle = `rgba(${c},${0.55 + ss * 0.35})`
+    ctx.lineWidth = 4.5 + ss * 2.5
+    ctx.shadowColor = `rgba(${c},0.9)`
+    ctx.shadowBlur = glowA
+    ctx.beginPath()
+    ctx.arc(cx, cy, arcR1, angle, angle + arcLen)
+    ctx.stroke()
+  }
+  ctx.shadowBlur = 0
+  for (let i = 0; i < 16; i++) {
+    const angle = (i / 16) * Math.PI * 2 - arcRot * 0.5
+    const arcLen = Math.PI / 20
+    ctx.strokeStyle = `rgba(${c},${0.5 + ss * 0.35})`
+    ctx.lineWidth = 3 + ss * 2
+    ctx.shadowColor = `rgba(${c},0.85)`
+    ctx.shadowBlur = glowA * 0.8
+    ctx.beginPath()
+    ctx.arc(cx, cy, arcR2, angle, angle + arcLen)
+    ctx.stroke()
+  }
+  ctx.shadowBlur = 0
+  for (let i = 0; i < 24; i++) {
+    const angle = (i / 24) * Math.PI * 2 + arcRot * 0.3
+    const arcLen = Math.PI / 30
+    ctx.strokeStyle = `rgba(${c},${0.45 + ss * 0.35})`
+    ctx.lineWidth = 2.2 + ss * 1.5
+    ctx.shadowColor = `rgba(${c},0.8)`
+    ctx.shadowBlur = glowA * 0.6
+    ctx.beginPath()
+    ctx.arc(cx, cy, arcR3, angle, angle + arcLen)
+    ctx.stroke()
+  }
+  ctx.shadowBlur = 0
+
+  // ── 第3层：数据环（36 刻度 + 12 跳动数据点） ──
+  const dataR = r1s * 0.58
+  ctx.strokeStyle = `rgba(${c},${0.45 + ss * 0.3})`
+  ctx.lineWidth = 2
+  ctx.shadowColor = `rgba(${c},0.85)`
+  ctx.shadowBlur = glowA * 0.8
+  ctx.beginPath()
+  ctx.arc(cx, cy, dataR, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.shadowBlur = 0
+  const dataRot = phaseTime * 0.3 * spdMul
+  for (let i = 0; i < 36; i++) {
+    const angle = (i / 36) * Math.PI * 2 + dataRot
+    const innerR = dataR - 6
+    ctx.strokeStyle = `rgba(${c},${0.5 + ss * 0.3})`
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR)
+    ctx.lineTo(cx + Math.cos(angle) * dataR, cy + Math.sin(angle) * dataR)
+    ctx.stroke()
+  }
+  // 12 个跳动数据点（音频频率驱动）
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2 + dataRot
+    const dotR = dataR - 14
+    // 音频频率驱动：每个数据点对应一个频率段
+    const freqIdx = Math.floor(i * _audioFreqs.length / 12)
+    const freqVal = _audioFreqs[freqIdx] || 0
+    const bri = freqVal * 0.8 + 0.2 + 0.15 * Math.sin(dataRot * 3 + i * 2.5 + phaseTime * 2)
+    const dotSize = 3 + bri * 6 + ss * 2.5
+    const freqColor = isSpeak ? `255,${Math.floor(200 - bri * 100)},${Math.floor(200 - bri * 80)}` : c
+    ctx.fillStyle = `rgba(${freqColor},${0.5 + bri * 0.5})`
+    ctx.shadowColor = `rgba(${freqColor},0.95)`
+    ctx.shadowBlur = 12 + bri * 14
+    ctx.beginPath()
+    ctx.arc(cx + Math.cos(angle) * dotR, cy + Math.sin(angle) * dotR, dotSize, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.shadowBlur = 0
+
+  // ── 第4层：内环（V 形标记 + 角点） ──
+  const innerR = r1s * 0.38
+  ctx.strokeStyle = `rgba(${c},${0.55 + ss * 0.35})`
+  ctx.lineWidth = 3.5
+  ctx.shadowColor = `rgba(${c},0.9)`
+  ctx.shadowBlur = glowA
+  ctx.beginPath()
+  ctx.arc(cx, cy, innerR, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.shadowBlur = 0
+  // 内第二环
+  ctx.strokeStyle = `rgba(${c},${0.35 + ss * 0.3})`
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(cx, cy, innerR * 0.85, 0, Math.PI * 2)
+  ctx.stroke()
+  // 8 个 V 形标记
+  const vRot = phaseTime * 0.5 * spdMul
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + vRot
+    const vR = innerR * 0.7
+    const vSize = 9 + ss * 4
+    const perp = angle + Math.PI / 2
+    const vx = cx + Math.cos(angle) * vR
+    const vy = cy + Math.sin(angle) * vR
+    ctx.strokeStyle = `rgba(${c},${0.65 + ss * 0.3})`
+    ctx.lineWidth = 2.5 + ss * 1.2
+    ctx.shadowColor = `rgba(${c},0.9)`
+    ctx.shadowBlur = glowA * 0.8
+    ctx.beginPath()
+    ctx.moveTo(vx + Math.cos(perp) * vSize, vy + Math.sin(perp) * vSize)
+    ctx.lineTo(vx, vy)
+    ctx.lineTo(vx - Math.cos(perp) * vSize, vy - Math.sin(perp) * vSize)
+    ctx.stroke()
+  }
+  ctx.shadowBlur = 0
+  // 4 个角点
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2 + vRot * 0.5
+    const dR = innerR * 1.15
+    const ds = 4.5 + ss * 2.5
+    ctx.fillStyle = `rgba(${c},${0.7 + ss * 0.3})`
+    ctx.shadowColor = `rgba(${c},1)`
+    ctx.shadowBlur = 14
+    ctx.beginPath()
+    ctx.arc(cx + Math.cos(angle) * dR, cy + Math.sin(angle) * dR, ds, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.shadowBlur = 0
+
+  // ── 第5层：中心核心辉光（说话时扩大） ──
+  const coreR = r1s * 0.16
+  const glowR = coreR * (1.9 + ss * 0.9)
+  const glowA2 = 0.3 + ss * 0.3 + pulse * 0.1
+  const cg = ctx.createRadialGradient(cx, cy, 2, cx, cy, glowR)
+  cg.addColorStop(0, `rgba(${c},${glowA2})`)
+  cg.addColorStop(0.5, `rgba(${c},${glowA2 * 0.4})`)
+  cg.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = cg
+  ctx.beginPath()
+  ctx.arc(cx, cy, glowR, 0, Math.PI * 2)
+  ctx.fill()
+  // 核心发光环
+  ctx.strokeStyle = `rgba(${c},${0.8 + ss * 0.2})`
+  ctx.lineWidth = 2.5 + ss * 1.5
+  ctx.shadowColor = `rgba(${c},1)`
+  ctx.shadowBlur = glowA * 1.6
+  ctx.beginPath()
+  ctx.arc(cx, cy, coreR, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.shadowBlur = 0
+
+  // ── 中心文字 ZHIYUAN ──
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const tGlow = 0.75 + ss * 0.25
+  ctx.fillStyle = `rgba(255,255,255,${tGlow})`
+  ctx.shadowColor = `rgba(${c},1)`
+  ctx.shadowBlur = 18 + ss * 12
+  ctx.font = `700 ${Math.round(15 + ss * 3)}px ui-monospace, Consolas, 'Microsoft YaHei', monospace`
+  ctx.fillText('ZHIYUAN', cx, cy - coreR * 0.55)
+  ctx.fillStyle = `rgba(${c},${0.65 + ss * 0.3})`
+  ctx.shadowBlur = 10
+  ctx.font = `600 ${Math.round(9 + ss * 2)}px ui-monospace, Consolas, monospace`
+  ctx.fillText('CORE 0x7F', cx, cy + coreR * 0.75)
+  ctx.restore()
+
+  ctx.restore()
+}
+
+// ──────── 主渲染循环 ────────
+// 背景星点（预生成，闪烁）
+let bgStars = null
+function initBgStars() {
+  if (bgStars) return
+  bgStars = Array.from({ length: 160 }, () => ({
+    x: Math.random(), y: Math.random(),
+    r: 0.4 + Math.random() * 1.4,
+    tw: Math.random() * Math.PI * 2,
+    spd: 0.4 + Math.random() * 1.2,
+  }))
+}
+function drawBackground(cx, cy) {
+  initBgStars()
+  const c = rgb()
+  const dark = appStore.theme === 'dark'
+  // 深空渐变底
+  const bg = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.max(W, H) * 0.75)
+  bg.addColorStop(0, `rgba(${c},${dark ? 0.10 : 0.06})`)
+  bg.addColorStop(0.55, 'rgba(0,0,0,0)')
+  bg.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, W, H)
+  // 星空
+  for (const s of bgStars) {
+    const twinkle = 0.35 + 0.65 * Math.abs(Math.sin(phaseTime * s.spd + s.tw))
+    ctx.fillStyle = `rgba(${c},${twinkle * (dark ? 0.5 : 0.28)})`
+    ctx.beginPath()
+    ctx.arc(s.x * W, s.y * H, s.r * (dark ? 1.2 : 0.9), 0, Math.PI * 2)
+    ctx.fill()
+  }
+  // 极细网格（全息感）
+  ctx.save()
+  ctx.strokeStyle = `rgba(${c},${dark ? 0.05 : 0.04})`
+  ctx.lineWidth = 0.5
+  const gridGap = 56
+  for (let x = (cx % gridGap); x < W; x += gridGap) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke()
+  }
+  for (let y = (cy % gridGap); y < H; y += gridGap) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
+  }
+  ctx.restore()
+}
+
+// 雷达扫描光束（Jarvis 风格）
+function drawScanBeam(cx, cy) {
+  const c = rgb()
+  const mk = modeKey()
+  const r = Math.min(W, H) * 0.47
+  const ang = phaseTime * (mk === 'working' ? 1.6 : 0.7)
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.rotate(ang)
+  const g = ctx.createConicGradient ? ctx.createConicGradient(0, 0, 0) : null
+  if (g) {
+    g.addColorStop(0, `rgba(${c},0.28)`)
+    g.addColorStop(0.06, `rgba(${c},0.06)`)
+    g.addColorStop(0.12, 'rgba(0,0,0,0)')
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.moveTo(0, 0)
+    ctx.arc(0, 0, r, 0, Math.PI * 2)
+    ctx.closePath()
+    ctx.fill()
+  }
+  // 扫描线
+  ctx.strokeStyle = `rgba(${c},0.4)`
+  ctx.lineWidth = 2
+  ctx.shadowColor = `rgba(${c},0.9)`
+  ctx.shadowBlur = 16
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.lineTo(r, 0)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawBrain() {
+  if (!ctx) return
+  ctx.clearRect(0, 0, W, H)
+  const mk = modeKey()
+  const mp = MODE_PARTICLE[mk]
+  const breatheMul = mp.breatheMul
+
+  // 屏幕震动
+  let ox = 0, oy = 0
+  if (FX.shake > 0.2) {
+    ox = (Math.random() - .5) * FX.shake
+    oy = (Math.random() - .5) * FX.shake
+    FX.shake *= 0.85
+  }
+  const cx = W / 2 + ox
+  const cy = H / 2 + oy
+  const c = rgb()
+  const R = CORE_R
+
+  // ── 背景：星空 + 网格 + 雷达扫描 ──
+  drawBackground(cx, cy)
+  drawScanBeam(cx, cy)
+
+  // ── 核心呼吸 + 爆发 ──
+  const burstBoost = 1 + FX.burst * 0.6
+  const breathe = (1 + Math.sin(phaseTime * (1.4 * breatheMul)) * 0.035) * burstBoost
+  const cr = R * breathe
+  FX.burst *= 0.88
+
+  // ── 外发光（三态不同强度 + 说话脉冲） ──
+  const glowIntensity = mp.glow * (1 + _speakingScale * 0.6) * (mk === 'working' ? 1.0 : mk === 'speaking' ? 0.85 : mk === 'error' ? 1.1 : 0.6)
+  const glowRadius = (mk === 'working' ? 3.2 : mk === 'speaking' ? 2.8 : mk === 'error' ? 3.0 : 2.2) + _speakingScale * 0.5
+  const glow = ctx.createRadialGradient(cx, cy, cr * 0.3, cx, cy, cr * glowRadius)
+  glow.addColorStop(0, `rgba(${c},${glowIntensity})`)
+  glow.addColorStop(0.5, `rgba(${c},${glowIntensity * 0.2})`)
+  glow.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, W, H)
+
+  // ── 轨道环 ──
+  drawOrbits(cx, cy)
+
+  // ── 神经网络连线 ──
+  const linkAlphaMul = mp.linkMul
+  ctx.lineWidth = mk === 'working' ? 1.1 : 0.7
+  ctx.shadowColor = `rgba(${c},0.6)`
+  ctx.shadowBlur = 4
+  for (const seg of segments) {
+    const a = coreNodes[seg.a], b = coreNodes[seg.b]
+    const ax = cx + a.x * cr, ay = cy + a.y * cr
+    const bx = cx + b.x * cr, by = cy + b.y * cr
+    const dist = Math.hypot(ax - bx, ay - by)
+    if (dist < LINK_DIST) {
+      const alpha = (1 - dist / LINK_DIST) * 0.32 * linkAlphaMul
+      if (alpha > 0.01) {
+        ctx.strokeStyle = `rgba(${c},${Math.min(alpha, 0.85)})`
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
+      }
+    }
+  }
+  ctx.shadowBlur = 0
+
+  // ── 3D 节点投影 ──
+  const rotSpeed = mp.coreSpd
+  const rotY = phaseTime * rotSpeed
+  const rotX = Math.sin(phaseTime * 0.25 * (mk === 'working' ? 1.8 : 1)) * 0.6
+  const cos = Math.cos, sin = Math.sin
+  const projected = coreNodes.map(n => {
+    const c1 = cos(rotY), s1 = sin(rotY)
+    let x = n.x * c1 - n.z * s1
+    let z = n.x * s1 + n.z * c1
+    const c2 = cos(rotX), s2 = sin(rotX)
+    let y = n.y * c2 - z * s2
+    z = n.y * s2 + z * c2
+    const persp = 1 + z * 0.6
+    return { x: cx + x * cr, y: cy + y * cr, z, persp, r: n.r * persp, ph: n.ph }
+  }).sort((p, q) => p.z - q.z)
+
+  for (const p of projected) {
+    const tw = 0.5 + 0.5 * Math.sin(phaseTime * 2 + p.ph)
+    ctx.fillStyle = `rgba(${c},${(0.25 + tw * 0.9) * (0.5 + p.persp * 0.5)})`
+    ctx.shadowColor = `rgba(${c},0.9)`
+    ctx.shadowBlur = 6 + tw * 8
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, p.r * 1.3, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.shadowBlur = 0
+
+  // ── 中央核心（说话时脉动增强） ──
+  const corePulse = mk === 'speaking' ? 0.6 + _speakingScale * 0.3 : mk === 'error' ? 0.55 : mk === 'working' ? 0.5 : 0.25
+  const coreG = ctx.createRadialGradient(cx - cr * 0.2, cy - cr * 0.2, 2, cx, cy, cr * (0.7 + _speakingScale * 0.15))
+  coreG.addColorStop(0, `rgba(255,255,255,${0.65 + 0.35 * Math.sin(phaseTime * (2 * breatheMul))})`)
+  coreG.addColorStop(0.4, `rgba(${c},${0.65 + corePulse * 0.25 * Math.sin(phaseTime * 3)})`)
+  coreG.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = coreG
+  ctx.shadowColor = `rgba(${c},1)`
+  ctx.shadowBlur = 30 + _speakingScale * 20
+  ctx.beginPath(); ctx.arc(cx, cy, cr * 0.66, 0, Math.PI * 2); ctx.fill()
+  ctx.shadowBlur = 0
+
+  // ── 核心能量旋臂（修复旋转叠加 BUG） ──
+  const armSpeed = mp.armSpd
+  for (let arm = 0; arm < 3; arm++) {
+    const rot = phaseTime * armSpeed + arm * Math.PI * 2 / 3
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.rotate(rot * 0.16)
+    const armLen = cr * (1.35 + 0.1 * Math.sin(phaseTime * 2 + arm) + _speakingScale * 0.3)
+    const grad = ctx.createLinearGradient(0, 0, armLen, 0)
+    grad.addColorStop(0, `rgba(${c},${0.75 + _speakingScale * 0.25})`)
+    grad.addColorStop(1, `rgba(${c},0)`)
+    ctx.strokeStyle = grad
+    ctx.lineWidth = 3.5
+    ctx.shadowColor = `rgba(${c},0.9)`
+    ctx.shadowBlur = 14
+    ctx.beginPath()
+    ctx.moveTo(cr * 0.4, 0)
+    ctx.lineTo(armLen, 0)
+    ctx.stroke()
+    ctx.restore()
+  }
+  ctx.shadowBlur = 0
+
+  // ── 辉光叠加 ──
+  ctx.globalCompositeOperation = 'lighter'
+  for (const p of projected) {
+    if (p.r > 2.2) {
+      ctx.fillStyle = `rgba(${c},0.4)`
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3.2, 0, Math.PI * 2); ctx.fill()
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over'
+
+  // ==================================================================
+  // 三态粒子系统
+  // ==================================================================
+  if (mk === 'ready' || mk === 'listening') {
+    // ── IDLE：环状星云 ──
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i]
+      // 缓慢旋转
+      p.ringAngle += p.sp * 0.008
+      p.tubeAngle += p.sp * 0.015
+      // 抖动
+      p.driftX += (Math.random() - .5) * 0.05
+      p.driftY += (Math.random() - .5) * 0.05
+      p.driftX *= 0.96
+      p.driftY *= 0.96
+      // 计算屏幕位置
+      const ringX = Math.cos(p.ringAngle) * (p.ringR + p.tubeR * Math.cos(p.tubeAngle))
+      const ringY = Math.sin(p.ringAngle) * (p.ringR + p.tubeR * Math.sin(p.tubeAngle))
+      p.px = cx + ringX + p.driftX
+      p.py = cy + ringY + p.driftY
+      // 越靠外越暗
+      const distFromCenter = Math.hypot(p.px - cx, p.py - cy)
+      const fade = Math.max(0.15, 1 - distFromCenter / (Math.max(W, H) * 0.5))
+      const alpha = fade * p.bright * (0.5 + 0.5 * Math.sin(phaseTime * 0.8 + p.ph))
+      ctx.fillStyle = `rgba(${c},${alpha})`
+      ctx.shadowColor = `rgba(${c},0.9)`
+      ctx.shadowBlur = 10
+      ctx.beginPath()
+      ctx.arc(p.px, p.py, p.size * (0.6 + 0.4 * Math.sin(phaseTime + p.ph)), 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.shadowBlur = 0
+  } else if (mk === 'working') {
+    // ── WORKING：数据风暴 ──
+    // 定期生成火花（音频电平加强）
+    if (Math.random() < 0.1 + _audioLevel * 0.3) {
+      const spread = 1 + _audioLevel * 2
+      FX.dataSparks.push({
+        x: cx + (Math.random() - .5) * cr * spread,
+        y: cy + (Math.random() - .5) * cr * spread,
+        vx: (Math.random() - .5) * 6 * spread,
+        vy: (Math.random() - .5) * 6 * spread,
+        life: 0.5 + _audioLevel * 0.5,
+        size: 1 + Math.random() * 3 * (1 + _audioLevel),
+      })
+    }
+    // 更新和绘制火花
+    for (let i = FX.dataSparks.length - 1; i >= 0; i--) {
+      const s = FX.dataSparks[i]
+      s.x += s.vx
+      s.y += s.vy
+      s.vx *= 0.96
+      s.vy *= 0.96
+      s.life -= 0.03
+      if (s.life <= 0) { FX.dataSparks.splice(i, 1); continue }
+      ctx.fillStyle = `rgba(255,255,255,${s.life * 0.8})`
+      ctx.beginPath()
+      ctx.arc(s.x, s.y, s.size * s.life, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    // 主粒子
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i]
+      // 向核心加速流入
+      const dx = cx - p.px, dy = cy - p.py
+      const dist = Math.hypot(dx, dy)
+      if (dist < 8) {
+        // 到达核心，重生
+        particles[i] = spawnWorkParticle()
+        continue
+      }
+      const accel = 0.008 * p.sp + 0.001
+      p.px += dx / dist * accel * dist * 0.02
+      p.py += dy / dist * accel * dist * 0.02
+      // 随机扰动（数据流的不规则感）
+      p.vx += (Math.random() - .5) * 0.6
+      p.vy += (Math.random() - .5) * 0.6
+      p.vx *= 0.94
+      p.vy *= 0.94
+      p.px += p.vx
+      p.py += p.vy
+      // 拖尾
+      p.trail.push({ x: p.px, y: p.py })
+      if (p.trail.length > 4) p.trail.shift()
+      // 画拖尾
+      if (p.trail.length > 1) {
+        ctx.beginPath()
+        ctx.moveTo(p.trail[0].x, p.trail[0].y)
+        for (let t = 1; t < p.trail.length; t++) {
+          ctx.lineTo(p.trail[t].x, p.trail[t].y)
+        }
+        ctx.strokeStyle = `rgba(${c},${p.bright * 0.3})`
+        ctx.lineWidth = p.size * 0.4
+        ctx.stroke()
+      }
+      // 闪烁
+      p.flicker += 0.05 + Math.random() * 0.1
+      const flicker = 0.5 + 0.5 * Math.sin(p.flicker)
+      const alpha = p.bright * flicker * Math.max(0.1, 1 - dist / (Math.max(W, H) * 0.6))
+      ctx.fillStyle = `rgba(${c},${alpha})`
+      ctx.shadowColor = `rgba(${c},0.9)`
+      ctx.shadowBlur = 8 + alpha * 10
+      ctx.beginPath()
+      ctx.arc(p.px, p.py, p.size * (0.5 + 0.5 * flicker), 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.shadowBlur = 0
+  } else if (mk === 'speaking') {
+    // ── SPEAKING：智慧辐射（音频电平驱动） ──
+    // 用音频电平代替固定节奏
+    const emitFreq = Math.min(0.5, _audioLevel * 0.8 + 0.05)
+    if (Math.random() < emitFreq) {
+      // 音频电平越高，声波环越大越快
+      const speedBoost = 1 + _audioLevel * 2
+      EMIT_RINGS.push({ r: 6, alpha: 0.8, speed: (2.0 + Math.random() * 1.2) * speedBoost, width: 1.8 })
+      EMIT_RINGS.push({ r: 6, alpha: 0.45, speed: (1.4 + Math.random() * 0.8) * speedBoost, width: 3.5 })
+      if (particles.length < 350) particles.push(spawnSpeakParticle())
+    }
+    // 光束：音频电平驱动
+    FX.glowRays = FX.glowRays * 0.95 + _audioLevel * 0.8
+    if (FX.glowRays > 0.05) {
+      ctx.save()
+      for (let r = 0; r < 12; r++) {
+        const angle = r * Math.PI / 6 + phaseTime * 0.1
+        const len = cr * (1.8 + _audioLevel * 1.5 + 0.5 * Math.sin(phaseTime * 2 + r))
+        const grad = ctx.createRadialGradient(cx, cy, cr * 0.5, cx, cy, len)
+        grad.addColorStop(0, `rgba(${c},${FX.glowRays * 0.3})`)
+        grad.addColorStop(1, 'rgba(0,0,0,0)')
+        ctx.fillStyle = grad
+        ctx.beginPath()
+        ctx.moveTo(cx, cy)
+        ctx.arc(cx, cy, len, angle - 0.15, angle + 0.15)
+        ctx.closePath()
+        ctx.fill()
+      }
+      ctx.restore()
+    }
+    // 声波环
+    ctx.save()
+    for (let i = EMIT_RINGS.length - 1; i >= 0; i--) {
+      const ring = EMIT_RINGS[i]
+      ring.r += ring.speed * 2.5
+      ring.alpha *= 0.97
+      if (ring.alpha < 0.01) { EMIT_RINGS.splice(i, 1); continue }
+      ctx.strokeStyle = `rgba(${c},${ring.alpha * 0.5})`
+      ctx.lineWidth = ring.width * (1 - ring.alpha) * 2.5 + 0.5
+      ctx.beginPath()
+      ctx.arc(cx, cy, ring.r, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+    ctx.restore()
+    // 辐射粒子
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i]
+      p._life -= p._decay
+      if (p._life <= 0) {
+        particles[i] = spawnSpeakParticle()
+        continue
+      }
+      p.px += p.vx
+      p.py += p.vy
+      // 减速
+      p.vx *= 0.99
+      p.vy *= 0.99
+      // 拖尾
+      p.trail.push({ x: p.px, y: p.py })
+      if (p.trail.length > 6) p.trail.shift()
+      if (p.trail.length > 1) {
+        ctx.beginPath()
+        ctx.moveTo(p.trail[0].x, p.trail[0].y)
+        for (let t = 1; t < p.trail.length; t++) {
+          ctx.lineTo(p.trail[t].x, p.trail[t].y)
+        }
+        ctx.strokeStyle = `rgba(${c},${p.bright * 0.2 * p._life})`
+        ctx.lineWidth = p.size * 0.3
+        ctx.stroke()
+      }
+      const alpha = p.bright * p._life * (0.6 + 0.4 * Math.sin(phaseTime * 2 + p.ph))
+      ctx.fillStyle = `rgba(${c},${alpha})`
+      ctx.shadowColor = `rgba(${c},0.9)`
+      ctx.shadowBlur = 10 + alpha * 12
+      ctx.beginPath()
+      ctx.arc(p.px, p.py, p.size * p._life, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.shadowBlur = 0
+  } else if (mk === 'error') {
+    // ── ERROR：混乱爆炸 ──
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i]
+      p._life -= p._decay
+      if (p._life <= 0) {
+        particles[i] = spawnErrorParticle()
+        continue
+      }
+      p.px += p.vx
+      p.py += p.vy
+      p.vx += (Math.random() - .5) * 0.3
+      p.vy += (Math.random() - .5) * 0.3
+      p.vx *= 0.98
+      p.vy *= 0.98
+      const alpha = p.bright * p._life * (0.5 + 0.5 * Math.sin(phaseTime * 4 + p.ph))
+      // 红白闪烁
+      const isBright = Math.sin(phaseTime * 6 + p.ph) > 0.3
+      ctx.fillStyle = isBright ? `rgba(255,255,255,${alpha * 0.6})` : `rgba(${c},${alpha})`
+      ctx.shadowColor = isBright ? 'rgba(255,255,255,0.9)' : `rgba(${c},0.9)`
+      ctx.shadowBlur = 12
+      ctx.beginPath()
+      ctx.arc(p.px, p.py, p.size * p._life, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.shadowBlur = 0
+  }
+
+  // ── 冲击波（模式切换时） ──
+  for (let i = FX.shockwaves.length - 1; i >= 0; i--) {
+    const sw = FX.shockwaves[i]
+    sw.r += sw.speed + Math.random() * 2
+    sw.alpha *= 0.96
+    if (sw.alpha < 0.01) { FX.shockwaves.splice(i, 1); continue }
+    ctx.strokeStyle = `rgba(${c},${sw.alpha * 0.6})`
+    ctx.lineWidth = sw.width * (1 - sw.alpha) * 6 + 1
+    ctx.beginPath()
+    ctx.arc(cx, cy, sw.r, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  // ── 闪电 ──
+  // 工作模式持续产生闪电
+  if (mk === 'working' && Math.random() < 0.04) {
+    FX.lightning.push(makeLightning(cx, cy))
+  }
+  ctx.save()
+  for (let i = FX.lightning.length - 1; i >= 0; i--) {
+    const l = FX.lightning[i]
+    l.alpha *= 0.97
+    l.life -= 0.025
+    if (l.life <= 0) { FX.lightning.splice(i, 1); continue }
+    const alpha = Math.max(l.alpha * l.life, 0)
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`
+    ctx.lineWidth = 2.2
+    ctx.shadowBlur = 18
+    ctx.shadowColor = `rgba(${c},0.9)`
+    ctx.beginPath()
+    ctx.moveTo(l.points[0].x, l.points[0].y)
+    for (let j = 1; j < l.points.length; j++) ctx.lineTo(l.points[j].x, l.points[j].y)
+    ctx.stroke()
+    ctx.strokeStyle = `rgba(${c},${alpha * 0.55})`
+    ctx.lineWidth = 5.5
+    ctx.shadowBlur = 0
+    ctx.beginPath()
+    ctx.moveTo(l.points[0].x, l.points[0].y)
+    for (let j = 1; j < l.points.length; j++) ctx.lineTo(l.points[j].x, l.points[j].y)
+    ctx.stroke()
+  }
+  ctx.restore()
+
+  // ── 全屏闪白 ──
+  if (FX.flash > 0.01) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.min(FX.flash * 0.3, 0.35)})`
+    ctx.fillRect(0, 0, W, H)
+    FX.flash *= 0.88
+  }
+
+  // ── 环境色罩 ──
+  const envTint = mp.envTint
+  if (envTint) {
+    const pulse = 0.04 + 0.03 * Math.sin(phaseTime * 2.5)
+    ctx.fillStyle = `rgba(${envTint},${pulse})`
+    ctx.fillRect(0, 0, W, H)
+  }
+
+  phaseTime += 0.016 * (0.8 + breatheMul * 0.2)
+  raf = requestAnimationFrame(drawBrain)
+}
+
+function tick() { drawBrain() }
+
+// ---------------- 生命周期 ----------------
+onMounted(() => {
+  refreshAll()
+  loadSuggestions()
+  pickContextHint()
+  setupAlertWatch()
+  initBrain()
+  initSpeech()
+  const tid = setInterval(() => { loadDashboard(); loadMarquee() }, 20000)
+  onBeforeUnmountCleanup = () => clearInterval(tid)
+})
+let onBeforeUnmountCleanup = null
+onBeforeUnmount(() => {
+  cancelAnimationFrame(raf)
+  window.removeEventListener('resize', resizeCanvas)
+  if (eventSource) eventSource.close()
+  if (listening.value) stopRecording()
+  stopVolumeLoop()
+  _cleanMicAnalyser()
+  stopWake()
+  if (_alertUnsub.value) _alertUnsub.value()
+  disconnectAlertsWs()
+  if (onBeforeUnmountCleanup) onBeforeUnmountCleanup()
+})
+</script>
+
+<style scoped>
+/* 主题基础变量 —— 默认暗黑 HUD */
+.zhiyuan-shell {
+  --accent: #20c7ff;
+  --rgb: 32, 199, 255;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #04121a 0%, #02070b 60%, #01040a 100%);
+  --text-main: #eaf9ff;
+  --text-dim: #94cadd;
+  --text-muted: #7196a4;
+  --panel-bg: linear-gradient(105deg, rgba(2, 12, 18, .92), rgba(5, 21, 29, .6));
+  --field-bg: rgba(2, 13, 18, .7);
+  --border-soft: #27788f;
+  --border-subtle: #245260;
+  --scan-cyan: rgba(37, 194, 255, .16);
+  --glass-dark: rgba(2, 13, 18, .72);
+  --link-dim: #b9d7e0;
+}
+/* ── 皮肤覆盖 · Taste 粉橙 (暗色) ── */
+.zhiyuan-shell[data-skin='taste'] {
+  --accent: #f15f79;
+  --rgb: 241, 95, 121;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #241018 0%, #160a14 55%, #0a060f 100%);
+  --text-dim: #e6b8c4;
+  --text-muted: #a87c8c;
+  --panel-bg: linear-gradient(105deg, rgba(38, 12, 22, .92), rgba(52, 16, 32, .6));
+  --field-bg: rgba(26, 9, 16, .7);
+  --border-soft: #b0526e;
+  --border-subtle: #7d3a50;
+  --scan-cyan: rgba(241, 95, 121, .16);
+  --glass-dark: rgba(24, 8, 15, .72);
+  --link-dim: #f0c6d0;
+}
+/* ── 皮肤覆盖 · Frost 冰霜 (暗色) ── */
+.zhiyuan-shell[data-skin='frost'] {
+  --accent: #22d3ee;
+  --rgb: 34, 211, 238;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #041a22 0%, #031018 55%, #020910 100%);
+  --text-dim: #b0dce8;
+  --text-muted: #6f95a4;
+  --panel-bg: linear-gradient(105deg, rgba(2, 20, 28, .92), rgba(4, 32, 42, .6));
+  --field-bg: rgba(2, 20, 27, .7);
+  --border-soft: #2e8fa6;
+  --border-subtle: #23697c;
+  --scan-cyan: rgba(34, 211, 238, .16);
+  --glass-dark: rgba(2, 17, 23, .72);
+  --link-dim: #bce4ee;
+}
+/* ── 皮肤覆盖 · Nebula 深空星云 (暗色) ── */
+.zhiyuan-shell[data-skin='nebula'] {
+  --accent: #a78bfa;
+  --rgb: 167, 139, 250;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #120a24 0%, #0a0618 55%, #050310 100%);
+  --text-dim: #cfc2f0;
+  --text-muted: #8f82b8;
+  --panel-bg: linear-gradient(105deg, rgba(14, 8, 30, .92), rgba(24, 14, 46, .6));
+  --field-bg: rgba(10, 6, 22, .7);
+  --border-soft: #7a66c9;
+  --border-subtle: #54458f;
+  --scan-cyan: rgba(167, 139, 250, .18);
+  --glass-dark: rgba(9, 5, 20, .72);
+  --link-dim: #ddd2f7;
+}
+/* 亮色主题覆盖 */
+.zhiyuan-shell.theme-light {
+  --accent: #4f46e5;
+  --rgb: 79, 70, 229;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #f6f8fc 0%, #eef2f7 55%, #e7ecf5 100%);
+  --text-main: #1e293b;
+  --text-dim: #475569;
+  --text-muted: #64748b;
+  --panel-bg: linear-gradient(105deg, rgba(255, 255, 255, .88), rgba(243, 246, 250, .72));
+  --field-bg: rgba(255, 255, 255, .8);
+  --border-soft: #c7d2fe;
+  --border-subtle: #a5b4fc;
+  --scan-cyan: rgba(79, 70, 229, .1);
+  --glass-dark: rgba(255, 255, 255, .86);
+  --link-dim: #334155;
+}
+/* ── 皮肤覆盖 · Taste 粉橙 (亮色) ── */
+.zhiyuan-shell[data-skin='taste'].theme-light {
+  --accent: #c84e89;
+  --rgb: 200, 78, 137;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #fef6f9 0%, #faeef3 55%, #f6e8ee 100%);
+  --text-dim: #8a4a5e;
+  --text-muted: #a07a86;
+  --panel-bg: linear-gradient(105deg, rgba(255, 255, 255, .9), rgba(250, 240, 244, .72));
+  --field-bg: rgba(255, 255, 255, .82);
+  --border-soft: #e8b3c4;
+  --border-subtle: #d89bb0;
+  --scan-cyan: rgba(200, 78, 137, .1);
+  --glass-dark: rgba(255, 255, 255, .88);
+  --link-dim: #7a3a50;
+}
+/* ── 皮肤覆盖 · Frost 冰霜 (亮色) ── */
+.zhiyuan-shell[data-skin='frost'].theme-light {
+  --accent: #06b6d4;
+  --rgb: 6, 182, 212;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #f3fbfd 0%, #eaf6fa 55%, #e3f1f7 100%);
+  --text-dim: #0f6e82;
+  --text-muted: #5c8794;
+  --panel-bg: linear-gradient(105deg, rgba(255, 255, 255, .9), rgba(238, 249, 252, .72));
+  --field-bg: rgba(255, 255, 255, .82);
+  --border-soft: #9fd6e4;
+  --border-subtle: #7cc2d4;
+  --scan-cyan: rgba(6, 182, 212, .1);
+  --glass-dark: rgba(255, 255, 255, .88);
+  --link-dim: #0c5a6b;
+}
+/* ── 皮肤覆盖 · Nebula 深空星云 (亮色) ── */
+.zhiyuan-shell[data-skin='nebula'].theme-light {
+  --accent: #7c3aed;
+  --rgb: 124, 58, 237;
+  --shell-bg: radial-gradient(120% 90% at 50% 40%, #f9f6ff 0%, #f1ebfc 55%, #ebe3fa 100%);
+  --text-dim: #5b3f9e;
+  --text-muted: #8b7fb8;
+  --panel-bg: linear-gradient(105deg, rgba(255, 255, 255, .9), rgba(245, 240, 252, .72));
+  --field-bg: rgba(255, 255, 255, .82);
+  --border-soft: #c8b4ec;
+  --border-subtle: #ab90e0;
+  --scan-cyan: rgba(124, 58, 237, .1);
+  --glass-dark: rgba(255, 255, 255, .88);
+  --link-dim: #4a2f85;
+}
+
+.zhiyuan-shell {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-width: 1180px;
+  min-height: 700px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--shell-bg);
+  color: var(--text-main);
+  font-family: ui-monospace, 'JetBrains Mono', Consolas, 'Microsoft YaHei', monospace;
+  letter-spacing: .04em;
+}
+.zhiyuan-shell[data-mode='working'] { --accent: #ff9b2f; --rgb: 255, 155, 47; }
+.zhiyuan-shell[data-mode='error'] { --accent: #ff493e; --rgb: 255, 73, 62; }
+.zhiyuan-shell.theme-light[data-mode='working'] { --accent: #d97706; --rgb: 217, 119, 6; }
+.zhiyuan-shell.theme-light[data-mode='error'] { --accent: #dc2626; --rgb: 220, 38, 38; }
+
+.brain-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+.scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .08;
+  z-index: 1;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, var(--scan-cyan) 4px);
+  mix-blend-mode: screen;
+}
+.vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: inset 0 0 160px #000, inset 0 0 60px rgba(var(--rgb), .12);
+}
+
+.hud-panel {
+  background: var(--panel-bg);
+  border: 1px solid rgba(var(--rgb), .4);
+  box-shadow: 0 0 24px rgba(var(--rgb), .1), inset 0 0 18px rgba(var(--rgb), .05);
+  backdrop-filter: blur(12px);
+}
+
+/* 顶栏 */
+.topbar {
+  position: absolute;
+  top: 20px;
+  left: 26px;
+  right: 26px;
+  height: 52px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 5;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 98.5% 100%, 1.5% 100%, 0 70%);
+}
+.brand { display: flex; gap: 12px; align-items: center; letter-spacing: .22em; color: var(--text-dim); }
+.brand i, .status i { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 12px var(--accent); }
+.brand strong { color: var(--accent); font-size: 17px; text-shadow: 0 0 14px var(--accent); }
+.brand span { height: 20px; width: 1px; background: var(--border-soft); }
+.brand em { font-style: normal; font-size: 11px; }
+.status { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; letter-spacing: .28em; color: var(--accent); }
+.status i { animation: pulse 1.7s infinite; }
+.status b { font-weight: 400; }
+.icon-button {
+  position: absolute;
+  right: 22px;
+  border: 1px solid var(--border-soft);
+  background: var(--field-bg);
+  color: var(--accent);
+  width: 34px;
+  height: 28px;
+  cursor: pointer;
+}
+@keyframes pulse { 50% { opacity: .3; transform: scale(.7); } }
+
+/* 走马灯 */
+.marquee {
+  position: absolute;
+  top: 84px;
+  left: 26px;
+  right: 26px;
+  height: 34px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 10px;
+}
+.marquee-tag {
+  flex: 0 0 auto;
+  margin-right: 12px;
+  color: #04121a;
+  background: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  letter-spacing: .14em;
+  box-shadow: 0 0 12px rgba(var(--rgb), .6);
+}
+.marquee-track { overflow: hidden; flex: 1; }
+.marquee-inner {
+  display: flex;
+  gap: 48px;
+  white-space: nowrap;
+  animation: marquee 40s linear infinite;
+}
+.marquee-inner:hover { animation-play-state: paused; }
+.marquee-item { font-size: 12px; color: var(--link-dim); }
+.marquee-item em { font-style: normal; font-weight: 700; font-size: 10px; margin-right: 7px; }
+.marquee-item .sev-critical { color: #ff5b51; }
+.marquee-item .sev-warning { color: #ff9b2f; }
+.marquee-item b { color: var(--text-main); margin-right: 7px; }
+.marquee-item small { color: var(--text-muted); margin-left: 8px; }
+@keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+/* 舞台 */
+.stage { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.identity {
+  position: absolute;
+  bottom: 108px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  letter-spacing: .3em;
+}
+.identity span { font-size: 11px; color: var(--text-muted); }
+.identity b { display: block; margin-top: 5px; font-size: 13px; color: var(--accent); text-shadow: 0 0 12px var(--accent); font-weight: 400; }
+
+/* 右侧 */
+.workers {
+  position: absolute;
+  right: 26px;
+  top: 150px;
+  width: 236px;
+  display: grid;
+  gap: 10px;
+  z-index: 8;
+}
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat-card { padding: 10px 12px; text-align: center; }
+.stat-card b { display: block; font-size: 24px; color: var(--accent); text-shadow: 0 0 12px rgba(var(--rgb), .7); }
+.stat-card.danger b { color: #ff5b51; }
+.stat-card small { color: var(--text-muted); letter-spacing: .12em; font-size: 10px; }
+.sub-agents-title { color: var(--text-muted); font-size: 10px; letter-spacing: .22em; margin-top: 6px; padding-left: 4px; }
+.worker {
+  height: 58px;
+  display: grid;
+  grid-template-columns: 42px 1fr 6px;
+  gap: 11px;
+  align-items: center;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  background: var(--glass-dark);
+  border: 1px solid var(--border-subtle);
+  clip-path: polygon(8% 0, 100% 0, 100% 76%, 92% 100%, 0 100%, 0 20%);
+  transition: .3s;
+  cursor: pointer;
+}
+.worker:hover { border-color: var(--sa-color, var(--accent)); color: var(--text-main); }
+.sa-tip { color: var(--text-muted); opacity: .5; font-size: 9px; }
+.worker.active {
+  color: var(--text-main);
+  border-color: var(--sa-color, var(--accent));
+  box-shadow: inset 0 0 20px rgba(255, 255, 255, .05), 0 0 16px rgba(var(--rgb), .12);
+}
+.worker > span { width: 40px; height: 40px; display: grid; place-items: center; font-size: 17px; border: 1px solid currentColor; border-radius: 50%; }
+.worker b, .worker small { display: block; }
+.worker b { font-size: 13px; font-weight: 500; }
+.worker small { margin-top: 3px; color: var(--accent); letter-spacing: .06em; font-size: 10px; }
+.worker i { height: 100%; width: 2px; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.no-sub { color: var(--text-muted); font-size: 12px; padding: 8px; }
+
+/* 左侧对话 */
+.dialogue {
+  position: absolute;
+  left: 26px;
+  top: 150px;
+  bottom: 96px;
+  width: 318px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+}
+.dialogue-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.dialogue-head .zhiyuan { color: var(--accent); letter-spacing: .2em; }
+.dlg-new { background: transparent; border: 1px solid var(--border-soft); color: var(--accent); width: 24px; height: 22px; cursor: pointer; }
+.dlg-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-soft) transparent; }
+.dlg-empty p { color: var(--text-muted); font-size: 12px; margin: 4px 0 12px; }
+.suggested { display: grid; gap: 7px; }
+.suggested button {
+  text-align: left;
+  background: var(--field-bg);
+  border: 1px solid var(--border-subtle);
+  color: var(--link-dim);
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: .2s;
+}
+.suggested button:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 10px rgba(var(--rgb), .15); }
+.msg { margin-bottom: 10px; }
+.msg b { font-size: 10px; letter-spacing: .18em; color: var(--text-muted); }
+.msg.zhiyuan b { color: var(--accent); }
+.msg p { margin: 4px 0 0; color: var(--link-dim); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.msg.system p { color: var(--text-muted); }
+.context-hint {
+  border: 1px solid rgba(var(--rgb), .35);
+  background: linear-gradient(90deg, rgba(var(--rgb), .10), rgba(var(--rgb), .03));
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 11.5px;
+  color: var(--link-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.alert-pop {
+  border: 1px solid rgba(255, 73, 62, .5);
+  background: linear-gradient(90deg, rgba(255, 73, 62, .12), rgba(255, 73, 62, .04));
+  padding: 9px 11px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+}
+.alert-pop-head { display: flex; align-items: center; gap: 8px; }
+.alert-pop-head b { color: var(--text-main); font-size: 12px; letter-spacing: .02em; }
+.alert-pop-sev { font-size: 9px; letter-spacing: .1em; padding: 2px 6px; border-radius: 2px; font-weight: 700; }
+.alert-pop-sev.sev-critical { background: rgba(255, 73, 62, .25); color: #ff6b60; }
+.alert-pop-sev.sev-high { background: rgba(255, 120, 40, .25); color: #ff9b2f; }
+.alert-pop-sev.sev-warning { background: rgba(255, 190, 40, .2); color: #ffd166; }
+.alert-pop-sev.sev-error { background: rgba(255, 73, 62, .25); color: #ff6b60; }
+.alert-pop-body { display: flex; flex-wrap: wrap; gap: 10px; margin: 5px 0 8px; }
+.alert-pop-body small { color: var(--text-muted); font-size: 10.5px; }
+.alert-pop-actions { display: flex; gap: 6px; }
+.alert-pop-actions button {
+  border: 1px solid rgba(255, 73, 62, .5);
+  background: rgba(255, 73, 62, .15);
+  color: #ff8a80;
+  font-size: 10.5px;
+  padding: 3px 9px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.alert-pop-actions button:hover { background: rgba(255, 73, 62, .28); }
+.alert-pop-actions button.secondary { background: transparent; border-color: var(--border-soft); color: var(--text-muted); }
+.context-hint-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.context-hint-actions button {
+  border: 1px solid rgba(var(--rgb), .45);
+  background: rgba(var(--rgb), .12);
+  color: var(--link-dim);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.context-hint-actions button:hover { color: var(--accent); border-color: var(--accent); }
+.context-hint-actions button.secondary { background: transparent; border-color: var(--border-soft); }
+.history-panel {
+  border: 1px solid var(--border-soft);
+  background: var(--glass-dark, rgba(0,0,0,.3));
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.history-panel-head { padding: 8px 10px 5px; font-size: 10px; letter-spacing: .15em; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
+.history-empty { padding: 14px 10px; font-size: 11px; color: var(--text-muted); text-align: center; }
+.history-item {
+  padding: 7px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: .15s;
+}
+.history-item:hover { background: rgba(var(--rgb), .08); }
+.history-item.active { border-left: 2px solid var(--accent); background: rgba(var(--rgb), .12); }
+.history-item b { font-size: 11.5px; color: var(--link-dim); font-weight: 500; }
+.history-item small { font-size: 9px; color: var(--text-muted); }
+.dlg-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.dlg-link {
+  border: 1px solid rgba(var(--rgb), .4);
+  background: rgba(var(--rgb), .08);
+  color: var(--link-dim);
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: .18s;
+}
+.dlg-link:hover { border-color: var(--accent); color: var(--accent); background: rgba(var(--rgb), .16); }
+.caret { display: inline-block; width: 7px; height: 14px; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+.blink { animation: blink 1s ease infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.dlg-input { display: flex; gap: 8px; margin-top: 10px; }
+.dlg-input input {
+  flex: 1;
+  background: var(--field-bg);
+  border: 1px solid var(--border-soft);
+  color: var(--text-main);
+  padding: 9px 11px;
+  outline: none;
+}
+.dlg-input input:focus { border-color: var(--accent); box-shadow: 0 0 12px rgba(var(--rgb), .2); }
+.dlg-input input:disabled { opacity: .5; }
+.dlg-input button {
+  border: 1px solid var(--accent);
+  background: rgba(var(--rgb), .14);
+  color: var(--accent);
+  letter-spacing: .12em;
+  font-size: 11px;
+  padding: 0 14px;
+  cursor: pointer;
+}
+.dlg-input button:disabled { opacity: .4; cursor: not-allowed; }
+
+/* 快捷分析指令 */
+.quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.quick-actions button {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--field-bg);
+  border: 1px solid var(--border-subtle);
+  color: var(--link-dim);
+  padding: 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: .2s;
+}
+.quick-actions button:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 10px rgba(var(--rgb), .18); transform: translateY(-1px); }
+.quick-actions button span { font-size: 15px; }
+
+/* 任务过程可视化 */
+.task-panel {
+  border: 1px solid rgba(var(--rgb), .35);
+  background: var(--field-bg);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.task-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.task-head b { color: var(--accent); font-size: 11px; letter-spacing: .12em; }
+.task-head span { color: var(--accent); font-size: 11px; }
+.task-bar { height: 4px; background: rgba(var(--rgb), .14); margin-bottom: 8px; overflow: hidden; }
+.task-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(var(--rgb), .5), var(--accent));
+  box-shadow: 0 0 8px rgba(var(--rgb), .8);
+  transition: width .4s;
+}
+.step-list { display: grid; gap: 6px; }
+.step { display: flex; gap: 8px; align-items: flex-start; }
+.step-dot { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; flex: 0 0 auto; background: var(--text-muted); }
+.step.running .step-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1s infinite; }
+.step.success .step-dot { background: #3ddc84; box-shadow: 0 0 8px #3ddc84; }
+.step.error .step-dot { background: #ff5b51; box-shadow: 0 0 8px #ff5b51; }
+.step-body b { display: block; color: var(--text-main); font-size: 12px; font-weight: 500; }
+.step-body small { display: block; color: var(--text-muted); font-size: 10.5px; margin-top: 2px; line-height: 1.4; }
+.step-body .step-args { color: var(--link-dim); opacity: .8; white-space: normal; word-break: break-all; }
+.step.success .step-body b { color: #16a34a; }
+.step.error .step-body b { color: #ef4444; }
+
+/* 麦克风 */
+.control.mic { position: relative; }
+.control.mic.active span { color: var(--accent); }
+.mic-ring {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--rgb), .4), transparent 70%);
+  animation: mic-pulse 1s ease infinite;
+  display: inline-block;
+}
+@keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(var(--rgb), .5); } 50% { box-shadow: 0 0 0 9px rgba(var(--rgb), 0); } }
+
+/* 底部 */
+.controls {
+  position: absolute;
+  left: 26px;
+  right: 26px;
+  bottom: 20px;
+  height: 62px;
+  display: grid;
+  grid-template-columns: 170px 170px 1fr 170px 170px;
+  gap: 16px;
+  z-index: 9;
+}
+.control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+  clip-path: polygon(10% 0, 100% 0, 100% 74%, 92% 100%, 0 100%, 0 26%);
+  transition: .25s;
+}
+.control:hover { transform: translateY(-2px); }
+.control span { font-size: 26px; color: var(--accent); text-shadow: 0 0 12px var(--accent); }
+.control b { font-weight: 400; letter-spacing: .1em; font-size: 12px; }
+.control.stat { pointer-events: none; }
+.control.stop { --accent: #ff493e; --rgb: 255, 73, 62; border-color: #c43f37; }
+.control.stop span, .control.stop b { color: #ff5b51; }
+.zhiyuan-shell.theme-light .control.stop { --accent: #dc2626; --rgb: 220, 38, 38; border-color: #fca5a5; }
+.zhiyuan-shell.theme-light .control.stop span, .zhiyuan-shell.theme-light .control.stop b { color: #dc2626; }
+.command-hud { display: flex; align-items: center; justify-content: center; }
+.cmd-label { color: var(--text-muted); letter-spacing: .22em; font-size: 11px; }
+
+.msg p.typing { min-height: 1.4em; }
+
+/* ── 角色切换器（顶栏） ── */
+.role-switcher {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+  margin-right: 52px;
+}
+.role-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--field-bg);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  letter-spacing: .06em;
+  transition: .2s;
+  clip-path: polygon(12% 0, 100% 0, 100% 72%, 90% 100%, 0 100%, 0 26%);
+}
+.role-btn:hover { color: var(--text-main); border-color: var(--role-color, var(--accent)); }
+.role-btn.active {
+  color: var(--text-main);
+  border-color: var(--role-color, var(--accent));
+  background: rgba(var(--rgb), .12);
+  box-shadow: 0 0 14px rgba(var(--rgb), .18);
+}
+.role-btn span { letter-spacing: .1em; }
+
+/* ── 唤醒按钮 ── */
+.control.wake.active { border-color: #3ddc84; }
+.control.wake.active span, .control.wake.active b { color: #3ddc84; text-shadow: 0 0 12px #3ddc84; }
+
+/* ── 工具调用终端 HUD（右侧浮层） ── */
+.tool-term {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  max-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+.tool-term-head {
+  font-size: 10px;
+  letter-spacing: .16em;
+  color: var(--accent);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+.tool-term-head small { color: var(--text-muted); }
+.tool-term-body { overflow-y: auto; display: grid; gap: 4px; }
+.tool-term-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  padding: 3px 6px;
+  background: rgba(0, 0, 0, .18);
+  border-left: 2px solid var(--border-subtle);
+  animation: tt-in .25s ease;
+}
+@keyframes tt-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+.tt-idx { color: var(--text-muted); font-size: 9px; }
+.tool-term-line b { font-weight: 500; color: var(--link-dim); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-status { font-style: normal; font-size: 9px; letter-spacing: .1em; color: var(--accent); }
+.tt-status.tt-ok { color: #3ddc84; text-shadow: 0 0 8px rgba(61, 220, 132, .8); }
+.tt-status.tt-err { color: #ff5b51; text-shadow: 0 0 8px rgba(255, 91, 81, .8); }
+
+.zhiyuan-shell.theme-light .role-btn { background: rgba(255, 255, 255, .6); }
+</style>

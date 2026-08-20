@@ -2543,3 +2543,70 @@ html[data-skin="nebula"][data-theme="light"] .metric-card {
   border: 1px solid rgba(124,58,237,0.12) !important;
   box-shadow: 0 10px 30px rgba(139,92,246,0.12) !important;
 }
+
+/* ============================================
+   AI 分析要点总结卡片 (.key-points)
+   统一三要素: 根因 / 方案 / 影响
+   展示: 非对话类置顶; AI 助手类对话结尾
+   规范见 CONTRACT.md 第二十七章
+   ============================================ */
+.key-points {
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-left: 4px solid var(--primary);
+  border-radius: 12px;
+  background: linear-gradient(135deg,
+    rgba(99, 102, 241, 0.08),
+    rgba(99, 102, 241, 0.02));
+  padding: 14px 16px;
+  margin: 12px 0;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.08);
+}
+html[data-theme="dark"] .key-points {
+  background: linear-gradient(135deg,
+    rgba(129, 140, 248, 0.14),
+    rgba(129, 140, 248, 0.04));
+  border-color: rgba(129, 140, 248, 0.4);
+}
+.key-points .kp-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--primary);
+  margin-bottom: 10px;
+  letter-spacing: 0.5px;
+}
+.key-points .kp-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(99, 102, 241, 0.18);
+}
+.key-points .kp-row:last-child {
+  border-bottom: none;
+}
+html[data-theme="dark"] .key-points .kp-row {
+  border-bottom-color: rgba(148, 163, 184, 0.14);
+}
+.key-points .kp-tag {
+  flex: 0 0 44px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.12);
+  border-radius: 6px;
+  padding: 2px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+html[data-theme="dark"] .key-points .kp-tag {
+  background: rgba(129, 140, 248, 0.2);
+}
+.key-points .kp-text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}

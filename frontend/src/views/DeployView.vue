@@ -24,14 +24,51 @@
     <div v-else class="plan-grid">
       <div v-for="p in plans" :key="p.id" class="plan-card" :class="'status-' + p.status">
         <div class="card-clickable" @click="openPlan(p.id)">
-          <div class="card-header">
-            <span class="plan-name">{{ p.name }}</span>
-            <span class="status-badge" :class="p.status">{{ statusLabel(p.status) }}</span>
+          <div class="card-top">
+            <div class="plan-ident">
+              <div class="plan-icon" :class="'icn-' + p.status">
+                <svg v-if="p.status === 'succeeded'" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg v-else-if="p.status === 'failed'" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <svg v-else-if="p.status === 'running'" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <svg v-else-if="p.status === 'rolled_back'" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none"><path d="M12 3l9 5v8l-9 5-9-5V8l9-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 12l8-4.6M12 12v9M12 12L4 7.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <div class="plan-name-wrap">
+                <span class="plan-name">{{ p.name }}</span>
+                <span class="plan-sub" v-if="p.description">{{ p.description }}</span>
+              </div>
+            </div>
+            <span class="status-badge" :class="p.status"><span class="dot" :class="p.status" />{{ statusLabel(p.status) }}</span>
           </div>
-          <div class="card-body">
-            <div class="card-meta" v-if="p.asset_ids && p.asset_ids.length">资产: {{ p.asset_ids.join(', ') }}</div>
-            <div class="card-meta" v-if="p.artifact_path">{{ p.artifact_path }}</div>
-            <div class="card-meta">{{ p.created_at }}</div>
+
+          <div class="card-stats">
+            <div class="stat">
+              <span class="stat-val">{{ p.sop_json && p.sop_json.steps ? p.sop_json.steps.length : 0 }}</span>
+              <span class="stat-label">部署步骤</span>
+            </div>
+            <div class="stat">
+              <span class="stat-val">{{ p.asset_ids && p.asset_ids.length ? p.asset_ids.length : 0 }}</span>
+              <span class="stat-label">目标资产</span>
+            </div>
+            <div class="stat" :class="{ 'stat-accent': (p.deploy_count || 0) > 0 }">
+              <span class="stat-val">{{ p.deploy_count || 0 }}</span>
+              <span class="stat-label">部署次数</span>
+            </div>
+            <div class="stat" v-if="p.risk_score">
+              <span class="stat-val" :class="'risk-' + riskLabel(p.risk_score)">{{ p.risk_score }}</span>
+              <span class="stat-label">风险分</span>
+            </div>
+          </div>
+
+          <div class="card-foot">
+            <div class="artifact" v-if="p.artifact_path" :title="p.artifact_path">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 17l6.5-6.5 4 4L17 12l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 21h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <span>{{ p.artifact_path }}</span>
+            </div>
+            <div class="card-time">
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>{{ p.last_deployed_at || p.created_at }}</span>
+            </div>
           </div>
         </div>
         <div class="card-actions">
@@ -321,6 +358,10 @@
           <div v-if="detailTab === 'report'">
             <div class="action-bar">
               <button class="btn" :disabled="!detailPlan.status || detailPlan.status === 'draft' || detailPlan.status === 'planned'" @click="runPostVerify">🔍 部署后验证</button>
+              <select v-model="reportTemplateId" class="input" style="width:220px" title="选择知识库中的部署报告模板(可选)">
+                <option :value="0">默认报告版式</option>
+                <option v-for="t in reportTemplates" :key="t.id" :value="t.id">{{ t.title }}</option>
+              </select>
               <button class="btn btn-primary" :disabled="!detailPlan.status || detailPlan.status === 'draft' || detailPlan.status === 'planned'" @click="runGenerateReport">📝 生成报告</button>
               <template v-if="detailPlan.deploy_report_json && detailPlan.deploy_report_json.executive_summary">
                 <a :href="`/deploy/api/plans/${detailPlan.id}/report/download?fmt=docx`" class="btn btn-download" target="_blank">📄 下载 Word</a>
@@ -574,6 +615,14 @@ const needDecision = ref(false)
 const riskConfirmInfo = ref(null)
 const dagPlan = ref([])
 const reportLoading = ref(false)
+const reportTemplates = ref([])
+const reportTemplateId = ref(0)
+async function loadReportTemplates() {
+  try {
+    const res = await request.get('/knowledge/documents/api/list?tags=report_template')
+    reportTemplates.value = (res.items || []).filter(d => d.content || d.title)
+  } catch (_) { reportTemplates.value = [] }
+}
 const testResults = ref(null)
 const executionHistory = ref([])
 const cleanupHistory = ref([])
@@ -587,6 +636,13 @@ const statusLabel = (s) => ({
   succeeded: '成功', failed: '失败', rolled_back: '已回滚',
   pending: '待执行', skipped: '已跳过',
 }[s] || s)
+
+const riskLabel = (score) => {
+  const n = Number(score) || 0
+  if (n <= 30) return 'low'
+  if (n <= 60) return 'medium'
+  return 'high'
+}
 
 function onFileSelect(e) {
   const f = e.target.files?.[0]
@@ -702,9 +758,20 @@ async function openPlan(id) {
     preflightResults.value = []
     preflightError.value = ''
     executeError.value = ''
+    // 恢复持久化的高危确认卡片(该计划独立), 若部署仍在等待则重新弹出
+    if (res.pending_decision && res.pending_decision.step != null) {
+      riskConfirmInfo.value = {
+        step: res.pending_decision.step,
+        description: res.pending_decision.description || '',
+        command: res.pending_decision.command || '',
+        risk: res.pending_decision.risk || 'high',
+        reason: res.pending_decision.reason || '',
+      }
+    }
     testResults.value = res.test_results_json || null
     executionHistory.value = Array.isArray(res.execution_history_json) ? res.execution_history_json : []
     cleanupHistory.value = Array.isArray(res.cleanup_history_json) ? res.cleanup_history_json : []
+    loadReportTemplates()
   } catch (e) {
     ElMessage.error('加载计划详情失败')
   }
@@ -829,8 +896,14 @@ async function sendDecision(action) {
 }
 
 function confirmRisk(approved) {
+  const action = approved ? 'confirm' : 'reject'
+  const pid = detailPlan.value && detailPlan.value.id
+  if (pid) {
+    // 优先 HTTP 提交(即使 WS 断开也能生效)
+    request.post(`/deploy/api/plans/${pid}/decision`, { action }).catch(() => {})
+  }
   if (deployWs && deployWs.readyState === WebSocket.OPEN) {
-    deployWs.send(JSON.stringify({ type: 'decision', action: approved ? 'confirm' : 'reject' }))
+    deployWs.send(JSON.stringify({ type: 'decision', action }))
   }
   riskConfirmInfo.value = null
 }
@@ -1094,6 +1167,16 @@ async function loadDetailPlan() {
     detailPlan.value = res
     environmentProbe.value = res.environment_probe_json || null
     envAnalysis.value = res.env_analysis_json || null
+    // 恢复持久化的高危确认卡片
+    if (res.pending_decision && res.pending_decision.step != null) {
+      riskConfirmInfo.value = {
+        step: res.pending_decision.step,
+        description: res.pending_decision.description || '',
+        command: res.pending_decision.command || '',
+        risk: res.pending_decision.risk || 'high',
+        reason: res.pending_decision.reason || '',
+      }
+    }
     testResults.value = res.test_results_json || null
     executionHistory.value = Array.isArray(res.execution_history_json) ? res.execution_history_json : []
     cleanupHistory.value = Array.isArray(res.cleanup_history_json) ? res.cleanup_history_json : []
@@ -1138,7 +1221,7 @@ async function runGenerateReport() {
         }
       } catch (_) {}
     }
-    const res = await request.post(`/deploy/api/plans/${detailPlan.value.id}/generate-report`)
+    const res = await request.post(`/deploy/api/plans/${detailPlan.value.id}/generate-report`, { template_id: reportTemplateId.value || 0 })
     if (res.error) {
       ElMessage.error(res.error)
     } else {
@@ -1166,21 +1249,58 @@ onMounted(() => {
 .loading { text-align: center; padding: 40px; color: #888; }
 .empty { text-align: center; padding: 60px; color: #888; }
 .error-msg { background: #fef2f2; color: #dc2626; padding: 10px; border-radius: 6px; margin: 10px 0; }
-.plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-.plan-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; transition: box-shadow .2s; }
-.plan-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-.card-clickable { padding: 16px; cursor: pointer; }
-.card-actions { padding: 0 16px 10px; display: flex; justify-content: flex-end; }
-.btn-delete { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-.btn-delete:hover { background: #fecaca; }
-.plan-card.status-running { border-left: 3px solid #3b82f6; }
-.plan-card.status-succeeded { border-left: 3px solid #22c55e; }
-.plan-card.status-failed { border-left: 3px solid #ef4444; }
-.plan-card.status-rolled_back { border-left: 3px solid #f59e0b; }
-.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.plan-name { font-weight: 600; font-size: 15px; }
-.card-body { font-size: 13px; color: #666; }
-.card-meta { margin-top: 4px; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+.plan-card { background: #fff; border: 1px solid #e8ecf2; border-radius: 14px; overflow: hidden; transition: transform .2s ease, box-shadow .25s ease, border-color .25s ease; position: relative; box-shadow: 0 1px 2px rgba(15,23,42,0.04); }
+.plan-card:hover { transform: translateY(-3px); box-shadow: 0 14px 34px -14px rgba(15,23,42,0.22), 0 4px 12px -6px rgba(15,23,42,0.08); border-color: #d6dde7; }
+.plan-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: #cbd5e1; }
+.plan-card.status-running::before { background: linear-gradient(90deg, #38bdf8, #6366f1); }
+.plan-card.status-succeeded::before { background: linear-gradient(90deg, #34d399, #10b981); }
+.plan-card.status-failed::before { background: linear-gradient(90deg, #fb7185, #ef4444); }
+.plan-card.status-planned::before { background: linear-gradient(90deg, #a5b4fc, #818cf8); }
+.plan-card.status-rolled_back::before { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.card-clickable { padding: 18px 20px 14px; cursor: pointer; }
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.plan-ident { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.plan-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.plan-icon svg { width: 22px; height: 22px; }
+.icn-succeeded { background: #ecfdf5; color: #10b981; }
+.icn-failed { background: #fef2f2; color: #ef4444; }
+.icn-running { background: #e0f2fe; color: #0284c7; }
+.icn-rolled_back { background: #fffbeb; color: #f59e0b; }
+.icn-planned { background: #eef2ff; color: #6366f1; }
+.icn-draft { background: #f1f5f9; color: #64748b; }
+.plan-name-wrap { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.plan-name { font-weight: 650; font-size: 15px; color: #0f172a; line-height: 1.3; word-break: break-word; }
+.plan-sub { font-size: 12px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+.status-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.status-badge.draft { background: #f1f5f9; color: #64748b; }
+.status-badge.planned { background: #eef2ff; color: #6366f1; }
+.status-badge.running { background: #e0f2fe; color: #0284c7; }
+.status-badge.running .dot { animation: pulse 1.4s infinite; }
+.status-badge.succeeded { background: #ecfdf5; color: #059669; }
+.status-badge.failed { background: #fef2f2; color: #dc2626; }
+.status-badge.rolled_back { background: #fffbeb; color: #d97706; }
+.status-badge.pending { background: #f1f5f9; color: #64748b; }
+.status-badge.skipped { background: #f1f5f9; color: #9ca3af; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.card-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 6px; background: #f8fafc; border: 1px solid #eef1f6; border-radius: 12px; padding: 12px 8px; margin-bottom: 14px; }
+.stat { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 4px; }
+.stat-val { font-size: 19px; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat-label { font-size: 11px; color: #94a3b8; }
+.stat-accent .stat-val { color: #6366f1; }
+.stat-val.risk-low { color: #059669; }
+.stat-val.risk-medium { color: #d97706; }
+.stat-val.risk-high { color: #dc2626; }
+.stat-val .risk-label { font-size: 11px; font-weight: 500; margin-left: 3px; }
+.card-foot { display: flex; flex-direction: column; gap: 8px; }
+.artifact, .card-time { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #64748b; min-width: 0; }
+.artifact svg, .card-time svg { width: 14px; height: 14px; flex-shrink: 0; color: #94a3b8; }
+.artifact span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+.card-time svg { width: 13px; height: 13px; }
+.card-actions { padding: 10px 20px 16px; display: flex; justify-content: flex-end; border-top: 1px solid #f1f5f9; }
+.btn-delete { background: #fff; color: #94a3b8; border: 1px solid #e8ecf2; }
+.btn-delete:hover { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
 .plan-info { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 10px 16px; margin: 0 16px 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 12px; }
 .plan-info-row { display: flex; align-items: center; gap: 6px; min-width: 200px; }
 .plan-info-row .info-label { color: #6b7280; white-space: nowrap; }

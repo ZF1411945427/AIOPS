@@ -96,9 +96,9 @@
 <script setup>
 import { ref, onMounted, reactive } from "vue"
 import { ElMessage } from "element-plus"
-import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
 import ServicePicker from '@/components/ServicePicker.vue'
+import request from '@/api/request'
 
 const showGuide = ref(false)
 const sloList = ref([])
@@ -117,8 +117,8 @@ async function onServicePick(id) {
   form.service_id = id
   if (id && !_assetMap[id]) {
     try {
-      const d = await axios.get(`/assets/api/${id}`)
-      _assetMap[id] = d.data.name
+      const d = await request.get(`/assets/api/${id}`)
+      _assetMap[id] = d.name
     } catch { _assetMap[id] = "" }
   }
   form.service_name = id ? (_assetMap[id] || "") : ""
@@ -126,8 +126,8 @@ async function onServicePick(id) {
 
 const loadData = async () => {
   try {
-    const res = await axios.get("/api/sre/slo")
-    sloList.value = res.data
+    const res = await request.get("/api/sre/slo")
+    sloList.value = res
   } catch (e) {
     console.error(e)
   }
@@ -156,10 +156,10 @@ const editSlo = (row) => {
 const saveSlo = async () => {
   try {
     if (isEdit.value && editingId.value) {
-      await axios.put(`/api/sre/slo/${editingId.value}`, form)
+      await request.put(`/api/sre/slo/${editingId.value}`, form)
       ElMessage.success("更新成功")
     } else {
-      await axios.post("/api/sre/slo", form)
+      await request.post("/api/sre/slo", form)
       ElMessage.success("创建成功")
     }
     dialogVisible.value = false
@@ -171,7 +171,7 @@ const saveSlo = async () => {
 
 const deleteSlo = async (id) => {
   try {
-    await axios.delete(`/api/sre/slo/${id}`)
+    await request.delete(`/api/sre/slo/${id}`)
     ElMessage.success("删除成功")
     loadData()
   } catch (e) {

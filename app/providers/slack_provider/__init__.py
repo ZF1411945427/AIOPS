@@ -1,0 +1,1 @@
+from app.providers.slack_provider.provider import SlackProvider

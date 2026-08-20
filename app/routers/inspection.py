@@ -34,8 +34,8 @@ def _on_startup():
     db = next(get_db())
     try:
         seed_builtin_templates(db)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 # ── 统计 ──
@@ -154,3 +154,7 @@ def api_trigger_by_alert(alert_id: int):
     if "error" in result:
         return result
     return result
+
+
+import logging
+logger = logging.getLogger(__name__)

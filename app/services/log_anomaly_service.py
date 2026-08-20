@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 from app.models import LogAnomalyRule, Alert, DataSource
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 def check_log_anomalies(db: Session):
     rules = db.query(LogAnomalyRule).filter(LogAnomalyRule.enabled == True).all()
     now = datetime.now()
@@ -19,8 +22,8 @@ def check_log_anomalies(db: Session):
                 try:
                     if re.search(rule.regex_pattern, msg):
                         count += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         elif rule.keyword and rule.log_level:
             count = _count_es_logs(db, rule.source, since, rule.log_level, keyword=rule.keyword)
         elif rule.keyword:

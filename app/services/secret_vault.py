@@ -11,6 +11,9 @@ import re
 from app.config import VAULT_ENCRYPT_SEED
 from app.models import SecretVault
 
+import logging
+logger = logging.getLogger(__name__)
+
 _REF_PATTERN = re.compile(r"\{\{secret:([^{}:\s]+)\}\}")
 
 VALUE_TYPES = ("password", "token", "api_key", "private_key", "custom")
@@ -166,8 +169,8 @@ def resolve_secret_refs(value, db=None):
             if own_session:
                 try:
                     db.close()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     if isinstance(value, dict):
         return {k: resolve_secret_refs(v, db) for k, v in value.items()}
     if isinstance(value, list):

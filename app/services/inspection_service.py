@@ -21,6 +21,9 @@ from app.models import (
 
 # ── 内置巡检模板 ──
 
+import logging
+logger = logging.getLogger(__name__)
+
 BUILTIN_TEMPLATES = [
     {
         "name": "服务器健康巡检",
@@ -684,8 +687,8 @@ def _generate_ai_report(db: Session, task: InspectionTask, template: InspectionT
             choices = resp.get("choices", [])
             if choices:
                 return choices[0].get("message", {}).get("content", "")
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
     return _generate_rule_report(task, template, assets, item_results, score)
 

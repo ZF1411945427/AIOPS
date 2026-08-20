@@ -135,6 +135,10 @@
 | **`last_checked`** | DateTime | **`last_checked_at`** | ❌ 缺 _at |
 | latency_ms | Integer | — | |
 | health_status | String(16) | — | |
+| **`online_since`** | DateTime | — | ✅ 新增：最近一次由 offline → online 切换的时刻，用于计算「持续在线时间」；持续在线期间保持不变，转到 offline 时建议保留上次在线时长或清空 |
+| **`probe_type`** | String(16) | `tcp` | ✅ 新增：资产探活方式，枚举 `tcp`/`ping`/`ssh`，默认 `tcp`。tcp=连接资产端口；ping=ICMP 连通；ssh=SSH 登录验证。SSH 定时自动探活采用低频（延长间隔）且失败时自动降级为 TCP，避免触发 sshd 半开队列（banner 超时） |
+| **`environment`** | String(24) | `non-production` | ✅ 新增：「是否生产环境」。枚举 `production`/`non-production`，默认 `non-production`（存量兼容，不误锁）。**仅服务器类资产（server/virtual_machine/cloud_host/vm）可设置**；非服务器资产不落库该字段，环境沿 `parent_id` 父链继承宿主服务器的 environment（见 AI 权限门控契约） |
+| **`ai_access_mode`** | String(24) | `read-only` | ✅ 新增：AI 访问模式，枚举 `read-only`/`read-write`，默认 `read-only`。**仅对生产资产生效**：生产+read-only=只读铁闸（AI 禁止任何写操作）；生产+read-write=临时豁免模式（可写但走人工确认）。非生产资产无视此字段始终可读写。豁免需显式勾选并备注原因，用完手动改回 read-only |
 
 ### `alert_silences` — 告警静默
 
@@ -277,7 +281,7 @@
 | **`last_scrape`** | DateTime | **`last_scraped_at`** | ❌ 缺 _at |
 | created_at | DateTime | — | ✅ |
 
-> **type 枚举**(由后端 `DS_TYPES` 驱动,前端下拉自动同步):`prometheus` / `custom_api` / `log_file` / `ssh` / `kubernetes` / `docker` / `elasticsearch` / `loki` / `jaeger` / `otel`
+> **type 枚举**(由后端 `ProviderFactory` 自动发现,前端下拉自动同步):`prometheus` / `custom_api` / `log_file` / `ssh` / `kubernetes` / `docker` / `elasticsearch` / `loki` / `jaeger` / `otel` / `slack` / `pagerduty` / `jira` / `datadog` / `grafana` / `zabbix` / `webhook` / `email` / `sentry` / `opsgenie`
 >
 > **loki**: endpoint 填 Loki HTTP 地址(如 `http://10.0.9.12:3100`),auth_config 支持 `username`/`password`(Basic)与 `org_id`(X-Scope-OrgID 多租户)。日志查询走 `log_query_service.LokiAdapter`(LogQL `/loki/api/v1/query_range`),`logs.py` 的 `/logs/api/sources` 与 `/logs/api/search` 已按 type 分发;日志中心与 MCP `query_log_sources` 均自动包含 loki。
 >
@@ -710,7 +714,12 @@
 | `options` | Array | `type=select` 时的候选项 |
 | `hint` | String | 底部说明（对应哪个环境变量/作用） |
 
-**消费约定**：前端 `deployForm.params` 以 `{key: value}` 形式收集；后端 docker 分支把 `params` 注入 compose 的 `environment`/`ports`/`volumes`（`render_compose`），native 分支把 `params` 以环境变量前缀注入脚本。**不得在代码中发明 schema 未声明的参数键**。
+**消费约定**：前端 `deployForm.params` 以 `{key: value}` 形式收集；后端 docker 分支把 `params` 注入 compose 的 `environment`/`ports`/`volumes`（`render_compose`）；native 分支由 `component_catalog_service.native_deploy(name, params, deploy_path, port)` 按组件 name 生成「真正改写配置文件」的脚本段（2026-08-17 增强）：
+- 关键参数（`db_port`/`amqp_port`/`mq_port`/`redis_password`/`maxmemory`/`server_name` 等）**必须写进目标机真实配置文件**（`port`/`requirepass`/`maxmemory`/`listen`/`server_name` 等），而非仅 export 环境变量。
+- native 部署前自动：停旧 service + 杀残留进程 + 备份旧配置(`<cfg>.bak.<ts>`)，避免端口冲突与旧实例残留。
+- `precheck_deploy` 的端口检查以用户填写的 `params['db_port']`（rabbitmq 取 `amqp_port`）为准，回退 `default_port`；并新增「残留进程」检测项。
+- 规则表（组件 name → 配置项映射）定义于 `component_catalog_service.native_deploy` 内部，非 DB 字段。
+**不得在代码中发明 schema 未声明的参数键**。
 
 ### `component_installs` — 组件安装记录
 
@@ -736,6 +745,7 @@
 | **`ai_analysis`** | Text(JSON) | AI 健康分析（summary/health_score/issues/recommendations/severity） |
 | **`deploy_log`** | Text | 部署日志（截断） |
 | **`deploy_params`** | Text(JSON) | **本次部署定制的参数快照** `{key:value}`（2026-08-16 新增，供安装记录查看/AI 分析） |
+| **`pending_decision_json`** | Text(JSON) | 待用户决策卡片内容(JSON)。`null`=无；有决策时存 `{id,install_id,question,options}`。决策被消费/部署结束/停止后清空。按安装记录独立持久化，互不干扰 |
 | **`deploy_plan_id`** | Integer | 关联 deploy.plans（可空） |
 | **`created_at`/`updated_at`** | DateTime | 时间戳 |
 
@@ -745,12 +755,12 @@
 
 #### 实时流式部署（WebSocket, AI 辅助，对标 K8s 集群部署 WS）
 
-- 端点：`GET /component-market/ws/deploy`（WebSocket，Query 传参）。Query：`component_id`(必)、`asset_id`(必)、`deploy_type`(默认 docker)、`deploy_path`、`namespace`、`release`、`http_proxy`、`https_proxy`、`no_proxy`。
+- 端点：`GET /component-market/ws/deploy`（WebSocket，Query 传参）。Query：`component_id`(必)、`asset_id`(必)、`deploy_type`(默认 docker)、`deploy_path`、`namespace`、`release`、`params`(URL-encoded JSON `{key:value}`，组件定制参数)、`http_proxy`、`https_proxy`、`no_proxy`。
 - 逐步推送事件 `{type}`：`status`(running/succeeded)/`phase`(step 0-4 + title)/`log`(node+message)/`ai`(stage/summary/advice/risk/ai_generated)/`error`/`complete`(status: succeeded/failed/stopped/deployed, install_id)。
 - 服务端已连接 `event.install_id` 关联安装记录；`deploy_log` 落库为完整事件日志；docker/native 真实执行，helm/ha 虚拟执行(建记录+AI建议+complete=deployed)。
 - 前端停止：向 WS 发 `{"type":"stop","install_id":N}`；或 `POST /component-market/api/deploys/{install_id}/stop`（走 `cancel_deploy`，置共享 `threading.Event`，部署流各阶段检查中断）。
 - **调用链**：`component_market.api ws_deploy` → `component_catalog_service.deploy_stream`(生成器逐个 yield) → `_exec_ssh`/`_apply_docker_proxy`/`get_deploy_render`；AI 建议 `_ai_deploy_tip`(call_llm, 无 provider 降级 `_rule_deploy_tip`)。
-- - `POST /component-market/api/precheck` — **逻辑预检**(对标 K8s `precheck_plan`)。body: `{component_id, asset_id, deploy_type?, port?, http_proxy?, https_proxy?, no_proxy?}`。返回 `{ok, issues, checks:[{name, ok, message}]}`。预检项: 目标机资产/SSH 连通/root 校验/目标机内存/端口占用/对应部署方式环境(Docker/Compose / native 脚本 / helm·ha 引擎)/磁盘空间(/data)。走 `component_catalog_service.precheck_deploy`。
+- - `POST /component-market/api/precheck` — **逻辑预检**(对标 K8s `precheck_plan`)。body: `{component_id, asset_id, deploy_type?, port?, params?, http_proxy?, https_proxy?, no_proxy?}`。返回 `{ok, issues, checks:[{name, ok, message}]}`。预检项: 目标机资产/SSH 连通/root 校验/目标机内存/端口占用(**取 `params['db_port']` 优先, rabbitmq 取 `amqp_port`**)/残留进程(native, 用 `pgrep -f <name>` 检测)/对应部署方式环境(Docker/Compose / native 脚本 / helm·ha 引擎)/磁盘空间(/data)。native 下端口占用不作为阻断(部署会先停旧服务/杀残留进程自动清理), docker 下端口占用为阻断。走 `component_catalog_service.precheck_deploy`。
 - 部署流事件新增: `{type:"precheck", name, ok, message}`(部署阶段0 逐步推 8 项预检明细, 前端渲染预检面板; 预检未通过 → error + complete=failed 中断) 与 `{type:"report", overall_status, summary, report}`(docker/native **部署成功后自动触发四合一体检** `full_health_check`, 产出综合报告)。
 
 **部署结果判断契约(🔴 关键)**
@@ -774,6 +784,29 @@
 - 变更点: `events_json` / `_append_install_event` / `get_install_events` / `resume` / `resumed_decision` / `resume_done`。
 
 **🔴 踩坑**：ws 端点**必须**顶部 `from fastapi import WebSocket` 且签名 `websocket: WebSocket`（正常类型注解），**不可**用字符串注解+函数内 import，否则 uvicorn 握手返回 403(101 握手失败)。
+
+---
+
+### AI 访问模式门控契约（生产只读铁闸，2026-08-20 新增）
+
+**目标**：生产环境服务器默认「只读查询」，AI 禁止对其执行任何写操作；特殊情况可临时豁免，用完手动关闭。安全红线：**只读状态下即使管理员也不能写**（靠后端门控强制，不依赖 UI/人工自觉）。
+
+**字段**（见第二章 `assets` 表）：
+- `environment`：`production` / `non-production`，默认 `non-production`。**仅服务器类资产（server/virtual_machine/cloud_host/vm）可设置**；非服务器资产不落库此字段。
+- `ai_access_mode`：`read-only` / `read-write`，默认 `read-only`。**仅对生产资产生效**。
+
+**有效访问模式 effective（app/services/asset_service.py::effective_ai_access）**：
+- 服务器资产：`environment==production` → `read-only`（除非 `ai_access_mode==read-write` 豁免）；否则 `read-write`。
+- 非服务器资产：**自身不存环境**，沿 `parent_id` 父链追溯宿主服务器的 environment/ai_access_mode（`_resolve_parent_access`）。父链任一环节生产只读 → 收敛为 read-only（安全最高优先级）。无父级 → 默认 read-write。
+
+**门控执行点（d挡得住无关 entry）**：
+1. `mcp_tools.propose_action`：解析 payload 目标资产，effective=read-only → 拒绝创建 PendingAction。
+2. `mcp_tools.propose_workflow`：目标资产 read-only → 拒绝（多步 SOP 同样门控）。
+3. `agent_service.confirm_pending_action` + `_async_execute_action`（执行路径，最后一道铁闸）：对 effective=read-only 的资产，即使已有 pending 动作也禁止执行（防 propose 时还未只读、事后被改只读的遗留动作绕过）。
+4. `mcp_tools.execute_mysql` / `query_mysql` 等：对 read-only 资产强制拒绝写 SQL（read-only 铁闸下仅放行 SELECT/SHOW/DESC/DESCRIBE/EXPLAIN）。
+5. `process_chat_message`：注入会话上下文时按 effective 裁剪 LLM 工具清单（read-only 移除写类工具）+ 注入权限说明，从源头减少 LLM 发起写意图。
+
+**变更点/排查关键词**：`environment` / `ai_access_mode` / `effective_ai_access` / `assert_ai_writable` / `_resolve_parent_access` / `_SERVER_CI_TYPES`。
 
 ---
 
@@ -1135,6 +1168,31 @@
 - `db_port` 字段类型 Integer，默认值 3306
 - `db_user` / `db_password` / `db_name` 字段沿用 CONTRACT.md 第五章敏感字段掩码规则
 
+### 8.4 `app_lang` — 业务应用语言枚举（ci_type="business_app" 时使用）
+
+> **本节为 `app_lang` 字段的唯一权威枚举清单。**
+> 当 `ci_type="business_app"` 时，`app_lang` 用于细分业务的实现语言 / 运行时。
+> 仅用于 `business_app`，不用于 `api_service` / `middleware` / `monitoring_endpoint`。
+
+| app_lang | 标签 |
+|---------|------|
+| java | Java |
+| go | Go |
+| python | Python |
+| node | Node.js |
+| php | PHP |
+| ruby | Ruby |
+| dotnet | .NET |
+| cpp | C++ |
+| rust | Rust |
+| scala | Scala |
+| other | 其他 |
+
+**约定：**
+- `app_lang` 字段类型 String(32)，可选，无默认值（未设置时为空）。
+- 存储位置：优先存 `ci_attributes`（`app_lang`），`connection_config`（http 分支）亦可透传 `app_lang`；detail 反序列化优先读 `ci_attributes`，其次 `connection_config`。
+- 前端 `AssetsView.vue` 业务应用表单「应用语言」下拉选项必须与本表一致。
+
 
 ---
 
@@ -1289,6 +1347,7 @@ emediation_service.py / edge_tunnel_service.py 现有执行链
 | deploy_count | Integer | 0 | 累计部署次数 |
 | dag_json | Text | "{}" | **AI 执行引擎 DAG 执行计划 JSON**：AI 分析步骤依赖后生成的 DAG，含 groups(并行组/串行组)、reasoning |
 | ai_decision_log_json | Text | "[]" | **AI 自主决策日志 JSON**：每次失败时 AI 的决策记录(fix/retry/skip/rollback)，含根因、修复命令、时间戳(最多 200 条) |
+| pending_decision_json | Text | "null" | 待用户高危确认卡片内容(JSON)。`null`=无；有决策时存 `{step,description,command,risk,reason}`。确认/拒绝/部署结束/停止后清空。按计划独立持久化，互不干扰 |
 | created_by | Integer FK(users.id) | nullable | 创建人 |
 | created_at | DateTime | now() | - |
 | updated_at | DateTime | now()/onupdate | - |
@@ -1487,6 +1546,21 @@ draft → planned → running → succeeded → (post-verify → report)
 > 通过 SSH 在目标主机上执行 kubeadm 编排，一键创建 K8S 集群，产出 kubeconfig 并自动接入平台 K8S 监控。
 > 新增/修改字段必须先改本节，再同步前后端代码。
 
+> **运行时说明**：`runtime` 支持 `containerd`（默认，走 `/run/containerd/containerd.sock`）与
+> `docker`（k8s≥1.24 dockershim 已移除，平台自动安装 **Docker CE + cri-dockerd**，kubelet 走
+> `unix:///var/run/cri-dockerd.sock`；`daemon.json` 设 `cgroupdriver=systemd`，
+> 并在 `/etc/systemd/system/docker.service.d/http-proxy.conf` 为 Docker daemon 配代理，
+> 与 containerd 的联网配置对齐；`KubeletConfiguration.containerRuntimeEndpoint` 写死运行时 socket，
+> 避免 systemd unit 未带 `KUBELET_KUBEADM_ARGS` 导致 kubelet 误连 containerd）。
+
+> **证书统一有效期实现**：`cert_expiry_years` 配置后，部署阶段4（init 成功后）执行 `_apply_cert_expiry`：
+> 在节点把**三套 CA（`ca`/`front-proxy-ca`/`etcd/ca`）用各自 key 自签为 N 年**、把**全部叶子证书
+> （apiserver/apiserver-kubelet-client/apiserver-etcd-client/front-proxy-client/etcd server·peer·healthcheck-client）
+> 按 issuer 路由到对应 CA key 用 `-copy_extensions copy` 保留 SAN 重签为 N 年**，CA key 全程不变
+> （旧/新叶子校验均通过，集群不中断），随后重启 kubelet + 重建控制面静态 pod 加载新证书。
+> 结果：**所有证书（CA+服务证书）到期时间一致为 N 年**。首次重签前自动备份 `/etc/kubernetes/pki.bk`。
+> 幂等：剩余有效期已 ≥N 年则跳过。未配置（NULL）则用 kubeadm 默认（CA 10 年/服务证书 1 年，各不一致）。
+
 ### 13.1 k8s_cluster_plans — K8S 集群部署计划
 
 | 字段 | 类型 | 默认 | 说明 |
@@ -1504,10 +1578,12 @@ draft → planned → running → succeeded → (post-verify → report)
 | http_proxy | String(256) | "" | 在线部署代理 URL（如 `http://192.168.100.2:7897`），留空=不走代理 |
 | https_proxy | String(256) | "" | HTTPS 代理 URL（留空=用 http_proxy） |
 | no_proxy | String(512) | "127.0.0.1,localhost,.local" | 不走代理的地址列表 |
+| cert_expiry_years | Integer | NULL | 证书统一有效期(年)。NULL=平台默认(CA 10年/服务证书1年, 各不一致)；设 N 年则 CA+apiserver/etcd/front-proxy/kubelet 等**全部证书时长一致为 N 年**；前端默认 100≈永久 |
 | nodes_json | Text | "[]" | 节点定义 JSON（见 13.3 节点对象结构） |
 | status | String(32) | "draft" | draft/planned/running/succeeded/failed/rolled_back |
 | current_step | Integer | 0 | 当前执行步骤序号（编排阶段） |
 | logs_json | Text | "[]" | 执行日志事件列表（{ts,type,node,step,message}） |
+| pending_decision_json | Text | "null" | 待用户决策卡片内容(JSON)。`null`=无待决策；有决策时存 `{id,question,options,root_cause}`。部署结束/用户选择后清空。按计划独立持久化，各条目互不干扰 |
 | kubeconfig | Text | "" | **敏感：产出 kubeconfig 内容（后端列表不返回，详情按需返回）** |
 | join_token | Text | "" | **敏感：worker 加入 token（临时，仅执行期写入）** |
 | report_json | Text | "{}" | 部署报告（node 状态矩阵 + 关键信息） |
@@ -2084,3 +2160,425 @@ def xxx(db=None, user_id=None, **kwargs): ...
 - `/healthz`、`/readyz` 已存在；新增 `GET /metrics`（Prometheus text/plain exposition，公开）：`aiops_healthz`、`aiops_mcp_tool_count`、`aiops_alert_rule_count`、`aiops_skill_count`、`aiops_network_device_count`、`aiops_app_up`、`aiops_db_alive`。
 - 日志 trace_id：`logger.py` 格式含 `{extra[trace_id]}` + `AIOPS_LOG_JSON=1` 输出 JSON 行；`TraceIdMiddleware`（最外层）每个请求生成/透传 `x-request-id` 并 `logger.contextualize(trace_id=...)`，实现全链路串联。
 - embedding（G2）：`embedding_service.py` 默认 `bge-m3` 本地 BGE-small-zh-v1.5（`models/bge-small-zh-v1.5`）离线可用，已满足对 ONNX 的目标（部署如需 ONNX 可另导出）。
+
+## 第二十三章：外部告警入站集成契约（2026-08-16 新增）
+
+> 目的：填补"无外部入站告警集成"缺口，对接 Prometheus Alertmanager webhook、Prometheus remote_write、以及通用 webhook 入站，并把处置状态回写源系统。**新增/修改字段必须先改本契约再同步前后端。**
+
+### 23.1 `inbound_sources` — 入站告警源
+
+| 字段名 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| id | Integer PK | — | — |
+| name | String(128) | NOT NULL | 源名称（唯一） |
+| source_type | String(32) | `alertmanager` | `alertmanager` / `prometheus_remote_write` / `webhook` / `datadog` / `pagerduty` |
+| endpoint_token | String(64) | 随机生成 | 入站端点签名 token（Bearer 或 query），防伪造 |
+| labels_json | Text(JSON) | `{}` | 入站时注入的标签（如 `{"source":"prom"}`） |
+| metrics_to_rules | Text(JSON) | `{}` | remote_write：metric 名→AlertRule 路由（`{"node_cpu":"cpu_usage"}`，可空） |
+| auto_create_rule | Boolean | False | remote_write 有指标但无规则时是否自动建告警规则 |
+| status_webhook_url | String(512) | "" | 处置状态回写的目标 URL（空=不回调） |
+| enabled | Boolean | True | 启用开关 |
+| created_at | DateTime | now | — |
+
+### 23.2 入站端点（统一前缀 `/api/inbound`）
+
+| 端点 | 作用 | 说明 |
+|------|------|------|
+| `POST /api/inbound/{source_id}/alertmanager` | 接收 Alertmanager webhook | body 为 Alertmanager `{alerts:[{labels,annotations,status,...}]}`；`status=firing` 触发、`resolved` 关闭 |
+| `POST /api/inbound/{source_id}/remote-write` | 接收 Prometheus remote_write（protobuf/snappy） | 需 `protobuf`/`snappy`/`prometheus_client` 解码；metric→MetricRecord 落库 |
+| `POST /api/inbound/{source_id}/webhook` | 通用 JSON webhook | body `{title,severity,status,metric_name?,message?,labels?}` |
+| `POST /api/inbound/{source_id}/status-callback` | 处置状态回写 | body `{alert_id,status}`，`acknowledged`/`resolved` |
+
+- 鉴权：`Authorization: Bearer <endpoint_token>` 或 `?token=<endpoint_token>`。token 错误返回 403。
+- 入站告警 `source` 标记 = 源名，`Alert.message` 拼接 labels/annotations。
+
+### 23.3 `alerts` 表新增 `source` 列
+
+- `source` String(32) 默认 `"internal"`：标识告警来源（`internal` / 入站源名 / `remote_write`）。
+- 入站触发告警规则：先按 `labels.rule_name` 或 `labels.metric` 匹配已有 `AlertRule`；无则按 `source` 自动建 `AlertRule`（severity/condition/threshold 用入站值）。
+
+### 23.4 处置状态回写
+
+- `POST /api/inbound/{source_id}/status-callback`：把本项目 `acknowledged`/`resolved` 状态通过「状态回写 webhook」同步到源系统。回写目标 URL 存 `inbound_sources.status_webhook_url`。
+- 状态回写 URL 在入站源编辑时可配；空则不回写（仅本地）。
+
+## 第二十四章：SOP 工作流触发 & 告警关联落库契约（2026-08-16 新增）
+
+### 24.1 SOP 工作流（`WorkflowTemplate`）触发接通
+
+> 修复既有缺口：`workflow_cron_scheduler.check_cron_triggers` 原先只查 `AgentWorkflow`，导致 `WorkflowTemplate.trigger_type='scheduled'/'alert_auto'` 是"纸面配置、不自动执行"。现扩展为**双表扫描**。
+
+| 引擎 | 表 | trigger_type 取值 | 后台调度 |
+|------|----|------------------|---------|
+| 智能体工作流 | `agent_workflows` | `manual` / `alert_auto` / `chat` / `cron` | `check_alert_triggers`（alert_auto）、`check_cron_triggers`（cron） |
+| SOP 剧本 | `workflow_templates` | `manual` / `scheduled` / `alert_auto` | `check_cron_triggers`（scheduled，cron 表达式） + 新 `check_sop_alert_triggers`（alert_auto） |
+
+- `check_cron_triggers`：除 agent 工作流外，再查 `WorkflowTemplate.trigger_type='scheduled'`；cron 表达式取 `trigger_condition.cron`；命中走 `workflow_service.start_workflow_run(db, template_id, title, context, trigger_source='cron')`。
+- `check_sop_alert_triggers`：查 `WorkflowTemplate.trigger_type='alert_auto'`，匹配最近新告警（复用 `_alert_matches_condition` 语义），防重复按 `WorkflowRun.context.alert_id` 历史去重。
+- `WorkflowTemplate.trigger_condition` 约定：`{"cron":"0 2 * * *"}`（scheduled）/ `{"severity":"critical"}`（alert_auto）。
+
+### 24.2 告警关联落库 + 自动生成 incident 闭环
+
+> 修复既有缺口：告警关联结果原先只进 30 秒进程缓存 `_CLUSTER_CACHE`，不落库、不自动生成故障单。现打通闭环。
+
+- 新表 `alert_clusters`：记录每次告警聚类结果。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| id | Integer PK | — |
+| cluster_id | String(64) | 聚类键（`svc-<id>` / `time-<n>` / `topo-<id>`） |
+| cluster_type | String(32) | `service` / `time_window` / `topology` |
+| alert_ids_json | Text(JSON) | 参与的告警 id 列表 |
+| key_asset_id | Integer | 关键资产 |
+| alert_count | Integer | 告警数 |
+| dominant_severity | String(32) | 主导级别 |
+| summary_json | Text(JSON) | 聚类摘要快照 |
+| created_at | DateTime | now |
+| incident_id | Integer | 关联的故障单（自动生成后回填） |
+
+- 新后台任务 `alert_correlation_service.persist_clusters(db)`：周期把 `cluster_alerts` 结果落 `alert_clusters`，并对满足条件的聚类（`alert_count>=2` 且 dominant_severity in critical/high 且无 incident）自动调 `incident_service` 生成故障单并关联 `IncidentAlert` + 回填 `incident_id`。
+- `cluster_alerts` 返回增加 `persisted`/`incident_id`。
+
+### 24.3 告警规则 AND/OR 组合条件
+
+- `AlertRule.condition` 现有单操作符（`> < >= <= == !=`）。新增组合支持：
+  - 规则 `config_json` 支持 `"expression": {"and":[{"op":">","threshold":80},{"op":"<","threshold":95}]}` 或 `{"or":[...]}`；有 `expression` 时复用 `metric_name` 评估。
+  - `alert_service._eval_rule_by_kind` 在 `metric_raw` 分支优先解析 `expression`，逐子条件对 `actual_value` 求值后按 and/or 聚合。
+- `config_json` 为 TOCTOU 安全，只影响规则评估，不改表结构。
+
+### 24.4 入站端点上下文注入
+
+- 入站告警 / remote_write 落库后，可选触发 `_notify_new_alert`（复用 `notification_service` + `alert_webhooks`），并供 SOP `alert_auto` / agent `alert_auto` 工作流消费（走既有 `check_alert_triggers` 轮询，无需额外接线）。
+
+---
+
+## 第二十五章：Provider 集成系统（2026-08-17 新增）
+
+### 25.1 架构概述
+
+Provider 集成系统采用 **插件式架构（Plugin Architecture）** + **工厂方法模式（Factory Method Pattern）**，参考 KeepHQ/keep 的 Provider 体系设计。
+
+```
+app/providers/
+├── base.py          # BaseProvider 抽象基类 + BaseAuthConfig + ProviderMeta
+├── factory.py       # ProviderFactory 动态发现/加载/注册
+├── service.py       # ProviderService 安装/卸载/测试/采集
+├── router.py        # API 路由 (/api/providers/*)
+├── models.py        # DTO 模型
+├── {type}_provider/ # 每个 Provider 独立目录
+│   ├── __init__.py
+│   └── provider.py  # {Type}Provider(BaseProvider)
+```
+
+### 25.2 Provider 注册机制
+
+- **自动发现**: `ProviderFactory.discover_providers()` 遍历 `app/providers/` 下所有 `*_provider/` 目录，`importlib.import_module` 动态导入，通过 `issubclass(BaseProvider)` 识别
+- **元数据声明**: 每个 Provider 通过 `PROVIDER_META = ProviderMeta(...)` 声明 type/display_name/category/tags/icon
+- **AuthConfig 声明式定义**: 每个 Provider 定义 `@dataclass`，字段用 `dataclasses.field(metadata={...})` 标记 `required`/`sensitive`/`hidden`/`description`/`placeholder`/`validation`/`options`
+- **敏感字段**: 后端返回 `***` + `has_*` 标记，前端编辑置空、空值=不更新（同 CONTRACT.md 第五章规则）
+
+### 25.3 Provider 目录规范
+
+| 目录 | 类别 | 能力 | 说明 |
+|------|------|------|------|
+| `prometheus_provider` | monitoring | test + scrape | PromQL 查询 CPU/内存/磁盘 |
+| `ssh_provider` | cloud_infra | test + scrape | SSH 远程采集 + Docker 发现 |
+| `kubernetes_provider` | cloud_infra | test + scrape | K8s API 资源发现 |
+| `elasticsearch_provider` | data_source | test + scrape | ES 集群健康/索引/分片 |
+| `loki_provider` | logging | test | Loki LogQL 查询 |
+| `jaeger_provider` | tracing | test | Jaeger 链路拉取 |
+| `docker_provider` | container | test + scrape | Docker 容器指标 |
+| `custom_api_provider` | custom | test | 自定义 REST API |
+| `otel_provider` | data_source | test | OTLP 被动接收 |
+| `log_file_provider` | data_source | test | 日志文件 Agent 采集 |
+| `slack_provider` | notification | test + notify | Slack 消息推送 |
+| `pagerduty_provider` | incident_management | test + notify | PagerDuty 事件触发 |
+| `jira_provider` | ticketing | test + notify | Jira 工单创建 |
+| `datadog_provider` | monitoring | test + **scrape** + notify + query | Datadog 监控，scrape 拉活动 Monitor 告警 |
+| `grafana_provider` | monitoring | test + **scrape** + notify | Grafana，scrape 拉活跃告警(/api/prometheus/grafana/api/v1/rules) |
+| `zabbix_provider` | monitoring | test + **scrape** + query | Zabbix，scrape 拉问题(problem.get) |
+| `dynatrace_provider` | monitoring | test + **scrape** + query | Dynatrace，scrape 拉 Problems(2026-08-17 新增) |
+| `cloudwatch_provider` | monitoring | test + **scrape** + query | AWS CloudWatch，scrape 拉 Alarm(纯 requests+SigV4 签名) |
+| `webhook_provider` | notification | test + notify | 通用 Webhook 推送 |
+| `email_provider` | notification | test + notify | SMTP 邮件推送 |
+| `sentry_provider` | monitoring | test + query | Sentry 错误追踪 |
+| `opsgenie_provider` | incident_management | test + notify | Opsgenie 告警推送 |
+
+### 25.4 API 路由
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/providers/catalog` | 获取所有可用 Provider 元数据（按分类分组） |
+| GET | `/api/providers/installed` | 所有已安装的 Provider 实例 |
+| GET | `/api/providers/installed/{id}` | 单个 Provider 实例详情 |
+| POST | `/api/providers/install` | 安装新 Provider |
+| PUT | `/api/providers/installed/{id}` | 更新 Provider 配置 |
+| POST | `/api/providers/installed/{id}/uninstall` | 卸载 Provider |
+| POST | `/api/providers/installed/{id}/test` | 测试连接 |
+| POST | `/api/providers/installed/{id}/scrape` | 触发采集 |
+| POST | `/api/providers/installed/{id}/toggle` | 启用/停用切换 |
+
+### 25.5 新旧体系桥接
+
+- `datasource_service.py` 保留原有 switch-case 逻辑，确保向后兼容
+- 新增 `scrape_via_provider()` 和 `test_via_provider()` 桥接函数，优先尝试 `ProviderFactory.get_provider()`，失败时回退到旧逻辑
+- `ProviderFactory` 自动发现的新 Provider 类型无需修改 `datasource_service.py` 即可使用
+- `datasource_service.scrape_all_sources()` 已优先使用 Provider 方式采集（新 Provider 优先），失败回退到旧 switch-case
+
+### 25.6 新增 Provider 步骤
+
+1. 在 `app/providers/` 下创建 `{type}_provider/` 目录
+2. 创建 `provider.py`，定义 `{Type}Provider(BaseProvider)` + `{Type}ProviderAuthConfig(BaseAuthConfig)`
+3. 设置 `PROVIDER_META` 元数据
+4. 实现 `test_connection()` 和 `scrape()` 或 `notify()`
+5. 重启后端，ProviderFactory 自动发现注册
+6. 前端 Provider 市场自动显示新 Provider
+
+### 25.7 对标 KeepHQ 移植说明（2026-08-17）
+
+已从 `E:\AIOPS\keep-main`(KeepHQ) 逐一移植/增强 5 个监控类 Provider，核心能力是**主动拉取外部告警**（Keep 的 `get_alerts`/`_get_alerts` 模式）：
+
+| Provider | 拉取接口 | 移植要点 |
+|----------|---------|---------|
+| Datadog | `GET /api/v1/monitor` | 复用 Keep 的 monitors+events 思路，group_states=alert,warn 过滤 |
+| Grafana | `GET /api/prometheus/grafana/api/v1/rules` | 复用 Keep 的 rules/history 思路，解析 firing alert |
+| Zabbix | `problem.get` (JSON-RPC) | 复用 Keep 的 problem.get，筛选未关闭 warning+ |
+| Dynatrace | `GET /api/v2/problems` | 复用 Keep 的 problems API，仅取 OPEN |
+| CloudWatch | `POST DescribeAlarms` | 纯 `requests` + **内联 SigV4 签名**（不引入 boto3 重依赖） |
+
+- 所有 Provider `scrape()` 返回统一告警 dict 结构：`{id, source, name, message, status, severity, timestamp, ...}`
+- CloudWatch 因未装 boto3，采用手写 AWS Signature V4 签名，避免新增依赖
+- 移植遵循 CONTRACT.md 字段契约：敏感字段(sensitive)在 AuthConfig 用 `metadata` 标记
+
+### 25.8 安装后采集接线
+
+- Provider 通过 `datasource_service.scrape_via_provider()` 接入采集调度（见 25.5）
+- 安装外部监控 Provider 后，scrape 拉回的告警 dict 可供告警引擎/关联/incident 消费
+- `ProviderService.scrape()` 会更新 `data_sources.last_status/last_error/last_scraped_at`
+
+## 第二十六章：主脑语音接口契约（JarvisVoice）
+
+> 主脑(JarvisView.vue)语音链路字段唯一数据源。任何字段变更必须先改本契约再同步前后端。
+> **2026-08-19 起语音全走云端**：本地 sherpa-onnx(KWS/ASR/VITS/VAD) 及 `sherpa_service.py`、`kws_keywords.txt` 已整体删除，models 下语音模型(约775MB)已清除。STT/TTS/唤醒均由 `app/services/voice_service.py` 按 `voice_providers` 表(见 26.6)分发到 阿里/百度/腾讯/edge-tts。
+> 历史: 2026-08-20 起 STT 由 whisper-small(~967MB) 迁到 sherpa-onnx Zipformer; 2026-08-19 移除本地全部语音。
+
+### 26.1 `/agent/tts`(GET,登录需鉴权)
+
+合成语音流，**云端分发**：已配置云 TTS(阿里/百度/腾讯)则调用云,否则/失败回退 edge-tts(微软免费云端)；本地 VITS 已移除。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `text` | str | 要合成的文本 |
+| `voice` | str | 角色:`jarvis`(默认,唯一角色=edge-tts 云健男声) |
+
+响应:
+- 一律 `audio/mpeg`(MP3) + 响应头 `X-TTS-Engine`: `aliyun` / `baidu` / `tencent` / `edge-tts`
+- 全链路失败返回 `{"error": ...}` 500
+
+前端以 `<audio>` 播放 MP3。
+
+### 26.2 `/agent/voice/wake-check`(POST,登录需鉴权)
+
+**云端 ASR 识别 + 文本匹配唤醒词**(本地 KWS/VAD 已移除)。
+
+- 请求体(`WakeCheckReq`): `audio_base64`(16kHz 单声道 16bit WAV base64) + `format: wav`(默认)
+- 处理: 音频 → `voice_service.transcribe_audio_file`(云 STT 分发) → 整句识别 → 匹配 `_WAKE_WORDS=['小智','唤醒']`
+
+响应体:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `hit` | bool | 是否命中唤醒词 |
+| `keyword` | str | 命中词文本(小智/唤醒)/ 空 |
+| `provider` | str | `aliyun` / `baidu` / `tencent` / `none`(无配置/失败) |
+
+后端 `_WAKE_WORDS`(agent_sse.py)与前端 `WAKE_WORDS`(JarvisView.vue)保持一致:`['小智','唤醒']`。
+
+前端唤醒流程:`WAKE` 按钮 → 录音 → 前端转 16k PCM WAV(base64)→ `/agent/voice/wake-check` → `hit=true` 时 `_handleWakeKeyword(keyword)` 切角色+进入聆听。
+
+### 26.3 `/agent/voice/transcribe`(POST,登录需鉴权)
+
+**云端 STT 整句识别**(普通语音指令)。
+
+请求体(`VoiceTranscribeReq`):
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `audio_base64` | str | 音频 base64 |
+| `format` | str | `webm`/`mp3`/`wav` |
+
+响应体:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `text` | str | 识别文本(空则 422) |
+| `provider` | str | `aliyun` / `baidu` / `tencent` / `none` |
+
+> 注:移动端 `/mobile/voice/transcribe` 同走 `voice_service.transcribe_audio_file`,云端 STT 分发。
+
+### 26.4 唤醒词
+
+后端 `_WAKE_WORDS`(agent_sse.py)与前端 `WAKE_WORDS`(JarvisView.vue)保持一致:`['小智','唤醒']`。
+(2026-08-19 起无本地 KWS 模型/拼音文件,唤醒靠云端 ASR 文本匹配。)
+
+### 26.5 TTS 音色映射(voice_service)
+
+| role | edge-tts 音色 | 说明 |
+|------|--------------|------|
+| `jarvis` | `zh-CN-YunjianNeural` | 云健(磁性男声),edge 默认;云 TTS 时用 `voice_providers.tts_voice` |
+
+> 本地 VITS(aishell3)已删除。仅保留 jarvis 单角色。
+
+### 26.6 语音服务(STT/TTS)云引擎配置契约(`voice_providers` 表)
+
+> 起 2026-08-XX: 语音链路改为**可配置多引擎分发**。在**智能体配置页(AiProvidersView.vue)**新增「语音服务」面板,增删改查 `voice_providers` 表条目,选择 STT / TTS 各用哪家引擎。未配置或引擎不可用时自动回退本地(sherpa)或 edge-tts。
+> 唯一数据源表:`voice_providers`(建表见 `app/models/agent.py::VoiceProvider`,ORM 由 `create_all` 自动建)。
+
+**表字段(CONTRACT 必须一致,不得自行发明):**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | Integer PK | 主键 |
+| `name` | String(64) 唯一 | 配置名(如 "阿里云语音") |
+| `engine` | String(32) | `aliyun` / `baidu` / `tencent` / `qiniu`(保留),`edge-tts`、`local` |
+| `engine_type` | String(16) | `stt` / `tts` / `both`(该条配置用于识别/合成/两者) |
+| `app_id` | String(128) | 阿里云 Appkey / 百度 AppID / 腾讯沿用(可空) |
+| `access_key_id` | String(255) | 云账号 AccessKeyId / AppKey(加密存储) |
+| `access_key_secret` | String(255) | 云账号 SecretKey(加密存储,`***` 脱敏) |
+| `region` | String(64) | 云区域,如 `cn-shanghai` / `ap-beijing`(可空) |
+| `stt_model` | String(128) | STT 模型/场景(阿里 `16k_zh` 等,可空) |
+| `tts_voice` | String(128) | TTS 音色(阿里/百度音色名,可空) |
+| `base_url` | String(255) | 自定义 Endpoint(可空,默认用官方) |
+| `extra_json` | Text | 扩展参数 JSON(rate/pitch/volume/person 等,默认 `{}`) |
+| `is_enabled` | Boolean | 是否启用 |
+| `priority` | Integer | 优先级(数字小优先,默认 10) |
+| `created_at` / `updated_at` | DateTime | 时间戳 |
+
+**敏感字段脱敏契约(与 AIProvider 一致):** 后端列表/详情接口一律只返回 `has_access_key: bool`,**绝不返回明文/密文**;前端编辑时 `access_key_secret` 置空、保存空值=不更新。加密复用 `AIProvider.set_api_key/get_api_key` 同款 Fernet(种子 `PROVIDER_ENCRYPT_SEED`)。
+
+**引擎分发(`app/services/voice_service.py`,纯云端,2026-08-19 起无本地回退):**
+- `resolve_stt_provider(db) -> VoiceProvider|None`:按 `engine_type in ('stt','both')` + `is_enabled=true` 取 `priority` 最小一条;无则 None(识别不可用)。
+- `resolve_tts_provider(db) -> VoiceProvider|None`:同上但 `engine_type in ('tts','both')`。
+- `transcribe_audio_file(db, audio_bytes, sample_rate, format) -> (text, provider)`:`provider` 为 `aliyun` / `baidu` / `tencent` / `none`(无配置/无密钥);失败返回空 text(无本地兜底)。
+- `synthesize(db, text, voice) -> (bytes, mime, engine)`:`(data, 'audio/mpeg', 'aliyun'/'baidu'/'tencent')` 或回退 `edge-tts`;全失败 `(None, None, "")`。
+- 云 STT 失败返回空(不回退本地);云 TTS 失败回退 edge-tts。
+
+**端点返回的 provider 值(前端展示用):**
+- STT:`aliyun` / `baidu` / `tencent` / `none`
+- TTS:响应头 `X-TTS-Engine`: `aliyun` / `baidu` / `tencent` / `edge-tts`
+
+### 26.7 全双工语音对话 WebSocket 协议（2026-08-19 新增）
+
+> **背景(爸爸需求)**: 语音对话要更智能——流式对话 + 中间插话立即打断。借鉴小智 ESP32(`E:\AIOPS\xiaozhi-esp32-main`) 语音协议，新增一条持久 WebSocket 承载完整语音对话闭环。
+> **端到端**: `WS /agent/voice/ws?token=<login JWT>`(登录 token=`issue_login_token` 签发,`verify_login_token` 校验,同告警/终端 WS)。
+> **实现**: `app/routers/voice_chat_ws.py`;前端 `JarvisView.vue` **WS 优先 + HTTP 兜底**(WS 未注册/失败自动回退 26.3 转写 + SSE 文本对话,不降级)。
+
+**消息格式**: text 帧 = JSON 控制消息;binary 帧 = 音频数据(逐句 TTS MP3 / STT 上传 PCM-WAV)。
+
+**客户端 → 服务器**:
+| type | 字段 | 说明 |
+|---|---|---|
+| `hello` | `session_id?` | 握手,复用已有会话 |
+| `listen` | `state:"stop"`, `format:"wav"` | 音频累积完成后触发 STT(需先发 binary 音频帧) |
+| `asr_start` | - | **真流式识别开始(2026-08-20)**:建流式 STT 会话(百度 realtime_asr),此后 binary 帧=16k 单声道 PCM 逐帧上行 |
+| `asr_end` | - | **真流式识别结束(2026-08-20)**:取定稿文本并触发语音对话;识别空回 `no_speech` |
+| `abort` | `reason:"user_interrupt"` | **插话中断**:停止当前 TTS 逐句下推 + 中止 LLM 生成,回 listening |
+| `tts_done` | - | 客户端播完一句(流控/状态同步) |
+| `ping` | - | 心跳 → `pong` |
+
+**服务器 → 客户端**:
+| type | 字段 | 说明 |
+|---|---|---|
+| `hello` | `session_id`, `transport` | 握手应答 |
+| `status` | `state:"recognizing"` | 正在 STT |
+| `asr_partial` | `text` | **真流式识别临时结果(2026-08-20)**:边说边出字,前端实时显示 |
+| `stt` | `text`, `provider` | 语音识别结果 |
+| `llm` | `token` | LLM 流式文本增量 |
+| `tts` | `state:"sentence"`, `sentence`, `engine` 或 `state:"start"/"stop"` | TTS 逐句开始(随后 binary=该句 MP3)/开始/结束 |
+| `emotion` | `emotion` | 情绪(`happy`/`alert`/`thinking`/`neutral`),驱动前端粒子染色 |
+| `aborted` | `reason`, `ready:true` | 已确认中断 |
+| `done` | `reply`, `session_id` | 整轮对话完成 |
+| `error` | `message` | 出错(未认证/识别空/LLM 失败) |
+
+**后端状态机**: `idle → listening(收音频) → processing(STT→LLM)→ speaking(TTS 逐句下发) → listening(idle)`。任意时刻 `abort` 置 `_VOICE_ABORT[ws_id]=True`,`_stream_llm_tokens`/逐句 TTS 循环检查后中断。
+
+**流式逐句 TTS**: 后端 `_split_sentences(reply)` 按 `。！？!?；\n` 切句,每句 `voice_service.synthesize()` 后 `tts:sentence` + binary MP3 下发;前端 `_wsAudioQueue` 每句一个 Audio 边收边播。单句合成失败跳过继续。
+
+**真流式边说边识别(2026-08-20 新增,借鉴小智流式上传)**: 前端用 **ScriptProcessorNode 并行管道**(与 MediaRecorder 共用同一 `stream`)在录音期间拿实时 PCM → 重采样 16k 单声道 int16 → 每 160ms 攒一帧(5120B)经 WS 上行;检测到有效人声(峰值>阈值)后发 `asr_start`,后端 `voice_stream_asr.py` 接百度 realtime_asr 边收边回 `asr_partial`(前端实时出字)。录音结束发 `asr_end` 取定稿触发对话。实现:`JarvisView.vue` `_startStreamPipe`/`_startStreamAsr`/`_endStreamAsr`/`_spOnAudioProcess`。**降级**: WS 不可用或唤醒模式时禁流式,回落 26.3 整段转写。
+
+**全双工基座(前端)**: `getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true } })`——浏览器原生 AEC/NS/AGC(对应小智 AFE 音频前端),保证 AI 播报时麦克风滤掉扬声器回声,边听边说不打架。
+
+**插话中断(前端)**: `_spVolLoop` 检测到用户音量(rms>0.06)且处于 speaking → `stopSpeech()` + `wsInterrupt()`(发 `abort`)+ 清 `_wsAudioQueue`;后端回 `aborted` 后 ready,自动回听。
+
+**频域人声判断 VAD(2026-08-20 新增,替代纯音量阈值)**: `_spVolLoop` 用 AnalyserNode 频谱区分"人声"与"环境噪音"(人声基频 85~300Hz 集中于低频 bin,环境白噪能量均匀)。`_isVoiceFreq()` 判断低频段能量占比与峰值 → 判定是否在说话,驱动静音端点检测(静音 1.8s 自动结束)而非纯 RMS<0.015,抗风扇/空调等环境噪音误判。实现:`JarvisView.vue` `_isVoiceFreq`/`_voiceMisses`。
+
+**前端 WS 自动重连**: `connectVoiceWS()` 在 onMounted 触发;WS 关闭(`onclose`)时若非手动(页面卸载 `_wsManualClose`)且非 busy,每 15s 自动重连(`_wsReconnectTimer`),实现**后端重启注册 WS 后,前端无需刷新即自动从 HTTP 兜底升级到全双工**。
+
+**前端语音设置面板(⚙️,底部 SET 按钮弹层,不笨重)**:
+- `interruptThresh`(默认 0.06,滑条 0.03~0.15)——插话灵敏度:用户开口打断 AI 播报的 RMS 阈值,越灵敏越易打断(也越易误触发);`_spVolLoop` 用此阈值替代硬编码 `0.06`。
+- `autoReListen`(默认 true)——AI 播完是否自动回听下一句;关闭可避免误触发开麦。done 回听需 `_wsAutoRt`(本次语音触发)且开关开启。
+- `listeningMode`(默认 true)——**持续聆听模式**:进入主脑页自动开麦一直聆听(VOICE 显示 "EARS ON"),**点一下关闭**(VOICE OFF),再点开启。所有结束录音路径(静音/超时/说完/空/超短)统一走 `_ensureListening()` 自动接回(受 listeningMode 控制);唤醒流程(检测唤醒词/命中)直接用 `_requestMic()` 开麦不切模式。mic-ring 待机淡灯、实际录音(.live)才脉冲。
+
+**语音人设与真实数据(2026-08-19 晚,解决"回复生硬+编造告警")**:
+- `_VOICE_SYSTEM_PROMPT`(`voice_chat_ws.py`):语音通道**专用口语化人设**,替换配置里面向文字报告/表格的严肃 `system_prompt`(理由:后者逐句 TTS 朗读会念出 #/*/序号和术语,生硬)。要点:说人话/短句/先结论/禁 Markdown 标记/有温度但克制不油腻/保留运维能力但用说话方式讲。
+- `_build_voice_context(db)`:进对话前抓**真实实时盘面**(活跃告警 count + 最新 3 条 severity/message),拼成 system 消息注入;人设要求**只能基于盘面说,绝不编造**,盘面没有的就说"得去查一下"。查询失败返回空串降级,不影响对话。
+- 注意:语音通道 LLM **不接工具调用**(纯生成);靠注入真实盘面保证"查告警/系统怎么样"类问题不编造。深层单点查询仍建议走文本对话/MCP 工具。
+
+## 第二十七章：AI 分析要点总结统一字段契约（Executive Summary, 2026-08-19 新增）
+
+> **背景(爸爸需求)**: 各 AI 分析结果都较详细，运维不常全看，需为每处 AI 分析统一补充一个"直击要害"的要点总结：**根因是什么 / 怎么解决 / 影响**。
+> **展示位置**: AI 助手(对话/流式)类 → 要点块追加在**回复结尾**；非对话(报告/页面/卡片)类 → 要点卡放在**结果最开头**。
+
+### 27.1 统一三要素字段（Single Source of Truth）
+
+所有 AI 分析接入要点总结，统一使用以下三个字段(命名全局唯一,不得改用 `recommendation`/`advice`/`command_description` 等旧名作为要点主字段；旧字段作为历史兼容保留,不承担"要点总结"职责):
+
+| 字段 | 类型 | 含义 | 说明 |
+|------|------|------|------|
+| `root_cause` | String | 根因是什么 | 一句话直击要害，**≤60 字**，说清楚"因为什么导致" |
+| `solution` | String | 怎么解决 | ≤80 字，可直接照做的处理步骤/方向 |
+| `impact` | String | 影响 | ≤60 字，影响范围/资产/严重度/后果 |
+
+三要素必须**同生同灭**：存在要点总结时三个字段均非空；无要点时后端可直接返回 `summary=null`(前端不渲染卡片,不展示空卡)。
+
+### 27.2 展示位置约定（前端）
+
+| 类别 | 位置 |
+|------|------|
+| AI 助手/对话/SSE 流式回复(reply) | **结尾**追加统一要点块 |
+| 非对话报告(部署报告/体检报告/RCA/关联分析/智能推荐等卡片或页面) | **结果最开头**置顶要点卡 |
+| 日志/表格类耗时结果 | 顶部置顶要点卡(若后端已返回 summary) |
+
+### 27.3 统一样式规范（前端 `.key-points`）
+
+- 全站复用类名 **`.key-points`**(卡片) + **`.kp-title`**(标题"📌 要点总结")。
+- 卡片三行: 分别渲染 **根因 / 方案 / 影响**,每行含图标 + 标签 + 内容。
+- 使用主题主色变量 `--primary` 强调(左边框/标签/三行标题),背景用主题浅色(`rgba(primary,0.06)` 渐变),**跟随深浅主题(适配 `html[data-theme=dark]`)**。
+- 醒目但克制: 不刺眼、不喧宾夺主,渲染在详情/要点区顶部或对话结尾。
+
+### 27.4 各 AI 分析接入清单(已规划,按类别)
+
+| 类别 | 后端接入点 | 前端位置 | 现状 |
+|------|-----------|---------|------|
+| AI 助手/主脑对话 | `agent_sse._stream_chat` done.reply 结尾 | JarvisView 消息末尾 | 待接 |
+| 关联分析(多维) | `observability_correlation.run_correlation_analysis` 顶层 | ObservabilityCorrelationView rca-bar 上方 | 待接 |
+| 告警聚类详情 | `alert_correlation_service.cluster_detail` | EventStatsView 详情顶部 | 待接 |
+| 智能推荐·告警 AI | `smart_recommend_service.ai_analyze_alert`(已有 root_cause/impact/recommendation) | SmartRecommendView 顶部 | 半成 |
+| 时序预测 | `prediction_service.predict_with_model` 顶层 | PredictionModelsView dialog 顶部 | 待接 |
+| RCA(故障单) | `rca_service.analyze_incident` 顶层 | (供 auto_investigator) | 待接 |
+| 图谱传播/根因 | `graph_inference_service`.`analyze_impact`/`infer_root_cause` | GraphInferenceView 顶部 | 待接 |
+| 链路/日志 RCA | `trace_rca`/`rca_algos.run_log_rca` | TraceView/LogsView 顶部 | 待接 |
+| 跨域 RCA | `ai_insight_service.cross_domain_rca` 顶层 | (供多方) | 待接 |
+| 组件 AI 分析 | `component_catalog_service.ai_analyze`(已有 summary/issues) | ComponentStoreView 顶部 | 半成 |
+| 组件体检/部署报告 | `generate_ai_health_report`/`generate_install_report`(已有 executive_summary) | ComponentStoreView 报告顶部 | 半成 |
+| 自动部署报告 | `deploy_service.generate_deploy_report`(已有 executive_summary) | DeployView report 顶部 | 半成 |
+| 自愈修复 | `remediation_service.ai_self_heal_analyze`(已有 root_cause/impact/command_description) | RemediationView 顶部 | 半成 |
+| 巡检报告 | `inspection_service._generate_ai_report`(markdown,待结构化) | InspectionView 报告顶部 | 待接 |
+| 基线安全 | `baseline_service.ai_analyze`(已有 summary/top_risks) | SmartRecommendView 基线区 | 半成 |
+| 配置漂移 | `config_drift_service.ai_assess`(已有 summary/root_cause/impact/recommendation) | ConfigDriftView 顶部 | 半成 |
+| 架构图 AI | `drawio_ai_planner`(布局型,analysis/suggestions) | FireMapView | 半成(布局型,可不接) |
+
+> **无 AI 的类别**(安全审计/变更管理/混沌实验)本期**不接入**(无 LLM 结论可提炼),见 MEMORY 决策。
+
+### 27.5 后端生成方式
+
+- 已结构化(已有 root_cause/impact/recommendation 等)的类别: 后端把现有字段聚合/映射为三要素 `summary`,**不加额外 LLM 调用**(避免重复消耗)。
+- 纯文本(markdown)类(巡检报告等): 改造 prompt 让 LLM 额外输出三要素 JSON,并做解析容错(失败降级为旧文本,不阻断)。
+- 所有新增 `summary` 字段在**响应 JSON 顶层**,命名统一为 `summary`(对象: `{root_cause,solution,impact}`),由后端写入,前端读取。

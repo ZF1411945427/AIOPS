@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tarfile
 import threading
@@ -465,8 +466,8 @@ def list_bundle_images(db: Session, bundle_id: int) -> dict:
             for m in tf.getmembers():
                 if m.name.startswith("images/") and m.isfile():
                     names.append(m.name.split("images/", 1)[1])
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return {"images": [{"name": n} for n in names], "loaded": b.loaded_images, "total": b.total_images}
 
 
@@ -574,10 +575,40 @@ def _registry_headers(r: OfflineRegistry) -> Dict[str, str]:
     return headers
 
 
+def _local_host_ips() -> set:
+    """返回本机所有网卡 IP, 用于判断 registry_url 是否指向宿主机自身。"""
+    ips = {"127.0.0.1", "localhost", "::1"}
+    try:
+        _, _, addrs = socket.gethostbyname_ex(socket.gethostname())
+        ips.update(a for a in addrs if a)
+    except Exception:
+        pass
+    return ips
+
+
+def _registry_probe_base(r: OfflineRegistry) -> str:
+    """构造用于本机探测的 base URL。
+
+    仓库地址若指向宿主机自身网卡(Vmnet8 NAT 等 11.0.1.1), 后端在本机用该地址
+    访问会因回环路由问题超时。探测端统一回退到 127.0.0.1(同一仓库), 只影响测试/
+    健康检查/列镜像, 不改变 部署 时虚机上使用的 registry_url。
+    """
+    scheme = "https" if r.is_secure else "http"
+    host = r.registry_url
+    port = ""
+    if "://" in host:  # 防御: 万一存了完整 url
+        host = host.split("://", 1)[1]
+    if ":" in host:
+        host, _, port = host.rpartition(":")
+    host = host.strip("/")
+    if host in _local_host_ips():
+        host = "127.0.0.1"
+    return f"{scheme}://{host}" + (f":{port}" if port else "")
+
+
 def test_registry(r: OfflineRegistry) -> dict:
     """通过 Registry HTTP API v2 测试连接与认证。"""
-    scheme = "https" if r.is_secure else "http"
-    base = f"{scheme}://{r.registry_url}"
+    base = _registry_probe_base(r)
     url = f"{base}/v2/"
     try:
         req = Request(url, headers=_registry_headers(r))
@@ -597,8 +628,7 @@ def test_registry(r: OfflineRegistry) -> dict:
 
 def list_registry_images(r: OfflineRegistry, max_items: int = 200) -> dict:
     """通过 Registry Catalog API 列出镜像列表。"""
-    scheme = "https" if r.is_secure else "http"
-    base = f"{scheme}://{r.registry_url}"
+    base = _registry_probe_base(r)
     try:
         req = Request(f"{base}/v2/_catalog?n={max_items}", headers=_registry_headers(r))
         resp = urlopen(req, timeout=15)

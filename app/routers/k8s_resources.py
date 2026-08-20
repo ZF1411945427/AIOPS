@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.template_utils import get_templates, parse_json_config
 from app.models import DataSource
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/k8s", tags=["k8s_resources"])
 templates = get_templates()
@@ -258,8 +261,8 @@ def api_deployment_canary(cluster: str, namespace: str, name: str, body: dict = 
         existing = None
         try:
             existing = apps_v1.read_namespaced_deployment(name=canary_name, namespace=namespace)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         if existing:
             apps_v1.patch_namespaced_deployment_scale(name=canary_name, namespace=namespace, body={"spec": {"replicas": canary_replicas}})
         else:
@@ -1156,8 +1159,8 @@ def api_pod_logs(cluster: str, namespace: str, name: str, tail: int = 500, conta
         try:
             pod_obj = v1.read_namespaced_pod(name, namespace)
             containers = [c.name for c in (pod_obj.spec.containers or [])]
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
         if not containers:
             containers = [name]
         use_container = container if container and container in containers else containers[0]
@@ -1178,8 +1181,8 @@ def api_pod_logs(cluster: str, namespace: str, name: str, tail: int = 500, conta
                     import ast
                     try:
                         log_data = ast.literal_eval(log_data).decode("utf-8", errors="replace")
-                    except Exception:
-                        pass
+                    except Exception as _exc2:
+                        logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
         except Exception as le:
             return JSONResponse({"ok": False, "message": str(le), "containers": containers, "warning": str(le)}, status_code=200)
         lines = log_data.count("\n") + (1 if log_data and not log_data.endswith("\n") else 0)
@@ -1212,8 +1215,8 @@ def api_pod_logs_download(cluster: str, namespace: str, name: str, tail: int = 1
         try:
             pod_obj = v1.read_namespaced_pod(name, namespace)
             containers = [c.name for c in (pod_obj.spec.containers or [])]
-        except Exception:
-            pass
+        except Exception as _exc3:
+            logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
         if not containers:
             containers = [name]
         use_container = container if container and container in containers else containers[0]
@@ -1233,8 +1236,8 @@ def api_pod_logs_download(cluster: str, namespace: str, name: str, tail: int = 1
                 import ast
                 try:
                     log_data = ast.literal_eval(log_data).decode("utf-8", errors="replace")
-                except Exception:
-                    pass
+                except Exception as _exc4:
+                    logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
         fname = f"{name}-{use_container}-{datetime.now().strftime('%Y%m%d%H%M%S')}.log"
         return PlainTextResponse(log_data, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={fname}"})
     except Exception as e:
@@ -1331,8 +1334,8 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
                             pass
                     elif isinstance(data, str) and data:
                         await websocket.send_text(data)
-            except Exception:
-                pass
+            except Exception as _exc5:
+                logger.warning("[except:pass] Exception: %s", _exc5, exc_info=True)
 
         async def browser_to_k8s():
             loop = asyncio.get_event_loop()
@@ -1347,8 +1350,8 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
                             await loop.run_in_executor(None, kws.sock.send, "\x00" + msg)
                         else:
                             await loop.run_in_executor(None, kws.sock.send_binary, b"\x00" + msg)
-            except Exception:
-                pass
+            except Exception as _exc6:
+                logger.warning("[except:pass] Exception: %s", _exc6, exc_info=True)
 
         t1 = asyncio.create_task(k8s_to_browser())
         t2 = asyncio.create_task(browser_to_k8s())
@@ -1359,13 +1362,13 @@ async def api_pod_terminal_ws(websocket: WebSocket, cluster: str, namespace: str
     except Exception as e:
         try:
             await websocket.send_text(f"连接异常: {e}")
-        except Exception:
-            pass
+        except Exception as _exc7:
+            logger.warning("[except:pass] Exception: %s", _exc7, exc_info=True)
     finally:
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as _exc8:
+            logger.warning("[except:pass] Exception: %s", _exc8, exc_info=True)
 
 
 @router.get("/api/hpa/recommend")
@@ -1420,8 +1423,8 @@ def api_hpa_recommend(cluster: str = "", namespace: str = "", target_cpu: int = 
                         for cm in containers_metrics:
                             actual_cpu_usage += _parse_k8s_resource(cm.get("usage", {}).get("cpu", "0"))
                             actual_mem_usage += _parse_k8s_resource(cm.get("usage", {}).get("memory", "0"), is_memory=True)
-            except Exception:
-                pass
+            except Exception as _exc9:
+                logger.warning("[except:pass] Exception: %s", _exc9, exc_info=True)
 
             if replicas > 0:
                 avg_cpu_per_pod = actual_cpu_usage / replicas if actual_cpu_usage else cpu_request * 0.3
@@ -1662,8 +1665,8 @@ def _parse_k8s_resource(value: str, is_memory: bool = False) -> int:
             if value.endswith(suffix) if suffix else not any(s in value for s in ("m", "k")):
                 try:
                     return int(float(value) * mul)
-                except ValueError:
-                    pass
+                except ValueError as _exc10:
+                    logger.warning("[except:pass] ValueError: %s", _exc10, exc_info=True)
         try:
             return int(float(value) * 1000)
         except ValueError:

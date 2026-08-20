@@ -60,6 +60,7 @@ class DeployPlan(Base):
     risk_score = Column(Integer, default=0)  # AI 预判的部署风险评分 0-100
     deployment_feature_json = Column(Text, default="{}")  # 部署特征向量(供 L5 学习)
     health_gate_json = Column(Text, default="[]")  # 部署过程中的健康门控记录
+    pending_decision_json = Column(Text, default="null")  # 待用户高危确认卡片(JSON) / "null"=无, 按计划独立
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
@@ -103,10 +104,12 @@ class K8sClusterPlan(Base):
     http_proxy = Column(String(256), default="")  # 在线部署代理（如 http://192.168.100.2:7897）
     https_proxy = Column(String(256), default="")  # 同上，HTTPS 用
     no_proxy = Column(String(512), default="127.0.0.1,localhost,.local")  # 不走代理的地址
+    cert_expiry_years = Column(Integer, default=None)  # 证书统一有效期(年); None=平台默认(CA 10年/服务证书1年); 如设 100 视为永久且所有证书时长一致
     nodes_json = Column(Text, default="[]")  # 节点定义（见 CONTRACT 13.3）
     status = Column(String(32), default="draft")
     current_step = Column(Integer, default=0)
     logs_json = Column(Text, default="[]")  # 执行日志事件列表
+    pending_decision_json = Column(Text, default="null")  # 待用户决策卡片内容(JSON) / "null"=无
     kubeconfig = Column(Text, default="")  # 敏感：产出 kubeconfig
     join_token = Column(Text, default="")  # 敏感：worker 加入 token（临时）
     report_json = Column(Text, default="{}")  # 部署报告

@@ -1,5 +1,20 @@
 [
   {
+    "key": "ai-ops-assistant",
+    "label": "AI 助手",
+    "type": "vue",
+    "icon": "ChatDotRound",
+    "path": "/ai-ops-assistant"
+  },
+  {
+    "key": "jarvis-command",
+    "label": "智渊主脑",
+    "type": "vue",
+    "icon": "Aim",
+    "path": "/jarvis-command",
+    "description": "赛博主脑指挥中心：实时态势 + 智能指令调度"
+  },
+  {
     "key": "duty",
     "label": "值班驾驶舱",
     "icon": "Odometer",
@@ -77,13 +92,14 @@
             "type": "vue",
             "icon": "TrendCharts",
             "path": "/events/stats"
-          }
-        ]
-      },
-      {
-        "key": "incident-handling",
-        "label": "故障处理",
-        "items": [
+          },
+          {
+            "key": "inbound-sources",
+            "label": "入站集成",
+            "type": "vue",
+            "icon": "Connection",
+            "path": "/inbound-sources"
+          },
           {
             "key": "incident",
             "label": "故障单管理",
@@ -431,13 +447,6 @@
             "path": "/metrics-view"
           },
           {
-            "key": "k8s-monitor",
-            "label": "K8s 资源监控",
-            "type": "vue",
-            "icon": "Monitor",
-            "path": "/k8s-monitor"
-          },
-          {
             "key": "prediction-models",
             "label": "容量预测",
             "type": "vue",
@@ -596,59 +605,53 @@
     "description": "知识管理员：知识检索、SOP管理",
     "items": [
       {
-        "key": "knowledge-management",
-        "label": "知识管理",
-        "items": [
-          {
-            "key": "kb-list",
-            "label": "故障知识库",
-            "type": "vue",
-            "icon": "Reading",
-            "path": "/knowledge"
-          },
-          {
-            "key": "runbooks",
-            "label": "Runbook",
-            "type": "vue",
-            "icon": "Document",
-            "path": "/runbooks"
-          },
-          {
-            "key": "knowledge-draft",
-            "label": "知识草稿审批",
-            "type": "vue",
-            "icon": "DocumentChecked",
-            "path": "/knowledge-draft"
-          },
-          {
-            "key": "kb-documents",
-            "label": "RAG 知识库文档",
-            "type": "vue",
-            "icon": "Files",
-            "path": "/knowledge/documents"
-          },
-          {
-            "key": "graph-inference",
-            "label": "知识图谱推理",
-            "type": "vue",
-            "icon": "MagicStick",
-            "path": "/knowledge/graph-inference"
-          },
-          {
-            "key": "smart-recommend",
-            "label": "智能推荐",
-            "type": "vue",
-            "icon": "Star",
-            "path": "/smart-recommend"
-          },
-          {
-            "key": "rag-eval",
-            "label": "RAG 检索质量评估",
-            "type": "vue",
-            "icon": "Finished",
-            "path": "/rag-eval"
-          }
-        ]
+        "key": "kb-list",
+        "label": "故障知识库",
+        "type": "vue",
+        "icon": "Reading",
+        "path": "/knowledge"
+      },
+      {
+        "key": "runbooks",
+        "label": "Runbook",
+        "type": "vue",
+        "icon": "Document",
+        "path": "/runbooks"
+      },
+      {
+        "key": "knowledge-draft",
+        "label": "知识草稿审批",
+        "type": "vue",
+        "icon": "DocumentChecked",
+        "path": "/knowledge-draft"
+      },
+      {
+        "key": "kb-documents",
+        "label": "RAG 知识库文档",
+        "type": "vue",
+        "icon": "Files",
+        "path": "/knowledge/documents"
+      },
+      {
+        "key": "graph-inference",
+        "label": "知识图谱推理",
+        "type": "vue",
+        "icon": "MagicStick",
+        "path": "/knowledge/graph-inference"
+      },
+      {
+        "key": "smart-recommend",
+        "label": "智能推荐",
+        "type": "vue",
+        "icon": "Star",
+        "path": "/smart-recommend"
+      },
+      {
+        "key": "rag-eval",
+        "label": "RAG 检索质量评估",
+        "type": "vue",
+        "icon": "Finished",
+        "path": "/rag-eval"
       }
     ]
   },
@@ -656,90 +659,77 @@
     "key": "aiops",
     "label": "Agent 管理",
     "icon": "Cpu",
-    "description": "AI运营者：AI助手、Agent运维管控",
+    "description": "AI运营者：Agent运维管控",
     "items": [
       {
-        "key": "ai-ops-assistant",
-        "label": "AI 助手",
+        "key": "agent-deploy",
+        "label": "Agent 下发监控",
         "type": "vue",
-        "icon": "ChatDotRound",
-        "path": "/ai-ops-assistant"
+        "icon": "Promotion",
+        "path": "/agent-deploy"
       },
       {
-        "key": "agent-ops",
-        "label": "Agent 运维",
-        "items": [
-          {
-            "key": "agent-deploy",
-            "label": "Agent 下发监控",
-            "type": "vue",
-            "icon": "Promotion",
-            "path": "/agent-deploy"
-          },
-          {
-            "key": "agent-autonomous",
-            "label": "Agent 自主巡检",
-            "type": "vue",
-            "icon": "Odometer",
-            "path": "/agent-autonomous"
-          },
-          {
-            "key": "agent-workflow-editor",
-            "label": "智能体编排",
-            "type": "vue",
-            "icon": "Operation",
-            "path": "/agent-workflow/editor"
-          },
-          {
-            "key": "ai-providers",
-            "label": "智能体配置",
-            "type": "vue",
-            "icon": "Setting",
-            "path": "/ai/providers"
-          },
-          {
-            "key": "agent-capabilities",
-            "label": "Agent 能力中心",
-            "type": "vue",
-            "icon": "Cpu",
-            "path": "/agent/capabilities"
-          },
-          {
-            "key": "sub-agents",
-            "label": "子智能体管理",
-            "type": "vue",
-            "icon": "UserFilled",
-            "path": "/agent/sub-agents"
-          },
-          {
-            "key": "im-chatops",
-            "label": "IM 双向通道",
-            "type": "vue",
-            "icon": "ChatLineRound",
-            "path": "/im/chatops"
-          },
-          {
-            "key": "agent-eval",
-            "label": "Agent 评测中心",
-            "type": "vue",
-            "icon": "Finished",
-            "path": "/agent-eval"
-          },
-          {
-            "key": "skills",
-            "label": "技能中心",
-            "type": "vue",
-            "icon": "MagicStick",
-            "path": "/skills"
-          },
-          {
-            "key": "sandbox-overview",
-            "label": "沙盒管控",
-            "type": "vue",
-            "icon": "Lock",
-            "path": "/sandbox"
-          }
-        ]
+        "key": "agent-autonomous",
+        "label": "Agent 自主巡检",
+        "type": "vue",
+        "icon": "Odometer",
+        "path": "/agent-autonomous"
+      },
+      {
+        "key": "agent-workflow-editor",
+        "label": "智能体编排",
+        "type": "vue",
+        "icon": "Operation",
+        "path": "/agent-workflow/editor"
+      },
+      {
+        "key": "ai-providers",
+        "label": "智能体配置",
+        "type": "vue",
+        "icon": "Setting",
+        "path": "/ai/providers"
+      },
+      {
+        "key": "agent-capabilities",
+        "label": "Agent 能力中心",
+        "type": "vue",
+        "icon": "Cpu",
+        "path": "/agent/capabilities"
+      },
+      {
+        "key": "sub-agents",
+        "label": "子智能体管理",
+        "type": "vue",
+        "icon": "UserFilled",
+        "path": "/agent/sub-agents"
+      },
+      {
+        "key": "im-chatops",
+        "label": "IM 双向通道",
+        "type": "vue",
+        "icon": "ChatLineRound",
+        "path": "/im/chatops"
+      },
+      {
+        "key": "agent-eval",
+        "label": "Agent 评测中心",
+        "type": "vue",
+        "icon": "Finished",
+        "path": "/agent-eval"
+      },
+      {
+        "key": "skills",
+        "label": "技能中心",
+        "type": "vue",
+        "icon": "MagicStick",
+        "path": "/skills"
+      },
+      {
+        "key": "sandbox-overview",
+        "label": "沙盒管控",
+        "type": "vue",
+        "icon": "Lock",
+        "path": "/sandbox"
       }
     ]
   },
@@ -876,6 +866,13 @@
             "type": "vue",
             "icon": "Connection",
             "path": "/es-integration"
+          },
+          {
+            "key": "providers",
+            "label": "Provider 集成",
+            "type": "vue",
+            "icon": "Grid",
+            "path": "/providers"
           },
           {
             "key": "openapi",

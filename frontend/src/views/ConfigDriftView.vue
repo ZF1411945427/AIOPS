@@ -216,7 +216,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import request from '@/api/request'
 
 const API = '/config-drift/api'
 const ASSET_API = '/assets/api'
@@ -268,11 +268,11 @@ function aiAction(d) {
 }
 
 async function loadStats() {
-  try { const { data } = await axios.get(`${API}/stats`); stats.value = data } catch (e) {}
+  try { const data = await request.get(`${API}/stats`); stats.value = data } catch (e) {}
 }
 async function loadAssets() {
   try {
-    const { data } = await axios.get(`${ASSET_API}/list`, { params: { page_size: 500 } })
+    const data = await request.get(`${ASSET_API}/list`, { params: { page_size: 500 } })
     const items = data.items || data.assets || data.list || []
     assetMap.value = {}
     items.forEach((a) => { assetMap.value[a.id] = a })
@@ -282,19 +282,19 @@ async function loadAssets() {
 async function loadDrifts() {
   loadingDrifts.value = true
   try {
-    const { data } = await axios.get(`${API}/drifts`, { params: { status: filterStatus.value } })
+    const data = await request.get(`${API}/drifts`, { params: { status: filterStatus.value } })
     drifts.value = data.items || []
   } finally { loadingDrifts.value = false }
 }
 async function loadBaselines() {
   loadingBaselines.value = true
   try {
-    const { data } = await axios.get(`${API}/baselines`)
+    const data = await request.get(`${API}/baselines`)
     baselines.value = data.items || []
   } finally { loadingBaselines.value = false }
 }
 async function loadTemplates() {
-  try { const { data } = await axios.get(`${API}/templates`); templates.value = data.items || [] } catch (e) {}
+  try { const data = await request.get(`${API}/templates`); templates.value = data.items || [] } catch (e) {}
 }
 function loadAll() {
   loadStats(); loadDrifts(); loadBaselines(); loadTemplates()
@@ -303,14 +303,14 @@ function loadAll() {
 function openDetail(d) { currentDrift.value = d }
 async function setStatus(d, status) {
   try {
-    await axios.post(`${API}/drifts/${d.id}/status`, { status })
+    await request.post(`${API}/drifts/${d.id}/status`, { status })
     loadAll()
   } catch (e) { alert('操作失败') }
 }
 async function detectDriftNow(b) {
   if (!confirm(`对资产「${assetName(b.asset_id)}」的「${b.config_name || b.config_key}」执行漂移检测？`)) return
   try {
-    const { data } = await axios.post(`${API}/detect`, { asset_id: b.asset_id, config_key: b.config_key })
+    const data = await request.post(`${API}/detect`, { asset_id: b.asset_id, config_key: b.config_key })
     if (data.ok && data.result) {
       alert(data.result.drifted ? `⚠️ 检测到 ${data.result.drift_count || 1} 处漂移` : '✅ 配置与基线一致，无漂移')
     } else { alert(data.error || '检测失败') }
@@ -319,7 +319,7 @@ async function detectDriftNow(b) {
 }
 async function deleteBaseline(b) {
   if (!confirm(`删除基线「${b.config_name || b.config_key}」？`)) return
-  try { await axios.delete(`${API}/baselines/${b.id}`); loadBaselines() } catch (e) { alert('删除失败') }
+  try { await request.delete(`${API}/baselines/${b.id}`); loadBaselines() } catch (e) { alert('删除失败') }
 }
 function openCreateBaseline() {
   form.value = { asset_id: 0, config_key: '', config_name: '', category: 'custom', source_command: '' }
@@ -335,7 +335,7 @@ function onAssetSelect() {
 }
 async function createBaseline() {
   try {
-    const { data } = await axios.post(`${API}/baselines`, {
+    const data = await request.post(`${API}/baselines`, {
       asset_id: form.value.asset_id,
       config_key: form.value.config_key,
       config_name: form.value.config_name,

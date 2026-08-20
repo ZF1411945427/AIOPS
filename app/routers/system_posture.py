@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct, text
 from datetime import datetime, timedelta
-from app.database import get_db
+from app.database import get_db, date_prefix_expr
 from app.models import Asset, Alert, Incident
 
 router = APIRouter(prefix="/api/system/posture", tags=["system_posture"])
@@ -69,26 +69,26 @@ def _batch_alert_incident_counts(db, all_asset_ids, day_start, day_end):
         return alert_by_day_asset, incident_by_day_asset
 
     rows = db.query(
-        func.date(Alert.created_at).label("day"),
+        date_prefix_expr(db, Alert.created_at).label("day"),
         Alert.asset_id,
         func.count(Alert.id).label("cnt")
     ).filter(
         Alert.asset_id.in_(all_asset_ids),
         Alert.created_at >= day_start,
         Alert.created_at < day_end
-    ).group_by(func.date(Alert.created_at), Alert.asset_id).all()
+    ).group_by(date_prefix_expr(db, Alert.created_at), Alert.asset_id).all()
     for day_str, asset_id, cnt in rows:
         alert_by_day_asset[(day_str, asset_id)] = cnt
 
     rows = db.query(
-        func.date(Incident.created_at).label("day"),
+        date_prefix_expr(db, Incident.created_at).label("day"),
         Incident.asset_id,
         func.count(Incident.id).label("cnt")
     ).filter(
         Incident.asset_id.in_(all_asset_ids),
         Incident.created_at >= day_start,
         Incident.created_at < day_end
-    ).group_by(func.date(Incident.created_at), Incident.asset_id).all()
+    ).group_by(date_prefix_expr(db, Incident.created_at), Incident.asset_id).all()
     for day_str, asset_id, cnt in rows:
         incident_by_day_asset[(day_str, asset_id)] = cnt
 

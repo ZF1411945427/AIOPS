@@ -197,6 +197,27 @@ def analyze_impact(
         },
         "recommendations": recommendations,
         "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "summary_block": _build_impact_key_points(
+            source_asset, impacted, high_impact, alert_impacted, recommendations
+        ),
+    }
+
+
+def _build_impact_key_points(source_asset, impacted, high_impact, alert_impacted, recommendations) -> dict:
+    """从故障传播分析结果组装统一三要素要点(根因/方案/影响)。"""
+    from app.routers.agent_sse import _clean_key_point
+
+    root_cause = f"{source_asset.name} 故障可能向下游传播，影响 {len(impacted)} 个资产（{len(high_impact)} 个高危、{len(alert_impacted)} 个已触发告警）"
+    if recommendations:
+        solution = "；".join([str(r) for r in recommendations[:3]])
+    else:
+        solution = "优先处置根因资产，观察下游恢复情况，必要时逐层校验依赖"
+    impact = f"影响 {len(impacted)} 个资产、最深 {max((i.get('depth', 0) for i in impacted), default=0)} 层"
+
+    return {
+        "root_cause": _clean_key_point(root_cause, 100),
+        "solution": _clean_key_point(solution, 160),
+        "impact": _clean_key_point(impact, 100),
     }
 
 
@@ -362,8 +383,8 @@ def infer_root_cause(
                     "path_ids": path,
                     "length": len(path) - 1,
                 })
-            except (nx.NetworkXNoPath, nx.NodeNotFound):
-                pass
+            except (nx.NetworkXNoPath, nx.NodeNotFound) as _exc:
+                logger.warning("[except:pass] (nx.NetworkXNoPath, nx.NodeNotFound): %s", _exc, exc_info=True)
 
     return {
         "total_alerts_analyzed": len(alerts),
@@ -378,6 +399,32 @@ def infer_root_cause(
             "decay_factor": PROPAGATION_DECAY,
         },
         "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "summary_block": _build_rootcause_key_points(
+            len(alerts), len(relevant_asset_ids), candidates[:10], reasoning
+        ),
+    }
+
+
+def _build_rootcause_key_points(total_alerts, total_assets, candidates, reasoning) -> dict:
+    """从图谱根因推理结果组装统一三要素要点(根因/方案/影响)。"""
+    from app.routers.agent_sse import _clean_key_point
+
+    top = candidates[0] if candidates else None
+    if top:
+        root_cause = f"根因候选：{top.get('asset_name')}（置信度 {top.get('confidence') or 'low'}，评分 {top.get('combined_score', 0)}）"
+        impact = f"分析 {total_alerts} 条告警、{total_assets} 个资产，候选 {len(candidates)} 个"
+        if top.get("alert_count"):
+            impact += f"，{top.get('asset_name')} 有 {top.get('alert_count')} 条活跃告警"
+        solution = "沿候选根因资产及其下游依赖处置告警，确认告警恢复后按严重度关闭；可结合推荐知识库定位故障模式"
+    else:
+        root_cause = "未定位到明确根因候选"
+        impact = f"分析 {total_alerts} 条告警、{total_assets} 个资产"
+        solution = "补充拓扑与告警关联，扩大分析范围，或转 AI 深度分析定位"
+
+    return {
+        "root_cause": _clean_key_point(root_cause, 100),
+        "solution": _clean_key_point(solution, 160),
+        "impact": _clean_key_point(impact, 100),
     }
 
 

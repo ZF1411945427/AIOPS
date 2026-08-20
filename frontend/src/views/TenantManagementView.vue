@@ -136,7 +136,7 @@
 
 <script>
 import { ref, reactive, computed, onMounted } from 'vue'
-import axios from 'axios'
+import request from '@/api/request'
 
 const API = '/tenant/api'
 
@@ -154,14 +154,14 @@ export default {
 
     const loadTenants = async () => {
       try {
-        const { data } = await axios.get(`${API}/tenants`)
+        const data = await request.get(`${API}/tenants`)
         tenants.value = data.items || []
       } catch (e) { console.error(e) }
     }
 
     const checkMode = async () => {
       try {
-        const { data } = await axios.get('/api/system/configs')
+        const data = await request.get('/api/system/configs')
         tenantMode.value = data['tenant_mode']?.value === 'true'
       } catch (e) { console.error(e) }
     }
@@ -170,7 +170,7 @@ export default {
       const newVal = !tenantMode.value
       if (!confirm(`确定要${newVal ? '开启' : '关闭'}租户模式吗？`)) return
       try {
-        await axios.put('/api/system/configs', { 'tenant_mode': newVal ? 'true' : 'false' })
+        await request.put('/api/system/configs', { 'tenant_mode': newVal ? 'true' : 'false' })
         tenantMode.value = newVal
         alert(`${newVal ? '租户模式已开启' : '租户模式已关闭'}`)
       } catch (e) { alert('操作失败') }
@@ -191,9 +191,9 @@ export default {
     const saveTenant = async () => {
       try {
         if (editing.value) {
-          await axios.put(`${API}/tenants/${editing.value.id}`, { ...form })
+          await request.put(`${API}/tenants/${editing.value.id}`, { ...form })
         } else {
-          await axios.post(`${API}/tenants`, { ...form })
+          await request.post(`${API}/tenants`, { ...form })
         }
         showDialog.value = false
         loadTenants()
@@ -203,7 +203,7 @@ export default {
     const deleteTenant = async (t) => {
       if (!confirm(`确定删除租户「${t.name}」（ID=${t.id}）？`)) return
       try {
-        await axios.delete(`${API}/tenants/${t.id}`)
+        await request.delete(`${API}/tenants/${t.id}`)
         loadTenants()
       } catch (e) { alert('删除失败') }
     }

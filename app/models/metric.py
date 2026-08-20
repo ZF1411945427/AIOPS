@@ -43,6 +43,7 @@ class MetricDashboardCard(Base):
     hours = Column(Integer, default=24)
     w = Column(Integer, default=2)
     h = Column(Integer, default=1)
+    category = Column(String(32), default="")
     order = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now())
 

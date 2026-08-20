@@ -223,7 +223,14 @@ def _parse_certs(ssh_host, ssh_user, ssh_password, ssh_port, cert_files):
         elif ext == "conf" or ext == "yaml":
             cmds.append(
                 f"tmpf=$(mktemp); "
-                f"grep client-certificate-data {path} 2>/dev/null | awk '{{print $2}}' | base64 -d > $tmpf 2>/dev/null; "
+                # 优先 client-certificate-data(base64 内联); 若无则 kubelet 等用 client-certificate 文件路径,
+                # 直接解析该证书文件(否则 PARSE_FAILED 误报"解析失败")。
+                f"if grep -q client-certificate-data {path} 2>/dev/null; then "
+                f"  grep client-certificate-data {path} | awk '{{print $2}}' | base64 -d > $tmpf 2>/dev/null; "
+                f"elif grep -q 'client-certificate:' {path} 2>/dev/null; then "
+                f"  CP=$(grep 'client-certificate:' {path} | head -1 | awk '{{print $2}}' | tr -d '\\\"'); "
+                f"  [ -f \"$CP\" ] && cat \"$CP\" > $tmpf 2>/dev/null; "
+                f"fi; "
                 f"if [ -s $tmpf ]; then openssl x509 -in $tmpf -noout -subject -enddate 2>/dev/null; "
                 f"else echo 'PARSE_FAILED'; fi; rm -f $tmpf"
             )
@@ -457,7 +464,108 @@ def inspect_cluster(ds: DataSource) -> dict:
     }
 
 
-def renew_cluster(ds: DataSource, force: bool = False) -> dict:
+def _resign_kubeadm_certs(host: str, user: str, password: str, port: int, years: int, timeout: int = 300) -> dict:
+    """kubeadm 集群按指定年限重签全部证书(3 个 CA + 全部叶子 + admin/cms/scheduler/super-admin kubeconfig),
+    并主动重启控制面组件(kube-apiserver/controller-manager/scheduler/etcd + kubelet)使其生效。
+    复用部署侧 `_apply_cert_expiry` 的 openssl 思路: 三个 CA 用各自 key 自签 N 天, 叶子按 issuer 路由,
+    -copy_extensions 保留 subject/SAN。返回 {"ok": bool, "output": str}。"""
+    try:
+        from app.services.ssh_helper import connect_ssh
+        client = connect_ssh(host, port=port, username=user, password=password, timeout=8)
+    except Exception as e:
+        return {"ok": False, "output": f"SSH 连接失败: {e}"}
+
+    days = int(years) * 365
+    script = (
+        "#!/bin/bash\n"
+        "set -e\n"
+        f"PKI=/etc/kubernetes/pki; D={days}\n"
+        # 只续期(不走 CA 自签)容易漏 SAN/链路; 这里用部署侧同款: 三个 CA 自签 + 叶子换签 + kubeconfig 换签。
+        "ok=1\n"
+        "resign_ca() { local cac=$1 cak=$2; "
+        "openssl x509 -x509toreq -in \"$cac\" -signkey \"$cak\" -out /tmp/_ca.csr -copy_extensions copy 2>/dev/null && "
+        "openssl x509 -req -in /tmp/_ca.csr -signkey \"$cak\" -out /tmp/_ca.crt -days \"$D\" -sha256 -copy_extensions copy 2>/dev/null && "
+        "cp /tmp/_ca.crt \"$cac\"; rm -f /tmp/_ca.csr /tmp/_ca.crt; }\n"
+        "resign_leaf() { local c=$1 k=$2 cac=$3 cak=$4; "
+        "[ -f \"$c\" ] || return 0; "
+        "openssl x509 -x509toreq -in \"$c\" -signkey \"$k\" -out /tmp/_r.csr -copy_extensions copy 2>/dev/null && "
+        "openssl x509 -req -in /tmp/_r.csr -CA \"$cac\" -CAkey \"$cak\" -CAcreateserial -out /tmp/_r.crt -days \"$D\" -sha256 -copy_extensions copy 2>/dev/null && "
+        "cp /tmp/_r.crt \"$c\"; rm -f /tmp/_r.csr /tmp/_r.crt; }\n"
+        "resign_kc() { local CFG=$1; [ -f \"$CFG\" ] || return 0; "
+        "CERTB64=$(grep 'client-certificate-data:' \"$CFG\" | head -1 | awk '{print $2}'); "
+        "KEYB64=$(grep 'client-key-data:' \"$CFG\" | head -1 | awk '{print $2}'); "
+        "[ -z \"$CERTB64\" ] || [ -z \"$KEYB64\" ] && return 1; "
+        "echo \"$CERTB64\" | base64 -d > /tmp/_kc.pem 2>/dev/null && "
+        "echo \"$KEYB64\" | base64 -d > /tmp/_kk.pem 2>/dev/null && "
+        "openssl x509 -x509toreq -in /tmp/_kc.pem -signkey /tmp/_kk.pem -out /tmp/_kc.csr -copy_extensions copy 2>/dev/null && "
+        "openssl x509 -req -in /tmp/_kc.csr -CA \"$PKI\"/ca.crt -CAkey \"$PKI\"/ca.key -CAcreateserial -out /tmp/_kc.new -days \"$D\" -sha256 -copy_extensions copy 2>/dev/null && "
+        "NEWB64=$(base64 -w0 /tmp/_kc.new 2>/dev/null); "
+        "[ -n \"$NEWB64\" ] || return 1; "
+        "sed -i \"0,/client-certificate-data:.*/s//client-certificate-data: $NEWB64/\" \"$CFG\" && "
+        "rm -f /tmp/_kc.pem /tmp/_kk.pem /tmp/_kc.csr /tmp/_kc.new; }\n"
+        "cd \"$PKI\" || exit 1\n"
+        "resign_ca ca.crt ca.key || ok=0\n"
+        "resign_ca front-proxy-ca.crt front-proxy-ca.key || ok=0\n"
+        "resign_ca etcd/ca.crt etcd/ca.key || ok=0\n"
+        "resign_leaf apiserver.crt apiserver.key ca.crt ca.key || ok=0\n"
+        "resign_leaf apiserver-kubelet-client.crt apiserver-kubelet-client.key ca.crt ca.key || ok=0\n"
+        "resign_leaf apiserver-etcd-client.crt apiserver-etcd-client.key etcd/ca.crt etcd/ca.key || ok=0\n"
+        "resign_leaf front-proxy-client.crt front-proxy-client.key front-proxy-ca.crt front-proxy-ca.key || ok=0\n"
+        "resign_leaf etcd/server.crt etcd/server.key etcd/ca.crt etcd/ca.key || ok=0\n"
+        "resign_leaf etcd/peer.crt etcd/peer.key etcd/ca.crt etcd/ca.key || ok=0\n"
+        "resign_leaf etcd/healthcheck-client.crt etcd/healthcheck-client.key etcd/ca.crt etcd/ca.key || ok=0\n"
+        "resign_kc \"$PKI/../admin.conf\" || ok=0\n"
+        "resign_kc \"$PKI/../controller-manager.conf\" || ok=0\n"
+        "resign_kc \"$PKI/../scheduler.conf\" || ok=0\n"
+        "resign_kc \"$PKI/../super-admin.conf\" || ok=0\n"
+        "echo \"RENEW_DONE ok=$ok\"\n"
+    )
+    # 上传脚本执行(避免嵌套引号被 paramiko 展开破坏)
+    out_txt = ""
+    try:
+        sftp = client.open_sftp()
+        with sftp.open("/tmp/_k8s_resign.sh", "w") as f:
+            f.write(script)
+        sftp.close()
+        _, out, err = client.exec_command("bash /tmp/_k8s_resign.sh 2>&1; echo __RC__=$?", timeout=timeout)
+        out_txt = out.read().decode("utf-8", "replace")
+        err_txt = err.read().decode("utf-8", "replace")
+    except Exception as e:
+        out_txt += f"\n[script error] {e}"
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    fin_ok = ("RENEW_DONE ok=1" in out_txt)
+    if fin_ok:
+        # 主动重启控制面静态 pod(删 manifest 由 kubelet 重建)+ kubelet, 加载新证书
+        _restart = (
+            "rm -f /etc/kubernetes/manifests/kube-apiserver.yaml "
+            "/etc/kubernetes/manifests/kube-controller-manager.yaml "
+            "/etc/kubernetes/manifests/kube-scheduler.yaml; "
+            "systemctl restart kubelet >/dev/null 2>&1; "
+            "kubeadm init phase control-plane apiserver --config /etc/kubernetes/kubeadm-config.yaml >/dev/null 2>&1; "
+            "kubeadm init phase control-plane controller-manager --config /etc/kubernetes/kubeadm-config.yaml >/dev/null 2>&1; "
+            "kubeadm init phase control-plane scheduler --config /etc/kubernetes/kubeadm-config.yaml >/dev/null 2>&1; "
+            "(rm -f /etc/kubernetes/manifests/etcd.yaml; "
+            " kubeadm init phase etcd local --config /etc/kubernetes/kubeadm-config.yaml >/dev/null 2>&1); "
+            "systemctl restart kubelet >/dev/null 2>&1; sleep 3; "
+            "echo __APISERVER__=$(curl -sk -m 5 -o /dev/null -w '%{http_code}' https://127.0.0.1:6443/healthz 2>/dev/null)"
+        )
+        try:
+            c2 = connect_ssh(host, port=port, username=user, password=password, timeout=8)
+            _, rout, _ = c2.exec_command(_restart, timeout=300)
+            out_txt += "\n[RESTART] " + rout.read().decode("utf-8", "replace")[:300]
+            c2.close()
+        except Exception as e:
+            out_txt += f"\n[restart error] {e}"
+
+    return {"ok": fin_ok, "output": out_txt}
+
+
+def renew_cluster(ds: DataSource, years: int = 0) -> dict:
     cfg = {}
     if ds.auth_config:
         try:
@@ -484,6 +592,32 @@ def renew_cluster(ds: DataSource, force: bool = False) -> dict:
 
     if not renew_cmd:
         return {"ok": False, "error": distro["renew_hint"], "distro": distro_key}
+
+    # kubeadm 续期: 支持按指定年限统一重签 + 主动重启。若未显式传 years,
+    # 则从数据源读取 cert_expiry_years, 否则默认 3 年 —— 避免走 `kubeadm certs renew all`
+    # 把已有证书重置回 kubeadm 默认的 1 年(用户看到的"重置")。
+    if distro_key == "kubeadm":
+        if not years or years < 1:
+            years = int(cfg.get("cert_expiry_years") or 0) or 3
+        pre = _ssh_exec(ssh_host, ssh_user, ssh_password, ssh_port,
+                        ["kubeadm certs renew all 2>&1 || echo '__RENEW_FAILED__'"])
+        if not pre.get("ok"):
+            return {"ok": False, "error": pre.get("error", "kubeadm renew 执行失败"), "distro": distro_key}
+        pre_out = pre["results"][0][1] if pre["results"] else ""
+        if "__RENEW_FAILED__" in pre_out:
+            return {"ok": False, "error": "kubeadm certs renew all 失败", "distro": distro_key,
+                    "output": pre_out}
+        r = _resign_kubeadm_certs(ssh_host, ssh_user, ssh_password, ssh_port, years)
+        return {
+            "ok": r["ok"],
+            "cluster": ds.name,
+            "distro": distro_key,
+            "not_after_target": f"{years} 年",
+            "output": (pre_out + "\n" + r["output"])[:4000],
+            "restart_hint": ("已主动重启控制面组件并重新签发全部证书为 %d 年; "
+                             "约需 1-2 分钟待 apiserver/etcd 恢复后请重新巡检确认" % years),
+            "error": None if r["ok"] else "按年限重签失败，请查看输出",
+        }
 
     commands = [renew_cmd]
     if distro_key in ("kubeadm",):

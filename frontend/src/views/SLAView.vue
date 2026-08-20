@@ -109,9 +109,9 @@
 <script setup>
 import { ref, onMounted, reactive } from "vue"
 import { ElMessage } from "element-plus"
-import axios from "axios"
 import GuideDrawer from '@/components/GuideDrawer.vue'
 import ServicePicker from '@/components/ServicePicker.vue'
+import request from '@/api/request'
 
 const showGuide = ref(false)
 const slaList = ref([])
@@ -129,8 +129,8 @@ async function onServicePick(id) {
   form.service_id = id
   if (id && !_assetMap[id]) {
     try {
-      const d = await axios.get(`/assets/api/${id}`)
-      _assetMap[id] = d.data.name
+      const d = await request.get(`/assets/api/${id}`)
+      _assetMap[id] = d.name
     } catch { _assetMap[id] = "" }
   }
   form.service_name = id ? (_assetMap[id] || "") : ""
@@ -138,8 +138,8 @@ async function onServicePick(id) {
 
 const loadData = async () => {
   try {
-    const res = await axios.get("/api/sre/sla")
-    slaList.value = res.data
+    const res = await request.get("/api/sre/sla")
+    slaList.value = res
   } catch (e) {
     console.error(e)
   }
@@ -156,7 +156,7 @@ const showCreateDialog = () => {
 
 const createSla = async () => {
   try {
-    await axios.post("/api/sre/sla", form)
+    await request.post("/api/sre/sla", form)
     ElMessage.success("创建成功")
     dialogVisible.value = false
     loadData()
@@ -167,7 +167,7 @@ const createSla = async () => {
 
 const deleteSla = async (id) => {
   try {
-    await axios.delete(`/api/sre/sla/${id}`)
+    await request.delete(`/api/sre/sla/${id}`)
     ElMessage.success("删除成功")
     loadData()
   } catch (e) {

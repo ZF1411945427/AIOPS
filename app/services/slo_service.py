@@ -9,6 +9,9 @@ from app.models import SLOConfig, ErrorBudget
 from app.services import metric_v2_service
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 def _query_vm_availability(service_name: str, window_hours: int = 24) -> dict:
     """从 VM 查询服务的可用性指标，返回 {total, errors, availability}."""
     now_s = int(datetime.now().timestamp())
@@ -37,8 +40,8 @@ def _query_vm_availability(service_name: str, window_hours: int = 24) -> dict:
                         errors += v
                     else:
                         total += v
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as _exc:
+                    logger.warning("[except:pass] (TypeError, ValueError): %s", _exc, exc_info=True)
 
     availability = None
     if total > 0:
@@ -104,8 +107,8 @@ def _create_slo_alert(db: Session, slo: SLOConfig, burn: dict, status: str):
     try:
         from app.services.notification_service import notify_new_alerts
         notify_new_alerts(db, [alert])
-    except Exception:
-        pass
+    except Exception as _exc1:
+        logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     try:
         from app.services.ws_manager import ws_manager
         import asyncio
@@ -128,8 +131,8 @@ def _create_slo_alert(db: Session, slo: SLOConfig, burn: dict, status: str):
                 loop.run_until_complete(_push())
         except RuntimeError:
             asyncio.run(_push())
-    except Exception:
-        pass
+    except Exception as _exc2:
+        logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
     return alert
 
 

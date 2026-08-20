@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ApiToken, MetricRecord, K8sEvent, Asset
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["api_v1"])
 
@@ -123,8 +126,8 @@ def query_metrics(
     try:
         from datetime import timedelta
         since = datetime.now() - timedelta(hours=hours)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     q = q.filter(MetricRecord.timestamp >= since)
     records = q.order_by(MetricRecord.timestamp.desc()).limit(limit).all()
     return JSONResponse([{

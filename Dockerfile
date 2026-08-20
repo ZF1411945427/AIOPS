@@ -20,8 +20,8 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=Asia/Shanghai \
     PIP_NO_CACHE_DIR=1
 
-# 生产数据库驱动(默认关闭; 用 Postgres 时: docker build --build-arg WITH_POSTGRES=1 .)
-ARG WITH_POSTGRES=0
+# 生产数据库驱动(PostgreSQL 为默认, 见 docker-compose; 仅内置镜像时用 --build-arg WITH_POSTGRES=0 可跳过)
+ARG WITH_POSTGRES=1
 RUN if [ "$WITH_POSTGRES" = "1" ]; then pip install --no-cache-dir psycopg2-binary; fi
 
 # 先装 torch CPU 版(单独索引源, 避免 PyPI 默认拉 GPU 版)
@@ -41,8 +41,8 @@ COPY --from=frontend-builder /build/dist ./frontend/dist
 # 模型权重(BGE ~92MB)
 COPY models/ ./models/
 
-# 运行时数据卷: 数据库 / 日志 / 许可证
-VOLUME ["/app/db", "/app/logs"]
+# 运行时数据卷: 日志 / 许可证(SQLite 已解耦, 数据库走外部 PostgreSQL)
+VOLUME ["/app/logs"]
 
 # 兼容遗留: docker-build 老路径不入卷, 统一用 /app
 EXPOSE 8000

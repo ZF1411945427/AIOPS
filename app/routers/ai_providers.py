@@ -220,3 +220,42 @@ def api_providers_reset_all(db: Session = Depends(get_db)):
     except Exception as e:
         logger.warning(f"api_providers_reset_all 异常: {e}")
         return {"status": "error", "message": str(e)}
+
+
+# ── Provider 统一注册表(Provider Abstraction Layer 消费端) ─────────────
+# 作用: 让 app/core/provider_base.py 的全局 ProviderRegistry 首次被真实消费,
+#       统一聚合 AI / 通知渠道 / 数据源 三类 provider 的健康快照。
+#       新增 provider(CATEGORY 子类)后经 register_all_providers 自动进入, 无需改本端点。
+
+@router.get("/api/providers/registry/{category:path}")
+def api_providers_registry_category(category: str, db: Session = Depends(get_db)):
+    """按 category(ai/notification/datasource/全部)查询统一注册表健康快照"""
+    from app.core.provider_base import registry, register_all_providers
+    register_all_providers(db)  # 幂等刷新, 保证新增数据源/渠道能被查询
+    c = category.strip("/")
+    cats = [c] if c and c != "all" else ["ai", "notification", "datasource"]
+    result = {}
+    total = 0
+    opens = 0
+    for cat in cats:
+        items = registry.health_snapshot(cat)
+        result[cat] = items
+        total += len(items)
+        opens += sum(1 for it in items if not it.get("health_ok"))
+    return {"categories": cats, "registry": result, "total": total, "unhealthy": opens}
+
+
+@router.get("/api/providers/registry")
+def api_providers_registry(db: Session = Depends(get_db)):
+    """全量统一注册表健康快照(等价 registry/all)"""
+    from app.core.provider_base import registry, register_all_providers
+    register_all_providers(db)
+    result = {}
+    total = 0
+    opens = 0
+    for cat in ["ai", "notification", "datasource"]:
+        items = registry.health_snapshot(cat)
+        result[cat] = items
+        total += len(items)
+        opens += sum(1 for it in items if not it.get("health_ok"))
+    return {"registry": result, "total": total, "unhealthy": opens}

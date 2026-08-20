@@ -4,6 +4,10 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.models import Asset, SecurityBaselineTemplate, AssetBaselineCheck
+from app.routers.agent_sse import _clean_key_point
+
+import logging
+logger = logging.getLogger(__name__)
 
 _CI_ALIASES = {"virtual_machine": "server", "vm": "server", "host": "server", "physical_machine": "server"}
 
@@ -171,16 +175,22 @@ IP: {asset.ip}
         elif "```" in content:
             content = content.split("```")[1].split("```")[0].strip()
         parsed = json.loads(content)
+        fix_priority = parsed.get("fix_priority", [])
         return {
             "ai_generated": True,
             "score": parsed.get("score", 100 - fail_count * 10),
             "risk_level": parsed.get("risk_level", "medium"),
             "summary": parsed.get("summary", ""),
             "top_risks": parsed.get("top_risks", []),
-            "fix_priority": parsed.get("fix_priority", []),
+            "fix_priority": fix_priority,
             "fail_count": fail_count,
             "pass_count": pass_count,
             "na_count": na_count,
+            "summary_block": {
+                "root_cause": _clean_key_point(str(parsed.get("summary", "")), 100),
+                "solution": _clean_key_point("；".join([str(x) for x in fix_priority[:3]]) if fix_priority else "按风险优先级逐项修复不合规项", 160),
+                "impact": _clean_key_point(f"{fail_count} 项不合规、{pass_count} 项合规（风险等级 {parsed.get('risk_level', 'medium')}）", 100),
+            },
         }
     except Exception:
         return _rule_report(fail_count, pass_count, na_count, checks)
@@ -214,6 +224,11 @@ def _rule_report(fail_count, pass_count, na_count, checks):
         "fail_count": fail_count,
         "pass_count": pass_count,
         "na_count": na_count,
+        "summary_block": {
+            "root_cause": _clean_key_point(summary, 100),
+            "solution": _clean_key_point("；".join([str(c.get("remediation", "")) for c in fails[:3] if c.get("remediation")]) or "按风险优先级逐项修复不合规项", 160),
+            "impact": _clean_key_point(f"{fail_count} 项不合规、{pass_count} 项合规（风险等级 {risk}）", 100),
+        },
     }
 
 
@@ -316,6 +331,6 @@ def _get_connection_config(asset: Asset) -> dict:
             return json.loads(raw)
         elif isinstance(raw, dict):
             return raw
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as _exc:
+        logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc, exc_info=True)
     return {}

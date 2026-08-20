@@ -42,6 +42,14 @@
       </div>
     </div>
 
+    <!-- 要点总结（统一三要素，置顶展示） -->
+    <div v-if="result && result.summary_block && (result.summary_block.root_cause || result.summary_block.solution)" class="key-points">
+      <div class="kp-title">📌 要点总结</div>
+      <div v-if="result.summary_block.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ result.summary_block.root_cause }}</span></div>
+      <div v-if="result.summary_block.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ result.summary_block.solution }}</span></div>
+      <div v-if="result.summary_block.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ result.summary_block.impact }}</span></div>
+    </div>
+
     <!-- RCA 建议 -->
     <div v-if="result && result.rca_suggestions && result.rca_suggestions.length" class="rca-bar">
       <span class="rca-icon">💡</span>

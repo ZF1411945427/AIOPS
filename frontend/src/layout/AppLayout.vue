@@ -297,6 +297,7 @@
       <AgentAudit v-else-if="activeView === 'audit'" />
       <OperationAudit v-else-if="activeView === 'op-audit'" />
       <AIOpsAssistantView v-else-if="activeView === 'ai-ops-assistant'" />
+      <JarvisView v-else-if="activeView === 'jarvis-command'" />
       <MenuConfig v-else-if="activeView === 'menu-config'" />
       <TraceView v-else-if="activeView === 'traces'" />
     <TraceAgentGuide v-else-if="activeView === 'discovery'" />
@@ -317,9 +318,11 @@
           <AssetsView v-else-if="activeView === 'asset-list'" />
           <ConfigDriftView v-else-if="activeView === 'config-drift'" />
           <DatasourcesView v-else-if="activeView === 'datasources'" />
+          <ProvidersView v-else-if="activeView === 'providers'" />
           <LogsView v-else-if="activeView === 'logs'" />
       <IncidentsView v-else-if="activeView === 'incident'" />
       <EventStatsView v-else-if="activeView === 'event-stats'" />
+      <InboundSourcesView v-else-if="activeView === 'inbound-sources'" />
       <EventSourcesView v-else-if="activeView === 'event-sources'" />
       <AnomalyView v-else-if="activeView === 'anomaly'" />
       <RemediationView v-else-if="activeView === 'remediation'" />
@@ -343,7 +346,6 @@
           <ExtCmdbView v-else-if="activeView === 'ext-cmdb'" />
           <ReportsView v-else-if="activeView === 'reports'" />
           <K8sOverviewView v-else-if="activeView === 'k8s-overview'" />
-          <K8sMonitorView v-else-if="activeView === 'k8s-monitor'" />
           <K8sResourceView v-else-if="activeView === 'k8s-resource'" />
           <K8sResourceListView v-else-if="activeView === 'k8s-statefulsets'" resource-type="statefulsets" />
           <K8sResourceListView v-else-if="activeView === 'k8s-daemonsets'" resource-type="daemonsets" />
@@ -442,13 +444,14 @@ import {
   Management, Service, Goods, GoodsFilled, DocumentAdd, DocumentCopy,
   DocumentDelete, FolderAdd, FolderChecked, FolderOpened, FolderRemove,
   Collection, CollectionTag, Postcard, Ticket, Briefcase as BriefcaseIcon,
-  Suitcase, SuitcaseLine, Operation as OpIcon, Lock
+  Suitcase, SuitcaseLine, Operation as OpIcon, Lock, Aim
 } from '@element-plus/icons-vue'
 import AIOpsChatWidget from '@/components/AIOpsChatWidget.vue'
 import FirstRunGuide from '@/components/FirstRunGuide.vue'
 const AgentAudit = defineAsyncComponent(() => import('@/views/AgentAudit.vue'))
 const OperationAudit = defineAsyncComponent(() => import('@/views/OperationAudit.vue'))
 const AgentChatView = defineAsyncComponent(() => import('@/views/AgentChatView.vue'))
+const JarvisView = defineAsyncComponent(() => import('@/views/JarvisView.vue'))
 const MenuConfig = defineAsyncComponent(() => import('@/views/MenuConfig.vue'))
 const SystemPosture = defineAsyncComponent(() => import('@/views/SystemPosture.vue'))
 const TraceView = defineAsyncComponent(() => import('@/views/TraceView.vue'))
@@ -470,10 +473,12 @@ const AlertRulesView = defineAsyncComponent(() => import('@/views/AlertRulesView
 const AssetsView = defineAsyncComponent(() => import('@/views/AssetsView.vue'))
 const ConfigDriftView = defineAsyncComponent(() => import('@/views/ConfigDriftView.vue'))
 const DatasourcesView = defineAsyncComponent(() => import('@/views/DatasourcesView.vue'))
+const ProvidersView = defineAsyncComponent(() => import('@/views/ProvidersView.vue'))
 const LogsView = defineAsyncComponent(() => import('@/views/LogsView.vue'))
 const IncidentsView = defineAsyncComponent(() => import('@/views/IncidentsView.vue'))
 const EventStatsView = defineAsyncComponent(() => import('@/views/EventStatsView.vue'))
 const EventSourcesView = defineAsyncComponent(() => import('@/views/EventSourcesView.vue'))
+const InboundSourcesView = defineAsyncComponent(() => import('@/views/InboundSourcesView.vue'))
 const AnomalyView = defineAsyncComponent(() => import('@/views/AnomalyView.vue'))
 const RemediationView = defineAsyncComponent(() => import('@/views/RemediationView.vue'))
 const RemediationWorkflowView = defineAsyncComponent(() => import('@/views/RemediationWorkflowView.vue'))
@@ -492,7 +497,6 @@ const TagsView = defineAsyncComponent(() => import('@/views/TagsView.vue'))
 const ExtCmdbView = defineAsyncComponent(() => import('@/views/ExtCmdbView.vue'))
 const ReportsView = defineAsyncComponent(() => import('@/views/ReportsView.vue'))
 const K8sOverviewView = defineAsyncComponent(() => import('@/views/K8sOverviewView.vue'))
-const K8sMonitorView = defineAsyncComponent(() => import('@/views/K8sMonitorView.vue'))
 const K8sResourceListView = defineAsyncComponent(() => import('@/views/K8sResourceListView.vue'))
 const K8sResourceView = defineAsyncComponent(() => import('@/views/K8sResourceView.vue'))
 const ContainerTopologyView = defineAsyncComponent(() => import('@/views/ContainerTopologyView.vue'))
@@ -681,14 +685,14 @@ const ICON_MAP = {
   DataBoard, Loading, OpIcon, Management, Service, Goods, GoodsFilled,
   DocumentAdd, DocumentCopy, DocumentDelete, FolderAdd, FolderChecked,
   FolderOpened, FolderRemove, Collection, CollectionTag, Postcard, Ticket,
-  BriefcaseIcon, Suitcase, SuitcaseLine, Lock
+  BriefcaseIcon, Suitcase, SuitcaseLine, Lock, Aim
 }
 
 function getIcon(name) {
   return ICON_MAP[name] || Monitor
 }
 
-const VUE_PAGES = new Set(['roles-manage', 'ai-ops-assistant', 'agent-deploy', 'agent-autonomous', 'ai-deploy', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-monitor', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'k8s-cert-inspect', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit', 'middleware-store'])
+const VUE_PAGES = new Set(['roles-manage', 'ai-ops-assistant', 'jarvis-command', 'agent-deploy', 'agent-autonomous', 'ai-deploy', 'audit', 'op-audit', 'menu-config', 'system-posture', 'traces', 'discovery', 'metrics', 'error-budget', 'burn-rate', 'slo-config', 'slo-dashboard', 'sla-agreement', 'oncall-schedule', 'availability-report', 'chaos-experiment', 'chaos-report', 'chaos-scenario', 'alerts', 'asset-list', 'datasources', 'logs', 'incident', 'event-stats', 'event-sources', 'anomaly', 'remediation', 'remediation-workflow', 'script-exec', 'blue-green', 'change-workflow', 'ai-providers', 'feature-store', 'prediction-models', 'users', 'notifications', 'settings', 'integration', 'tags', 'ext-cmdb', 'reports', 'k8s-overview', 'k8s-statefulsets', 'k8s-daemonsets', 'k8s-services', 'k8s-ingresses', 'k8s-configmaps', 'k8s-secrets', 'k8s-hpas', 'k8s-pvcs', 'k8s-pvs', 'k8s-topology', 'k8s-pods', 'k8s-deployments', 'docker-overview', 'docker-list', 'kb-list', 'kb-documents', 'graph-inference', 'smart-recommend', 'rag-eval', 'runbooks', 'lifecycle', 'topology', 'topology-path', 'openapi', 'workflow-runs', 'workflow-templates', 'agent-workflow-editor', 'agent-workflow-runs', 'helm-releases', 'ansible', 'license', 'k8s-namespaces', 'firemap', 'smart-inspection', 'knowledge-draft', 'remediation-effect', 'agent-eval', 'rag-rerank', 'anomaly-benchmark', 'asset-discovery', 'ops-analytics', 'dashboard-designer', 'diagnostic-tools', 'tenant-management', 'observability-correlation', 'trace-anomaly-config', 'k8s-hpa-recommend', 'k8s-resource-optimize', 'k8s-cert-inspect', 'network-test', 'background-tasks', 'contract-check', 'audit-matrix', 'security-audit', 'middleware-store'])
 
 function _flattenItems(items) {
   const result = []
@@ -719,7 +723,7 @@ function _findItem(key) {
   return null
 }
 
-function handleMenuSelect(arg) {
+function handleMenuSelect(arg, context) {
   const key = typeof arg === 'string' ? arg : (arg.key || '')
   activeMenu.value = key
   const item = _findItem(key)
@@ -729,6 +733,16 @@ function handleMenuSelect(arg) {
   }
 
   currentTitle.value = item.label
+
+  // 记录来源页面（上下文感知：切到主脑时带上"从哪个页面来的"）
+  if (key !== 'jarvis-command' && activeView.value && activeView.value !== key) {
+    window.__aiopsLastView = activeView.value
+  }
+
+  // 保存导航上下文（供 deep link 等使用）
+  if (context) {
+    window.__aiopsNavContext = context
+  }
 
   if (item.type === 'vue' || VUE_PAGES.has(key)) {
     activeView.value = key
@@ -764,7 +778,7 @@ function handleNotifClick(n) {
 }
 
 onMounted(async () => {
-  window._navigateTo = (key) => handleMenuSelect(key)
+  window._navigateTo = (key, context) => handleMenuSelect(key, context)
   window._navigateToIframe = (path) => {
     const item = { type: 'iframe', path }
     activeMenu.value = path

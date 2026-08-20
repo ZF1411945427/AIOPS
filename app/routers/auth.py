@@ -25,7 +25,8 @@ _VUE_INDEX = Path(__file__).resolve().parent.parent.parent / "frontend/dist/inde
 
 def _serve_vue() -> HTMLResponse:
     content = _VUE_INDEX.read_text(encoding="utf-8")
-    return HTMLResponse(content=content)
+    # index.html 禁止缓存: 构建产物文件名带 hash, 缓存旧 index.html 会导致引用旧 JS/CSS 404
+    return HTMLResponse(content=content, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 def hash_password(password: str) -> str:

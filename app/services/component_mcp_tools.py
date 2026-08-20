@@ -16,6 +16,9 @@ from app.models import Asset
 from app.services.mcp_registry import register_mcp_tool
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 def _get_db():
     try:
         return get_session_for(get_db_mode())()
@@ -43,8 +46,8 @@ def _ssh(asset, command, timeout=20):
         finally:
             try:
                 ssh.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     except Exception as e:
         return (False, f"SSH 失败: {e}")
 

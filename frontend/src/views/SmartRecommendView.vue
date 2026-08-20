@@ -66,6 +66,12 @@
           <span class="tag-mini" style="margin-left:8px;background:rgba(20,184,166,0.1);color:#14b8a6;">AI</span>
         </div>
         <div class="panel-body">
+          <div v-if="alertAiKeyPoints && (alertAiKeyPoints.root_cause || alertAiKeyPoints.solution)" class="key-points">
+            <div class="kp-title">📌 要点总结</div>
+            <div v-if="alertAiKeyPoints.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ alertAiKeyPoints.root_cause }}</span></div>
+            <div v-if="alertAiKeyPoints.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ alertAiKeyPoints.solution }}</span></div>
+            <div v-if="alertAiKeyPoints.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ alertAiKeyPoints.impact }}</span></div>
+          </div>
           <div class="bl-score-bar">
             <div class="alert-ai-sev badge" :class="sevClass(alertAiResult.severity_assessment)">{{ alertAiResult.severity_assessment }}</div>
           </div>
@@ -209,6 +215,12 @@
       <div v-if="aiRecs.length" class="panel" style="margin-top:14px;">
         <div class="panel-head">AI 智能推荐 · {{ aiRecs.length }} 条</div>
         <div class="panel-body">
+          <div v-if="aiRecsKeyPoints && (aiRecsKeyPoints.root_cause || aiRecsKeyPoints.solution)" class="key-points">
+            <div class="kp-title">📌 要点总结</div>
+            <div v-if="aiRecsKeyPoints.root_cause" class="kp-row"><span class="kp-tag">结论</span><span class="kp-text">{{ aiRecsKeyPoints.root_cause }}</span></div>
+            <div v-if="aiRecsKeyPoints.solution" class="kp-row"><span class="kp-tag">建议</span><span class="kp-text">{{ aiRecsKeyPoints.solution }}</span></div>
+            <div v-if="aiRecsKeyPoints.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ aiRecsKeyPoints.impact }}</span></div>
+          </div>
           <div v-for="(r, i) in aiRecs" :key="i" class="rec-item" style="margin-bottom:8px;">
             <div class="rec-head">
               <span class="rec-rank">#{{ i + 1 }}</span>
@@ -261,6 +273,12 @@
           <div class="bl-score-bar">
             <div class="bl-score" :style="{color: scoreColor(blAnalysis.score)}">{{ blAnalysis.score }}<span class="bl-score-label">/100</span></div>
             <div class="bl-risk" :class="'risk-' + blAnalysis.risk_level">{{ riskLabel(blAnalysis.risk_level) }}</div>
+          </div>
+          <div v-if="blKeyPoints && (blKeyPoints.root_cause || blKeyPoints.solution)" class="key-points">
+            <div class="kp-title">📌 要点总结</div>
+            <div v-if="blKeyPoints.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ blKeyPoints.root_cause }}</span></div>
+            <div v-if="blKeyPoints.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ blKeyPoints.solution }}</span></div>
+            <div v-if="blKeyPoints.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ blKeyPoints.impact }}</span></div>
           </div>
           <div class="bl-summary">{{ blAnalysis.summary }}</div>
           <div class="bl-stats">
@@ -382,6 +400,7 @@ const runbooks = ref([])
 const sources = ref(null)
 const alertAiLoading = ref(false)
 const alertAiResult = ref(null)
+const alertAiKeyPoints = ref(null)
 
 const glossary = [
   { term: '召回率', en: 'Recall', desc: '搜出来的相关知识占所有相关知识的比例。' },
@@ -465,10 +484,12 @@ async function aiAlertAnalyze() {
   if (!alertId.value) { ElMessage.warning('请先输入告警 ID'); return }
   alertAiLoading.value = true
   alertAiResult.value = null
+  alertAiKeyPoints.value = null
   try {
     const data = await request.get('/smart-recommend/ai-analyze-alert/' + alertId.value)
     if (data.analysis) {
       alertAiResult.value = data.analysis
+      alertAiKeyPoints.value = data.summary_block || null
     } else {
       ElMessage.info(data.message || 'AI 未返回分析结果')
     }
@@ -485,6 +506,7 @@ const metricLoading = ref(false)
 const metricSearched = ref(false)
 const gaps = ref([])
 const aiRecs = ref([])
+const aiRecsKeyPoints = ref(null)
 const aiLoading = ref(false)
 const assetRecommendations = ref([])
 
@@ -521,6 +543,7 @@ async function aiRecommend() {
   try {
     const data = await request.get('/smart-recommend/ai-recommend/' + assetId.value)
     aiRecs.value = data.recommendations || []
+    aiRecsKeyPoints.value = data.summary_block || null
     if (!aiRecs.value.length) {
       ElMessage.info(data.message || 'AI 未返回推荐')
     }
@@ -593,6 +616,7 @@ const blAiLoading = ref(false)
 const blSearched = ref(false)
 const blItems = ref([])
 const blAnalysis = ref(null)
+const blKeyPoints = ref(null)
 const showManual = ref(false)
 const manualItem = ref(null)
 const manualStatus = ref('pass')
@@ -667,6 +691,7 @@ async function aiAnalyzeBaseline() {
   try {
     const data = await request.get('/baseline/analyze/' + blAssetId.value)
     blAnalysis.value = data.analysis || null
+    blKeyPoints.value = (data.analysis && data.analysis.summary_block) || null
     blItems.value = data.items || []
   } catch (e) {
     ElMessage.error('分析失败: ' + (e.message || e))

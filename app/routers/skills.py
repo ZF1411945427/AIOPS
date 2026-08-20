@@ -24,8 +24,8 @@ def _current_user_id(request: Request) -> int:
                 payload = verify_login_token(auth[7:])
                 if payload:
                     user_id = payload.get("user_id")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return user_id
 
 
@@ -135,3 +135,7 @@ def json_dumps(obj) -> str:
         return json.dumps(obj, ensure_ascii=False, default=str)[:500]
     except Exception:
         return str(obj)[:500]
+
+
+import logging
+logger = logging.getLogger(__name__)

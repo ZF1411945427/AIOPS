@@ -130,3 +130,44 @@ def serve_vue_spa(path: str):
 2. **H5 publicPath 覆盖 vite base**:`manifest.json` 的 `h5.publicPath` 优先级高于 `vite.config.js` 的 `base`,缺失会覆盖 → `/assets/*.js` 404 白屏。`mobile/src/manifest.json` 的 h5 节点必须同时配 `publicPath: "/mobile-app/"`,改完重新 `npm run build:h5 --prefix mobile`
 3. **页面组件深层编译缓存**:`src/pages/` 下 `.vue` 改动可能不生效(浏览器 DOM 渲染旧版本),但 `src/main.js` 改动总生效。遇问题先在 `main.js` 验证逻辑,再排查组件缓存(可能需 `npm run build:h5` 全量构建);绕过方案用 `document.addEventListener('click', handler, true)` 全局事件拦截 + 直接调 API
 4. **@tap 事件 DOM 拦截**:uni-app `@tap` 在 H5 同时触发 touchstart + click;`<view>` 渲染为 `<uni-view>`;全局拦截用捕获阶段 `document.addEventListener('click', handler, true)`,文本内容匹配比类名匹配可靠
+
+## ⚠️ Web 前端"改了但看不出效果"排查套路(2026-08-19 实战教训)
+
+**背景:** 为 AI 助手加"要点总结卡片"时,后端/构建都正确,但前端一直不显示。最终定位到 4 个叠加因素,按重要性排序:
+
+### 1. 先确认改的是用户实际用的那个组件(最容易踩)
+- AI 助手有两套页面:**老式 `JarvisView.vue`**(ZHIYUAN CORE 科幻风) 和 **实际使用的 `AgentChatView.vue`**(由 `AIOpsAssistantView.vue` 承载,"智能助手/agent-layout/msg-bubble" 风格)。
+- 加功能前**先 grep 前端页面里真实渲染的特征类**(如 `msg-bubble`、`agent-sidebar`、`ai-assistant-tabs`)定位正确文件,别凭"主脑=JarvisView"的直觉。
+- 后端 SSE 逻辑在 `app/routers/agent_sse.py` + `frontend/src/composables/useAgentSSE.js`(封装 EventSource)。
+
+### 2. 防下游数据流覆盖(致命)
+`AgentChatView.vue` 的 `sendMessage()` 里:
+```js
+messages.push({..., summary})   // 1. push 带新字段的消息
+await loadMessages(id)           // 2. 拉历史 → messages = msgs 整体覆盖 → 新字段丢失!
+```
+`loadMessages()` 会**整体覆盖 `messages` 数组**,而 SSE 实时生成的字段(如 `summary`)不入库、历史里没有,所以被清空。
+**修复:** `loadMessages()` 之后**把新字段补回最后一条消息**(`messages[len-1].summary = sseSummary`)。这是最隐蔽、最可能导致"后端正常但前端不显示"的原因。
+
+### 3. 静态资源 immutable 缓存头屏蔽新 JS
+`app/main.py` 的 `CacheControlMiddleware` 曾给 `/vue-assets/` 设 `max-age=31536000, immutable`(一年),导致浏览器**强制刷新 Ctrl+Shift+R 也加载不到新 JS**。
+**已改:** `public, max-age=0, must-revalidate`(构建产物带 hash,改为每次校验)。
+**排查:** 改前端后若 Ctrl+Shift+R 无效,先查 `/vue-assets/assets/*.js` 响应头的 Cache-Control 是否为 immutable/长缓存。
+
+### 4. 大项目前端 build 内存不足(OOM)
+项目 chunk 多,`npm run build --prefix frontend` 或直接 `vite build` 在内存紧张时 **JavaScript heap out of memory**。
+**解决:** 用 `NODE_OPTIONS=--max-old-space-size=8192` + `node node_modules/vite/bin/vite.js build`(在 `frontend/` 目录)。关闭同机的 Vite dev server 也能释放内存。
+
+### 5. AI 要点字段别用硬截断(截半句/留孤立逗号)
+`_generate_key_points`(agent_sse) / `_build_correlation_key_points`(observability_correlation) 生成要点时,**别用 `[:60]`/`[:80]` 直接截断**——会截在中文词中间(如"…服务进程"少了"离线")、残留末尾孤立逗号。
+**修复:** 用 `_clean_key_point(value, max_len)`(定义在 `agent_sse.py`) 去首尾孤立标点 + 超长在标点边界断开;长度放宽到 root_cause/impact=100、solution=160。
+
+### 后端 SSE 自测(不依赖浏览器)
+登录后 curl 直接测 done 事件是否带新字段:
+```bash
+curl -s -c ck.txt -b ck.txt -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}' http://127.0.0.1:8000/login
+curl -s -N -b ck.txt -c ck.txt "http://127.0.0.1:8000/agent/chat/stream?session_id=0&message=<percent-encoded 消息>" \
+  > sse.txt; grep -A3 "event: done" sse.txt
+```
+后端能返回但前端不显示 → 99% 是前端组件位置错或数据流覆盖(见 1、2)。

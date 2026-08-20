@@ -62,23 +62,37 @@
           <thead>
             <tr>
               <th class="col-check"><input type="checkbox" :checked="allSelected" @change="toggleAll" /></th>
-              <th>ID</th><th>时间</th><th>指标</th><th>当前值</th><th>阈值</th>
-              <th>级别</th><th>状态</th><th>消息</th><th>操作</th>
+              <th>ID</th><th>时间</th><th>资源</th><th>资源类型</th><th>指标</th><th>当前值</th><th>阈值</th>
+              <th>级别</th><th>状态</th><th>来源</th><th>消息</th><th>故障单</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="a in alerts" :key="a.id" :class="`severity-${a.severity}`">
+            <tr v-for="a in alerts" :key="a.id" :class="[`severity-${a.severity}`, { 'row-highlight': highlightedAlertId === a.id }]">
               <td class="col-check"><input type="checkbox" :checked="selected.has(a.id)" @change="toggleSelect(a.id)" /></td>
               <td>{{ a.id }}</td>
               <td class="text-sm">{{ formatTime(a.created_at) }}</td>
+              <td class="text-sm">
+                <span v-if="a.asset_name">{{ a.asset_name }}</span><span v-if="a.asset_ip" class="muted-ip"> ({{ a.asset_ip }})</span>
+                <span v-else-if="!a.asset_name && a.asset_id" class="muted-ip">资产#{{ a.asset_id }}</span>
+                <span v-else class="muted-ip">-</span>
+              </td>
+              <td><span class="badge ci-type">{{ assetTypeLabel(a.asset_type) }}</span></td>
               <td>{{ a.metric_name }}</td>
               <td>{{ a.actual_value }}</td>
               <td>{{ a.threshold }}</td>
               <td><span class="badge" :class="a.severity">{{ a.severity }}</span></td>
               <td><span class="badge" :class="a.status">{{ a.status }}</span></td>
+              <td><span class="badge source" :class="a.source === 'internal' ? 'internal' : 'external'">{{ a.source === 'internal' ? '内部' : (a.source || '内部') }}</span></td>
               <td class="text-sm msg-cell">{{ a.message }}</td>
               <td>
+                <template v-if="a.incident_id">
+                  <button class="btn btn-sm btn-incident" @click="gotoIncident(a.incident_id)">🎫 #{{ a.incident_id }}</button>
+                </template>
+                <span v-else class="muted-ip">-</span>
+              </td>
+              <td>
                 <button v-if="a.status !== 'resolved'" class="btn btn-sm btn-primary" @click="resolveAlert(a.id)">解决</button>
+                <button v-if="!a.incident_id && a.status !== 'resolved'" class="btn btn-sm btn-escalate" @click="escalateToIncident(a.id)">转故障单</button>
                 <button class="btn btn-sm btn-rca" @click="openRca(a.id)">根因分析</button>
                 <button class="btn btn-sm btn-ai" @click="openAiRca(a.id)">AI 深度分析</button>
                 <button class="btn btn-sm btn-primary" @click="openAssistant(a.id)">💬 智能助手</button>
@@ -385,6 +399,43 @@ function formatTime(s) {
   return s.substring(5, 16)
 }
 
+function assetTypeLabel(ci) {
+  return {
+    server: '服务器', virtual_machine: '虚拟机', cloud_host: '云主机',
+    middleware: '中间件', database: '数据库', business_app: '业务应用',
+    api_service: 'API服务', kubernetes_cluster: 'K8s集群', ssl_certificate: 'SSL证书',
+    monitoring_endpoint: '监控端点', storage_device: '存储设备', dns_record: 'DNS记录',
+    network_device: '网络设备', load_balancer: '负载均衡', business: '业务',
+  }[ci] || (ci || '-')
+}
+
+const highlightedAlertId = ref(null)
+let highlightTimer = null
+
+function gotoIncident(incidentId) {
+  window._pendingIncidentId = incidentId
+  window._navigateTo('incident')
+}
+
+async function escalateToIncident(alertId) {
+  try {
+    await ElMessageBox.confirm(`确认将告警 #${alertId} 升级为故障单？`, '转故障单')
+  } catch (e) {
+    return
+  }
+  try {
+    const data = await request.post(`/alerts/api/${alertId}/to-incident`)
+    if (data.ok) {
+      ElMessage.success(`已关联故障单 #${data.incident_id}`)
+      loadAlerts()
+    } else {
+      ElMessage.error(data.error || '转故障单失败')
+    }
+  } catch (e) {
+    ElMessage.error('转故障单失败: ' + (e.message || e))
+  }
+}
+
 async function openAssistant(alertId) {
   try {
     const data = await request.post(`/alerts/api/${alertId}/open-assistant`)
@@ -407,10 +458,21 @@ function insertAlertAtTop(alert) {
   }
 }
 
-onMounted(() => {
-  loadAlerts()
+onMounted(async () => {
+  await loadAlerts()
   connectAlertsWs('')
   onAlert(insertAlertAtTop)
+  // 从故障单跳转过来：高亮/定位指定告警
+  const pendingId = window._pendingAlertId
+  if (pendingId) {
+    window._pendingAlertId = null
+    const found = alerts.value.find(a => a.id === pendingId)
+    if (found) {
+      highlightedAlertId.value = pendingId
+      if (highlightTimer) clearTimeout(highlightTimer)
+      highlightTimer = setTimeout(() => { highlightedAlertId.value = null }, 4000)
+    }
+  }
 })
 
 onBeforeUnmount(() => {
@@ -459,12 +521,16 @@ onBeforeUnmount(() => {
 .table tr:hover td { background: var(--bg-hover, rgba(0,0,0,0.03)); }
 .text-sm { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .msg-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muted-ip { color: #94a3b8; font-size: 0.72rem; }
+.badge.ci-type { background: rgba(99,102,241,0.1); color: #6366f1; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
 .badge.info { background: rgba(59,130,246,0.1); color: #3b82f6; }
 .badge.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
 .badge.critical, .badge.triggered { background: rgba(239,68,68,0.1); color: #ef4444; }
 .badge.acknowledged { background: rgba(245,158,11,0.1); color: #f59e0b; }
 .badge.resolved { background: rgba(34,197,94,0.1); color: #22c55e; }
+.badge.source.internal { background: rgba(100,116,139,0.1); color: #64748b; }
+.badge.source.external { background: rgba(168,85,247,0.1); color: #a855f7; }
 .loading-state, .empty-state { text-align: center; padding: 32px; color: var(--text-tertiary, #94a3b8); font-size: 0.9rem; }
 .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
 .page-info { font-size: 0.82rem; color: var(--text-secondary, #64748b); }
@@ -477,6 +543,16 @@ onBeforeUnmount(() => {
 .btn-rca:hover { background: rgba(99,102,241,0.2); }
 .btn-ai { background: rgba(168,85,247,0.1); color: #a855f7; border-color: rgba(168,85,247,0.3); margin-left: 4px; }
 .btn-ai:hover { background: rgba(168,85,247,0.2); }
+.btn-incident { background: rgba(245,158,11,0.12); color: #d97706; border-color: rgba(245,158,11,0.35); margin-left: 4px; }
+.btn-incident:hover { background: rgba(245,158,11,0.22); }
+.btn-escalate { background: rgba(220,38,38,0.08); color: #dc2626; border-color: rgba(220,38,38,0.3); margin-left: 4px; }
+.btn-escalate:hover { background: rgba(220,38,38,0.16); }
+.row-highlight { animation: alertFlash 1.2s ease 3; }
+.row-highlight td { background: rgba(245,158,11,0.12); }
+@keyframes alertFlash {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(245,158,11,0.25); }
+}
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .modal-box { background: var(--bg-card, #fff); border-radius: 12px; max-height: 85vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
 .modal-lg { width: 700px; max-width: 92vw; }

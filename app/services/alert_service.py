@@ -7,6 +7,9 @@ from app.models import Alert, AlertRule, MetricRecord, Asset, AlertSilence, Aler
 from app.services import notification_service
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 def _serialize_alert(a: Alert) -> dict:
     return {
         "id": a.id,
@@ -17,6 +20,7 @@ def _serialize_alert(a: Alert) -> dict:
         "threshold": a.threshold,
         "severity": a.severity,
         "status": a.status,
+        "source": getattr(a, "source", "internal") or "internal",
         "message": a.message,
         "created_at": a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else None,
     }
@@ -33,8 +37,8 @@ def _ws_publish_async(alert_dicts: list):
             ws_manager.publish_alert({"type": "alert", "alerts": alert_dicts})
         )
         loop.close()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 def list_rules(db: Session):
@@ -116,9 +120,17 @@ def _metric_history(db: Session, metric_name: str, asset_id, limit: int = 120):
 
 
 def _eval_metric_raw(rule, latest, db):
-    """静态阈值: 原逻辑。"""
-    cond = (rule.condition or "").strip().lower()
+    """静态阈值: 原逻辑。支持 config_json.expression 的 AND/OR 组合条件表达式。"""
     v = latest.value
+    cfg = _load_config(rule)
+
+    # 组合条件表达式: {"and":[{"op":">","threshold":80},{"op":"<","threshold":95}]}
+    expr = cfg.get("expression")
+    if isinstance(expr, dict) and expr:
+        result = _eval_expression(expr, v, rule)
+        return result[0], v, result[1]
+
+    cond = (rule.condition or "").strip().lower()
     if cond in (">", "gt"):
         return v > rule.threshold, v, f"{rule.metric_name} 当前值:{v} 超出阈值:{rule.threshold}"
     if cond in ("<", "lt"):
@@ -130,6 +142,65 @@ def _eval_metric_raw(rule, latest, db):
     if cond in ("=", "==", "eq"):
         return v == rule.threshold, v, f"{rule.metric_name} 当前值:{v} 等于阈值:{rule.threshold}"
     return False, v, ""
+
+
+def _eval_condition_atom(op, value, threshold) -> bool:
+    """求值单个原子条件 (op: > < >= <= == != )"""
+    op = (op or "").strip().lower()
+    try:
+        tv = float(threshold)
+    except (TypeError, ValueError):
+        tv = threshold
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        pass
+    if op in (">", "gt"):
+        return value > tv
+    if op in ("<", "lt"):
+        return value < tv
+    if op in (">=", "gte"):
+        return value >= tv
+    if op in ("<=", "lte"):
+        return value <= tv
+    if op in ("=", "==", "eq"):
+        return value == tv
+    if op in ("!=", "ne"):
+        return value != tv
+    return False
+
+
+def _eval_expression(expr: dict, value, rule) -> tuple:
+    """递归求值 AND/OR 组合表达式。返回 (triggered, message 摘要)。
+    expr: {"and":[atom|expr, ...]} / {"or":[...]} / 原子 {"op","threshold"}"""
+    from app.logger import logger as _lg
+    atom_msgs = []
+    if "and" in expr or "or" in expr:
+        items = expr.get("and") or expr.get("or") or []
+        op = "and" if "and" in expr else "or"
+        results = []
+        for it in items:
+            if isinstance(it, dict) and ("and" in it or "or" in it):
+                res, msg = _eval_expression(it, value, rule)
+                results.append(res)
+                atom_msgs.append(msg)
+            elif isinstance(it, dict) and "op" in it:
+                res = _eval_condition_atom(it.get("op"), value, it.get("threshold"))
+                results.append(res)
+                atom_msgs.append(f"{it.get('op')} {it.get('threshold')}")
+            else:
+                results.append(False)
+                atom_msgs.append("invalid")
+        if op == "and":
+            triggered = all(results)
+        else:
+            triggered = any(results)
+        summary = " AND ".join(f"[{m}]" for m in atom_msgs) if op == "and" else " OR ".join(f"[{m}]" for m in atom_msgs)
+        return triggered, f"{rule.metric_name} 当前值:{value} 组合条件({summary})"
+    if "op" in expr:
+        res = _eval_condition_atom(expr.get("op"), value, expr.get("threshold"))
+        return res, f"{rule.metric_name} 当前值:{value} {expr.get('op')} {expr.get('threshold')}"
+    return False, f"{rule.metric_name} 表达式无效"
 
 
 def _eval_anomaly(rule, latest, db):
@@ -285,8 +356,8 @@ def _eval_log_match(rule, db) -> tuple:
         es_source = cfg.get("es_source") or ""
         if es_source:
             count += _count_es_logs(db, es_source, datetime.now() - timedelta(hours=hours), level=level, keyword=keyword)
-    except Exception:
-        pass
+    except Exception as _exc1:
+        logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     triggered = count >= threshold
     return triggered, count, f"日志命中[{keyword or 'all'}] {count} 条 ≥阈值{threshold} (窗口{hours}h)"
 
@@ -330,8 +401,8 @@ def check_rules(db: Session):
                     silenced_metric_names.add(s.metric_name)
                 if s.rule_id:
                     silenced_rule_ids.add(s.rule_id)
-        except Exception:
-            pass
+        except Exception as _exc2:
+            logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
     now = datetime.now()
     dedup_window = timedelta(minutes=5)
     storm_window = timedelta(minutes=1)
@@ -449,20 +520,37 @@ def check_rules(db: Session):
                     )
                     .first()
                 )
-                # svc_up 特殊处理：即使已有活跃告警，只要值仍异常就重复触发（服务持续离线需要持续告警）
+                # svc_up 单例去重：同一资产+规则已有活跃告警时不重复写入，仅刷新 last_notified_at
                 if rule.metric_name == "svc_up" and latest.value < rule.threshold:
-                    alert = Alert(
-                        rule_id=rule.id,
-                        asset_id=latest.asset_id,
-                        metric_name=rule.metric_name,
-                        actual_value=actual_value,
-                        threshold=rule.threshold,
-                        severity=rule.severity,
-                        status="triggered",
-                        message=f"{rule.name} - {rule.metric_name} 当前值:{actual_value} 超出阈值:{rule.threshold}",
-                    )
-                    db.add(alert)
-                    new_alerts.append(alert)
+                    if active:
+                        active.last_notified_at = now
+                        db.commit()
+                        continue
+                    elif not active and not recent_resolved:
+                        alert = Alert(
+                            rule_id=rule.id,
+                            asset_id=latest.asset_id,
+                            metric_name=rule.metric_name,
+                            actual_value=actual_value,
+                            threshold=rule.threshold,
+                            severity=rule.severity,
+                            status="triggered",
+                            message=f"{rule.name} - {rule.metric_name} 当前值:{actual_value} 超出阈值:{rule.threshold}",
+                        )
+                        db.add(alert)
+                        new_alerts.append(alert)
+                    elif not active and recent_resolved:
+                        sup = db.query(AlertSuppression).filter(
+                            AlertSuppression.rule_id == rule.id,
+                            AlertSuppression.reason == "dedup",
+                            AlertSuppression.created_at > now - timedelta(hours=1),
+                        ).first()
+                        if sup:
+                            sup.suppressed_count += 1
+                        else:
+                            db.add(AlertSuppression(rule_id=rule.id, rule_name=rule.name, metric_name=rule.metric_name, reason="dedup"))
+                        db.commit()
+                    continue
                 elif not active and not recent_resolved:
                     alert = Alert(
                         rule_id=rule.id,
@@ -496,12 +584,12 @@ def check_rules(db: Session):
             from app.routers.alert_webhooks import call_alert_webhooks
             for a in new_alerts:
                 call_alert_webhooks(db, a)
-        except Exception:
-            pass
+        except Exception as _exc3:
+            logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
         try:
             _ws_publish_async([_serialize_alert(a) for a in new_alerts])
-        except Exception:
-            pass
+        except Exception as _exc4:
+            logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
     return new_alerts
 
 
@@ -524,7 +612,7 @@ def get_alert_detail(db: Session, alert_id: int):
 
 
 def list_alerts(db: Session, status: str = "", severity: str = "", page: int = 1, per_page: int = 20):
-    q = db.query(Alert)
+    q = db.query(Alert).filter(Alert.archived == False)
     if status:
         q = q.filter(Alert.status == status)
     if severity:
@@ -676,8 +764,8 @@ def _send_escalation_notification(db: Session, alert: Alert, from_severity: str)
         for ch in channels:
             if alert.severity in (ch.severity or "").split(",") or not ch.severity:
                 send_notification(db, alert, ch)
-    except Exception:
-        pass
+    except Exception as _exc5:
+        logger.warning("[except:pass] Exception: %s", _exc5, exc_info=True)
 
 
 def get_escalations_for_alert(db: Session, alert_id: int):
@@ -699,8 +787,8 @@ def is_in_silence_window(db: Session, alert: Alert) -> bool:
             prev = cron.get_prev(datetime)
             if prev + timedelta(minutes=s.duration_minutes) >= now:
                 return True
-        except Exception:
-            pass
+        except Exception as _exc6:
+            logger.warning("[except:pass] Exception: %s", _exc6, exc_info=True)
     return False
 
 
@@ -793,7 +881,26 @@ def check_k8s_events(db: Session, window_minutes: int = 30):
             db.refresh(a)
         try:
             notification_service.notify_new_alerts(db, new_alerts)
-        except Exception:
-            pass
+        except Exception as _exc7:
+            logger.warning("[except:pass] Exception: %s", _exc7, exc_info=True)
 
     return new_alerts, skipped, len(events)
+
+
+ARCHIVE_DAYS = 60  # 已解决告警超过此天数自动归档
+
+
+def archive_old_alerts(db: Session) -> dict:
+    """归档超保留期的已解决告警。返回 {"archived": count}。"""
+    cutoff = datetime.now() - timedelta(days=ARCHIVE_DAYS)
+    old = (
+        db.query(Alert)
+        .filter(Alert.status == "resolved", Alert.created_at < cutoff, Alert.archived == False)
+        .all()
+    )
+    count = len(old)
+    for a in old:
+        a.archived = True
+    if count:
+        db.commit()
+    return {"archived": count}

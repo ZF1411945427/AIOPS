@@ -7,8 +7,12 @@ import paramiko
 from sqlalchemy.orm import Session
 
 from app.models import AutoRemediation, RemediationLog, Alert, Asset, PendingAction, AIProvider, RemediationWorkflow, DataSource, DiagnosisReport, KbDocument
+from app.routers.agent_sse import _clean_key_point
 
 # 关联分析短时缓存：同一 asset_id 60 秒内复用，避免每次 AI 分析都重复查询
+import logging
+logger = logging.getLogger(__name__)
+
 _CORRELATION_CACHE = {}
 _CORRELATION_CACHE_TTL = 60
 
@@ -438,8 +442,8 @@ def run_diagnosis(db: Session, alert_id: int, asset_id: int = None, metric_name:
                         code = stdout.channel.recv_exit_status()
                         output = "\n".join(s for s in [out, err] if s) or f"exit_code={code}"
                         success = (code == 0)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
             elif host_asset:
                 success, output = _remote_exec(host_asset, cmd, timeout=cmd_timeout)
         elif asset and channel == "k8s":
@@ -463,8 +467,8 @@ def run_diagnosis(db: Session, alert_id: int, asset_id: int = None, metric_name:
     if _shared_ssh:
         try:
             _shared_ssh.close()
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
 
     # 更新报告状态
     report.commands_run = json.dumps(commands_run, ensure_ascii=False)
@@ -555,11 +559,11 @@ def _ssh_connect(asset: "Asset", timeout: int = 10) -> "paramiko.SSHClient":
                     port = srv_cfg.get("ssh_port", port)
                     username = srv_cfg.get("ssh_user", username)
                     password = srv_cfg.get("ssh_password", password)
-                except Exception:
-                    pass
+                except Exception as _exc2:
+                    logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
             _db.close()
-        except Exception:
-            pass
+        except Exception as _exc3:
+            logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
 
     from app.services.ssh_helper import connect_ssh
     ssh = connect_ssh(host, port=port, username=username, password=password, timeout=timeout)
@@ -660,8 +664,8 @@ def _parse_k8s_meta(asset: "Asset") -> dict:
         if isinstance(attrs, dict):
             meta["cluster"] = attrs.get("k8s_cluster") or attrs.get("cluster") or ""
             meta["namespace"] = attrs.get("namespace") or "default"
-    except Exception:
-        pass
+    except Exception as _exc4:
+        logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
     # k8s_cluster 列兜底
     if not meta["cluster"]:
         meta["cluster"] = getattr(asset, "k8s_cluster", "") or ""
@@ -802,8 +806,8 @@ def _k8s_exec_command(command: str, core_v1, asset: "Asset", extra_hint: str = "
             if _r.returncode == 0:
                 return (True, f"{extra_hint} 执行完成: {_r.stdout[:500]}")
             return (False, f"{extra_hint} 执行失败: {_r.stderr[:300]}")
-    except Exception:
-        pass
+    except Exception as _exc5:
+        logger.warning("[except:pass] Exception: %s", _exc5, exc_info=True)
     return (False, f"{extra_hint} 执行失败（无法在 K8s pod 内执行命令: {command[:80]}")
 
 
@@ -1061,8 +1065,8 @@ def check_and_remediate(db: Session):
                 if pl.get("source") == "rule":
                     has_rule_pa = True
                     break
-            except Exception:
-                pass
+            except Exception as _exc6:
+                logger.warning("[except:pass] Exception: %s", _exc6, exc_info=True)
         if has_rule_pa:
             continue
 
@@ -1118,8 +1122,8 @@ def check_and_remediate(db: Session):
                 if pl.get("source") == "ai":
                     exist_ai = True
                     break
-            except Exception:
-                pass
+            except Exception as _exc7:
+                logger.warning("[except:pass] Exception: %s", _exc7, exc_info=True)
         if exist_ai:
             continue
         # 自动跑诊断命令（只读，免审批）
@@ -1256,8 +1260,8 @@ def auto_ai_analyze_alerts(db: Session, limit: int = 1):
                 if pl.get("source") == "ai":
                     exist_ai = True
                     break
-            except Exception:
-                pass
+            except Exception as _exc8:
+                logger.warning("[except:pass] Exception: %s", _exc8, exc_info=True)
         if exist_ai:
             continue
         # 调 AI 分析（内部已生成 PendingAction，source=ai）
@@ -1265,8 +1269,8 @@ def auto_ai_analyze_alerts(db: Session, limit: int = 1):
             result = ai_self_heal_analyze(db, alert.id)
             if result.get("ok"):
                 analyzed += 1
-        except Exception:
-            pass
+        except Exception as _exc9:
+            logger.warning("[except:pass] Exception: %s", _exc9, exc_info=True)
 
 
 def get_triggered_alerts(db: Session, limit: int = 30):
@@ -1314,12 +1318,12 @@ def _parse_lenient_ai_json(content: str) -> dict:
     # 先尝试标准解析
     try:
         return json.loads(content)
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as _exc10:
+        logger.warning("[except:pass] json.JSONDecodeError: %s", _exc10, exc_info=True)
     try:
         return json.loads(content, strict=False)
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as _exc11:
+        logger.warning("[except:pass] json.JSONDecodeError: %s", _exc11, exc_info=True)
     # lenient：按字段名定位提取
     import re
     result = {}
@@ -1416,8 +1420,8 @@ def ai_self_heal_analyze(db: Session, alert_id: int) -> dict:
                                      "command": _pl.get("command", ""),
                                      "command_description": _pa.reason or "",
                                      "command_explanation": _pl.get("command_explanation", "")}}
-        except Exception:
-            pass
+        except Exception as _exc12:
+            logger.warning("[except:pass] Exception: %s", _exc12, exc_info=True)
 
     asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert.asset_id else None
     # 构造资产类型感知的上下文（引导 AI 按通道给命令）
@@ -1549,8 +1553,8 @@ def ai_self_heal_analyze(db: Session, alert_id: int) -> dict:
                     for c in corr_changes[:3]:
                         parts.append(f"    - {c.get('description','')[:80]}")
                 correlation_section = "\n".join(parts)
-        except Exception:
-            pass  # 关联分析失败不阻塞主流程
+        except Exception as _exc13:
+            logger.warning("[except:pass] Exception: %s", _exc13, exc_info=True)
 
     # ── 查询该资产关联的部署知识文档，注入 AI prompt ──
     deployment_section = ""
@@ -1572,8 +1576,8 @@ def ai_self_heal_analyze(db: Session, alert_id: int) -> dict:
 ═══════════════════════════════════════════════════════════════
 
 ⚠️ 请参考以上部署文档确定正确的服务名、安装方式（systemd/docker/手动部署）、配置路径等信息，避免给出错误的服务名或命令。"""
-        except Exception:
-            pass
+        except Exception as _exc14:
+            logger.warning("[except:pass] Exception: %s", _exc14, exc_info=True)
 
     # ── 构造诊断工具清单（供 AI 选择补诊工具）──
     from app.routers.diagnostic_tools import DIAGNOSTIC_TOOLS
@@ -1855,8 +1859,8 @@ def _auto_execute_readonly(db: Session, pa: PendingAction, asset, alert) -> dict
     payload = {}
     try:
         payload = json.loads(pa.action_payload) if pa.action_payload else {}
-    except Exception:
-        pass
+    except Exception as _exc15:
+        logger.warning("[except:pass] Exception: %s", _exc15, exc_info=True)
 
     pa.status = PendingAction.STATUS_EXECUTING
     db.commit()
@@ -1904,8 +1908,8 @@ def get_ai_pending_actions(db: Session, status: str = "all", limit: int = 50):
         payload = {}
         try:
             payload = json.loads(pa.action_payload) if pa.action_payload else {}
-        except Exception:
-            pass
+        except Exception as _exc16:
+            logger.warning("[except:pass] Exception: %s", _exc16, exc_info=True)
         source = payload.get("source", "ai")
         # 对 workflow 类型解析工作流步骤，供前端展示具体执行内容
         workflow_steps = None
@@ -1960,12 +1964,12 @@ def get_ai_pending_actions(db: Session, status: str = "all", limit: int = 50):
                             if "round_num" not in c:
                                 c["round_num"] = dr.round_num or 0
                         diagnosis_commands.extend(cmds)
-                    except Exception:
-                        pass
+                    except Exception as _exc17:
+                        logger.warning("[except:pass] Exception: %s", _exc17, exc_info=True)
                 if not diag_report_id and diag_reports:
                     diag_report_id = diag_reports[-1].id
-            except Exception:
-                pass
+            except Exception as _exc18:
+                logger.warning("[except:pass] Exception: %s", _exc18, exc_info=True)
 
         result.append({
             "id": pa.id,
@@ -1990,6 +1994,11 @@ def get_ai_pending_actions(db: Session, status: str = "all", limit: int = 50):
             "diagnosis_reasoning": payload.get("diagnosis_reasoning", ""),
             "impact": payload.get("impact", ""),
             "created_at": pa.created_at.strftime("%Y-%m-%d %H:%M:%S") if pa.created_at else "",
+            "summary_block": {
+                "root_cause": _clean_key_point(payload.get("root_cause", "") or "触发自愈", 100),
+                "solution": _clean_key_point(payload.get("command_description", "") or payload.get("action_name", "") or "执行自愈处置", 160),
+                "impact": _clean_key_point(payload.get("impact", "") or f"告警风险 {payload.get('risk_level', '')}", 100),
+            },
         })
     return result
 
@@ -2015,8 +2024,8 @@ def confirm_ai_action(db: Session, action_id: int, username: str = "admin") -> d
     payload = {}
     try:
         payload = json.loads(pa.action_payload) if pa.action_payload else {}
-    except Exception:
-        pass
+    except Exception as _exc19:
+        logger.warning("[except:pass] Exception: %s", _exc19, exc_info=True)
 
     alert = db.query(Alert).filter(Alert.id == pa.alert_id).first() if pa.alert_id else None
     asset = db.query(Asset).filter(Asset.id == alert.asset_id).first() if alert and alert.asset_id else None
@@ -2074,8 +2083,8 @@ def confirm_ai_action(db: Session, action_id: int, username: str = "admin") -> d
             try:
                 from app.services.remediation_effect_service import track_effect
                 track_effect(log.id, db)
-            except Exception:
-                pass
+            except Exception as _exc20:
+                logger.warning("[except:pass] Exception: %s", _exc20, exc_info=True)
             if not s_success:
                 all_success = False
                 break  # 失败即停，避免后续步骤雪崩
@@ -2093,8 +2102,8 @@ def confirm_ai_action(db: Session, action_id: int, username: str = "admin") -> d
             try:
                 from app.services.knowledge_autogen_service import generate_draft
                 generate_draft(pa.alert_id, db, force=True)
-            except Exception:
-                pass
+            except Exception as _exc21:
+                logger.warning("[except:pass] Exception: %s", _exc21, exc_info=True)
         return {"ok": True, "success": all_success, "output": output[:500],
                 "workflow_id": wf_id, "workflow_name": wf.name}
 
@@ -2131,16 +2140,16 @@ def confirm_ai_action(db: Session, action_id: int, username: str = "admin") -> d
     try:
         from app.services.remediation_effect_service import track_effect
         track_effect(log.id, db, status_before=_alert_status_before)
-    except Exception:
-        pass
+    except Exception as _exc22:
+        logger.warning("[except:pass] Exception: %s", _exc22, exc_info=True)
 
     # ── 执行成功后自动沉淀知识（复用智能助手知识生成能力）──
     if success and pa.alert_id:
         try:
             from app.services.knowledge_autogen_service import generate_draft
             generate_draft(pa.alert_id, db, force=True)
-        except Exception:
-            pass  # 知识沉淀失败不阻塞主流程
+        except Exception as _exc23:
+            logger.warning("[except:pass] Exception: %s", _exc23, exc_info=True)
 
     return {"ok": True, "success": success, "output": output[:500]}
 
@@ -2171,8 +2180,8 @@ def reanalyze_with_failure_context(db: Session, failed_action_id: int) -> dict:
     payload = {}
     try:
         payload = json.loads(pa.action_payload) if pa.action_payload else {}
-    except Exception:
-        pass
+    except Exception as _exc24:
+        logger.warning("[except:pass] Exception: %s", _exc24, exc_info=True)
 
     # 找关联的告警和资产
     alert = db.query(Alert).filter(Alert.id == pa.alert_id).first() if pa.alert_id else None
@@ -2201,8 +2210,8 @@ def reanalyze_with_failure_context(db: Session, failed_action_id: int) -> dict:
     result_payload = {}
     try:
         result_payload = json.loads(pa.result_payload) if pa.result_payload else {}
-    except Exception:
-        pass
+    except Exception as _exc25:
+        logger.warning("[except:pass] Exception: %s", _exc25, exc_info=True)
     failed_output = result_payload.get("output", "")
 
     # AI 配置
@@ -2223,8 +2232,8 @@ def reanalyze_with_failure_context(db: Session, failed_action_id: int) -> dict:
             if attrs:
                 extra = ", ".join(f"{a.attr_key}={a.attr_value}" for a in attrs if a.attr_value)
                 asset_info += f", {extra}" if extra else ""
-        except Exception:
-            pass
+        except Exception as _exc26:
+            logger.warning("[except:pass] Exception: %s", _exc26, exc_info=True)
         asset_info += ")"
 
     # 查询可用工作流
@@ -2313,8 +2322,8 @@ def reanalyze_with_failure_context(db: Session, failed_action_id: int) -> dict:
 ═══════════════════════════════
 
 ⚠️ 请参考以上部署文档确定正确的服务名、安装方式、配置路径，避免给出错误的命令。"""
-        except Exception:
-            pass
+        except Exception as _exc27:
+            logger.warning("[except:pass] Exception: %s", _exc27, exc_info=True)
 
     user_prompt = f"""告警信息：
 - ID: {alert.id}

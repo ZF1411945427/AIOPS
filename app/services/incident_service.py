@@ -200,3 +200,45 @@ def get_approval_history(db: Session, incident_id: int) -> list:
         for r in records
     ]
 
+
+def escalate_alert_to_incident(db: Session, alert_id: int) -> dict:
+    """将一条告警升级为故障单。返回 {"incident_id": id, "ok": True} 或 {"ok": False, "error": "..."}。"""
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        return {"ok": False, "error": "告警不存在"}
+    # 查找是否已有同类未关闭故障单
+    existing = (
+        db.query(Incident)
+        .filter(Incident.asset_id == alert.asset_id, Incident.status == "open")
+        .first()
+    )
+    if existing:
+        # 关联到已有故障单
+        link = db.query(IncidentAlert).filter(
+            IncidentAlert.incident_id == existing.id,
+            IncidentAlert.alert_id == alert_id,
+        ).first()
+        if not link:
+            db.add(IncidentAlert(incident_id=existing.id, alert_id=alert_id))
+            existing.alert_count = (existing.alert_count or 0) + 1
+            db.commit()
+        return {"incident_id": existing.id, "ok": True}
+    # 创建新故障单
+    sev_cn = {"critical": "严重", "warning": "警告", "info": "提示"}.get(alert.severity, "告警")
+    title = f"[{sev_cn}] {alert.message[:80]}"
+    inc = Incident(
+        title=title,
+        severity=alert.severity,
+        status="open",
+        asset_id=alert.asset_id,
+        alert_count=1,
+        impact="high",
+        description=alert.message,
+    )
+    db.add(inc)
+    db.commit()
+    db.refresh(inc)
+    db.add(IncidentAlert(incident_id=inc.id, alert_id=alert_id))
+    db.commit()
+    return {"incident_id": inc.id, "ok": True}
+

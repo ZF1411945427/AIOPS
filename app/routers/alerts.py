@@ -12,6 +12,9 @@ from app.models import AlertSessionLink
 from app.services.remediation_service import execute_action
 from app.services.agent_service import call_llm, get_or_create_session, add_message
 from sqlalchemy.orm import Session
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 templates = get_templates()
@@ -37,6 +40,8 @@ def _alert_to_dict(a):
         "created_at": a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else None,
         "acknowledged_at": a.acknowledged_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, "acknowledged_at", None) else None,
         "resolved_at": a.resolved_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(a, "resolved_at", None) else None,
+        "source": getattr(a, "source", "internal") or "internal",
+        "incident_id": getattr(a, "incident_id", None),
     }
 
 
@@ -79,6 +84,15 @@ def api_alert_list(
     db: Session = Depends(get_db)):
     """告警列表 JSON API."""
     alerts, total = alert_service.list_alerts(db, status, severity, page, per_page)
+    # 批量反查每条告警归属的故障单 incident_id(AlerIncident 多对多关联)
+    from app.models import IncidentAlert
+    alert_ids = [a.id for a in alerts]
+    incident_map = {}
+    if alert_ids:
+        for link in db.query(IncidentAlert).filter(IncidentAlert.alert_id.in_(alert_ids)).all():
+            incident_map.setdefault(link.alert_id, link.incident_id)
+        for a in alerts:
+            a.incident_id = incident_map.get(a.id)
     stats = alert_service.get_alert_stats(db)
     total_pages = (total + per_page - 1) // per_page if total > 0 else 1
     return JSONResponse({
@@ -102,6 +116,10 @@ def api_alert_detail(alert_id: int, db: Session = Depends(get_db)):
         a = db.query(Asset).filter(Asset.id == alert.asset_id).first()
         if a:
             asset_name = a.name or ""
+    from app.models import IncidentAlert
+    link = db.query(IncidentAlert).filter(IncidentAlert.alert_id == alert.id).first()
+    if link:
+        alert.incident_id = link.incident_id
     d = _alert_to_dict(alert)
     d["asset_name"] = asset_name
     d["rule_name"] = ""
@@ -111,6 +129,17 @@ def api_alert_detail(alert_id: int, db: Session = Depends(get_db)):
         if rule:
             d["rule_name"] = rule.name or ""
     return JSONResponse({"alert": d})
+
+
+@router.post("/api/{alert_id}/to-incident")
+def api_alert_to_incident(alert_id: int, db: Session = Depends(get_db)):
+    """将一条告警升级/转成故障单：同资产已有未关闭故障单则归并，否则新建。
+    返回 {"incident_id": id, "ok": True} 或 {"ok": False, "error": "..."}."""
+    from app.services.incident_service import escalate_alert_to_incident
+    result = escalate_alert_to_incident(db, alert_id)
+    if not result.get("ok"):
+        return JSONResponse({"ok": False, "error": result.get("error", "转故障单失败")}, status_code=200)
+    return JSONResponse({"ok": True, "incident_id": result["incident_id"]})
 
 
 @router.post("/api/batch-acknowledge")
@@ -199,8 +228,8 @@ def api_heal_alert(alert_id: int, db: Session = Depends(get_db)):
         try:
             from app.services.remediation_effect_service import track_effect
             track_effect(log.id, db, status_before=_abs2)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
         results.append({"step": step_idx + 1, "action": action_type, "is_success": success, "output": output})
         if not success:
             break

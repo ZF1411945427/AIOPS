@@ -273,6 +273,12 @@
               <div class="bn-bar-wrap"><div class="bn-bar" :style="{ width: Math.min(s.bottleneck_score * 10, 100) + '%' }"></div></div>
             </div>
           </div>
+          <div v-if="aiKeyPoints && (aiKeyPoints.root_cause || aiKeyPoints.solution)" class="key-points">
+            <div class="kp-title">📌 要点总结</div>
+            <div v-if="aiKeyPoints.root_cause" class="kp-row"><span class="kp-tag">根因</span><span class="kp-text">{{ aiKeyPoints.root_cause }}</span></div>
+            <div v-if="aiKeyPoints.solution" class="kp-row"><span class="kp-tag">方案</span><span class="kp-text">{{ aiKeyPoints.solution }}</span></div>
+            <div v-if="aiKeyPoints.impact" class="kp-row"><span class="kp-tag">影响</span><span class="kp-text">{{ aiKeyPoints.impact }}</span></div>
+          </div>
           <div class="ai-result" v-html="aiResult"></div>
         </div>
         <div v-else class="ai-empty">点击「开始分析」，AI 将基于当前查询结果做瓶颈定位与根因分析</div>
@@ -336,6 +342,7 @@ const aiLoading = ref(false)
 const aiError = ref('')
 const aiResult = ref('')
 const aiResultRaw = ref('')
+const aiKeyPoints = ref(null)
 const aiMeta = ref('')
 const transferring = ref(false)
 const bottleneckSvc = ref([])
@@ -584,6 +591,7 @@ async function runAiAnalyze() {
   aiLoading.value = true
   aiError.value = ''
   aiResult.value = ''
+  aiKeyPoints.value = null
   bottleneckSvc.value = []
   try {
     const enriched = []
@@ -611,6 +619,7 @@ async function runAiAnalyze() {
     if (res.ok) {
       aiResult.value = mdToHtml(res.analysis || '')
       aiResultRaw.value = res.analysis || ''
+      aiKeyPoints.value = res.key_points || null
       const m = res.meta || {}
       aiMeta.value = `分析 ${m.trace_count || enriched.length} 条调用链 · ${m.service_count || 0} 个服务 · 模型: ${res.provider || '-'} · 记录 #${res.record_id || '-'}`
       if (res.enhanced && res.enhanced.aggregation && res.enhanced.aggregation.services) {

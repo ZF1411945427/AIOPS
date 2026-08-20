@@ -814,7 +814,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
-import axios from 'axios'
+import request from '@/api/request'
 import { ElMessage } from 'element-plus'
 
 const API = '/component-market/api'
@@ -834,7 +834,7 @@ const deployForm = ref({ asset_id:0, deploy_type:'', namespace:'default', releas
 const deployParams = ref({})
 const proxyList = ref([])
 async function refreshProxyList() {
-  try { const r = await axios.get(`${API}/proxies`); proxyList.value = r.data.items || [] } catch (e) { /* ignore */ }
+  try { const r = await request.get(`${API}/proxies`); proxyList.value = r.items || [] } catch (e) { /* ignore */ }
 }
 function applyProxy(id) {
   const px = proxyList.value.find(p => p.id === Number(id))
@@ -918,11 +918,11 @@ function detailStatusClass(s) {
   return 'draft'
 }
 
-async function loadStats() { try { const {data}=await axios.get(`${API}/stats`); stats.value=data } catch(e){} }
+async function loadStats() { try { const data = await request.get(`${API}/stats`); stats.value=data } catch(e){} }
 async function loadCatalog() {
   loading.value=true
   try {
-    const {data}=await axios.get(`${API}/catalog`, { params:{ category:filterCat.value, keyword:keyword.value } })
+    const data = await request.get(`${API}/catalog`, { params:{ category:filterCat.value, keyword:keyword.value } })
     comps.value=data.items||[]
   } finally { loading.value=false }
 }
@@ -936,11 +936,11 @@ function setStatus(s) {
   loadInstalls()
 }
 async function loadInstalls() {
-  try { const {data}=await axios.get(`${API}/installs`); installs.value=data.items||[] } catch(e){}
+  try { const data = await request.get(`${API}/installs`); installs.value=data.items||[] } catch(e){}
 }
 async function viewInstall(it) {
   try {
-    const { data } = await axios.get(`${API}/installs/${it.id}`)
+    const data = await request.get(`${API}/installs/${it.id}`)
     if (!data.ok) { ElMessage.error(data.error || '获取详情失败'); return }
     installDetail.value = data.item
     // 打开部署详情(与「一键部署」同布局): 用详情数据填充部署信息 & 连 resume ws 回放历史/续 AI 对话
@@ -971,7 +971,7 @@ async function viewInstall(it) {
 async function replayRecipe(inst) {
   deployRecipe.value = ''
   try {
-    const { data } = await axios.get(`${API}/render`, { params:{
+    const data = await request.get(`${API}/render`, { params:{
       component_id: inst.component_id, deploy_type: inst.deploy_type,
       host: '', namespace: inst.name_space || 'default', release: inst.release_name || '' } })
     deployRecipe.value = data.content || data.error || ''
@@ -1016,7 +1016,7 @@ function submitReplayDecision(choice) {
 function closeReplay() { replayOpen.value = false; if (replayWs) { try{replayWs.close()}catch(e){} replayWs=null } }
 async function loadAssets() {
   try {
-    const {data}=await axios.get(`${ASSET_API}/list`, { params:{ page_size:500 } })
+    const data = await request.get(`${ASSET_API}/list`, { params:{ page_size:500 } })
     const all=(data.items||data.assets||data.list||[])
     // 目标机只保留可 SSH 部署的资产(排除 k8s 集群/database/http 等, 及 k8s 命名空间/服务杂项)
     assets.value = all.filter(a =>
@@ -1066,7 +1066,7 @@ async function renderRecipe() {
   const collectParams = {}
   ;(c.param_schema || []).forEach(item => { collectParams[item.key] = deployParams.value[item.key] })
   try {
-    const {data}=await axios.get(`${API}/render`, { params:{
+    const data = await request.get(`${API}/render`, { params:{
       component_id:c.id, deploy_type:deployForm.value.deploy_type,
       host:a?`${a.ip}`:'', namespace:deployForm.value.namespace, release:deployForm.value.release,
       use_offline: deployForm.value.use_offline ? 'true' : '',
@@ -1077,7 +1077,7 @@ async function renderRecipe() {
 }
 async function doDeploy() {
   try {
-    const {data}=await axios.post(`${API}/deploy`, {
+    const data = await request.post(`${API}/deploy`, {
       component_id:deployComp.value.id, asset_id:deployForm.value.asset_id,
       deploy_type:deployForm.value.deploy_type, namespace:deployForm.value.namespace,
       release:deployForm.value.release, deploy_path:deployForm.value.deploy_path,
@@ -1131,7 +1131,7 @@ async function runPrecheck() {
   precheckOk.value = true
   precheckIssues.value = []
   try {
-    const { data } = await axios.post(`${API}/precheck`, {
+    const data = await request.post(`${API}/precheck`, {
       component_id: deployComp.value.id,
       asset_id: deployForm.value.asset_id,
       deploy_type: deployForm.value.deploy_type,
@@ -1156,7 +1156,7 @@ async function genPlan() {
   if (!deployForm.value.asset_id) { ElMessage.warning('请先选择目标机'); return }
   generatingPlan.value = true
   try {
-    const { data } = await axios.post(`${API}/plan`, {
+    const data = await request.post(`${API}/plan`, {
       component_id: deployComp.value.id,
       asset_id: deployForm.value.asset_id,
       deploy_type: deployForm.value.deploy_type,
@@ -1186,7 +1186,7 @@ async function generateReport() {
   if (!reportItem.value) return
   reportLoading.value = true
   try {
-    const { data } = await axios.post(`${API}/installs/${reportItem.value.id}/report`)
+    const data = await request.post(`${API}/installs/${reportItem.value.id}/report`)
     if (!data.ok) { ElMessage.error(data.error || '生成报告失败'); return }
     reportData.value = data.report
     reportItem.value.report_json = JSON.stringify(data.report)
@@ -1214,7 +1214,7 @@ async function generateHealthReport() {
   if (!reportItem.value) return
   reportLoading.value = true
   try {
-    const { data } = await axios.post(`${API}/installs/${reportItem.value.id}/health-report`)
+    const data = await request.post(`${API}/installs/${reportItem.value.id}/health-report`)
     if (!data.ok) { ElMessage.error(data.error || 'AI 体检失败'); return }
     reportData.value = data.report
     loadInstalls()
@@ -1297,7 +1297,7 @@ async function saveAssetFromInstall() {
   if (assetForm.value.description) payload.description = assetForm.value.description
   assetSaving.value = true
   try {
-    await axios.post(`${ASSET_API}/create`, payload)
+    await request.post(`${ASSET_API}/create`, payload)
     ElMessage.success(`已添加资产: ${assetForm.value.name}`)
     closeAssetForm()
     loadAssets()
@@ -1390,7 +1390,7 @@ function startDeploy() {
 }
 function stopDeploy() {
   if (currentInstallId.value) {
-    try { axios.post(`${API}/deploys/${currentInstallId.value}/stop`) } catch(e){}  }
+    try { request.post(`${API}/deploys/${currentInstallId.value}/stop`) } catch(e){}  }
   if (deployWs) {
     try { deployWs.send(JSON.stringify({ type: 'stop', install_id: currentInstallId.value })) } catch(e){}
   }
@@ -1421,7 +1421,7 @@ function submitDecision(choice) {
 async function runBatchFullCheck() {
   if(!confirm('对所有运行中的组件实例执行批量全面体检？')) return
   try {
-    const {data}=await axios.post(`${API}/batch-full-check`)
+    const data = await request.post(`${API}/batch-full-check`)
     if(!data.ok){ ElMessage.error(data.error||'批量体检失败'); return }
     const r=data.result
     const lines = []
@@ -1441,7 +1441,7 @@ async function runBatchFullCheck() {
 }
 async function runFullCheck(it) {
   try {
-    const {data}=await axios.post(`${API}/installs/${it.id}/full-check`)
+    const data = await request.post(`${API}/installs/${it.id}/full-check`)
     if(!data.ok){ ElMessage.error(data.error||'体检失败'); return }
     resultView.value={ title:`🔍 全面体检报告 · ${it.component_name}`, body: JSON.stringify(data.result,null,2) }
     loadInstalls()
@@ -1449,7 +1449,7 @@ async function runFullCheck(it) {
 }
 async function runCheck(it, kind) {
   try {
-    const {data}=await axios.post(`${API}/installs/${it.id}/${kind}`)
+    const data = await request.post(`${API}/installs/${it.id}/${kind}`)
     if(!data.ok){ ElMessage.error(data.error||'检查失败'); return }
     const r=data.result
     resultView.value={ title: resultTitle(kind, it.component_name), body: JSON.stringify(r,null,2) }
@@ -1461,11 +1461,11 @@ function resultTitle(kind, name){
 }
 async function delInstall(it){
   if(!confirm(`删除安装记录 ${it.component_name}@${it.asset_name}?`)) return
-  try{ await axios.delete(`${API}/installs/${it.id}`); loadInstalls() }catch(e){}
+  try{ await request.delete(`${API}/installs/${it.id}`); loadInstalls() }catch(e){}
 }
 async function toAsset(it){
   try {
-    const {data}=await axios.post(`${API}/installs/${it.id}/to-asset`)
+    const data = await request.post(`${API}/installs/${it.id}/to-asset`)
     if(data.ok){
       if(data.already) ElMessage.warning(`资产「${it.component_name}」已存在(asset #${data.asset_id}), 未重复创建`)
       else {
@@ -1479,361 +1479,4 @@ async function toAsset(it){
 onMounted(()=>{ loadAll(); refreshProxyList() })
 </script>
 
-<style scoped>
-.store-page{padding:20px;color:#1f2937}
-.page-header h1{margin:0 0 4px;font-size:20px}
-.page-header p{margin:0 0 16px;color:#6b7280;font-size:13px}
-.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
-.stat-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;text-align:center}
-.val{font-size:24px;font-weight:700}.val.blue{color:#3b82f6}.val.ok{color:#10b981}.val.warn{color:#f59e0b}
-.lbl{font-size:12px;color:#6b7280}
-.tab-bar{display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin-bottom:16px}
-.tab-item{padding:10px 18px;cursor:pointer;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-2px}
-.tab-item.active{color:#3b82f6;border-bottom-color:#3b82f6;font-weight:600}
-.filter-bar{display:flex;gap:10px;margin-bottom:16px}
-.filter-bar select,.filter-bar input{padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px}
-.filter-bar select{width:140px}
-.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.comp-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px}
-.comp-head{display:flex;gap:10px;align-items:center;margin-bottom:8px}
-.icon{font-size:26px}.title-box .name{font-weight:600;font-size:15px}.ver{font-size:11px;color:#9ca3af}
-.desc{font-size:12px;color:#4b5563;min-height:32px;margin-bottom:10px}
-.deploy-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-.dt-tag{font-size:11px;background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:10px}
-.foot{display:flex;justify-content:space-between;align-items:center}
-.complexity{font-size:11px;color:#9ca3af}
-.inst-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.inst-tip{font-size:12px;color:#9ca3af}
-.inst-list{display:flex;flex-direction:column;gap:12px}.inst-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:12px}
-.inst-head{display:flex;gap:12px;align-items:center}
-.ic{font-size:24px}.iname{font-weight:600}.imeta{font-size:12px;color:#6b7280}
-.status-group{display:flex;gap:6px}
-.st{padding:2px 8px;border-radius:10px;font-size:11px;background:#e5e7eb;color:#374151}
-.st-st{color:#1e40af}
-.st2{padding:2px 8px;border-radius:10px;font-size:11px}
-.st2-healthy{background:#d1fae5;color:#065f46}.st2-unhealthy{background:#fee2e2;color:#991b1b}.st2-unknown{background:#f3f4f6;color:#6b7280}
-.ops{display:flex;gap:6px;flex-wrap:wrap}
-.mask{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1100}
-.modal{background:#fff;border-radius:12px;width:620px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column}
-.modal.wide{width:760px}
-.mhead{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e5e7eb}
-.mhead h3{margin:0;font-size:16px}.mclose{background:none;border:none;font-size:18px;cursor:pointer}
-.mbody{padding:18px 20px;overflow-y:auto}
-.mfoot{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid #e5e7eb}
-.field{margin-bottom:14px}.field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
-.field select,.field input{width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;font-size:13px}
-.dt-select{display:flex;gap:8px}.dt-btn{padding:8px 14px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:13px}
-.dt-btn.active{background:#3b82f6;color:#fff;border-color:#3b82f6}
-.row2{display:flex;gap:10px}
-.proxy-block{border:1px dashed #dcdfe6;border-radius:8px;padding:10px 12px;margin-bottom:14px;background:#fafbfc}
-.proxy-block summary{cursor:pointer;font-size:13px;color:#3b82f6;font-weight:600;user-select:none}
-.proxy-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px}
-.proxy-select-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
-.proxy-select-row label{font-size:13px;color:#475569;font-weight:600}
-.proxy-select{flex:1;border:1px solid #d7dee8;border-radius:8px;padding:8px 10px;font-size:13px;background:#fff}
-.proxy-hint{font-size:12px;color:#9ca3af;margin-top:4px}
-.param-block{border:1px solid #dbeafe;background:#f8fbff;border-radius:8px;padding:12px 14px;margin-bottom:14px}
-.param-title{font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.param-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width:640px){.param-grid{grid-template-columns:1fr}}
-.param-block .cfg-field label{font-size:12px}
-.offline-toggle{border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:10px 14px;margin-bottom:14px}
-.offline-toggle .checkbox-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#0f172a}
-.offline-toggle input[type=checkbox]{width:16px;height:16px}
-.recipe{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:12px;font-size:12px;max-height:260px;overflow:auto;white-space:pre-wrap}
-.result{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:14px;font-size:12px;max-height:60vh;overflow:auto;white-space:pre-wrap}
-.empty{text-align:center;padding:50px;color:#6b7280}
-.btn{padding:8px 14px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px}
-.btn-primary{background:#3b82f6;color:#fff;border-color:#3b82f6}
-.btn-danger{color:#ef4444;border-color:#fecaca}
-.btn-asset{color:#7c3aed;border-color:#ddd6fe}
-.btn-asset:disabled{opacity:.5;cursor:not-allowed}
-.btn-sm{padding:5px 10px;font-size:12px}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.deploy-modal{width:880px}
-.deploy-status{font-size:12px;color:#10b981;margin-left:10px;display:inline-flex;align-items:center;gap:6px}
-.spinner{width:12px;height:12px;border:2px solid #10b981;border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.phase-bar{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-.phase{padding:4px 10px;font-size:12px;border-radius:6px;background:#eef2f7;color:#94a3b8}
-.phase.done{background:#d1fae5;color:#065f46}
-.phase.cur{background:#3b82f6;color:#fff}
-.deploy-workspace{display:grid;grid-template-columns:1.6fr 1fr;gap:12px}
-.terminal{background:#0f172a;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-height:320px}
-.term-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#1e293b;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155}
-.term-info{color:#10b981}
-.term-body{flex:1;padding:10px 12px;overflow:auto;max-height:360px;font-family:Consolas,Menlo,monospace;font-size:12px}
-.term-empty{color:#64748b;text-align:center;padding:40px 0}
-.tline{white-space:pre-wrap;word-break:break-all;margin-bottom:2px;color:#cbd5e1}
-.tline .tts{color:#64748b;margin-right:8px;font-size:11px}
-.tline.phase{background:none;padding:0;color:#93c5fd;border-radius:0}
-.tline.error{color:#f87171}
-.tline.ok{color:#34d399}
-.tline .tmsg{vertical-align:baseline}
-.ai-panel{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;min-height:320px;display:flex;flex-direction:column;gap:8px;overflow:auto;max-height:400px}
-.ai-head{font-weight:600;font-size:13px;color:#7c3aed;display:flex;align-items:center;gap:6px}
-.ai-empty{color:#94a3b8;font-size:12px;text-align:center;padding:30px 0}
-.ai-tip{background:#fff;border:1px solid #ede9fe;border-left:3px solid #7c3aed;border-radius:6px;padding:8px 10px}
-.ai-stage{font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:4px}
-.ai-summary{font-size:12px;color:#1f2937;margin-bottom:4px}
-.ai-advice{font-size:12px;color:#6b7280;line-height:1.5}
-.ai-risk{font-size:11px;margin-top:4px;font-weight:600}
-.ai-risk.risk-low{color:#10b981}.ai-risk.risk-medium{color:#f59e0b}.ai-risk.risk-high{color:#ef4444}
-.ai-foot{margin-top:auto}
-.result-box{padding:10px;border-radius:6px;font-size:13px;font-weight:600;text-align:center}
-.result-box.ok{background:#d1fae5;color:#065f46}
-.result-box.fail{background:#fee2e2;color:#991b1b}
-.precheck-panel{background:#f6f8fa;border:1px solid #e1e4e8;border-radius:8px;padding:10px 12px;max-height:180px;overflow:auto}
-.precheck-title{font-weight:600;font-size:12px;color:#1f2937;margin-bottom:6px}
-.precheck-item{display:flex;align-items:center;gap:8px;padding:2px 0;font-size:12px}
-.precheck-mark{font-weight:700}
-.precheck-mark.ok{color:#10b981}
-.precheck-mark.fail{color:#ef4444}
-.precheck-name{min-width:110px;color:#374151}
-.precheck-msg.ok{color:#059669}
-.precheck-msg.fail{color:#dc2626}
-.report-box{background:#fff;border:1px solid #ddd6fe;border-left:3px solid #7c3aed;border-radius:8px;padding:10px}
-.report-title{font-weight:600;font-size:13px;color:#5b21b6;display:flex;align-items:center;gap:8px}
-.report-overall{padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600}
-.report-overall.ov-healthy{background:#d1fae5;color:#065f46}
-.report-overall.ov-degraded{background:#fef3c7;color:#92400e}
-.report-overall.ov-unhealthy{background:#fee2e2;color:#991b1b}
-.report-summary{font-size:12px;color:#6b7280;margin-top:6px;line-height:1.5}
-
-/* ── K8s 详情/部署式弹窗样式 ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:1050}
-.modal-box{background:#fff;border-radius:8px;max-width:92vw;width:960px;max-height:90vh;overflow:auto}
-.modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #e4e7ed;position:sticky;top:0;background:#fff;z-index:2}
-.modal-head h3{margin:0;font-size:16px;display:flex;align-items:center;gap:8px}
-.modal-close{border:none;background:none;font-size:22px;cursor:pointer;color:#909399;line-height:1}
-.modal-close:hover{color:#f56c6c}
-.modal-body{padding:16px 18px}
-.modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e4e7ed;position:sticky;bottom:0;background:#fff}
-.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.form-row{margin-bottom:8px}
-.form-row label{display:block;font-size:13px;color:#606266;margin-bottom:4px}
-.form-row select,.form-row input{width:100%;border:1px solid #dcdfe6;border-radius:4px;padding:6px 8px;font-size:13px;box-sizing:border-box;background:#fff}
-.form-row select:disabled,.form-row input:disabled{background:#f5f7fa;color:#a8abb2}
-.req{color:#f56c6c}
-.hint{color:#909399;font-size:12px;margin-top:6px}
-.deploy-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.deploy-actions .kv{background:#f0f2f5;border-radius:4px;padding:2px 8px;font-size:12px;color:#606266}
-.deploy-actions .kv.run{background:#ecf5ff;color:#409eff}
-.status-badge{border-radius:4px;padding:1px 8px;font-size:12px}
-.status-badge.draft,.status-badge.pending{background:#f4f4f5;color:#909399}
-.status-badge.running{background:#ecf5ff;color:#409eff}
-.status-badge.succeeded,.status-badge.ok{background:#f0f9eb;color:#67c23a}
-.status-badge.failed{background:#fef0f0;color:#f56c6c}
-.terminal{background:#1e1e1e;color:#d4d4d4;border-radius:4px;overflow:hidden;min-height:300px;display:flex;flex-direction:column}
-.term-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#2b2b2b;color:#e2e8f0;font-size:12px;border-bottom:1px solid #333}
-.term-info{color:#89d185}
-.term-body{flex:1;padding:10px 12px;overflow:auto;max-height:340px;font-family:Consolas,Menlo,monospace;font-size:12px}
-.phase-bar{display:flex;gap:4px;margin:12px 0;flex-wrap:wrap}
-.phase{padding:3px 8px;font-size:11px;border-radius:3px;background:#f4f4f5;color:#909399}
-.phase.done{background:#f0f9eb;color:#67c23a}
-.phase.cur{background:#409eff;color:#fff}
-
-/* ══ 优化版部署弹窗: 深色摘要头 + 两栏分区卡片 ══ */
-.deploy-dialog{width:1020px;max-width:96vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;border-radius:14px;box-shadow:0 24px 60px -12px rgba(2,6,23,.4)}
-.deploy-hero{display:flex;align-items:center;gap:16px;padding:18px 22px;color:#fff;
-  background:linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#312e81 100%);position:relative}
-.hero-icon{width:52px;height:52px;border-radius:14px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,.15)}
-.hero-info{flex:1;min-width:0}
-.hero-title{font-size:20px;font-weight:700;display:flex;align-items:baseline;gap:10px;letter-spacing:.3px;color:#fff}
-.hero-ver{font-size:12px;color:#a5b4fc;font-weight:500}
-.hero-sub{font-size:12.5px;color:#cbd5e1;margin-top:2px;opacity:.9}
-.hero-tags{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.hero-tag{font-size:11px;padding:2px 9px;border-radius:20px;background:rgba(255,255,255,.12);color:#e2e8f0;border:1px solid rgba(255,255,255,.14)}
-.hero-tag.port{background:rgba(129,140,248,.25);border-color:rgba(129,140,248,.35);color:#c7d2fe}
-.hero-badge{flex-shrink:0}
-.status-badge.lg{padding:3px 12px;font-size:12.5px;border-radius:20px;font-weight:600}
-.hero-close{position:absolute;top:14px;right:16px;background:none;border:none;color:#94a3b8;font-size:24px;cursor:pointer;line-height:1}
-.hero-close:hover{color:#fff}
-
-.deploy-body{display:grid;grid-template-columns:minmax(320px,36%) 1fr;gap:0;flex:1;overflow:hidden;background:#f1f5f9}
-.deploy-col{padding:18px 20px;overflow-y:auto}
-.config-col{background:#fff;border-right:1px solid #e2e8f0}
-.exec-col{padding-left:22px;display:flex;flex-direction:column;gap:14px}
-.panel-title{font-size:13px;font-weight:700;color:#0f172a;letter-spacing:.5px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
-.config-col .panel-title::after{content:'';flex:1;height:1px;background:#e2e8f0;margin-left:12px}
-.exec-live{font-size:11px;color:#10b981;font-weight:600;display:inline-flex;align-items:center;gap:5px;background:#ecfdf5;padding:2px 8px;border-radius:20px}
-.exec-live .dot{width:6px;height:6px;border-radius:50%;background:#10b981;animation:pulse 1.2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-
-.cfg-field{margin-bottom:14px}
-.cfg-field label{display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom:6px}
-.cfg-field select,.cfg-field input{width:100%;padding:8px 11px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;background:#f8fafc;box-sizing:border-box;transition:border-color .15s,box-shadow .15s,background .15s}
-.cfg-field select:focus,.cfg-field input:focus{outline:none;border-color:#6366f1;background:#fff;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
-.cfg-field select:disabled,.cfg-field input:disabled{background:#f1f5f9;color:#94a3b8}
-.cfg-field select i{font-style:normal;color:#94a3b8}
-.cfg-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-
-.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.mode-btn{padding:9px 6px;border:1px solid #e2e8f0;border-radius:9px;background:#fff;cursor:pointer;font-size:12.5px;color:#475569;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:5px}
-.mode-btn:hover{border-color:#c7d2fe;background:#f5f6ff}
-.mode-btn.active{background:linear-gradient(135deg,#6366f1,#4f46e5);border-color:#4f46e5;color:#fff;font-weight:600;box-shadow:0 4px 12px -3px rgba(79,70,229,.5)}
-.mode-btn:disabled{opacity:.5;cursor:not-allowed}
-
-.proxy-block,.recipe-block{border:1px dashed #e2e8f0;border-radius:10px;padding:10px 13px;margin-bottom:0;background:#f8fafc}
-.proxy-block summary,.recipe-block summary{cursor:pointer;font-size:12.5px;color:#4f46e5;font-weight:600;user-select:none;list-style:none;display:flex;align-items:center;gap:6px}
-.proxy-block summary::before,.recipe-block summary::before{content:'\25B8';transition:transform .15s;font-size:11px}
-.proxy-block[open] summary::before,.recipe-block[open] summary::before{transform:rotate(90deg)}
-.proxy-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px}
-.recipe-block{margin-top:12px}
-.recipe-block pre{background:#0f172a;color:#a5f3fc;border-radius:8px;padding:12px;font-size:12px;max-height:180px;overflow:auto;white-space:pre-wrap;margin-top:10px;font-family:Consolas,Menlo,monospace;line-height:1.5}
-
-.exec-col .terminal{flex:none;background:#0b1220;border:1px solid #1e293b;border-radius:10px;overflow:hidden}
-.exec-col .term-head{background:#111c33;border-bottom:1px solid #1e293b}
-.exec-col .term-body{max-height:220px;font-size:12px}
-.exec-col .precheck-panel{border-radius:10px;border:1px solid #e2e8f0}
-.exec-col .ai-panel{min-height:0;max-height:220px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px}
-.exec-col .ai-tip{background:#fff;border-left:3px solid #6366f1}
-.exec-col .report-box,.exec-col .result-box{border-radius:10px}
-
-/* ── AI 失败诊断卡 ── */
-.ai-tip.diagnostic{border-left:3px solid #ef4444;border-color:#fecaca;background:#fff5f5}
-.diag-head{font-size:12px;font-weight:700;color:#dc2626;display:flex;align-items:center;gap:6px;margin-bottom:4px}
-.diag-icon{font-size:13px}
-.diag-cause{font-size:12.5px;color:#7f1d1d;font-weight:600;margin-bottom:6px;line-height:1.5}
-.diag-steps{display:flex;flex-direction:column;gap:4px;margin-top:4px}
-.diag-step{display:flex;align-items:flex-start;gap:6px;font-size:12px;color:#374151;line-height:1.4}
-.diag-n{flex-shrink:0;width:16px;height:16px;border-radius:50%;background:#ef4444;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;margin-top:1px;font-weight:600}
-
-/* ── AI 交付报告 ── */
-.report-box.deliv{background:#faf9ff;border:1px solid #ddd6fe;border-left:3px solid #7c3aed;border-radius:10px;padding:12px}
-.report-conclusion{font-size:13px;font-weight:600;color:#1f2937;margin:6px 0 8px;line-height:1.5}
-.report-field{font-size:12px;color:#374151;margin-bottom:6px;line-height:1.5}
-.rf-label{display:inline-block;font-size:11px;font-weight:700;color:#7c3aed;background:#ede9fe;border-radius:4px;padding:1px 6px;margin-right:6px;vertical-align:top}
-.rf-item{margin:2px 0 2px 12px;color:#4b5563}
-.rf-item.risk-item{color:#b91c1c}
-
-/* ── AI 决策门控卡片 ── */
-.decision-card{background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1.5px solid #6366f1;border-radius:12px;padding:12px 14px;margin-bottom:12px;box-shadow:0 6px 18px -8px rgba(99,102,241,.4)}
-.decision-head{font-size:13px;font-weight:700;color:#4338ca;display:flex;align-items:center;gap:6px;margin-bottom:6px}
-.decision-icon{font-size:15px}
-.decision-q{font-size:12.5px;color:#3730a3;margin-bottom:10px;line-height:1.5}
-.decision-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
-.decision-opt{display:flex;align-items:flex-start;gap:8px;text-align:left;padding:9px 11px;border:1px solid #c7d2fe;border-radius:9px;background:#fff;cursor:pointer;transition:all .15s}
-.decision-opt:hover{border-color:#6366f1;background:#eef2ff;transform:translateY(-1px);box-shadow:0 4px 12px -6px rgba(99,102,241,.5)}
-.decision-opt-key{flex-shrink:0;width:20px;height:20px;border-radius:6px;background:#6366f1;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
-.decision-opt-title{font-size:12.5px;font-weight:600;color:#1e1b4b;margin-bottom:2px}
-.decision-opt-detail{font-size:11.5px;color:#6d28d9;line-height:1.4;display:block}
-.decision-free{display:flex;gap:8px;align-items:center}
-.decision-free input{flex:1;border:1px solid #c7d2fe;border-radius:8px;padding:8px 10px;font-size:12.5px;background:#fff}
-.decision-free input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
-
-/* ── 部署方案(AI 生成) ── */
-.plan-system{display:inline-block;background:#e0e7ff;color:#3730a3;border-radius:10px;padding:1px 8px;font-size:11px;margin-left:6px;font-weight:600}
-.plan-ai{display:inline-block;background:#dcfce7;color:#15803d;border-radius:10px;padding:1px 8px;font-size:11px;margin-left:6px;font-weight:600}
-.plan-toolbar{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
-.plan-empty{color:#94a3b8;font-size:12px;padding:14px 4px}
-.recipe-block pre{max-height:220px}
-.opt-offline{color:#c0c4cc}
-.detail-dialog{border-radius:14px;overflow:hidden;box-shadow:0 24px 60px -12px rgba(2,6,23,.4)}
-.detail-body{padding:18px 22px;max-height:66vh;overflow:auto;background:#f8fafc}
-.detail-log{background:#0b1220;color:#a5f3fc;border-radius:10px;padding:14px;font-size:12.5px;min-height:200px;white-space:pre-wrap;line-height:1.6;font-family:Consolas,Menlo,monospace;border:1px solid #1e293b}
-.detail-ai{background:#fff;border-left:3px solid #7c3aed;border-radius:8px;padding:12px;font-size:13px;color:#1f2937;white-space:pre-wrap;line-height:1.5}
-
-/* ── 执行区 Tab(减挤) ── */
-.exec-tabs-head{display:flex;gap:6px;margin-bottom:10px;border-bottom:1px solid #e2e8f0;padding-bottom:8px}
-.exec-tab{border:none;background:none;padding:6px 14px;font-size:13px;color:#64748b;cursor:pointer;border-radius:8px;display:inline-flex;align-items:center;gap:6px;transition:all .15s}
-.exec-tab:hover{background:#f1f5f9}
-.exec-tab.active{background:#eef2ff;color:#4f46e5;font-weight:600}
-.tab-badge{background:#4f46e5;color:#fff;font-size:11px;border-radius:10px;padding:0 6px;min-width:16px;text-align:center}
-.term-body-lg{max-height:380px;height:340px}
-.ai-panel-lg{min-height:200px;max-height:380px}
-.check-tab{display:flex;flex-direction:column;gap:12px;max-height:380px;overflow:auto}
-.check-tab .precheck-panel{border-radius:10px}
-.exec-col .check-tab .report-box{border-radius:10px}
-
-/* ── 配置区 Tab(左栏) ── */
-.cfg-tabs-head{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #e2e8f0;padding-bottom:8px}
-.config-tab{border:none;background:none;padding:6px 12px;font-size:13px;color:#64748b;cursor:pointer;border-radius:8px;display:inline-flex;align-items:center;gap:5px;transition:all .15s}
-.config-tab:hover{background:#f1f5f9}
-.config-tab.active{background:#eef2ff;color:#4f46e5;font-weight:600}
-.cfg-tab-pane{display:flex;flex-direction:column;gap:2px}
-.plan-meta{display:flex;gap:6px;align-items:center;margin:6px 0 8px}
-
-/* ── K8S 式安装记录表格 ── */
-.status-filter{display:flex;gap:6px;flex-wrap:wrap}
-.sf-btn{border:1px solid #e2e8f0;background:#fff;padding:5px 14px;font-size:13px;color:#64748b;border-radius:8px;cursor:pointer;transition:all .15s}
-.sf-btn:hover{border-color:#c7d2fe}
-.sf-btn.active{background:#4f46e5;color:#fff;border-color:#4f46e5;font-weight:600}
-.table-wrap{background:#fff;border:1px solid #e4e7ed;border-radius:10px;overflow:auto}
-.table{width:100%;border-collapse:collapse;font-size:13px}
-.table thead th{background:#f8fafc;color:#64748b;font-weight:600;text-align:left;padding:10px 14px;border-bottom:1px solid #e4e7ed;white-space:nowrap}
-.table tbody td{padding:10px 14px;border-bottom:1px solid #f1f5f9}
-.table tbody tr:hover{background:#f8faff}
-.table .pname{font-weight:600;color:#1e293b}
-.table .muted{color:#94a3b8}
-.row-actions{white-space:nowrap}
-.row-actions .btn{margin-right:4px}
-
-/* ── 可直接交付部署报告弹窗(对标 AI 自动部署页报告版式) ── */
-.report-dialog{max-width:880px;display:flex;flex-direction:column;max-height:90vh}
-.report-dialog-head{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;background:#0f172a;border-radius:14px 14px 0 0;color:#fff}
-.rdh-left{display:flex;align-items:center;gap:12px}
-.rdh-icon{font-size:26px}
-.rdh-title{font-size:17px;font-weight:700}
-.rdh-sub{font-size:12px;opacity:.8;margin-top:2px}
-.rdh-tag{margin-left:6px;background:#1e293b;padding:2px 8px;border-radius:10px;font-size:11px}
-.report-dialog-head .hero-close{color:#94a3b8}
-.report-dialog-body{overflow:auto;padding:20px 22px;flex:1}
-.report-loading{display:flex;align-items:center;gap:10px;color:#64748b;padding:40px;justify-content:center}
-.report-loading .spinner{width:18px;height:18px;border:2px solid #cbd5e1;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.report-dialog-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px;border-top:1px solid #eef2f7;background:#fff;border-radius:0 0 14px 14px}
-.report-full{padding:0}
-.report-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.report-header h3{margin:0;font-size:20px;color:#0f172a}
-.report-meta-bar{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:#64748b;margin-bottom:16px;padding:8px 14px;background:#f8fafc;border-radius:8px}
-.report-status-badge{font-size:12px;padding:3px 10px;border-radius:12px;font-weight:600}
-.report-status-badge.succeeded,.report-status-badge.success,.report-status-badge.healthy,.report-status-badge.pass,.report-status-badge.safe{background:#dcfce7;color:#16a34a}
-.report-status-badge.failed,.report-status-badge.error,.report-status-badge.unhealthy{background:#fee2e2;color:#dc2626}
-.report-status-badge.running,.report-status-badge.pending{background:#dbeafe;color:#2563eb}
-.report-status-badge.degraded,.report-status-badge.drift{background:#fef3c7;color:#d97706}
-.report-status-badge.error{background:#fee2e2;color:#dc2626}
-.report-line{margin:5px 0;font-size:13px;color:#334155;line-height:1.6}
-.report-section-card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin-bottom:16px}
-.report-section-card h4{margin:0 0 12px;font-size:15px;color:#0f172a}
-.report-summary-text{color:#334155;line-height:1.7;margin:0}
-.kpi-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.kpi-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;min-width:64px;text-align:center}
-.kpi-item.success{border-color:#bbf7d0;background:#f0fdf4}
-.kpi-label{display:block;font-size:11px;color:#64748b;margin-bottom:2px}
-.kpi-value{font-size:18px;font-weight:700;color:#0f172a}
-.command-block{background:#1e293b;color:#e2e8f0;padding:12px;border-radius:8px;font-size:13px;font-family:'JetBrains Mono','Fira Code',monospace;white-space:pre-wrap;line-height:1.6;margin:0}
-.report-table{width:100%;border-collapse:collapse;font-size:13px}
-.report-table td{padding:8px 10px;border-bottom:1px solid #f1f5f9}
-.report-table td.env-key{width:140px;font-weight:600;color:#0f172a;background:#f8fafc}
-.login-line{margin:4px 0;font-size:13px}
-.login-user{font-weight:600;color:#0f172a}
-.login-via{color:#64748b;margin-left:8px;font-family:'JetBrains Mono',monospace;font-size:12px}
-.issue-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;padding:6px 0;border-bottom:1px solid #f1f5f9}
-.issue-severity{font-weight:600;text-transform:uppercase;font-size:11px}
-.severity-high .issue-severity{color:#dc2626}.severity-medium .issue-severity{color:#d97706}.severity-low .issue-severity{color:#16a34a}
-.issue-desc{flex:1}
-.issue-resolve{color:#64748b}
-.issue-status{font-size:11px;padding:2px 8px;border-radius:10px;background:#f1f5f9;color:#475569}
-.issue-status.resolved{background:#dcfce7;color:#16a34a}
-.issue-status.pending{background:#fee2e2;color:#dc2626}
-.asset-dialog{max-width:640px;display:flex;flex-direction:column;max-height:92vh}
-.asset-dialog-head{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;background:#0f172a;border-radius:14px 14px 0 0;color:#fff}
-.adh-left{display:flex;align-items:center;gap:12px}
-.adh-icon{font-size:24px}
-.adh-title{font-size:17px;font-weight:700}
-.adh-sub{font-size:12px;opacity:.8;margin-top:2px}
-.asset-dialog-head .hero-close{color:#94a3b8}
-.asset-dialog-body{overflow:auto;padding:20px 22px;flex:1}
-.asset-readonly-tip{background:#eff6ff;color:#1d4ed8;font-size:12px;padding:8px 12px;border-radius:8px;margin-bottom:16px}
-.asset-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.af-field{display:flex;flex-direction:column;gap:6px}
-.af-field.af-wide{grid-column:1 / -1}
-.af-field label{font-size:13px;color:#475569;font-weight:600}
-.af-field label .req{color:#ef4444}
-.af-field input{border:1px solid #d7dee8;border-radius:8px;padding:9px 12px;font-size:13px;outline:none;background:#fff}
-.af-field input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
-.af-field input:disabled{background:#f1f5f9;color:#64748b;cursor:not-allowed}
-.asset-form-sep{font-size:13px;font-weight:700;color:#0f172a;margin:20px 0 12px;padding-top:16px;border-top:1px dashed #e2e8f0}
-.asset-dialog-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px;border-top:1px solid #eef2f7;background:#fff;border-radius:0 0 14px 14px}
-</style>
+<style scoped src="./ComponentStoreView.style.css"></style>

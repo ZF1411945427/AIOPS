@@ -10,6 +10,9 @@ from app.services.agent_service import call_llm
 from app.models import AIProvider, AgentConfig, Incident
 from sqlalchemy.orm import Session
 from datetime import datetime
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 templates = get_templates()
@@ -226,8 +229,8 @@ def api_incident_rca(incident_id: int, db: Session = Depends(get_db)):
         inc_obj = detail.get("incident")
         inc_severity = (inc_obj.severity or "warning") if inc_obj else "warning"
         knowledge_graph_service.record_rca_result(db, incident_id, analysis, severity=inc_severity)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
     def _safe(obj):
         if isinstance(obj, dict):

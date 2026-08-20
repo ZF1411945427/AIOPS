@@ -1,0 +1,38 @@
+# ===== Backend Lint + Arch + Sanitize =====
+# push / PR 到 main 时运行
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: ruff + arch + sanitize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check app tests tools deploy scripts
+
+      - name: Run arch check
+        run: python tools/arch_check.py
+
+      - name: Reject stray debug scripts in root
+        run: |
+          if ls check_*.py debug_*.py fix_*.py force_alert.py 2>/dev/null; then
+            echo "::error::Found stray temp scripts in repo root. Please remove."
+            exit 1
+          fi
+          echo "Root temp-script guard passed."

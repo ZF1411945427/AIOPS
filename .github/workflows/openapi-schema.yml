@@ -1,0 +1,19 @@
+# ===== OpenAPI 模式校验 =====
+name: openapi-schema
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements-ci.txt
+      - name: Validate OpenAPI schema
+        run: python tools/check_openapi.py

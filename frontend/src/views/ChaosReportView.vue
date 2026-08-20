@@ -135,7 +135,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { DataLine, CircleCheck, CircleClose, Bell } from '@element-plus/icons-vue'
-import axios from 'axios'
+import request from '@/api/request'
 
 const API = '/api/chaos'
 const summary = ref({})
@@ -163,25 +163,25 @@ const PIE_COLORS = ['#5470c6','#91cc75','#fac858','#ee6666','#73c0de','#3ba272',
 
 async function loadSummary() {
   try {
-    const { data } = await axios.get(`${API}/summary`)
+    const data = await request.get(`${API}/summary`)
     summary.value = data
   } catch {}
 }
 
 async function loadExperiments() {
   try {
-    const { data } = await axios.get(`${API}/experiments`)
+    const data = await request.get(`${API}/experiments`)
     data.forEach(e => { experimentMap.value[e.id] = e.name })
   } catch {}
 }
 
 async function loadAllRuns() {
   try {
-    const { data: exps } = await axios.get(`${API}/experiments`)
+    const exps = await request.get(`${API}/experiments`)
     const all = []
     for (const exp of exps) {
       try {
-        const { data: runs } = await axios.get(`${API}/experiments/${exp.id}/runs`)
+        const runs = await request.get(`${API}/experiments/${exp.id}/runs`)
         all.push(...runs)
       } catch {}
     }
@@ -192,7 +192,7 @@ async function loadAllRuns() {
 
 async function loadRadarChart() {
   try {
-    const { data } = await axios.get(`${API}/resilience-radar`)
+    const data = await request.get(`${API}/resilience-radar`)
     await nextTick()
     if (!radarChart && radarChartRef.value) radarChart = echarts.init(radarChartRef.value)
     if (radarChart) {
@@ -228,7 +228,7 @@ async function loadRadarChart() {
 
 async function loadPieChart() {
   try {
-    const { data } = await axios.get(`${API}/summary`)
+    const data = await request.get(`${API}/summary`)
     const faultDist = data.fault_distribution || {}
     const labels = {
       'cpu-stress': 'CPU压力', 'mem-stress': '内存压力', 'disk-fill': '磁盘填充',

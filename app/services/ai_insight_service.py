@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.models import AIInsightRecord, AIProvider, AgentConfig, Alert, Span, DataSource
 from app.services.agent_service import call_llm
 from app.services.ai_provider_health import select_healthy_provider
+from app.routers.agent_sse import _clean_key_point
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +311,30 @@ def cross_domain_rca(db: Session, provider, metric_name: str, asset_id: int,
         "trace_count": len(related_traces),
         "metric_name": metric_name,
         "asset_name": asset_name,
+        "summary_block": _build_cross_domain_key_points(
+            asset_name, metric_name, trend, len(alerts), len(related_traces)
+        ),
+    }
+
+
+def _build_cross_domain_key_points(asset_name, metric_name, trend, alert_count, trace_count) -> dict:
+    """从跨域 RCA 结果组装统一三要素要点(根因/方案/影响)。"""
+    _TREND_CN = {"up": "上升", "down": "下降", "flat": "平稳", "spike": "突刺"}
+    tr = (trend or {}).get("trend", "")
+    _tc = _TREND_CN.get(tr, tr or "未知")
+    rel = (trend or {}).get("rel_change_pct")
+    rel_s = f"{rel}%" if rel is not None else ""
+
+    root_cause = f"{asset_name} 指标 {metric_name} 趋势{_tc}"
+    if rel_s:
+        root_cause += f"（相对变化 {rel_s}）"
+    solution = "结合关联告警、调用链与日志定位根因，按异常类型处置（扩容/回滚/修复）并观察指标恢复"
+    impact = f"关联 {alert_count} 条告警、{trace_count} 条调用链"
+
+    return {
+        "root_cause": _clean_key_point(root_cause, 100),
+        "solution": _clean_key_point(solution, 160),
+        "impact": _clean_key_point(impact, 100),
     }
 
 

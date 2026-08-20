@@ -119,25 +119,56 @@
           <p class="renew-tip" v-if="result && result.distro === 'rke'">
             RKE 续期命令：<code>rke cert rotate</code>，需在 RKE 工作节点执行。
           </p>
-          <label class="checkbox-line" v-if="result && result.distro !== 'cloud'">
-            <input type="checkbox" v-model="renewModal.force" /> 强制续期（忽略剩余天数，全部重签）
+          <label class="renew-years" v-if="result && result.distro === 'kubeadm'">
+            续期年限：
+            <input type="number" min="1" max="20" v-model.number="renewModal.years" />
+            年
+            <span class="renew-years-tip">（kubeadm 将重签全部证书为指定年限，并主动重启控制面）</span>
           </label>
+
+          <div v-if="renewing" class="renew-processing">
+            <p class="renew-hint">⏳ 正在续期并重启控制面组件（kube-apiserver / etcd / controller-manager / scheduler），集群将短暂不可用，约需 1-3 分钟...</p>
+            <p class="renew-hint muted">如确认此为维护窗口，操作将自动完成，无需额外确认。</p>
+          </div>
+          <div v-else-if="renewResult" class="renew-result">
+            <p class="renew-head" :style="{ color: renewResult.ok ? '#67c23a' : '#f56c6c' }">
+              {{ renewResult.ok ? '✓ 续期成功' : '✕ 续期失败' }}
+              <span v-if="renewResult.not_after_target" class="renew-target-inline">目标期限：{{ renewResult.not_after_target }}</span>
+            </p>
+            <pre class="renew-output-inline">{{ renewResult.output }}</pre>
+            <p v-if="renewResult.restart_hint" class="renew-hint">{{ renewResult.restart_hint }}</p>
+            <p v-if="renewResult.error && !renewResult.ok" class="renew-err">{{ renewResult.error }}</p>
+            <button class="btn btn-sm" @click="closeRenew">关闭</button>
+          </div>
         </div>
         <div class="modal-foot">
           <button class="btn" @click="closeRenew">取消</button>
-          <button v-if="result && result.distro !== 'cloud'" class="btn btn-warn" @click="confirmRenew" :disabled="renewing">{{ renewing ? '续期中...' : '确认续期' }}</button>
+          <button v-if="result && result.distro !== 'cloud'" class="btn btn-warn" @click="requestRenew" :disabled="renewing || renewingConfirm">{{ renewing ? '续期中...' : '确认续期' }}</button>
         </div>
       </div>
     </div>
 
-    <div v-if="renewResult" class="panel" style="margin-top:16px">
-      <div class="panel-head" :style="{ color: renewResult.ok ? '#67c23a' : '#f56c6c' }">
-        {{ renewResult.ok ? '✓ 续期成功' : '✕ 续期失败' }}
-      </div>
-      <div class="panel-body">
-        <div class="renew-output">
-          <pre>{{ renewResult.output }}</pre>
-          <p v-if="renewResult.restart_hint" class="renew-hint">{{ renewResult.restart_hint }}</p>
+    <div v-if="renewConfirmVisible" class="modal-overlay">
+      <div class="modal-box" style="width:520px">
+        <div class="modal-head">
+          <h3>确认续期</h3>
+          <button class="modal-close" @click="renewConfirmVisible = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="confirm-warn">⚠️ 此操作将重新签发集群全部证书，并<strong>主动重启控制面组件</strong>：</p>
+          <ul class="confirm-list">
+            <li>kube-apiserver</li>
+            <li>kube-controller-manager</li>
+            <li>kube-scheduler</li>
+            <li>etcd</li>
+          </ul>
+          <p class="confirm-tip">
+            续期期间控制面组件将短暂重启（约 1-3 分钟），请确保这是预期的维护窗口。续期年限：<strong>{{ renewModal.years }} 年</strong>。
+          </p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="renewConfirmVisible = false">取消</button>
+          <button class="btn btn-danger" @click="confirmRenew">确定执行</button>
         </div>
       </div>
     </div>
@@ -167,9 +198,11 @@ const loading = ref(false)
 const error = ref('')
 const result = ref(null)
 const renewing = ref(false)
+const renewingConfirm = ref(false)
 const renewResult = ref(null)
 const showGuide = ref(false)
-const renewModal = ref({ visible: false, force: false })
+const renewModal = ref({ visible: false, years: 3 })
+const renewConfirmVisible = ref(false)
 
 const selectedCluster = computed(() => clusters.value.find(c => c.id === clusterId.value) || null)
 
@@ -224,29 +257,37 @@ async function loadInspect() {
 }
 
 function openRenew() {
-  renewModal.value = { visible: true, force: false }
+  renewModal.value = { visible: true, years: 3 }
+  renewResult.value = null
+  renewing.value = false
+  renewingConfirm.value = false
+  renewConfirmVisible.value = false
 }
 
 function closeRenew() {
   renewModal.value.visible = false
+  renewConfirmVisible.value = false
+}
+
+function requestRenew() {
+  renewConfirmVisible.value = true
 }
 
 async function confirmRenew() {
+  renewConfirmVisible.value = false
   renewing.value = true
   renewResult.value = null
   try {
     const res = await request.post('/k8s/cert/api/renew', {
       cluster_id: clusterId.value,
-      force: renewModal.value.force,
+      years: renewModal.value.years || 0,
     })
     renewResult.value = res
-    closeRenew()
     if (res.ok) {
       loadInspect()
     }
   } catch (e) {
     renewResult.value = { ok: false, output: '', error: String(e.message || e) }
-    closeRenew()
   } finally {
     renewing.value = false
   }
@@ -313,12 +354,17 @@ onMounted(loadClusters)
 .btn-warn { background: #e6a23c; border-color: #e6a23c; color: #fff; }
 .renew-tip { font-size: 13px; color: #606266; line-height: 1.7; }
 .renew-tip code { background: #f4f4f5; padding: 2px 6px; border-radius: 4px; }
+.renew-years { display: block; margin-top: 10px; font-size: 13px; color: #303133; }
+.renew-years input { width: 70px; padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px; margin: 0 6px; }
+.renew-years-tip { color: #909399; font-size: 12px; }
+.renew-target { font-size: 13px; color: #67c23a; margin: 0 0 8px; }
 .checkbox-line { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #606266; margin-top: 12px; }
 .renew-output {
   background: #1d1f21; color: #c9d1d9; border-radius: 8px; padding: 14px; max-height: 300px; overflow: auto;
 }
 .renew-output pre { margin: 0; white-space: pre-wrap; font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.6; }
 .renew-hint { color: #67c23a; font-size: 13px; margin: 10px 0 0; }
+.renew-hint.muted { color: #909399; font-size: 12px; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 8px 10px; border-bottom: 1px solid #ebeef5; text-align: left; font-size: 13px; }
 .table th { background: #f5f7fa; color: #909399; font-weight: 600; }
@@ -326,4 +372,28 @@ onMounted(loadClusters)
 .panel-head { padding: 12px 16px; border-bottom: 1px solid #ebeef5; font-weight: 600; font-size: 14px; }
 .panel-body { padding: 12px 16px; }
 .empty-state { text-align: center; color: #909399; padding: 30px 0; }
+.renew-processing { margin-top: 12px; }
+.renew-result { margin-top: 12px; background: #f7f8fa; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px; }
+.renew-head { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+.renew-target-inline { font-size: 12px; color: #606266; font-weight: 400; margin-left: 8px; }
+.renew-output-inline {
+  margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Consolas, Monaco, monospace;
+  font-size: 12px; line-height: 1.6; background: #1d1f21; color: #c9d1d9; border-radius: 8px;
+  padding: 12px; max-height: 260px; overflow: auto;
+}
+.renew-err { color: #f56c6c; font-size: 13px; margin: 10px 0 0; }
+.btn-sm { padding: 6px 14px; font-size: 13px; margin-top: 12px; }
+.btn-danger { background: #f56c6c; color: #fff; }
+.confirm-warn { font-size: 14px; color: #e6a23c; margin: 0 0 10px; line-height: 1.6; }
+.confirm-list { margin: 0 0 12px 20px; padding: 0; color: #606266; font-size: 13px; line-height: 1.9; }
+.confirm-list li { margin: 2px 0; }
+.confirm-tip { font-size: 13px; color: #909399; margin: 0; line-height: 1.6; }
+.confirm-tip strong { color: #f56c6c; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: var(--bg-card, #fff); border-radius: 12px; max-height: 85vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); position: sticky; top: 0; background: var(--bg-card, #fff); z-index: 1; }
+.modal-head h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+.modal-close { font-size: 1.4rem; background: none; border: none; cursor: pointer; color: var(--text-secondary, #64748b); padding: 0; line-height: 1; }
+.modal-body { padding: 16px 20px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border, rgba(0,0,0,0.07)); }
 </style>

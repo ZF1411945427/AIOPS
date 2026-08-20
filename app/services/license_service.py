@@ -16,6 +16,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _PUB_KEY_FILE = os.path.join(_PROJECT_ROOT, "tools", "public_key.pem")
@@ -79,16 +82,16 @@ def _collect_cpu():
         proc = platform.processor() or ""
         if proc:
             return proc.strip()
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     if os.name == "posix":
         try:
             with open("/proc/cpuinfo", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     if line.lower().startswith("model name"):
                         return line.split(":", 1)[1].strip()
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     try:
         return platform.machine() or "unknown"
     except Exception:
@@ -105,8 +108,8 @@ def _collect_disk():
             lines = [l.strip() for l in out.stdout.splitlines() if l.strip() and l.lower() != "serialnumber"]
             if lines:
                 return "|".join(lines)
-        except Exception:
-            pass
+        except Exception as _exc2:
+            logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
     else:
         try:
             out = subprocess.run(
@@ -116,8 +119,8 @@ def _collect_disk():
             lines = [l.strip() for l in out.stdout.splitlines() if l.strip()]
             if lines:
                 return "|".join(lines)
-        except Exception:
-            pass
+        except Exception as _exc3:
+            logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
     return "unknown"
 
 
@@ -167,8 +170,8 @@ def _read_state() -> dict:
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as _exc4:
+        logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
     return {}
 
 
@@ -177,8 +180,8 @@ def _write_state(data: dict) -> None:
         os.makedirs(STATE_DIR, exist_ok=True)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
-    except Exception:
-        pass
+    except Exception as _exc5:
+        logger.warning("[except:pass] Exception: %s", _exc5, exc_info=True)
 
 
 def _clock_rollback_check() -> tuple[bool, str]:
@@ -190,8 +193,8 @@ def _clock_rollback_check() -> tuple[bool, str]:
             last = datetime.fromisoformat(last_str)
             if now < last - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
                 return False, f"检测到系统时钟回拨（当前 {now.isoformat()} < 上次记录 {last.isoformat()}）"
-        except Exception:
-            pass
+        except Exception as _exc6:
+            logger.warning("[except:pass] Exception: %s", _exc6, exc_info=True)
     state["last_check_time"] = now.isoformat()
     _write_state(state)
     return True, "ok"

@@ -6,12 +6,13 @@ import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from app.database import get_session_for, get_db_mode
+from app.database import get_session_for, get_db_mode, safe_add_columns, safe_drop_columns
 from app.logger import logger
 from app import config as _config
 from app.security import verify_password
 from app.models import User, NotificationChannel, AnomalyConfig, ReportSchedule, MetricRecord
 from app.services import alert_service, anomaly_service, incident_service, remediation_service, datasource_service, config_service, pod_health_service, log_anomaly_service, contention_service, metric_collector, asset_service, trace_anomaly_service
+from app.services import alert_correlation_service
 from app.services import agent_workflow_service, workflow_cron_scheduler, auto_investigator
 from app.services.synthetic_monitor import check_all_synthetics
 from app.services import skill_registry
@@ -25,6 +26,21 @@ _last_archive_time = 0.0
 _last_scrape_time = 0.0
 _last_autonomous_time = 0.0
 METRIC_RETENTION_DAYS = int(_os.environ.get("AIOPS_METRIC_RETENTION_DAYS", "90"))
+
+
+def _try_celery_dispatch(task_name: str) -> bool:
+    """尝试把采集团下发给 Celery worker；不可用则返回 False（回退进程内）.
+
+    仅当 AIOPS_CELERY_ENABLED=true 且 Redis 可达时才走分布式路径，
+    否则保持原有进程内执行，保证 Redis 异常不中断业务。
+    """
+    try:
+        from app.services.celery_dispatcher import celery_enabled, dispatch
+        if not celery_enabled():
+            return False
+        return dispatch(task_name)
+    except Exception:
+        return False
 
 
 def _collect_all_menu_keys() -> list:
@@ -102,62 +118,25 @@ def init_admin():
         db.add(NotificationChannel(name="系统日志", type="log", channel_config="{}", enabled=True))
         db.commit()
     config_service.init_configs(db)
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE anomaly_configs ADD COLUMN algorithm VARCHAR(32) DEFAULT 'sigma'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE anomaly_configs ADD COLUMN period INTEGER DEFAULT 12"))
-    except Exception:
-        pass
+    # 方言安全补列/删列(兼容旧库演进; PG 用 IF NOT EXISTS + 独立事务, 不污染事务)
+    safe_add_columns(db, "anomaly_configs", ["algorithm VARCHAR(32) DEFAULT 'sigma'", "period INTEGER DEFAULT 12"])
     try:
         from app.routers.chaos import seed_chaos_scenarios
         seed_chaos_scenarios(db)
         db.commit()
     except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE chaos_scenarios ADD COLUMN target_layer VARCHAR(32) DEFAULT 'host'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE chaos_experiments ADD COLUMN target_layer VARCHAR(32) DEFAULT 'host'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE assets ADD COLUMN connection_type VARCHAR(32) DEFAULT 'ssh'"))
-        db.execute(text("ALTER TABLE assets ADD COLUMN connection_config TEXT DEFAULT '{}'"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text
-        db.execute(text("ALTER TABLE assets DROP COLUMN ssh_user"))
-        db.execute(text("ALTER TABLE assets DROP COLUMN ssh_password"))
-        db.execute(text("ALTER TABLE assets DROP COLUMN ssh_port"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text as _t
-        db.execute(_t("ALTER TABLE deploy_plans ADD COLUMN doc_file_name VARCHAR(256) DEFAULT ''"))
-        db.commit()
-    except Exception:
-        pass
-    try:
-        from sqlalchemy import text as _t
-        db.execute(_t("ALTER TABLE deploy_plans ADD COLUMN asset_ids TEXT DEFAULT '[]'"))
-        db.commit()
-    except Exception:
-        pass
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    safe_add_columns(db, "chaos_scenarios", ["target_layer VARCHAR(32) DEFAULT 'host'"])
+    safe_add_columns(db, "chaos_experiments", ["target_layer VARCHAR(32) DEFAULT 'host'"])
+    safe_add_columns(db, "assets", ["connection_type VARCHAR(32) DEFAULT 'ssh'", "connection_config TEXT DEFAULT '{}'", "probe_type VARCHAR(16) DEFAULT 'tcp'", "environment VARCHAR(24) DEFAULT 'non-production'", "ai_access_mode VARCHAR(24) DEFAULT 'read-only'"])
+    safe_drop_columns(db, "assets", ["ssh_user", "ssh_password", "ssh_port"])
+    safe_add_columns(db, "deploy_plans", ["doc_file_name VARCHAR(256) DEFAULT ''", "asset_ids TEXT DEFAULT '[]'"])
+    safe_add_columns(db, "k8s_cluster_plans", ["pending_decision_json TEXT DEFAULT 'null'"])
+    safe_add_columns(db, "component_installs", ["pending_decision_json TEXT DEFAULT 'null'"])
+    safe_add_columns(db, "deploy_plans", ["pending_decision_json TEXT DEFAULT 'null'"])
     if not db.query(AnomalyConfig).first():
         for metric in ["cpu_usage", "memory_usage", "disk_usage"]:
             db.add(AnomalyConfig(
@@ -187,6 +166,7 @@ def _init_background_task_monitor():
         {"name": "k8s_event_alert", "fn": alert_service.check_k8s_events, "description": "K8s 事件告警"},
         {"name": "anomaly_detect", "fn": anomaly_service.detect_anomalies, "description": "异常检测"},
         {"name": "incident_correlate", "fn": incident_service.correlate_alerts, "description": "故障关联"},
+        {"name": "alert_cluster_persist", "fn": alert_correlation_service.persist_clusters, "description": "告警关联落库+自动故障单"},
         {"name": "remediation", "fn": remediation_service.check_and_remediate, "description": "自愈执行"},
         {"name": "datasource_scrape", "fn": datasource_service.scrape_all_sources, "description": "数据源采集"},
         {"name": "pod_health", "fn": pod_health_service.check_pod_anomalies, "description": "Pod 健康检查"},
@@ -196,6 +176,8 @@ def _init_background_task_monitor():
         {"name": "synthetic_monitor", "fn": check_all_synthetics, "description": "拨测探测"},
         {"name": "workflow_alert_trigger", "fn": agent_workflow_service.check_alert_triggers, "description": "工作流告警自动触发"},
         {"name": "workflow_cron_trigger", "fn": workflow_cron_scheduler.check_cron_triggers, "description": "工作流 cron 定时调度"},
+        {"name": "sop_cron_trigger", "fn": workflow_cron_scheduler.check_sop_cron_triggers, "description": "SOP 剧本 cron 定时调度"},
+        {"name": "sop_alert_trigger", "fn": workflow_cron_scheduler.check_sop_alert_triggers, "description": "SOP 剧本告警自动触发"},
         {"name": "auto_investigate", "fn": auto_investigator.auto_investigate_new_incidents, "description": "告警自动调查闭环"},
         {"name": "asset_probe", "fn": asset_service.probe_assets, "description": "资产健康探测"},
         {"name": "metric_collect", "fn": metric_collector.collect_all_metrics, "description": "指标采集"},
@@ -239,6 +221,7 @@ def background_loop():
             ("k8s_event_alert", alert_service.check_k8s_events),
             ("anomaly_detect", anomaly_service.detect_anomalies),
             ("incident_correlate", incident_service.correlate_alerts),
+            ("alert_cluster_persist", alert_correlation_service.persist_clusters),
             ("remediation", remediation_service.check_and_remediate),
             ("pod_health", pod_health_service.check_pod_anomalies),
             ("log_anomaly", log_anomaly_service.check_log_anomalies),
@@ -247,6 +230,8 @@ def background_loop():
             ("synthetic_monitor", check_all_synthetics),
             ("workflow_alert_trigger", agent_workflow_service.check_alert_triggers),
             ("workflow_cron_trigger", workflow_cron_scheduler.check_cron_triggers),
+            ("sop_cron_trigger", workflow_cron_scheduler.check_sop_cron_triggers),
+            ("sop_alert_trigger", workflow_cron_scheduler.check_sop_alert_triggers),
             ("auto_investigate", auto_investigator.auto_investigate_new_incidents),
         ]
         _pool = ThreadPoolExecutor(max_workers=5)
@@ -268,10 +253,16 @@ def background_loop():
         global _last_probe_time, _last_collect_time, _last_archive_time, _last_scrape_time, _last_autonomous_time
         if _now - _last_probe_time >= 60:
             _last_probe_time = _now
-            threading.Thread(target=_run_bg_service, args=("asset_probe", asset_service.probe_assets, _mode), daemon=True).start()
+            if _try_celery_dispatch("app.celery_tasks.probe_assets_task"):
+                logger.info("asset_probe 已投递 Celery worker")
+            else:
+                threading.Thread(target=_run_bg_service, args=("asset_probe", asset_service.probe_assets, _mode), daemon=True).start()
         if _now - _last_scrape_time >= 120:
             _last_scrape_time = _now
-            threading.Thread(target=_run_bg_service, args=("datasource_scrape", datasource_service.scrape_all_sources, _mode), daemon=True).start()
+            if _try_celery_dispatch("app.celery_tasks.scrape_all_sources_task"):
+                logger.info("datasource_scrape 已投递 Celery worker")
+            else:
+                threading.Thread(target=_run_bg_service, args=("datasource_scrape", datasource_service.scrape_all_sources, _mode), daemon=True).start()
         if _now - _last_collect_time >= 300:
             _last_collect_time = _now
             threading.Thread(target=_run_bg_service, args=("metric_collect", metric_collector.collect_all_metrics, _mode), daemon=True).start()
@@ -286,6 +277,17 @@ def background_loop():
                 _archive_db.rollback()
             finally:
                 _archive_db.close()
+            # 告警归档：已解决超 2 个月的历史告警标记 archived（避免无限累积）
+            _alert_archive_db = get_session_for(_mode)()
+            try:
+                alert_service.archive_old_alerts(_alert_archive_db)
+            except Exception:
+                try:
+                    _alert_archive_db.rollback()
+                except Exception:
+                    pass
+            finally:
+                _alert_archive_db.close()
             _report_db = get_session_for(_mode)()
             try:
                 for _schedule in _report_db.query(ReportSchedule).filter(

@@ -7,6 +7,9 @@ import threading
 from datetime import datetime
 from typing import Optional, List
 
+import logging
+logger = logging.getLogger(__name__)
+
 VM_URL = "http://127.0.0.1:8428"
 VM_WRITE_URL = f"{VM_URL}/api/v1/import/prometheus"
 VM_QUERY_URL = f"{VM_URL}/api/v1/query"
@@ -66,8 +69,8 @@ def write_metrics_batch(metrics: List[dict]):
                              headers={"Content-Type": "application/x-protobuf"})
         if resp.status_code not in (204, 200):
             pass
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
 
 def query_promql(query: str, time: Optional[str] = None) -> dict:
@@ -103,8 +106,8 @@ def query_metric_names() -> List[str]:
         if resp.status_code == 200:
             data = resp.json()
             return data.get("data", [])
-    except Exception:
-        pass
+    except Exception as _exc1:
+        logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     return []
 
 
@@ -209,8 +212,8 @@ def query_range_aggregated(name: str, aggregate: str = "avg", hours: int = 24) -
                         "value": float(val),
                     } for ts, val in values],
                 })
-    except Exception:
-        pass
+    except Exception as _exc2:
+        logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
     result["avg"].sort(key=lambda x: x["time"])
     return result
 

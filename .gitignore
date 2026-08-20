@@ -198,6 +198,9 @@ db/milvus/
 /deploy/本地虚机
 db/check_vmware.py
 
+# ===== Docker Registry 镜像缓存(大文件超 GitHub 100MB 限制, 不入库) =====
+docker-registry/
+
 # temp diagnostic files
 _h.txt
 _menu.txt

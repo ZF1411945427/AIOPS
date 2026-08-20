@@ -25,17 +25,18 @@
         <table v-else-if="pagedAssets.length" class="table">
           <thead>
             <tr>
-              <th class="col-id">ID</th><th>名称</th><th>CI 类型</th><th>IP / 地址</th><th>状态</th><th>生命周期</th>
-              <th>引用/孤岛</th><th>最近检查</th><th>创建时间</th><th>操作</th>
+              <th class="col-id">ID</th><th>名称</th><th>CI 类型</th><th>IP / 地址</th><th>状态</th><th>环境 / AI</th><th>生命周期</th>
+              <th>引用/孤岛</th><th>持续在线</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="a in pagedAssets" :key="a.id" :class="{ 'row-deprecated': a.status === 'deprecated', 'row-orphan': isOrphan(a) }">
               <td class="col-id text-sm">{{ a.id }}</td>
               <td><span class="asset-name">{{ shortName(a.name) }}</span><div class="asset-fullname" v-if="a.name.includes('/')">{{ a.name }}</div></td>
-              <td><span class="badge ci-type" :style="ciTypeStyle(a.ci_type)">{{ a.ci_type || '-' }}</span></td>
+              <td><span class="badge ci-type" :style="ciTypeStyle(a.ci_type)">{{ a.ci_type || '-' }}</span><span v-if="subtypeOf(a)" class="badge mw-sub" :style="ciTypeStyle(a.ci_type)">{{ subtypeOf(a) }}</span></td>
               <td class="text-sm">{{ a.ip || '-' }}</td>
               <td><span class="badge" :class="a.status">{{ statusLabel(a.status) }}</span></td>
+              <td><span v-if="a.effective_ai_access === 'read-only'" class="badge ai-ro" title="生产只读：AI 只能查询">🔒 只读</span><span v-else class="badge ai-rw" title="AI 可读写(生产豁免或非生产)">✏️ 读写</span><span v-if="a.environment === 'production'" class="badge env-prod">生产</span></td>
               <td><span class="badge lc-badge" :class="lifecycleClass(a.lifecycle_status)">{{ a.lifecycle_status }}</span></td>
               <td class="text-sm">
                 <span v-if="a.refCount !== null" class="ref-info" :class="{ orphan: a.isOrphan }">
@@ -43,7 +44,7 @@
                 </span>
                 <span v-else class="text-muted">-</span>
               </td>
-              <td class="text-sm"><span class="check-time" :class="a.status === 'offline' ? 'stale' : 'fresh'">{{ checkTimeLabel(a) }}</span></td>
+              <td class="text-sm"><span class="check-time" :class="a.status === 'offline' ? 'stale' : 'fresh'">{{ onlineTimeLabel(a) }}</span></td>
               <td class="text-sm">{{ a.created_at || '-' }}</td>
               <td>
                 <button v-if="a.ci_type === 'kubernetes_cluster'" class="btn btn-sm btn-sync" :disabled="syncingId === a.id" @click="syncK8s(a)">{{ syncingId === a.id ? '同步中...' : '同步' }}</button>
@@ -117,6 +118,32 @@
             </div>
           </div>
 
+          <div v-if="showAiAccessSection" class="form-section ai-access-section">
+            <div class="section-title">AI 访问权限</div>
+            <div class="ai-access-block">
+              <label class="ai-access-check" :class="{ 'is-disabled': aiAccessDisabled }">
+                <input type="checkbox" v-model="isProductionEnv" @change="onEnvChange" :disabled="aiAccessDisabled">
+                <span class="ai-access-label">是否生产环境</span>
+              </label>
+              <p class="ai-access-hint">
+                <template v-if="aiAccessDisabled">该资产挂在生产服务器之下，AI 只允许<b>查询（只读）</b>，禁止任何写操作。如需调整请在父服务器上取消「生产环境」。</template>
+                <template v-else>勾选后，AI 对该资产默认只允许<b>查询（只读）</b>，禁止任何写操作（重启服务/清磁盘/执行命令/写 SQL 等）。特殊情况可临时开启「豁免」放行，操作完成后记得改回。</template>
+              </p>
+              <template v-if="isProductionEnv && !aiAccessDisabled">
+                <div class="ai-access-extra">
+                  <label class="ai-mode-toggle">
+                    <input type="checkbox" v-model="isExemptReadOnly">
+                    临时豁免（允许 AI 写操作）
+                  </label>
+                  <div class="ai-access-hint" style="margin-top:4px">
+                    <template v-if="isExemptReadOnly">⚠️ 临时豁免已开启：AI 可执行写操作，但仍需人工确认。请务必在操作完成后取消勾选恢复只读。</template>
+                    <template v-else>当前为只读模式：AI 只能查询，无法执行任何写操作。</template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
         <div class="form-section" v-if="showSpecSection">
           <div class="section-title">规格属性</div>
           <div class="form-grid">
@@ -134,6 +161,23 @@
         <div class="form-section" v-if="form.ci_type">
           <div class="section-title">连接配置</div>
           <div class="conn-tip">{{ ciTypeMeta?.connectionTip || '配置该资产的连接信息，用于远程运维和监控。' }}</div>
+
+          <div class="form-grid">
+            <div class="form-row full"><label>探活方式</label>
+              <div class="probe-type-options">
+                <label class="probe-option" :class="{ active: form.probe_type === 'tcp' }"><input type="radio" value="tcp" v-model="form.probe_type"> TCP 端口</label>
+                <label class="probe-option" :class="{ active: form.probe_type === 'ping' }"><input type="radio" value="ping" v-model="form.probe_type"> ICMP Ping</label>
+                <label class="probe-option" :class="{ active: form.probe_type === 'ssh' }"><input type="radio" value="ssh" v-model="form.probe_type"> SSH 登录</label>
+              </div>
+            </div>
+            <div class="form-row full">
+              <div class="probe-hint" v-if="form.probe_type === 'tcp'">默认推荐：连接资产端口判断存活，速度快、不依赖账密。</div>
+              <div class="probe-hint" v-else-if="form.probe_type === 'ping'">ICMP 连通判断，适合只想确认主机在线；需目标机放行 ICMP。</div>
+              <div class="probe-hint" v-else>
+                用账密登录验证凭据有效。SSH 会自动低频探活（约 5 分钟一次），失败时自动降级为 TCP 22 端口连通，避免高频登录触发 sshd 排队。
+              </div>
+            </div>
+          </div>
 
           <template v-if="isSshType && !isWindowsOs">
             <div class="form-grid">
@@ -268,6 +312,17 @@
           <template v-else-if="form.ci_type === 'business_app' || form.ci_type === 'api_service' || form.ci_type === 'middleware' || form.ci_type === 'monitoring_endpoint'">
             <div class="form-grid">
               <div class="form-row full"><label>服务地址</label><input v-model="form.http_url" class="input" placeholder="https://api.example.com/health"></div>
+              <div class="form-row" v-if="form.ci_type === 'business_app'"><label>应用语言</label>
+                <select v-model="form.app_lang" class="input">
+                  <option value="">未指定</option>
+                  <option value="java">Java</option><option value="go">Go</option>
+                  <option value="python">Python</option><option value="node">Node.js</option>
+                  <option value="php">PHP</option><option value="ruby">Ruby</option>
+                  <option value="dotnet">.NET</option><option value="cpp">C++</option>
+                  <option value="rust">Rust</option><option value="scala">Scala</option>
+                  <option value="other">其他</option>
+                </select>
+              </div>
               <div class="form-row"><label>认证方式</label>
                 <select v-model="form.http_auth" class="input"><option value="">无</option><option value="basic">Basic Auth</option><option value="bearer">Bearer Token</option></select>
               </div>
@@ -441,6 +496,7 @@ const ciTypeMetaMap = {
 
 const ciTypeMeta = computed(() => ciTypeMetaMap[form.value.ci_type])
 const showSpecSection = computed(() => !!ciTypeMeta.value?.specFields)
+
 const syncingId = ref(null)
 
 const namePlaceholder = computed(() => ({
@@ -465,6 +521,26 @@ const mwPortPlaceholder = computed(() => ({
   seata: '8091', minio: '9000', memcached: '11211', redis: '6379',
 })[form.value.mw_subtype] || '80')
 
+// 生产只读铁闸: 仅服务器类资产可设置「是否生产环境」(非服务器由父链继承环境)
+const serverTypeSet = ['server', 'virtual_machine', 'cloud_host']
+const isServerType = computed(() => serverTypeSet.includes(form.value.ci_type))
+// 非服务器: 只有当有父服务器且父服务器勾选了生产时才显示勾选框(置灰跟随父)
+const isProductionEnv = computed({
+  get: () => form.value.environment === 'production' || form.value.effective_environment === 'production',
+  set: (v) => { form.value.environment = v ? 'production' : 'non-production' },
+})
+const isExemptReadOnly = computed({
+  get: () => form.value.ai_access_mode === 'read-write',
+  set: (v) => { form.value.ai_access_mode = v ? 'read-write' : 'read-only' },
+})
+function onEnvChange() {
+  // 生产默认只读; 取消生产时恢复读写(非生产不受只读约束)
+  if (isServerType.value && form.value.environment === 'production' && form.value.ai_access_mode !== 'read-write') {
+    form.value.ai_access_mode = 'read-only'
+  } else if (isServerType.value && form.value.environment !== 'production') {
+    form.value.ai_access_mode = 'read-write'
+  }
+}
 function onDbTypeChange() {
   const portMap = {
     mysql: 3306, mariadb: 3306, postgresql: 5432, oracle: 1521, sqlserver: 1433,
@@ -477,7 +553,6 @@ function onDbTypeChange() {
     form.value.db_port = portMap[form.value.db_type]
   }
 }
-
 function onMwSubtypeChange() {
   const portMap = {
     nginx: 80, apache: 80, tomcat: 8080, jetty: 8080,
@@ -491,23 +566,32 @@ function onMwSubtypeChange() {
     form.value.mw_port = portMap[form.value.mw_subtype]
   }
 }
+// 是否显示「AI 访问权限」区块: 服务器总是显示; 非服务器仅当父服务器为生产时显示(置灰)
+const showAiAccessSection = computed(() => {
+  if (!form.value.ci_type) return false
+  if (isServerType.value) return true
+  return form.value.effective_environment === 'production'
+})
+// 置灰(仅非服务器): 不能自己改, 跟随父服务器
+const aiAccessDisabled = computed(() => !isServerType.value)
 
 const form = ref({})
 const specValues = ref({})
 
 const defaultForm = {
   id: null, name: '', ci_type: '', ip: '', status: 'online', tags: '',
-  connection_type: 'ssh', ssh_user: 'root', ssh_port: 22, ssh_password: '',
+  connection_type: 'ssh', probe_type: 'tcp', ssh_user: 'root', ssh_port: 22, ssh_password: '',
   winrm_user: 'Administrator', winrm_port: 5985, winrm_password: '', winrm_transport: 'ntlm', winrm_ssl: false,
   k8s_api_server: '', k8s_token: '',
   snmp_community: 'public', snmp_port: 161, snmp_version: 'v2c',
   db_type: 'mysql', db_port: 3306, db_user: 'root', db_password: '', db_name: '',
   mw_subtype: 'nginx', mw_port: 80, mw_admin_url: '',
-  http_url: '', http_auth: '', http_credential: '',
+  http_url: '', http_auth: '', http_credential: '', app_lang: '',
   cert_domain: '', cert_issuer: '', cert_expiry: '',
   dns_domain: '', dns_type: 'A', dns_value: '',
   monitor_url: '', monitor_type: 'http', monitor_interval: 60,
   storage_type: 'nfs', storage_mount: '', storage_capacity: 0,
+  environment: 'non-production', ai_access_mode: 'read-only',
   version: '',
 }
 
@@ -542,6 +626,26 @@ function checkTimeLabel(a) {
   const s = a.status === 'online' ? '在线' : a.status === 'offline' ? '离线' : statusLabel(a.status)
   return `${s} · ${ago}`
 }
+function durationText(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000))
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (d > 0) return `${d}天${h}小时`
+  if (h > 0) return `${h}小时${m}分`
+  if (m > 0) return `${m}分钟`
+  return `${sec}秒`
+}
+function onlineTimeLabel(a) {
+  if (a.status === 'online' && a.online_since) {
+    const t = new Date(String(a.online_since).replace(' ', 'T')).getTime()
+    if (!isNaN(t)) return `在线 · 已持续 ${durationText(checkNow.value - t)}`
+  }
+  // 非在线或无 online_since：回退到状态显示
+  const s = a.status === 'online' ? '在线' : a.status === 'offline' ? '离线' : statusLabel(a.status)
+  const ago = timeAgo(a.last_checked_at)
+  return ago ? `${s} · ${ago}` : s
+}
 function lifecycleClass(s) {
   if (s === 'active') return 'lc-active'
   if (s === 'maintenance') return 'lc-maintenance'
@@ -562,6 +666,13 @@ function tierLabel(ci_type) { return '标准' }
 function ciTypeStyle(ci_type) {
   const c = CI_TYPE_COLOR[ci_type]
   return c ? { background: c + '1a', color: c } : {}
+}
+// 子类型小标: 中间件显示 mw_subtype、数据库显示 db_type,其它资产不显示
+function subtypeOf(a) {
+  if (!a) return ''
+  if (a.ci_type === 'middleware') return a.mw_subtype || ''
+  if (a.ci_type === 'database') return a.db_type || ''
+  return ''
 }
 function shortName(full) { return full.includes('/') ? full.split('/').pop() : full }
 function isOrphan(a) { return a.isOrphan === true }
@@ -659,6 +770,7 @@ async function openEdit(id) {
     else if (ci === 'ssl_certificate') { form.value.cert_domain = attrs.cert_domain || ''; form.value.cert_issuer = attrs.cert_issuer || ''; form.value.cert_expiry = attrs.cert_expiry || '' }
     else if (ci === 'dns_record') { form.value.dns_domain = attrs.dns_domain || ''; form.value.dns_type = attrs.dns_type || 'A'; form.value.dns_value = attrs.dns_value || '' }
     else if (ci === 'monitoring_endpoint') { form.value.monitor_url = attrs.monitor_url || ''; form.value.monitor_type = attrs.monitor_type || 'http'; form.value.monitor_interval = attrs.monitor_interval || 60 }
+    else if (ci === 'business_app') { form.value.app_lang = attrs.app_lang || form.value.app_lang || '' }
     showForm.value = true
   } catch (e) { ElMessage.error('加载详情失败: ' + (e.message || e)) }
 }
@@ -750,7 +862,7 @@ async function syncK8s(asset) {
 }
 
 function buildPayload() {
-  const p = { name: form.value.name, ci_type: form.value.ci_type, ip: form.value.ip, status: form.value.status, tags: form.value.tags, connection_type: form.value.connection_type }
+  const p = { name: form.value.name, ci_type: form.value.ci_type, ip: form.value.ip, status: form.value.status, tags: form.value.tags, connection_type: form.value.connection_type, probe_type: form.value.probe_type || 'tcp' }
   const meta = ciTypeMetaMap[form.value.ci_type] || {}
   // 规格属性存 ci_attributes
   const attrs = {}
@@ -764,6 +876,7 @@ function buildPayload() {
   else if (ci === 'ssl_certificate') { attrs.cert_domain = form.value.cert_domain; attrs.cert_issuer = form.value.cert_issuer; attrs.cert_expiry = form.value.cert_expiry }
   else if (ci === 'dns_record') { attrs.dns_domain = form.value.dns_domain; attrs.dns_type = form.value.dns_type; attrs.dns_value = form.value.dns_value }
   else if (ci === 'monitoring_endpoint') { attrs.monitor_url = form.value.monitor_url; attrs.monitor_type = form.value.monitor_type; attrs.monitor_interval = form.value.monitor_interval }
+  else if (ci === 'business_app') { if (form.value.app_lang) attrs.app_lang = form.value.app_lang }
   // 业务域(全 CI 类型通用)
   if (form.value.domain && form.value.domain.trim()) attrs.domain = form.value.domain.trim()
   if (Object.keys(attrs).length) p.ci_attributes = attrs
@@ -783,9 +896,15 @@ function buildPayload() {
     if (!p.ip && form.value.mw_admin_url) p.ip = form.value.mw_admin_url
   } else if (['business_app', 'api_service', 'monitoring_endpoint'].includes(ci)) {
     p.http_url = form.value.http_url; p.http_auth = form.value.http_auth; p.http_credential = form.value.http_credential; p.ip = form.value.http_url || ''
+    if (ci === 'business_app') p.app_lang = form.value.app_lang
   }
   if (isSshType.value) {
     p.ssh_user = form.value.ssh_user; p.ssh_password = form.value.ssh_password; p.ssh_port = form.value.ssh_port
+  }
+  // 生产只读铁闸: 仅服务器类资产提交环境/AI访问模式
+  if (isServerType.value) {
+    p.environment = form.value.environment === 'production' ? 'production' : 'non-production'
+    p.ai_access_mode = (p.environment === 'production' && form.value.ai_access_mode === 'read-write') ? 'read-write' : 'read-only'
   }
   if (isWinrmType.value) {
     p.connection_type = 'winrm'
@@ -1023,6 +1142,7 @@ onMounted(() => { loadAssets() })
 .text-sm { font-size: 0.78rem; color: var(--text-secondary, #64748b); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 0.7rem; font-weight: 600; }
 .badge.ci-type { background: rgba(59,130,246,0.1); color: #3b82f6; }
+.badge.mw-sub { background: rgba(249,115,22,0.12); color: #ea580c; margin-left: 4px; }
 .badge.online { background: rgba(34,197,94,0.1); color: #22c55e; }
 .badge.offline { background: rgba(100,116,139,0.1); color: #64748b; }
 .badge.degraded { background: rgba(245,158,11,0.1); color: #d97706; }
@@ -1044,6 +1164,12 @@ onMounted(() => { loadAssets() })
 .input { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); color: var(--text, #1e293b); font-size: 0.82rem; box-sizing: border-box; }
 .input.textarea { resize: vertical; font-family: inherit; }
 .conn-tip { font-size: 0.76rem; color: var(--text-tertiary, #94a3b8); margin-bottom: 10px; line-height: 1.5; padding: 8px 10px; background: rgba(99,102,241,0.06); border-radius: 4px; border-left: 2px solid var(--accent, #6366f1); }
+.probe-type-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.probe-option { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid var(--border-strong, rgba(0,0,0,0.12)); border-radius: 5px; background: var(--bg-card-solid, #fff); font-size: 0.8rem; cursor: pointer; color: var(--text, #1e293b); }
+.probe-option.active { border-color: var(--accent, #6366f1); background: rgba(99,102,241,0.08); color: var(--accent, #6366f1); }
+.probe-option input { accent-color: var(--accent, #6366f1); }
+.probe-hint { font-size: 0.76rem; color: var(--text-tertiary, #94a3b8); line-height: 1.5; padding: 6px 10px; background: rgba(0,0,0,0.02); border-radius: 4px; }
+
 .conn-note { font-size: 0.76rem; color: var(--text-tertiary, #94a3b8); padding: 6px 10px; background: rgba(0,0,0,0.02); border-radius: 4px; }
 .modal-actions { display: flex; gap: 8px; margin-top: 18px; align-items: center; }
 .conn-test-msg { font-size: 0.78rem; }
@@ -1090,6 +1216,19 @@ tr.row-orphan td { background: rgba(239,68,68,0.03); }
 .lc-badge.lc-active { background: rgba(34,197,94,0.15); color: #16a34a; }
 .lc-badge.lc-maintenance { background: rgba(245,158,11,0.15); color: #d97706; }
 .lc-badge.lc-retired { background: rgba(107,114,128,0.15); color: #4b5563; }
+.badge.ai-ro { background: rgba(239,68,68,0.12); color: #ef4444; font-size: 0.68rem; }
+.badge.ai-rw { background: rgba(34,197,94,0.12); color: #22c55e; font-size: 0.68rem; }
+.badge.env-prod { background: rgba(249,115,22,0.15); color: #f97316; font-size: 0.68rem; }
+.ai-access-section { border-left: 3px solid rgba(245,158,11,0.5); }
+.ai-access-block { margin-top: 8px; }
+.ai-access-check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem; }
+.ai-access-check.is-disabled { cursor: not-allowed; opacity: 0.85; }
+.ai-access-check.is-disabled input { cursor: not-allowed; }
+.ai-access-check.is-disabled .ai-access-label { color: var(--text-muted,#94a3b8); }
+.ai-access-label { font-weight: 600; color: var(--text,#e2e8f0); }
+.ai-access-hint { font-size: 0.78rem; color: var(--text-muted,#94a3b8); margin-top: 6px; line-height: 1.5; }
+.ai-access-extra { margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; background: rgba(245,158,11,0.06); }
+.ai-mode-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; color: #fbbf24; }
 .btn-terminal { background: rgba(16,185,129,0.08); color: #10b981; border-color: rgba(16,185,129,0.25); }
 .btn-terminal:hover { background: rgba(16,185,129,0.15); }
 .webssh-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000; }

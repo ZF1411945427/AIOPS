@@ -94,6 +94,50 @@ def analyze_incident(db: Session, incident_id: int) -> dict:
         "created_at": incident.created_at.strftime("%Y-%m-%d %H:%M:%S") if incident.created_at else None,
         **pkg,
         "report_md": report_md,
+        "summary_block": _build_incident_key_points(incident, root_asset, involved, pkg, len(alerts)),
+    }
+
+
+def _build_incident_key_points(incident, root_asset, involved, pkg, total_alerts) -> dict:
+    """从 Investigation Package 组装统一三要素要点(根因/方案/影响)，不加额外 LLM 调用。"""
+    from app.routers.agent_sse import _clean_key_point
+
+    candidates = pkg.get("candidate_causes") or []
+    root = candidates[0] if candidates else None
+    next_steps = pkg.get("next_steps") or []
+    facts = pkg.get("facts") or {}
+
+    # 根因：取最高置信度的候选
+    if root and root.get("asset_name") and root.get("asset_name") != "未定位到明确根因":
+        root_cause = f"根因候选：{root.get('asset_name')}（置信度 {root.get('confidence') or 'low'}），{root.get('reason') or ''}"
+    else:
+        root_cause = f"暂未明确根因，告警共计 {total_alerts} 条，建议补充拓扑与告警关联进一步研判"
+
+    # 方案：取 next_steps 前 2 条可执行动作
+    if next_steps:
+        actions = []
+        for ns in next_steps[:3]:
+            a = ns.get("action") or ns.get("title") or ns.get("category") or ""
+            if a:
+                actions.append(a)
+        solution = "；".join([str(x) for x in actions])
+    else:
+        solution = "按根因候选资产排查告警、处置故障并按流程关闭故障单"
+
+    # 影响：受影响的资产数量 + 告警数 + 严重度
+    involved_names = [i.get("name") for i in involved[:3] if i.get("name")]
+    if involved_names:
+        impact = f"波及 {len(involved)} 个资产（{'、'.join(involved_names)}），共 {total_alerts} 条告警"
+    else:
+        impact = f"共 {total_alerts} 条关联告警"
+    sev = incident.severity if incident else ""
+    if sev:
+        impact += f"，严重度 {sev}"
+
+    return {
+        "root_cause": _clean_key_point(root_cause, 100),
+        "solution": _clean_key_point(solution, 160),
+        "impact": _clean_key_point(impact, 100),
     }
 
 

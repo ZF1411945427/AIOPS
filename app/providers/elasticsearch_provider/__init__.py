@@ -1,0 +1,1 @@
+from app.providers.elasticsearch_provider.provider import ElasticsearchProvider

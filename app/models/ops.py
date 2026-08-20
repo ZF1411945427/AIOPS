@@ -363,6 +363,7 @@ class ComponentCatalog(Base):
     docker_image = Column(String(128), default="")             # docker 镜像
     helm_chart = Column(String(128), default="")               # helm chart(如 bitnami/redis)
     helm_repo = Column(String(256), default="")                # helm 仓库
+    source = Column(String(256), default="")                   # native 安装来源(如 清华镜像/官方源) — 定死只读展示
     default_port = Column(Integer, default=0)
     deploy_types = Column(Text, default="[]")                  # 支持的部署方式 ["native","docker","helm","ha"]
     native_script = Column(Text, default="")                   # 传统部署脚本(yum/apt/命令)
@@ -402,5 +403,6 @@ class ComponentInstall(Base):
     deploy_params = Column(Text, default="{}")                 # 本次部署定制参数快照(JSON {key:value})
     report_json = Column(Text, default="")                     # AI 可直接交付部署报告(JSON) — 落库持久化
     events_json = Column(Text, default="")                     # 部署完整结构化事件(JSON数组, 供历史回放/续 AI 对话)
+    pending_decision_json = Column(Text, default="null")       # 待用户决策卡片(JSON) / "null"=无, 按安装记录独立
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

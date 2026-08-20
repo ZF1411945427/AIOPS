@@ -1,0 +1,16 @@
+# ===== 架构边界检查门禁 =====
+name: arch-check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  arch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Run arch_check
+        run: python tools/arch_check.py

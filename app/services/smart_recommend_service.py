@@ -2,6 +2,10 @@ import json
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models import Asset, MetricTemplate, AssetMetricRecommendation, MetricRecord, AIProvider, KnowledgeBase, AlertKbLink
+from app.routers.agent_sse import _clean_key_point
+
+import logging
+logger = logging.getLogger(__name__)
 
 _CI_ALIASES = {"virtual_machine": "server", "vm": "server", "host": "server", "physical_machine": "server"}
 
@@ -51,8 +55,8 @@ def ai_recommend(asset: Asset, db: Session) -> dict:
     ci_attrs = {}
     try:
         ci_attrs = json.loads(asset.ci_attributes) if asset.ci_attributes else {}
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as _exc:
+        logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc, exc_info=True)
 
     system_prompt = """你是 AIOps 智能指标推荐专家。根据资产的 CI 类型和属性，推荐最值得监控的指标。
 输出 JSON 格式：{"recommendations": [{"metric_key": "...", "metric_name": "...", "category": "...", "reason": "..."}]}
@@ -85,7 +89,16 @@ IP: {asset.ip}
             content = content.split("```")[1].split("```")[0].strip()
         parsed = json.loads(content)
         recs = parsed.get("recommendations", [])
-        return {"ai_enabled": True, "recommendations": recs, "message": ""}
+        return {
+            "ai_enabled": True,
+            "recommendations": recs,
+            "message": "",
+            "summary_block": {
+                "root_cause": _clean_key_point(f"检测到 {asset.name} 存在 {len(recs)} 项观测缺口：{'、'.join([str(r.get('metric_name', r.get('metric_key', ''))) for r in recs[:4]])}" if recs else f"{asset.name} 观测覆盖较完整，暂无指标缺口", 100),
+                "solution": _clean_key_point("按推荐陆续新增监控指标，补全对关键资源的可观测性" if recs else "保持现有监控，结合业务演进评估后续补充", 160),
+                "impact": _clean_key_point(f"{len(recs)} 项关键指标待补充、已有 {len(collected)} 项在采", 100),
+            },
+        }
     except Exception as e:
         return {"ai_enabled": True, "recommendations": [], "message": f"AI 推荐失败: {e}"}
 
@@ -194,7 +207,16 @@ def ai_analyze_alert(alert, db: Session) -> dict:
         elif "```" in content:
             content = content.split("```")[1].split("```")[0].strip()
         parsed = json.loads(content)
-        return {"ai_enabled": True, "analysis": parsed, "message": ""}
+        return {
+            "ai_enabled": True,
+            "analysis": parsed,
+            "message": "",
+            "summary_block": {
+                "root_cause": _clean_key_point(str(parsed.get("root_cause", "")), 100),
+                "solution": _clean_key_point(str(parsed.get("recommendation", "")), 160),
+                "impact": _clean_key_point(str(parsed.get("impact", "")), 100),
+            },
+        }
     except Exception as e:
         return {"ai_enabled": True, "analysis": None, "message": f"AI 分析失败: {e}"}
 

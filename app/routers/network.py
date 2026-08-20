@@ -19,8 +19,8 @@ def _current_user_id(request: Request) -> int:
                 payload = verify_login_token(auth[7:])
                 if payload:
                     uid = payload.get("user_id")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
     return uid
 
 
@@ -102,3 +102,7 @@ def api_map_links(request: Request, payload: dict, db: Session = Depends(get_db)
         return JSONResponse({"ok": False, "error": "缺少 host_ip"}, status_code=400)
     result = network_service.map_host_links(db, host_ip)
     return JSONResponse({"ok": True, "result": result})
+
+
+import logging
+logger = logging.getLogger(__name__)

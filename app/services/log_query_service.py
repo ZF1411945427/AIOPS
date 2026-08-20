@@ -13,6 +13,9 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 class LogQueryAdapter(ABC):
     """日志源适配器抽象基类"""
 
@@ -137,8 +140,8 @@ class ElasticsearchAdapter(LogQueryAdapter):
         finally:
             try:
                 es.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
 
         total = resp.get("hits", {}).get("total", {})
         if isinstance(total, dict):
@@ -498,8 +501,8 @@ class LokiAdapter(LogQueryAdapter):
             for cid, name in mapping.items():
                 if name == service:
                     return f'filename=~".*/containers/{re.escape(cid)}[a-f0-9]*/.*"'
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
         # k8s pod / 裸机文件名 / 通用片段
         escaped = _re2_escape(service)
         return f'filename=~"(?i)(/var/log/pods/[^_]+_{escaped}-[0-9]{{9,10}}-[a-z0-9]{{5}}_|/data/mall/logs/{escaped}\\\\.log|.*{escaped}.*)"'
@@ -564,15 +567,15 @@ def query_logs(
         if source.auth_config:
             try:
                 auth_config = json.loads(source.auth_config)
-            except Exception:
-                pass
+            except Exception as _exc2:
+                logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
 
         mapping_config = {}
         if source.mapping_config:
             try:
                 mapping_config = json.loads(source.mapping_config)
-            except Exception:
-                pass
+            except Exception as _exc3:
+                logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
 
         return adapter.query(
             endpoint=source.endpoint or "",

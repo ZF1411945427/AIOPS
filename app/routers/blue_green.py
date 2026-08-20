@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import BlueGreenDeploy, BlueGreenSwitchRecord, DataSource
 from app.template_utils import get_templates
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/blue-green", tags=["blue-green"])
 templates = get_templates()
@@ -328,13 +331,13 @@ def api_deploy_delete(did: int, db: Session = Depends(get_db)):
                     try:
                         apps_v1.delete_namespaced_deployment(
                             name=k8s_name + "-" + label, namespace=d.namespace)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
                 # 删除 Service
                 try:
                     core_v1.delete_namespaced_service(name=k8s_name, namespace=d.namespace)
-                except Exception:
-                    pass
+                except Exception as _exc1:
+                    logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
                 k8s_msg = "K8s resources cleaned"
         except Exception as e:
             k8s_msg = "K8s cleanup error: " + str(e)

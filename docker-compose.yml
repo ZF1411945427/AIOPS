@@ -14,14 +14,16 @@ services:
     container_name: aiops
     ports:
       - "${AIOPS_PORT:-8000}:8000"
+    depends_on:
+      - postgres
     volumes:
-      - ./db:/app/db                # SQLite 数据库(持久化)
       - ./logs:/app/logs            # 日志
       - ./license.lic:/app/license.lic:ro   # 许可证(可选)
     environment:
       - TZ=Asia/Shanghai
       - APP_ENV=${APP_ENV:-prod}
-      - AIOPS_DB_URL=${AIOPS_DB_URL:-}
+      # 生产默认直连 postgres 服务(SQLite 已解耦移除)
+      - AIOPS_DB_URL=postgresql://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops-secret}@postgres:5432/${POSTGRES_DB:-aiops}
       - AIOPS_TEMPO_OTLP_URL=http://tempo:4318/v1/traces
       - AIOPS_TEMPO_QUERY_URL=http://tempo:3200
     restart: unless-stopped
@@ -32,13 +34,10 @@ services:
       start_period: 90s
       retries: 3
 
-  # ── 可选: 生产数据库 Postgres(profile=postgres)──
-  # 启用: docker compose --profile postgres up -d
-  # 同时设置 .env 的 AIOPS_DB_URL 指向 postgres 服务
+  # ── 生产数据库 Postgres(默认核心服务, 项目已解耦 SQLite)──
   postgres:
     image: postgres:16-alpine
     container_name: aiops-postgres
-    profiles: ["postgres"]
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-aiops}
       - POSTGRES_USER=${POSTGRES_USER:-aiops}

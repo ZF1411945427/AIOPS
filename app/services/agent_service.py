@@ -27,6 +27,11 @@ _execution_events_lock = threading.Lock()
 
 DEFAULT_SYSTEM_PROMPT = """你是一个 AIOps 智能运维助手。你可以：
 
+## 🌐 语言要求（最重要！）
+- **始终使用中文与用户交流并回复，除非用户明确用其他语言提问（如英文/日文）。**
+- 用户用中文提问，就必须用中文回答；用户说"用英文回复"才切换英文。
+- 角色名/专有名词（如 J.A.R.V.I.S.、Kubernetes）可用原文，但回复正文必须中文。
+
 1. **查询资源**：查看资产、告警、指标、日志、K8s 资源等
 2. **分析问题**：分析告警根因、异常检测结果、调用链、多维信号关联分析（告警+指标+日志+链路四维度聚合）等
 3. **查询操作流程**：通过 `query_runbook` 检索标准操作流程（Runbook），包含操作步骤、诊断方法、适用场景
@@ -237,6 +242,13 @@ propose_action({
 3. 分析风险（如果有操作建议）
 4. 给出具体建议或下一步操作"""
 
+# ⚠️ 强制中文回复（作为用户消息前的最后一条 system，优先级最高）
+_LANG_SYSTEM_HINT = (
+    "## 🌐 语言要求（最高优先级）\n"
+    "无论用户使用什么语言提问，你都必须用中文回复（用户明确要求其他语言除外）。"
+    "请使用自然、专业的中文组织回复内容。"
+)
+
 # ── LLM 连接池（复用 TCP+TLS，避免每次三次握手） ──
 _LLM_SESSION = None
 _LLM_SESSION_LOCK = threading.Lock()
@@ -415,8 +427,8 @@ def stream_llm(provider: AIProvider, messages: List[Dict], tools: Optional[List[
             call_args = tc["arguments"]
             try:
                 call_args = json.loads(tc["arguments"]) if tc["arguments"] else {}
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
             tool_calls.append({"id": tc["id"], "type": "function", "function": {
                 "name": tc["name"], "arguments": json.dumps(call_args, ensure_ascii=False) if not isinstance(call_args, str) else call_args}})
     yield {"complete": {"content": "".join(full_text), "tool_calls": tool_calls}}
@@ -620,6 +632,26 @@ def add_message(
     return msg
 
 
+def _build_readonly_permission_note(db: Session, asset_id) -> str:
+    """生成并注入当前资产的生产只读权限说明（只读铁闸提示，不含写意图诱导）."""
+    try:
+        asset = db.query(Asset).filter(Asset.id == asset_id).first()
+        if not asset:
+            return ""
+        from app.services.asset_service import effective_ai_access
+        if effective_ai_access(db, asset) == "read-only":
+            return (
+                f"\n\n## 🔒 生产只读模式（系统强制）\n"
+                f"当前资产「{asset.name}」为生产环境**只读模式**：AI 只能执行查询类工具"
+                f"（query_assets/query_metrics/query_alerts/query_mysql(SELECT 等只读 SQL)/日志/链路等），"
+                f"**禁止**提议任何写操作（重启服务/清理磁盘/执行命令/写 SQL 等）。"
+                f"即使你判断需要写操作也会被系统拒绝，请直接说明原因并建议用户到资产管理开启临时豁免。\n"
+            )
+    except Exception as _exc4:
+        logger.warning("[except:pass] _build_readonly_permission_note: %s", _exc4, exc_info=True)
+    return ""
+
+
 def process_chat_message(
     db: Session, user_id: int, session_id: Optional[int],
     user_message: str, config_name: str = "default",
@@ -698,8 +730,8 @@ def process_chat_message(
         _expert_ctx = build_expert_injection(user_message)
         if _expert_ctx:
             system_prompt += _expert_ctx
-    except Exception:
-        pass
+    except Exception as _exc1:
+        logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     
     # 注入会话上下文（告警/资产关联）
     session_ctx = json.loads(session.context or "{}")
@@ -720,8 +752,8 @@ def process_chat_message(
                     try:
                         cfg = json.loads(asset_row.connection_config)
                         db_type = cfg.get("db_type", "")
-                    except Exception:
-                        pass
+                    except Exception as _exc2:
+                        logger.warning("[except:pass] Exception: %s", _exc2, exc_info=True)
 
         ctx_injection = (
             f"\n\n## ⚠️ 当前告警上下文（系统自动注入，请优先分析此告警）\n"
@@ -739,7 +771,7 @@ def process_chat_message(
                 f"示例：query_mysql(asset_id={asset_id}, sql=\"SHOW DATABASES\")\n"
                 f"示例：query_mysql(asset_id={asset_id}, sql=\"SHOW TABLES\")\n"
             )
-        system_prompt += ctx_injection
+        system_prompt += ctx_injection + _build_readonly_permission_note(db, asset_id)
     elif session_ctx.get("asset_id"):
         asset_id = session_ctx["asset_id"]
         asset_name = session_ctx.get("asset_name", "")
@@ -753,8 +785,8 @@ def process_chat_message(
                 try:
                     cfg = json.loads(cfg_raw.connection_config)
                     db_type = cfg.get("db_type", "")
-                except Exception:
-                    pass
+                except Exception as _exc3:
+                    logger.warning("[except:pass] Exception: %s", _exc3, exc_info=True)
 
         ctx_injection = (
             f"\n\n## 🏢 当前资产上下文（系统自动注入）\n"
@@ -770,10 +802,12 @@ def process_chat_message(
                 f"示例：query_mysql(asset_id={asset_id}, sql=\"SHOW TABLES\")      # 查看当前库所有表\n"
                 f"示例：query_mysql(asset_id={asset_id}, sql=\"DESC table_name\")  # 查看表结构\n"
             )
-        system_prompt += ctx_injection
+        system_prompt += ctx_injection + _build_readonly_permission_note(db, asset_id)
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(get_message_history(db, session, config))
+    # ⚠️ 强制中文回复（追加在用户消息之前的最后一条 system，优先级最高）
+    messages.append({"role": "system", "content": _LANG_SYSTEM_HINT})
     messages.append({"role": "user", "content": user_message})
 
     # Build MCP tools manifest for LLM
@@ -1151,8 +1185,8 @@ def process_chat_message(
                     _active = [a for a in _alerts if a.get("status") == "triggered"]
                     if _active and "告警" not in content:
                         content += f"\n⚠️ 当前告警: {len(_active)} 条待处理\n"
-    except Exception:
-        pass
+    except Exception as _exc4:
+        logger.warning("[except:pass] Exception: %s", _exc4, exc_info=True)
 
     # Save assistant reply
     assistant_msg = add_message(
@@ -1320,9 +1354,25 @@ def confirm_pending_action(db: Session, action_id: int, user_name: str) -> Dict:
     if not allow_exec:
         return _fail("管理员已禁止动作执行（allow_action_execution=False）")
 
-    # payload schema 重新校验（防 LLM 在 propose 阶段构造畸形 payload，confirm 时原样执行造成危害）
+    # ── 生产只读铁闸（最后一道执行防线）──
+    # 即使动作在 propose 阶段尚未只读、事后资产被改回只读, 执行时也强制拒绝;
+    # 防遗留 pending 动作绕过 propose 门控在确认环节执行写操作。
     payload = json.loads(action.action_payload) if action.action_payload else {}
-    tool_name = f"execute_{action.action_type}"
+    from app.services.asset_service import assert_ai_writable
+    try:
+        _ro_deny = assert_ai_writable(db, payload)
+    except Exception:
+        _ro_deny = None
+    if _ro_deny:
+        action.status = PendingAction.STATUS_FAILED
+        action.confirmed_by = user_name
+        action.confirmed_at = datetime.now()
+        fail_result = {"status": "error", "message": _ro_deny}
+        action.result_payload = json.dumps(fail_result, ensure_ascii=False)
+        db.commit()
+        from app.logger import logger
+        logger.warning(f"生产只读铁闸阻止执行 pending_action #{action_id}: {_ro_deny}")
+        return {"is_success": False, "status": PendingAction.STATUS_FAILED, "result": fail_result}
     schema_error = _validate_payload_schema(tool_name, payload)
     if schema_error:
         return _fail(f"payload 校验失败：{schema_error}")
@@ -1458,8 +1508,8 @@ def _async_execute_action(action_id: int, session_id: int, message_id: Optional[
                     action.result_payload = json.dumps(
                         {"status": "error", "message": "后台执行异常"}, ensure_ascii=False)
                     db.commit()
-            except Exception:
-                pass
+            except Exception as _exc5:
+                logger.warning("[except:pass] Exception: %s", _exc5, exc_info=True)
         finally:
             db.close()
             # 通知 confirm 接口线程已完成
@@ -1513,8 +1563,8 @@ def _summarize_execution_result(db: Session, action: PendingAction, result: Dict
             if reply:
                 add_message(db, session_obj.id, "assistant", reply)
                 return reply
-    except Exception:
-        pass
+    except Exception as _exc6:
+        logger.warning("[except:pass] Exception: %s", _exc6, exc_info=True)
     return ""
 
 

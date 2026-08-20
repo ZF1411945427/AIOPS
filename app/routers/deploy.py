@@ -4,7 +4,7 @@ import json
 import queue
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Body, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -217,8 +217,8 @@ async def ws_rollback_cleanup(websocket: WebSocket, plan_id: int):
             if event is _sentinel:
                 try:
                     await websocket.close()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.warning("[except:pass] Exception: %s", _exc, exc_info=True)
                 break
             await websocket.send_text(json.dumps(event, ensure_ascii=False))
     except WebSocketDisconnect:
@@ -228,6 +228,11 @@ async def ws_rollback_cleanup(websocket: WebSocket, plan_id: int):
     finally:
         _thread_pool.shutdown(wait=False)
         db.close()
+
+
+@router.post("/api/plans/{plan_id}/decision")
+def api_plan_decision(plan_id: int, payload: dict, db: Session = Depends(get_db)):
+    return deploy_service.submit_decision(db, plan_id, action=payload.get("action", ""))
 
 
 @router.post("/api/plans/{plan_id}/stop")
@@ -255,10 +260,10 @@ def post_verify(plan_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api/plans/{plan_id}/generate-report")
-def generate_report(plan_id: int, db: Session = Depends(get_db)):
-    """AI 生成部署报告。"""
+def generate_report(plan_id: int, body: dict = Body({}), db: Session = Depends(get_db)):
+    """AI 生成部署报告。body: {template_id?: 知识库报告模板ID, 可选}"""
     try:
-        result = deploy_service.generate_deploy_report(db, plan_id)
+        result = deploy_service.generate_deploy_report(db, plan_id, template_id=body.get("template_id") or 0)
         if result.get("error"):
             return JSONResponse({"error": result["error"]}, status_code=200)
         return {"ok": True, "report": result.get("report", {})}
@@ -352,8 +357,8 @@ async def ws_execute_plan(websocket: WebSocket, plan_id: int):
         logger.error(f"部署实时终端异常: plan_id={plan_id} {e}")
         try:
             await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
-        except Exception:
-            pass
+        except Exception as _exc1:
+            logger.warning("[except:pass] Exception: %s", _exc1, exc_info=True)
     finally:
         # 断开时停止执行（关闭 SSH 连接中断命令，恢复状态、释放锁）
         try:

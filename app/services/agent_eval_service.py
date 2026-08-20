@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, Integer, Float
 from app.models import AgentEvaluation, ChatSession, ToolInvocation
 from app.services.mcp_registry import get_mcp_tool
+from app.database import date_prefix_expr
 
 
 def _tool_display_name(tool_name: str) -> str:
@@ -95,15 +96,15 @@ def get_eval_stats(db: Session, days: int = 30) -> dict:
     ).filter(ToolInvocation.created_at >= since).group_by(ToolInvocation.tool_name).all()
 
     daily_rows = db.query(
-        func.date(AgentEvaluation.created_at).label("date"),
+        date_prefix_expr(db, AgentEvaluation.created_at).label("date"),
         func.count(AgentEvaluation.id).label("count"),
         func.avg(func.cast(AgentEvaluation.is_success, Float)).label("avg_success"),
     ).filter(
         AgentEvaluation.created_at >= since
     ).group_by(
-        func.date(AgentEvaluation.created_at)
+        date_prefix_expr(db, AgentEvaluation.created_at)
     ).order_by(
-        func.date(AgentEvaluation.created_at)
+        date_prefix_expr(db, AgentEvaluation.created_at)
     ).all()
 
     return {

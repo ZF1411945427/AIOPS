@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 from app.database import get_db as get_db_session
 from app.models import SLOConfig, ErrorBudget, OnCallSchedule, EscalationPolicy, SLARecord, AvailabilityReport
 from app.services import slo_service
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/sre", tags=["sre"])
 
@@ -440,8 +443,8 @@ def get_current_oncall(db: Session = Depends(get_db_session)):
                     if coerced["name"] == r.current_oncall:
                         phone = coerced["phone"]
                         break
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as _exc:
+                logger.warning("[except:pass] (json.JSONDecodeError, TypeError): %s", _exc, exc_info=True)
             items.append({
                 "team_name": r.team_name,
                 "current_oncall": r.current_oncall,
